@@ -13,7 +13,9 @@
 #include "work_pool.h"
 
 #include <atomic>
+#include <chrono>
 #include <cstdint>
+#include <cstdlib>
 #include <iostream>
 #include <algorithm>
 #include <stdexcept>
@@ -102,6 +104,72 @@ void RepeatedRunsDoNotLeak() {
     }
 }
 
+// Two callers at once.
+//
+// The pool belongs to a Context, and a Context is shared for the whole process, so a cube histogram
+// on one thread and a region profile on another really do arrive here together. The pool holds the
+// body, the task counter and the running count in one set of fields; before those calls were
+// serialised, the second caller overwrote them while the first caller's workers were still reading
+// them, and a worker would run one body with the other's task count.
+//
+// Each job checks its own arithmetic: every task of its own run happens exactly once, and no task
+// index arrives that its own run did not ask for.
+void ConcurrentRunsDoNotShareState() {
+    WorkPool pool(8);
+    std::atomic<bool> wrong_task_index{false};
+    std::atomic<bool> wrong_count{false};
+    std::atomic<bool> uneven{false};
+
+    const auto job = [&](std::size_t tasks, int rounds) {
+        for (int round = 0; round < rounds; ++round) {
+            std::vector<std::atomic<int>> seen(tasks);
+            for (auto& count : seen) {
+                count.store(0);
+            }
+            std::atomic<std::size_t> ran{0};
+            pool.Run(tasks, [&](std::size_t task, std::size_t) {
+                if (task >= tasks) {
+                    // A task index this run never handed out: it came from the other call's count.
+                    wrong_task_index.store(true);
+                    return;
+                }
+                seen[task].fetch_add(1);
+                ran.fetch_add(1);
+            });
+            if (ran.load() != tasks) {
+                wrong_count.store(true);
+            }
+            for (const auto& count : seen) {
+                if (count.load() != 1) {
+                    uneven.store(true);
+                }
+            }
+        }
+    };
+
+    // Unserialised, the first thing that goes wrong is not a wrong number: a call clobbers the
+    // count of workers still out there and the other call waits for it forever. A test that hangs
+    // reports nothing, so the wait is given a deadline it will never reach when this works -- the
+    // whole file runs in hundredths of a second.
+    std::thread watchdog([] {
+        std::this_thread::sleep_for(std::chrono::seconds(30));
+        std::cerr << "work pool test failed: concurrent runs deadlocked\n";
+        std::_Exit(1);
+    });
+    watchdog.detach();
+
+    // Different task counts, so a body running under the other call's count is out of range one way
+    // and short the other.
+    std::thread first(job, std::size_t{37}, 400);
+    std::thread second(job, std::size_t{53}, 400);
+    first.join();
+    second.join();
+
+    Require(!wrong_task_index.load(), "a body was given a task index its own run never asked for");
+    Require(!wrong_count.load(), "a run executed a different number of bodies than it had tasks");
+    Require(!uneven.load(), "a task ran other than exactly once");
+}
+
 void TheSplitRuleIsConservative() {
     // Nothing to split.
     Require(PlanRowTasks(1000, 0, 8, 1U << 16U) == 0, "no rows should ask for no tasks");
@@ -149,6 +217,7 @@ int main() {
         WorkerIndicesAreExclusiveWhileRunning();
         SingleThreadedPoolRunsInline();
         RepeatedRunsDoNotLeak();
+        ConcurrentRunsDoNotShareState();
         TheSplitRuleIsConservative();
         RowRangesCoverEveryRowOnce();
     } catch (const std::exception& error) {

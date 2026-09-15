@@ -58,6 +58,9 @@ public:
      * `worker` is in [0, size()) and no two bodies running at the same time share one, so a private
      * accumulator indexed by it needs no lock. Tasks are claimed from a shared counter rather than
      * divided up front, so an uneven one does not leave workers waiting on the slowest slice.
+     *
+     * Safe to call from more than one thread: calls are serialised, and one of them waits. That is
+     * not a detail a caller can ignore on a pool it does not own -- see `_run` below.
      */
     void Run(std::size_t tasks, const std::function<void(std::size_t task, std::size_t worker)>& body);
 
@@ -65,6 +68,21 @@ private:
     void Worker(std::size_t index);
 
     std::vector<std::thread> _workers;
+
+    // One Run at a time. The body, the task counter and the count of workers still out there are
+    // one set of fields, so a second caller arriving while the first is still running would hand
+    // that first caller's workers its own body and its own task count -- a body indexing buffers
+    // sized for the other call.
+    //
+    // It is not a hypothetical: the pool belongs to a Context, a Context is shared for the whole
+    // process, and the caller runs a cube histogram on one thread while a region profile runs on
+    // another. Held for one call only, and a call is the arithmetic over a single read, so the
+    // waiting is bounded by that and not by the walk.
+    //
+    // A body must not call Run. None does -- they are arithmetic over a buffer the caller already
+    // owns -- and this is the reason to keep it that way.
+    std::mutex _run;
+
     std::mutex _mutex;
     std::condition_variable _wake;
     std::condition_variable _done;

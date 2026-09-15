@@ -86,6 +86,10 @@ void WorkPool::Run(std::size_t tasks, const std::function<void(std::size_t, std:
         return;
     }
 
+    // Everything below writes the pool's one set of fields and then waits for workers reading
+    // them, so only one call may be inside it at a time. See _run.
+    std::lock_guard<std::mutex> serialised(_run);
+
     {
         std::lock_guard<std::mutex> lock(_mutex);
         _body = &body;

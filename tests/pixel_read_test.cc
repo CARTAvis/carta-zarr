@@ -415,6 +415,50 @@ void TestProgressiveRead(const carta::zarr::Image& sky) {
     Require(calls == 1, "a cancelled read should stop at the piece that refused");
 }
 
+// A location is whatever the consumer typed, and a relative one is legal. The store keeps it as
+// given -- the filesystem transport holds the root it was handed -- so the one place that makes a
+// path absolute, Store::ResolveArrayDirectory, is what stops an opened image from depending on the
+// process staying in the directory it was opened from. TensorStore's file kvstore would otherwise
+// resolve the array against whatever the working directory has since become.
+//
+// Metadata is read and cached while the image is being opened, so it is the pixel read that is
+// exposed, and this reads pixels after moving away.
+void TestAnOpenImageOutlivesTheWorkingDirectory(const char* fixture) {
+    const std::filesystem::path located(fixture);
+    const auto previous = std::filesystem::current_path();
+    struct Restore {
+        std::filesystem::path path;
+        ~Restore() {
+            std::error_code ignored;
+            std::filesystem::current_path(path, ignored);
+        }
+    } const restore{previous};
+    std::filesystem::current_path(located.parent_path());
+
+    const auto context = carta::zarr::Context::Create();
+    Require(static_cast<bool>(context), "Context::Create failed");
+    const auto dataset = carta::zarr::Dataset::Open(context.value(), located.filename().string());
+    Require(static_cast<bool>(dataset),
+            "Dataset::Open failed for a relative location" +
+                (dataset ? std::string{} : ": " + dataset.error().message));
+    const auto image = dataset.value().OpenImage("SKY");
+    Require(static_cast<bool>(image),
+            "OpenImage failed for a relative location" + (image ? std::string{} : ": " + image.error().message));
+    Require(image.value().descriptor().spectral.has_value(),
+            "the spectral coordinate was not read from a relatively located store");
+
+    std::filesystem::current_path(previous);
+
+    const auto& sky = image.value();
+    std::vector<float> pixels(static_cast<std::size_t>(kL * kM * kFrequency * kPolarization * kTime), 0.0F);
+    const auto read =
+        sky.Read(WholeImage(sky.descriptor()), {pixels.data(), pixels.size() * sizeof(float)}, Unmasked());
+    Require(static_cast<bool>(read), "an image opened relatively could not be read from another directory" +
+                                         (read ? std::string{} : ": " + read.error().message));
+    Require(pixels.at(LogicalOffset(1, 2, 1, 2)) == ExpectedValue(1, 2, 1, 2, 0),
+            "an image opened relatively read different pixels");
+}
+
 }  // namespace
 
 int main() {
@@ -438,6 +482,7 @@ int main() {
         }
     }
     try {
+        TestAnOpenImageOutlivesTheWorkingDirectory(kFixtures[0]);
         Require(fast_axes.size() == 2 && fast_axes.at(0) != fast_axes.at(1),
                 "the two fixtures should disagree about which spatial axis the store varies fastest; "
                 "if they agree, one of them was regenerated wrongly and half of this is untested");

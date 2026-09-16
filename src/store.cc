@@ -392,20 +392,18 @@ Result<std::vector<double>> Store::ReadNumericArrayUncached(std::string_view nod
         return array_path.error();
     }
     try {
-        const std::filesystem::path target_path =
-            std::filesystem::weakly_canonical(std::filesystem::absolute(array_path.value()));
-        return zarr_metadata::ReadNumericValues(target_path, _context, node);
+        return zarr_metadata::ReadNumericValues(array_path.value(), _context, node);
     } catch (const std::exception& e) {
         return MakeError(ErrorCode::io_error, e.what(), std::string(node));
     }
 }
 
+// The one place the store asks where an array's bytes are. A transport answers with a location that
+// does not depend on the caller's working directory, so nothing here or below normalizes: this ran
+// weakly_canonical on every pixel read, and what it was protecting against belongs at the root,
+// which is resolved once when the transport opens.
 Result<std::filesystem::path> Store::ResolveArrayDirectory(std::string_view node) const {
-    auto array_path = _transport->ArrayDirectory(node);
-    if (!array_path) {
-        return array_path.error();
-    }
-    return std::filesystem::weakly_canonical(std::filesystem::absolute(array_path.value()));
+    return _transport->ArrayDirectory(node);
 }
 
 Result<void> Store::ReadPixelsFloat32(std::string_view node, const zarr::PixelSelection& selection,

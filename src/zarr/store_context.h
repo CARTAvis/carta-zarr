@@ -68,6 +68,21 @@ private:
     mutable StoreContextPtr _without_cache;
 };
 
+/**
+ * Open the Zarr array held in a located directory.
+ *
+ * The one place this library says what its arrays are made of -- zarr3 over a file kvstore -- so a
+ * transport that reaches bytes some other way has one function to change rather than a search to
+ * run. ADR 0004 records why the transport still hands up a filesystem path for one to be built
+ * from, and what that costs.
+ *
+ * With a context the handle comes from that context's table and is shared. Without one, TensorStore
+ * default resources are used and nothing is kept; that is what a probe gets, and a probe opens no
+ * arrays.
+ */
+Result<tensorstore::TensorStore<>> OpenZarrArray(const std::filesystem::path& array_directory,
+                                                 const StoreContextPtr& context, std::string_view node);
+
 // Translate the public options into TensorStore context resources. Positive limits are written
 // into the spec; zero limits keep TensorStore's defaults unless disable_cache explicitly requests
 // a zero-byte cache pool.

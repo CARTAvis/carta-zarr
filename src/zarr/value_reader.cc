@@ -12,9 +12,6 @@
 #include <tensorstore/cast.h>
 #include <tensorstore/context.h>
 #include <tensorstore/data_type.h>
-#include <tensorstore/open.h>
-#include <tensorstore/open_mode.h>
-#include <tensorstore/spec.h>
 #include <tensorstore/tensorstore.h>
 #include <tensorstore/util/result.h>
 
@@ -34,30 +31,16 @@ Result<std::vector<double>> ReadNumericValues(const std::filesystem::path& array
                                               const StoreContextPtr& context,
                                               std::string_view node) {
     try {
-        auto spec_result = tensorstore::Spec::FromJson({
-            {"driver", "zarr3"},
-            {"kvstore", {{"driver", "file"}, {"path", array_directory.string()}}},
-        });
-        if (!spec_result.ok()) {
-            return MakeError(ErrorCode::io_error,
-                             "Failed to create TensorStore spec: " + spec_result.status().ToString(),
-                             std::string(node));
-        }
-
-        auto open_result =
-            tensorstore::Open(spec_result.value(), context ? context->context : tensorstore::Context::Default(),
-                              tensorstore::OpenMode::open, tensorstore::ReadWriteMode::read)
-                .result();
-        if (!open_result.ok()) {
-            return MakeError(ErrorCode::io_error, "Failed to open TensorStore: " + open_result.status().ToString(),
-                             std::string(node));
+        auto opened = OpenZarrArray(array_directory, context, node);
+        if (!opened) {
+            return opened.error();
         }
 
         // Every real Zarr type a coordinate may be stored in is read as double. Converting rather
         // than requiring float64 is what the probe already promises: it accepts any real type, and
         // an image whose coordinates are float32 or integer has to open rather than fail here.
         // Conversion rides the read's own copy, as it does for pixels.
-        auto converted = tensorstore::Cast(open_result.value(), tensorstore::dtype_v<double>);
+        auto converted = tensorstore::Cast(opened.value(), tensorstore::dtype_v<double>);
         if (!converted.ok()) {
             return MakeError(ErrorCode::unsupported_data_type,
                              "Array is not readable as double: " + converted.status().ToString(), std::string(node));

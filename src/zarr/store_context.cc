@@ -16,6 +16,31 @@
 #include <utility>
 
 namespace carta::zarr::internal {
+namespace {
+
+// What a carta-zarr array is, stated once. Every array this library reads -- pixels, flags and
+// coordinate values alike -- is opened through here.
+Result<tensorstore::TensorStore<>> OpenZarr3File(const std::string& path, const tensorstore::Context& context,
+                                                 std::string_view node) {
+    auto spec = tensorstore::Spec::FromJson({
+        {"driver", "zarr3"},
+        {"kvstore", {{"driver", "file"}, {"path", path}}},
+    });
+    if (!spec.ok()) {
+        return Error{ErrorCode::io_error, "Failed to create TensorStore spec: " + spec.status().ToString(),
+                     std::string(node)};
+    }
+    auto opened = tensorstore::Open(spec.value(), context, tensorstore::OpenMode::open,
+                                    tensorstore::ReadWriteMode::read)
+                      .result();
+    if (!opened.ok()) {
+        return Error{ErrorCode::io_error, "Failed to open TensorStore: " + opened.status().ToString(),
+                     std::string(node)};
+    }
+    return std::move(opened).value();
+}
+
+}  // namespace
 
 StoreContextPtr StoreContext::CloneForStore() const {
     return std::make_shared<const StoreContext>(context);
@@ -32,26 +57,23 @@ Result<tensorstore::TensorStore<>> StoreContext::OpenArray(const std::filesystem
     }
 
     // Opened outside the lock so that a slow open of one array does not stall reads of another.
-    auto spec = tensorstore::Spec::FromJson({
-        {"driver", "zarr3"},
-        {"kvstore", {{"driver", "file"}, {"path", key}}},
-    });
-    if (!spec.ok()) {
-        return Error{ErrorCode::io_error, "Failed to create TensorStore spec: " + spec.status().ToString(),
-                     std::string(node)};
-    }
-    auto opened = tensorstore::Open(spec.value(), context, tensorstore::OpenMode::open,
-                                    tensorstore::ReadWriteMode::read)
-                      .result();
-    if (!opened.ok()) {
-        return Error{ErrorCode::io_error, "Failed to open TensorStore: " + opened.status().ToString(),
-                     std::string(node)};
+    auto opened = OpenZarr3File(key, context, node);
+    if (!opened) {
+        return opened.error();
     }
 
     const std::scoped_lock lock(_arrays_mutex);
     // Another thread may have opened the same array first; either handle is equivalent, so keep
     // whichever landed in the table.
-    return _arrays.emplace(key, std::move(opened).value()).first->second;
+    return _arrays.emplace(key, std::move(opened.value())).first->second;
+}
+
+Result<tensorstore::TensorStore<>> OpenZarrArray(const std::filesystem::path& array_directory,
+                                                 const StoreContextPtr& context, std::string_view node) {
+    if (context) {
+        return context->OpenArray(array_directory, node);
+    }
+    return OpenZarr3File(array_directory.string(), tensorstore::Context::Default(), node);
 }
 
 StoreContextPtr StoreContext::WithoutCache() const {

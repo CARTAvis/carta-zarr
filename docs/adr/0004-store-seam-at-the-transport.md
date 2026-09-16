@@ -56,7 +56,8 @@ at all.
 
 Transport is a seam with two adapters, not one. The filesystem transport serves production; the
 in-memory transport in `tests/support/` serves the schema profile tests. A third — HTTP or S3 — is
-what `docs/design.md` §4 anticipates, and it arrives without the profile changing.
+what `docs/design.md` §4 anticipates, and it arrives without the profile changing -- but not, as
+first written here, without the library changing. See "Reopened" below.
 
 An in-memory transport makes hand-writing store metadata easy, which is in tension with ADR-0003's
 rule that fixtures come from the pinned generator. The line: the in-memory transport serves negative
@@ -66,3 +67,45 @@ disagrees with the directory tree. Positive conformance is settled by generator 
 It also counts the nodes it was asked for, which is how the consolidated-metadata test states what
 the copy is for. Asserting the images that come back cannot distinguish a store that used the copy
 from one that ignored it, because both reach the same answer; asserting that no child was read can.
+
+## Reopened: should the seam stop naming a filesystem?
+
+`ArrayDirectory` returns a `std::filesystem::path`, which is the one thing in this seam that is not
+about bytes. Reviewing it again, the seam keeps that shape, and two things about it were wrong
+rather than merely partial.
+
+The first is a claim above. "A third — HTTP or S3 — arrives without the profile changing" is true of
+the profile and false of the library. Describing an image reads the `frequency` and `time`
+coordinate values, so a transport with no filesystem behind it can serve `Probe` and a discovery and
+then fail every `OpenImage`. A store that can be listed and never opened is a worse answer than one
+that is refused, and that is what such a transport would deliver today.
+
+The move that fixes it is known: `ArrayDirectory` would hand up a kvstore spec rather than a path,
+and an HTTP transport would supply `{"driver": "http"}` where the filesystem one supplies
+`{"driver": "file"}`. It is not being made now, for two reasons. There is one adapter that can
+answer it — the in-memory transport reports `unsupported_transport`, as it should — so the variation
+would be hypothetical, and a seam built for a caller that does not exist is guessed rather than
+designed. And `string_array.cc` reads fixed-length UTF-32 chunk bytes off the filesystem directly,
+without TensorStore; carrying it across a kvstore seam means owning what this ADR already declined
+to own. When a second transport is actually written, this is the paragraph to come back to: the work
+is that function plus the string reader, and nothing above them.
+
+The second was a real fault. The filesystem transport kept the location exactly as the consumer
+spelled it, and `Store` made the result absolute on every array read instead — which resolves
+against the working directory *at read time*, not at open time. An image opened from a relative
+location therefore stopped being readable when the process changed directory, and the failure landed
+on a pixel read long after the open that looked fine. The resolution now happens once, in
+`NormalizeLocation`, so a transport answers with a location that does not depend on the caller's
+working directory; that is now part of what `ArrayDirectory` promises. It also takes a
+`weakly_canonical` off the per-read path, where it cost a few `lstat` calls per cursor step. That
+second part was not measured and is not the reason for the change: against a chunk decode it is
+almost certainly below this machine's noise floor. Correctness is the reason.
+
+`TestAnOpenImageOutlivesTheWorkingDirectory` in `tests/pixel_read_test.cc` pins it, and it pins the
+part that matters: it opens relatively, moves away, and *then* reads. Reading before moving away
+passes either way, which is why the fault survived this long.
+
+Alongside it, what a carta-zarr array is made of — zarr3 over a `file` kvstore — was written out in
+two places, one of which also bypassed the array-handle table. `OpenZarrArray` in
+`zarr/store_context.cc` is now the only place it is said, which is the same function a second
+transport would change.

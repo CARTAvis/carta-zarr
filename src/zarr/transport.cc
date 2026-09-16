@@ -38,7 +38,17 @@ Result<std::filesystem::path> NormalizeLocation(std::string_view location) {
     if (path.empty()) {
         return MakeError(ErrorCode::invalid_argument, "Zarr location must not be empty");
     }
-    return path;
+    // Resolved against the working directory here and nowhere else. A store keeps its root for as
+    // long as the images opened from it live, so a root left relative makes every later read depend
+    // on the process still being where it was when the consumer opened the file -- and it is the
+    // pixel reads that would fail, long after the open that looked fine. Doing it once at the root
+    // also keeps it off the per-read path, where it was a handful of lstat calls per cursor step.
+    std::error_code error;
+    auto resolved = std::filesystem::weakly_canonical(std::filesystem::absolute(path, error), error);
+    if (error) {
+        return MakeError(ErrorCode::io_error, "Unable to resolve Zarr location: " + error.message(), path.string());
+    }
+    return resolved;
 }
 
 class FilesystemTransport final : public Transport {

@@ -41,9 +41,15 @@ public:
     // carries no consolidated metadata.
     virtual Result<std::vector<std::string>> ListNodes() const = 0;
 
-    // Where a node's array directory lives. The current storage session is local-filesystem only;
-    // a transport holding no filesystem data reports unsupported_transport rather than pretending
-    // that TensorStore or the string decoder can read it.
+    // Where a node's array lives, as a filesystem path. This is the one place the seam is not
+    // about bytes: a transport holding no filesystem data reports unsupported_transport rather than
+    // pretending TensorStore or the string decoder can reach it, which means such a transport can
+    // serve a probe and a discovery but cannot open an image. ADR 0004 records what that costs and
+    // why the seam still has this shape.
+    //
+    // The path is absolute and does not depend on the process's working directory: an image is read
+    // long after it is opened, and a store that answered relatively would hand out locations that
+    // stop meaning the same thing. Nothing above or below this normalizes it again.
     virtual Result<std::filesystem::path> ArrayDirectory(std::string_view node) const = 0;
 };
 

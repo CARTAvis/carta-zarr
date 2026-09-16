@@ -71,8 +71,11 @@ Result<void> ValidateRequest(const ImageDescriptor& descriptor, const AxisMap& a
 
 Result<void> ValidateSpectral(const ImageDescriptor& descriptor, const AxisMap& axes, const Range& spectral) {
     const auto channels = descriptor.axes.at(axes.spectral).length;
+    // The last selected channel has to fall inside the axis, compared by dividing the room that is
+    // left rather than by multiplying out the span: (count - 1) * stride wraps, and a wrapped span
+    // passes a check it should fail. The pixel selection states the same rule the same way.
     if (spectral.stride == 0 || spectral.count == 0 || spectral.start >= channels ||
-        (spectral.count - 1) * spectral.stride > channels - 1 - spectral.start) {
+        spectral.count - 1 > (channels - 1 - spectral.start) / spectral.stride) {
         return MakeError(ErrorCode::invalid_argument, "The spectral range falls outside the image",
                          descriptor.id);
     }

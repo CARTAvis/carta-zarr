@@ -232,6 +232,14 @@ void TestRejectedRequests(const carta::zarr::Image& sky) {
     strided_past_end.axes.at(0) = {0, kL, 2};
     expect_rejected(strided_past_end, "a stride carrying the last element past the end");
 
+    // The span of a strided selection is (count - 1) * stride, and in 64 bits these two multiply to
+    // exactly 2^64: the span wraps to zero, so a selection running far past the axis looks like it
+    // ends at its first element. The element count and TensorStore both refuse it anyway, so this
+    // is here to keep the answer a rejection if either of them ever stops refusing.
+    auto overflowing_span = whole;
+    overflowing_span.axes.at(0) = {0, (std::uint64_t{1} << 32U) + 1, std::uint64_t{1} << 32U};
+    expect_rejected(overflowing_span, "a count and stride whose span overflows");
+
     auto zero_stride = whole;
     zero_stride.axes.at(0).stride = 0;
     expect_rejected(zero_stride, "a zero stride");

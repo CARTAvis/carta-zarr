@@ -230,6 +230,12 @@ void TestRejectedRequests(const carta::zarr::Image& sky) {
     auto outside = WholeSpectrum(0, 0.0F, 10.0F, 8);
     outside.spectral = {0, kFrequency + 1, 1};
     rejects(outside, "a spectral range outside the image should be rejected");
+    // As in a pixel read: (count - 1) * stride wraps to zero here, so a selection running far past
+    // the spectral axis looks like it ends at its first channel. It is refused either way -- by the
+    // slab read, once it gets there -- and this asks for it to be refused by the axis it names.
+    auto overflowing = WholeSpectrum(0, 0.0F, 10.0F, 8);
+    overflowing.spectral = {0, (std::uint64_t{1} << 32U) + 1, std::uint64_t{1} << 32U};
+    rejects(overflowing, "a spectral count and stride whose span overflows should be rejected");
 
     // Pixels are binned in float. Each of these ranges is finite and non-empty in the double the
     // caller states it in, and is neither by the time a pixel is binned against it: the first

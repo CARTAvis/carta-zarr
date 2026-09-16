@@ -232,9 +232,11 @@ Result<PixelSelection> BuildSelection(const ImageDescriptor& descriptor, const R
             return MakeError(ErrorCode::invalid_argument, "Axis '" + axis.name + "' selects no elements",
                              descriptor.id);
         }
-        // The last selected index, which is what has to fall inside the axis.
-        const std::uint64_t span = (range.count - 1) * range.stride;
-        if (range.start >= axis.length || span > axis.length - 1 - range.start) {
+        // The last selected index is what has to fall inside the axis. It is compared by dividing
+        // the room that is left rather than by multiplying out the span, because the span
+        // overflows: a count and a stride of about 2^32 each multiply to a small number, which
+        // passed this check and went on to size a buffer and drive the loops.
+        if (range.start >= axis.length || range.count - 1 > (axis.length - 1 - range.start) / range.stride) {
             return MakeError(ErrorCode::invalid_argument,
                              "Axis '" + axis.name + "' request exceeds its length of " +
                                  std::to_string(axis.length),

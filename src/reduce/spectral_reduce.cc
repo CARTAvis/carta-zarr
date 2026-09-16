@@ -430,11 +430,13 @@ Result<void> ReduceSpectral(const Store& store, const ImageDescriptor& descripto
     }
 
     // The spectral range is checked here as well as inside each slab request, so that a bad range
-    // is one error naming the axis rather than a partial reduction that fails on some later slab.
+    // is one error naming the axis rather than a partial reduction that fails on some later slab. The
+    // last selected channel is compared by dividing the room that is left rather than by
+    // multiplying out the span: (count - 1) * stride wraps, and a wrapped span passes.
     const Range spectral = request.spectral;
     const auto channels = descriptor.axes.at(map.spectral).length;
     if (spectral.stride == 0 || spectral.count == 0 || spectral.start >= channels ||
-        (spectral.count - 1) * spectral.stride > channels - 1 - spectral.start) {
+        spectral.count - 1 > (channels - 1 - spectral.start) / spectral.stride) {
         return MakeError(ErrorCode::invalid_argument, "The spectral range falls outside the image", node);
     }
 

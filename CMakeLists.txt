@@ -132,222 +132,212 @@ install(FILES
 
 include(CTest)
 if(CARTA_ZARR_BUILD_TESTS AND BUILD_TESTING)
-    add_executable(carta_zarr_tests tests/schema_probe_test.cc)
-    target_link_libraries(carta_zarr_tests PRIVATE CARTA::zarr)
-    target_compile_features(carta_zarr_tests PRIVATE cxx_std_17)
+    find_package(Threads REQUIRED)
+
     set(CARTA_ZARR_FIXTURE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/tests/data/images/zarr")
-    target_compile_definitions(carta_zarr_tests PRIVATE
-        CARTA_ZARR_REFERENCE_FIXTURE="${CARTA_ZARR_FIXTURE_DIR}/xradio/minimal"
-        CARTA_ZARR_LEGACY_FIXTURE="${CARTA_ZARR_FIXTURE_DIR}/xradio/legacy")
-    add_test(NAME carta-zarr-schema-probe COMMAND carta_zarr_tests)
+
+    # The two fixture sets more than one test needs. Named here so that a regenerated fixture moves
+    # in one place rather than in whichever targets happened to reference it.
+    set(CARTA_ZARR_PIXEL_FIXTURES
+        CARTA_ZARR_PIXEL_FIXTURE="${CARTA_ZARR_FIXTURE_DIR}/xradio/pixels"
+        CARTA_ZARR_PIXEL_FIXTURE_L_FASTEST="${CARTA_ZARR_FIXTURE_DIR}/xradio/pixels_l_fastest")
+    set(CARTA_ZARR_WIDE_FIXTURE
+        CARTA_ZARR_PIXEL_FIXTURE_WIDE="${CARTA_ZARR_FIXTURE_DIR}/xradio/pixels_wide")
+
+    # Implementation groups a test compiles directly. Each is the set of sources that one internal
+    # thing needs to stand up on its own, so a test says what it is testing rather than how the
+    # dependency graph happens to be shaped this week.
+    set(CARTA_ZARR_METADATA_SOURCES src/zarr/array_metadata.cc)
+    set(CARTA_ZARR_PASS_SOURCES
+        src/reduce/pass.cc
+        src/reduce/pass_read.cc
+        src/zarr/pixel_selection.cc)
+
+    #[[
+      Register one test executable.
+
+      There are two kinds here and the difference is load-bearing, so it is a keyword rather than
+      something inferred. A PUBLIC test links the shared library and can reach only what a consumer
+      can reach. An INTERNAL test compiles implementation sources directly, because what it pins is
+      not reachable from outside: hidden visibility, or a build deliberately assembled without
+      TensorStore in it. An internal test gets tests/ on its include path too, for the support
+      headers those builds share.
+
+      TEST_NAME is optional. Leaving it out builds the target without registering it with ctest,
+      which is what a timing harness with no pass or fail wants.
+    ]]
+    function(carta_zarr_add_test name)
+        cmake_parse_arguments(ARG "PUBLIC;INTERNAL" "TEST_NAME" "SOURCES;DEFINITIONS;LIBRARIES" ${ARGN})
+        if(ARG_PUBLIC AND ARG_INTERNAL)
+            message(FATAL_ERROR "${name}: a test either links the library or compiles it, not both")
+        endif()
+        if(NOT ARG_PUBLIC AND NOT ARG_INTERNAL)
+            message(FATAL_ERROR "${name}: say PUBLIC or INTERNAL")
+        endif()
+
+        add_executable(${name} ${ARG_SOURCES})
+        target_compile_features(${name} PRIVATE cxx_std_17)
+        if(ARG_PUBLIC)
+            target_link_libraries(${name} PRIVATE CARTA::zarr)
+        else()
+            target_include_directories(${name} PRIVATE
+                ${CMAKE_CURRENT_SOURCE_DIR}/include
+                ${CMAKE_CURRENT_SOURCE_DIR}/src
+                ${CMAKE_CURRENT_SOURCE_DIR}/tests)
+        endif()
+        if(ARG_LIBRARIES)
+            target_link_libraries(${name} PRIVATE ${ARG_LIBRARIES})
+        endif()
+        if(ARG_DEFINITIONS)
+            target_compile_definitions(${name} PRIVATE ${ARG_DEFINITIONS})
+        endif()
+        if(ARG_TEST_NAME)
+            add_test(NAME ${ARG_TEST_NAME} COMMAND ${name})
+        endif()
+    endfunction()
+
+    carta_zarr_add_test(carta_zarr_tests PUBLIC
+        TEST_NAME carta-zarr-schema-probe
+        SOURCES tests/schema_probe_test.cc
+        DEFINITIONS
+            CARTA_ZARR_REFERENCE_FIXTURE="${CARTA_ZARR_FIXTURE_DIR}/xradio/minimal"
+            CARTA_ZARR_LEGACY_FIXTURE="${CARTA_ZARR_FIXTURE_DIR}/xradio/legacy")
 
     # The string decoder is an internal component with hidden visibility, so this test compiles it
     # directly instead of linking the shared library.
-    add_executable(carta_zarr_string_tests
-        tests/string_array_test.cc
-        src/zarr/string_array.cc
-        src/zarr/array_metadata.cc)
-    target_compile_features(carta_zarr_string_tests PRIVATE cxx_std_17)
-    target_include_directories(carta_zarr_string_tests PRIVATE
-        ${CMAKE_CURRENT_SOURCE_DIR}/include
-        ${CMAKE_CURRENT_SOURCE_DIR}/src)
-    target_link_libraries(carta_zarr_string_tests PRIVATE
-        nlohmann_json::nlohmann_json
-        ZLIB::ZLIB
-        Zstd::Zstd
-        Blosc::blosc)
-    target_compile_definitions(carta_zarr_string_tests PRIVATE
-        CARTA_ZARR_STRING_FIXTURE_DIR="${CARTA_ZARR_FIXTURE_DIR}/string")
-    add_test(NAME carta-zarr-string-array COMMAND carta_zarr_string_tests)
+    carta_zarr_add_test(carta_zarr_string_tests INTERNAL
+        TEST_NAME carta-zarr-string-array
+        SOURCES tests/string_array_test.cc src/zarr/string_array.cc ${CARTA_ZARR_METADATA_SOURCES}
+        LIBRARIES nlohmann_json::nlohmann_json ZLIB::ZLIB Zstd::Zstd Blosc::blosc
+        DEFINITIONS CARTA_ZARR_STRING_FIXTURE_DIR="${CARTA_ZARR_FIXTURE_DIR}/string")
 
     # The schema profile's structural decisions read metadata only, so they run against an in-memory
     # transport instead of a directory tree. This target compiles the internals directly and links no
     # TensorStore: the value reader is stubbed, which is also the honest behaviour of a transport
     # holding no array data.
-    add_executable(carta_zarr_profile_tests
-        tests/schema_profile_test.cc
-        tests/support/value_reader_stub.cc
-        tests/support/pixel_reader_stub.cc
-        src/store.cc
-        src/schema/profile.cc
-        src/schema/xradio/probe_report.cc
-        src/schema/xradio/direction.cc
-    src/schema/xradio/linear_axis.cc
-        src/schema/xradio/image.cc
-        src/zarr/array_metadata.cc
-        src/zarr/array_view.cc
-        src/zarr/pixel_selection.cc
-        src/zarr/string_array.cc
-        src/zarr/transport.cc)
-    target_compile_features(carta_zarr_profile_tests PRIVATE cxx_std_17)
-    target_include_directories(carta_zarr_profile_tests PRIVATE
-        ${CMAKE_CURRENT_SOURCE_DIR}/include
-        ${CMAKE_CURRENT_SOURCE_DIR}/src
-        ${CMAKE_CURRENT_SOURCE_DIR}/tests)
-    target_link_libraries(carta_zarr_profile_tests PRIVATE
-        nlohmann_json::nlohmann_json
-        ZLIB::ZLIB
-        Zstd::Zstd
-        Blosc::blosc)
-    add_test(NAME carta-zarr-schema-profile COMMAND carta_zarr_profile_tests)
+    carta_zarr_add_test(carta_zarr_profile_tests INTERNAL
+        TEST_NAME carta-zarr-schema-profile
+        SOURCES
+            tests/schema_profile_test.cc
+            tests/support/value_reader_stub.cc
+            tests/support/pixel_reader_stub.cc
+            src/store.cc
+            src/schema/profile.cc
+            src/schema/xradio/probe_report.cc
+            src/schema/xradio/direction.cc
+            src/schema/xradio/linear_axis.cc
+            src/schema/xradio/image.cc
+            src/zarr/array_view.cc
+            src/zarr/pixel_selection.cc
+            src/zarr/string_array.cc
+            src/zarr/transport.cc
+            ${CARTA_ZARR_METADATA_SOURCES}
+        LIBRARIES nlohmann_json::nlohmann_json ZLIB::ZLIB Zstd::Zstd Blosc::blosc)
 
     # ArrayView addresses a flat Zarr buffer by dimension name. It needs only its own metadata type,
     # so it is tested directly rather than through a store.
-    add_executable(carta_zarr_array_view_tests
-        tests/array_view_test.cc
-        src/zarr/array_view.cc
-        src/zarr/array_metadata.cc)
-    target_compile_features(carta_zarr_array_view_tests PRIVATE cxx_std_17)
-    target_include_directories(carta_zarr_array_view_tests PRIVATE
-        ${CMAKE_CURRENT_SOURCE_DIR}/include
-        ${CMAKE_CURRENT_SOURCE_DIR}/src)
-    target_link_libraries(carta_zarr_array_view_tests PRIVATE nlohmann_json::nlohmann_json)
-    add_test(NAME carta-zarr-array-view COMMAND carta_zarr_array_view_tests)
+    carta_zarr_add_test(carta_zarr_array_view_tests INTERNAL
+        TEST_NAME carta-zarr-array-view
+        SOURCES tests/array_view_test.cc src/zarr/array_view.cc ${CARTA_ZARR_METADATA_SOURCES}
+        LIBRARIES nlohmann_json::nlohmann_json)
 
     # Memo is a header-only utility, so this target compiles only the test. It pins the two
     # decisions Store leans on: a value is computed exactly once, and a failure is remembered.
-    add_executable(carta_zarr_memo_tests tests/memo_test.cc)
-    target_compile_features(carta_zarr_memo_tests PRIVATE cxx_std_17)
-    target_include_directories(carta_zarr_memo_tests PRIVATE
-        ${CMAKE_CURRENT_SOURCE_DIR}/include
-        ${CMAKE_CURRENT_SOURCE_DIR}/src)
-    find_package(Threads REQUIRED)
-    target_link_libraries(carta_zarr_memo_tests PRIVATE Threads::Threads)
-    add_test(NAME carta-zarr-memo COMMAND carta_zarr_memo_tests)
+    carta_zarr_add_test(carta_zarr_memo_tests INTERNAL
+        TEST_NAME carta-zarr-memo
+        SOURCES tests/memo_test.cc
+        LIBRARIES Threads::Threads)
 
     # The worker pool and the rule that decides whether to wake it. Compiled on its own because the
     # reductions' own fixtures are far smaller than the split's threshold, so the parallel path is
     # unreachable from there -- see the comment at the top of the test.
-    add_executable(carta_zarr_work_pool_tests tests/work_pool_test.cc src/work_pool.cc)
-    target_compile_features(carta_zarr_work_pool_tests PRIVATE cxx_std_17)
-    target_include_directories(carta_zarr_work_pool_tests PRIVATE
-        ${CMAKE_CURRENT_SOURCE_DIR}/include
-        ${CMAKE_CURRENT_SOURCE_DIR}/src)
-    target_link_libraries(carta_zarr_work_pool_tests PRIVATE Threads::Threads)
-    add_test(NAME carta-zarr-work-pool COMMAND carta_zarr_work_pool_tests)
+    carta_zarr_add_test(carta_zarr_work_pool_tests INTERNAL
+        TEST_NAME carta-zarr-work-pool
+        SOURCES tests/work_pool_test.cc src/work_pool.cc
+        LIBRARIES Threads::Threads)
 
-    # The linear axis fit is pure: values in, a linear description out. It is tested on its own,
-    # with no store and no transport, so the cases that are awkward to build as a directory tree --
-    # unevenly spaced samples, an extrapolated reference pixel, degenerate axes -- are cheap here.
     # Where an image points, from its root attributes and its l and m samples. No store, no
     # transport: the whole thing takes JSON and two vectors. ADR 0002 rests on these fields reaching
     # casacore intact, and the two that were asserted nowhere -- the increment and the
     # transformation matrix -- are checked here.
-    add_executable(carta_zarr_direction_tests
-        tests/direction_test.cc
-        src/schema/xradio/direction.cc
-        src/schema/xradio/linear_axis.cc
-        src/zarr/array_metadata.cc)
-    target_compile_features(carta_zarr_direction_tests PRIVATE cxx_std_17)
-    target_include_directories(carta_zarr_direction_tests PRIVATE
-        ${CMAKE_CURRENT_SOURCE_DIR}/include
-        ${CMAKE_CURRENT_SOURCE_DIR}/src)
-    target_link_libraries(carta_zarr_direction_tests PRIVATE nlohmann_json::nlohmann_json)
-    add_test(NAME carta-zarr-direction COMMAND carta_zarr_direction_tests)
+    carta_zarr_add_test(carta_zarr_direction_tests INTERNAL
+        TEST_NAME carta-zarr-direction
+        SOURCES
+            tests/direction_test.cc
+            src/schema/xradio/direction.cc
+            src/schema/xradio/linear_axis.cc
+            ${CARTA_ZARR_METADATA_SOURCES}
+        LIBRARIES nlohmann_json::nlohmann_json)
 
-    add_executable(carta_zarr_linear_axis_tests
-        tests/linear_axis_test.cc
-        src/schema/xradio/linear_axis.cc)
-    target_compile_features(carta_zarr_linear_axis_tests PRIVATE cxx_std_17)
-    target_include_directories(carta_zarr_linear_axis_tests PRIVATE
-        ${CMAKE_CURRENT_SOURCE_DIR}/include
-        ${CMAKE_CURRENT_SOURCE_DIR}/src)
-    add_test(NAME carta-zarr-linear-axis COMMAND carta_zarr_linear_axis_tests)
+    # The linear axis fit is pure: values in, a linear description out. It is tested on its own,
+    # with no store and no transport, so the cases that are awkward to build as a directory tree --
+    # unevenly spaced samples, an extrapolated reference pixel, degenerate axes -- are cheap here.
+    carta_zarr_add_test(carta_zarr_linear_axis_tests INTERNAL
+        TEST_NAME carta-zarr-linear-axis
+        SOURCES tests/linear_axis_test.cc src/schema/xradio/linear_axis.cc)
 
     # What a pass decides before it reads anything. Compiled against pass.cc alone: PlanPass touches
     # no store and no transport, so the read strategy -- which has moved more than once, and moved
     # in three places each time -- is checkable without a directory tree.
-    add_executable(carta_zarr_pass_tests
-        tests/pass_test.cc
-        src/reduce/pass.cc
-        src/reduce/pass_read.cc
-        src/zarr/pixel_selection.cc)
-    target_compile_features(carta_zarr_pass_tests PRIVATE cxx_std_17)
-    target_include_directories(carta_zarr_pass_tests PRIVATE
-        ${CMAKE_CURRENT_SOURCE_DIR}/include
-        ${CMAKE_CURRENT_SOURCE_DIR}/src
-        ${CMAKE_CURRENT_SOURCE_DIR}/tests)
-    target_link_libraries(carta_zarr_pass_tests PRIVATE nlohmann_json::nlohmann_json)
-    add_test(NAME carta-zarr-pass COMMAND carta_zarr_pass_tests)
+    carta_zarr_add_test(carta_zarr_pass_tests INTERNAL
+        TEST_NAME carta-zarr-pass
+        SOURCES tests/pass_test.cc ${CARTA_ZARR_PASS_SOURCES}
+        LIBRARIES nlohmann_json::nlohmann_json)
 
     # A whole reduction against pixels that were never written down. This target links no Store and
     # no TensorStore, which is the seam the pass's SlabSource exists to create: the oracle is the
     # formula the pixels come from, so the image can be whatever size the question needs rather than
     # whatever size is worth committing.
-    add_executable(carta_zarr_reduce_synthetic_tests
-        tests/reduce_synthetic_test.cc
-        src/reduce/pass.cc
-        src/reduce/pass_read.cc
-        src/reduce/plane_histogram.cc
-        src/reduce/spectral_reduce.cc
-        src/work_pool.cc
-        src/zarr/pixel_selection.cc)
-    target_compile_features(carta_zarr_reduce_synthetic_tests PRIVATE cxx_std_17)
-    target_include_directories(carta_zarr_reduce_synthetic_tests PRIVATE
-        ${CMAKE_CURRENT_SOURCE_DIR}/include
-        ${CMAKE_CURRENT_SOURCE_DIR}/src
-        ${CMAKE_CURRENT_SOURCE_DIR}/tests)
-    target_link_libraries(carta_zarr_reduce_synthetic_tests PRIVATE Threads::Threads)
-    add_test(NAME carta-zarr-reduce-synthetic COMMAND carta_zarr_reduce_synthetic_tests)
+    carta_zarr_add_test(carta_zarr_reduce_synthetic_tests INTERNAL
+        TEST_NAME carta-zarr-reduce-synthetic
+        SOURCES
+            tests/reduce_synthetic_test.cc
+            src/reduce/plane_histogram.cc
+            src/reduce/spectral_reduce.cc
+            src/work_pool.cc
+            ${CARTA_ZARR_PASS_SOURCES}
+        LIBRARIES Threads::Threads)
 
-    add_executable(carta_zarr_chunk_blocks_tests tests/chunk_blocks_test.cc)
-    target_compile_features(carta_zarr_chunk_blocks_tests PRIVATE cxx_std_17)
-    target_include_directories(carta_zarr_chunk_blocks_tests PRIVATE
-        ${CMAKE_CURRENT_SOURCE_DIR}/include
-        ${CMAKE_CURRENT_SOURCE_DIR}/src)
-    add_test(NAME carta-zarr-chunk-blocks COMMAND carta_zarr_chunk_blocks_tests)
+    carta_zarr_add_test(carta_zarr_chunk_blocks_tests INTERNAL
+        TEST_NAME carta-zarr-chunk-blocks
+        SOURCES tests/chunk_blocks_test.cc)
 
     # Conformance runs against a store XRADIO itself produced, so that a bump of the pinned XRADIO
     # version reports which of this library's assumptions it broke.
-    add_executable(carta_zarr_conformance_tests tests/conformance_test.cc)
-    target_link_libraries(carta_zarr_conformance_tests PRIVATE CARTA::zarr)
-    target_compile_features(carta_zarr_conformance_tests PRIVATE cxx_std_17)
-    target_compile_definitions(carta_zarr_conformance_tests PRIVATE
-        CARTA_ZARR_CONFORMANCE_FIXTURE="${CARTA_ZARR_FIXTURE_DIR}/xradio/conformance")
-    add_test(NAME carta-zarr-xradio-conformance COMMAND carta_zarr_conformance_tests)
+    carta_zarr_add_test(carta_zarr_conformance_tests PUBLIC
+        TEST_NAME carta-zarr-xradio-conformance
+        SOURCES tests/conformance_test.cc
+        DEFINITIONS CARTA_ZARR_CONFORMANCE_FIXTURE="${CARTA_ZARR_FIXTURE_DIR}/xradio/conformance")
 
     # Pixel reads run against a fixture whose values encode their own logical coordinates, so the
     # axis permutation, the stride, the fill value of a deleted chunk and the pixel mask each have a
     # wrong answer that the test can tell apart from the right one.
-    add_executable(carta_zarr_pixel_read_tests tests/pixel_read_test.cc)
-    target_link_libraries(carta_zarr_pixel_read_tests PRIVATE CARTA::zarr)
-    target_compile_features(carta_zarr_pixel_read_tests PRIVATE cxx_std_17)
-    target_compile_definitions(carta_zarr_pixel_read_tests PRIVATE
-        CARTA_ZARR_PIXEL_FIXTURE="${CARTA_ZARR_FIXTURE_DIR}/xradio/pixels"
-        CARTA_ZARR_PIXEL_FIXTURE_L_FASTEST="${CARTA_ZARR_FIXTURE_DIR}/xradio/pixels_l_fastest")
-    target_link_libraries(carta_zarr_pixel_read_tests PRIVATE Threads::Threads)
-    add_test(NAME carta-zarr-pixel-read COMMAND carta_zarr_pixel_read_tests)
+    carta_zarr_add_test(carta_zarr_pixel_read_tests PUBLIC
+        TEST_NAME carta-zarr-pixel-read
+        SOURCES tests/pixel_read_test.cc
+        LIBRARIES Threads::Threads
+        DEFINITIONS ${CARTA_ZARR_PIXEL_FIXTURES})
 
     # The spectral reduction is checked against an oracle recomputed from the fixture's encoding,
     # not against a recorded answer, so that a walk which reads the right pixels but double-counts a
     # region straddling two chunks disagrees with it.
-    add_executable(carta_zarr_spectral_reduce_tests tests/spectral_reduce_test.cc)
-    target_link_libraries(carta_zarr_spectral_reduce_tests PRIVATE CARTA::zarr)
-    target_compile_features(carta_zarr_spectral_reduce_tests PRIVATE cxx_std_17)
-    target_compile_definitions(carta_zarr_spectral_reduce_tests PRIVATE
-        CARTA_ZARR_PIXEL_FIXTURE="${CARTA_ZARR_FIXTURE_DIR}/xradio/pixels"
-        CARTA_ZARR_PIXEL_FIXTURE_L_FASTEST="${CARTA_ZARR_FIXTURE_DIR}/xradio/pixels_l_fastest"
-        CARTA_ZARR_PIXEL_FIXTURE_WIDE="${CARTA_ZARR_FIXTURE_DIR}/xradio/pixels_wide")
-    add_test(NAME carta-zarr-spectral-reduce COMMAND carta_zarr_spectral_reduce_tests)
+    carta_zarr_add_test(carta_zarr_spectral_reduce_tests PUBLIC
+        TEST_NAME carta-zarr-spectral-reduce
+        SOURCES tests/spectral_reduce_test.cc
+        DEFINITIONS ${CARTA_ZARR_PIXEL_FIXTURES} ${CARTA_ZARR_WIDE_FIXTURE})
 
-    add_executable(carta_zarr_histogram_tests tests/histogram_test.cc)
-    target_link_libraries(carta_zarr_histogram_tests PRIVATE CARTA::zarr)
-    target_compile_features(carta_zarr_histogram_tests PRIVATE cxx_std_17)
-    target_compile_definitions(carta_zarr_histogram_tests PRIVATE
-        CARTA_ZARR_PIXEL_FIXTURE="${CARTA_ZARR_FIXTURE_DIR}/xradio/pixels"
-        CARTA_ZARR_PIXEL_FIXTURE_L_FASTEST="${CARTA_ZARR_FIXTURE_DIR}/xradio/pixels_l_fastest"
-        CARTA_ZARR_PIXEL_FIXTURE_WIDE="${CARTA_ZARR_FIXTURE_DIR}/xradio/pixels_wide")
-    add_test(NAME carta-zarr-histogram COMMAND carta_zarr_histogram_tests)
+    carta_zarr_add_test(carta_zarr_histogram_tests PUBLIC
+        TEST_NAME carta-zarr-histogram
+        SOURCES tests/histogram_test.cc
+        DEFINITIONS ${CARTA_ZARR_PIXEL_FIXTURES} ${CARTA_ZARR_WIDE_FIXTURE})
 
     # Not a ctest: it reports durations and has no opinion about them, because every fixture here is
     # too small for a threshold to mean anything. It is the guard described in ADR 0005 -- run it
     # against build-release/ before and after a change to the pass, and compare. See its own header
-    # for why a Debug number is worthless.
-    add_executable(carta_zarr_pass_timing tests/pass_timing.cc)
-    target_link_libraries(carta_zarr_pass_timing PRIVATE CARTA::zarr)
-    target_compile_features(carta_zarr_pass_timing PRIVATE cxx_std_17)
-    target_compile_definitions(carta_zarr_pass_timing PRIVATE
-        CARTA_ZARR_PIXEL_FIXTURE_WIDE="${CARTA_ZARR_FIXTURE_DIR}/xradio/pixels_wide")
+    # for why a Debug number is worthless. No TEST_NAME, so it is built and never run by ctest.
+    carta_zarr_add_test(carta_zarr_pass_timing PUBLIC
+        SOURCES tests/pass_timing.cc
+        DEFINITIONS ${CARTA_ZARR_WIDE_FIXTURE})
 
     if(CARTA_ZARR_BUILD_PACKAGE_TEST)
         add_test(

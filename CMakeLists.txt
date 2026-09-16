@@ -239,11 +239,16 @@ if(CARTA_ZARR_BUILD_TESTS AND BUILD_TESTING)
     # What a pass decides before it reads anything. Compiled against pass.cc alone: PlanPass touches
     # no store and no transport, so the read strategy -- which has moved more than once, and moved
     # in three places each time -- is checkable without a directory tree.
-    add_executable(carta_zarr_pass_tests tests/pass_test.cc src/reduce/pass.cc)
+    add_executable(carta_zarr_pass_tests
+        tests/pass_test.cc
+        src/reduce/pass.cc
+        src/reduce/pass_read.cc
+        src/zarr/pixel_selection.cc)
     target_compile_features(carta_zarr_pass_tests PRIVATE cxx_std_17)
     target_include_directories(carta_zarr_pass_tests PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/include
-        ${CMAKE_CURRENT_SOURCE_DIR}/src)
+        ${CMAKE_CURRENT_SOURCE_DIR}/src
+        ${CMAKE_CURRENT_SOURCE_DIR}/tests)
     target_link_libraries(carta_zarr_pass_tests PRIVATE nlohmann_json::nlohmann_json)
     add_test(NAME carta-zarr-pass COMMAND carta_zarr_pass_tests)
 

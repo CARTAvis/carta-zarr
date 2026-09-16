@@ -17,6 +17,10 @@
 #include "reduce/axis_map.h"
 #include "reduce/pass.h"
 
+#include "support/synthetic_slab_source.h"
+
+#include <chrono>
+#include <cmath>
 #include <cstdio>
 #include <stdexcept>
 #include <string>
@@ -31,6 +35,9 @@ using carta::zarr::ReadOptions;
 using carta::zarr::internal::MapAxes;
 using carta::zarr::internal::PassPlan;
 using carta::zarr::internal::PlanPass;
+using carta::zarr::internal::RunPass;
+using carta::zarr::internal::Slab;
+using carta::zarr::testing::SyntheticSlabSource;
 
 void Require(bool condition, const std::string& message) {
     if (!condition) {
@@ -215,6 +222,210 @@ void TestSampledRangePicksTheMultiplesInside() {
     Require(count == 0, "a range holding no multiple selects nothing rather than one");
 }
 
+// ---------------------------------------------------------------------------------------------
+// Running the pass against pixels that were never written down.
+//
+// Everything below was unreachable while the only adapter read from a directory tree: a chunk read
+// twice is invisible in a reduction's answer, no reduce test sets a cancellation or a deadline, and
+// the largest committed fixture is 512x520x4.
+
+// value = l * 1000 + m + channel * 1e6, so a pixel says where it came from.
+float Encoded(const std::vector<std::uint64_t>& logical) {
+    return static_cast<float>((logical.at(2) * 1000000) + (logical.at(0) * 1000) + logical.at(1));
+}
+
+struct Walked {
+    std::uint64_t pixels = 0;
+    double sum = 0.0;
+    std::uint64_t slabs = 0;
+};
+
+Walked WalkEverything(const SyntheticSlabSource& source, const PassPlan& plan, const ReadOptions& options,
+                      std::uint64_t channels) {
+    Walked walked;
+    std::uint64_t chunks_done = 0;
+    const auto outcome = RunPass(
+        source, plan, options, 0, channels, chunks_done, [](std::uint64_t) -> carta::zarr::Result<void> { return {}; },
+        [&](const Slab& slab) {
+            ++walked.slabs;
+            for (std::uint64_t z = 0; z < slab.channel_count; ++z) {
+                const float* plane = slab.pixels + (z * slab.stride_z);
+                for (std::uint64_t v = 0; v < slab.v_count; ++v) {
+                    const float* row = plane + (v * slab.stride_v);
+                    for (std::uint64_t u = 0; u < slab.u_count; ++u) {
+                        walked.sum += row[u * slab.stride_u];
+                        ++walked.pixels;
+                    }
+                }
+            }
+        });
+    Require(static_cast<bool>(outcome), "the pass failed");
+    return walked;
+}
+
+// The invariant every piece of this was built around and nothing could assert: a pass decodes each
+// chunk once. A fixture-driven test cannot see it, because a walk that reads a chunk twice and adds
+// its pixels once still produces the right answer -- it is only slower.
+void TestEachChunkIsReadOnce() {
+    const auto image = MakeImage(512, 520, 32);
+    const auto geometry = MakeGeometry(128, 130, 4, AxisRole::spatial_y);
+    ReadOptions options;
+    // Small enough that the pass has to split along the chunk rows and along the spectrum at once.
+    options.temporary_memory_limit_bytes = 4 * 128 * 130 * 4 * 4;
+    const auto plan = Plan(image, geometry, Range{0, 32, 1}, options);
+    SyntheticSlabSource source(image, geometry, Encoded);
+
+    const auto walked = WalkEverything(source, plan, options, 32);
+    Require(walked.slabs > 1, "this budget should have split the walk; if it did not, raise the image size");
+    Require(source.most_hits_on_one_chunk() == 1,
+            "a pass decodes each chunk once -- a slab that ends inside a chunk makes one decode serve "
+            "two slabs and this is the only place that shows");
+    Require(source.chunks_touched() == (512 / 128) * (520 / 130) * (32 / 4),
+            "and it touches every chunk the selection covers, exactly the once");
+}
+
+// Every selected pixel, once, and the value the store would have given.
+void TestThePassVisitsEveryPixelOnce() {
+    const auto image = MakeImage(64, 40, 8);
+    const auto geometry = MakeGeometry(16, 20, 2, AxisRole::spatial_y);
+    ReadOptions options;
+    options.temporary_memory_limit_bytes = 16 * 20 * 2 * 4;
+    const auto plan = Plan(image, geometry, Range{0, 8, 1}, options);
+    SyntheticSlabSource source(image, geometry, Encoded);
+
+    const auto walked = WalkEverything(source, plan, options, 8);
+    Require(walked.pixels == 64ULL * 40ULL * 8ULL, "every pixel of the selection, once");
+
+    double expected = 0.0;
+    for (std::uint64_t z = 0; z < 8; ++z) {
+        for (std::uint64_t l = 0; l < 64; ++l) {
+            for (std::uint64_t m = 0; m < 40; ++m) {
+                expected += Encoded({l, m, z, 0, 0});
+            }
+        }
+    }
+    Require(std::abs(walked.sum - expected) <= 1e-6 * expected, "and the values the store would have given");
+}
+
+// The pixel mask is folded in before the visitor sees anything, which is what lets every reduction
+// treat a flagged pixel as a NaN without knowing there was a flag.
+void TestAFlaggedPixelArrivesAsNaN() {
+    const auto image = MakeImage(32, 20, 4, true);
+    const auto geometry = MakeGeometry(16, 20, 2, AxisRole::spatial_y);
+    ReadOptions options;
+    const auto plan = Plan(image, geometry, Range{0, 4, 1}, options);
+    Require(plan.apply_mask, "an image with a flag applies it by default");
+
+    SyntheticSlabSource source(image, geometry, Encoded);
+    // Every third pixel along l is bad.
+    source.set_flags([](const std::vector<std::uint64_t>& logical) { return (logical.at(0) % 3) != 0; });
+
+    std::uint64_t good = 0;
+    std::uint64_t bad = 0;
+    std::uint64_t chunks_done = 0;
+    const auto outcome = RunPass(
+        source, plan, options, 0, 4, chunks_done, [](std::uint64_t) -> carta::zarr::Result<void> { return {}; },
+        [&](const Slab& slab) {
+            for (std::uint64_t z = 0; z < slab.channel_count; ++z) {
+                const float* plane = slab.pixels + (z * slab.stride_z);
+                for (std::uint64_t v = 0; v < slab.v_count; ++v) {
+                    const float* row = plane + (v * slab.stride_v);
+                    for (std::uint64_t u = 0; u < slab.u_count; ++u) {
+                        std::isnan(row[u * slab.stride_u]) ? ++bad : ++good;
+                    }
+                }
+            }
+        });
+    Require(static_cast<bool>(outcome), "the pass failed");
+    Require(source.mask_reads() == source.pixel_reads(), "a masked pass reads a flag for every slab");
+    // l in [0, 32) has eleven multiples of three.
+    Require(bad == 11ULL * 20ULL * 4ULL, "every flagged pixel arrives as NaN");
+    Require(good == (32ULL - 11ULL) * 20ULL * 4ULL, "and no unflagged one does");
+}
+
+// Cancellation and the deadline are checked at every storage operation, and no reduce test sets
+// either -- there was no way to reach the second read of a fixture small enough to run.
+void TestCancellationStopsThePass() {
+    const auto image = MakeImage(256, 260, 16);
+    const auto geometry = MakeGeometry(64, 65, 2, AxisRole::spatial_y);
+    ReadOptions options;
+    options.temporary_memory_limit_bytes = 64 * 65 * 2 * 4;
+    int reads = 0;
+    options.cancellation_requested = [&]() { return reads >= 2; };
+    const auto plan = Plan(image, geometry, Range{0, 16, 1}, options);
+    SyntheticSlabSource source(image, geometry, Encoded);
+
+    std::uint64_t chunks_done = 0;
+    const auto outcome = RunPass(
+        source, plan, options, 0, 16, chunks_done, [](std::uint64_t) -> carta::zarr::Result<void> { return {}; },
+        [&](const Slab&) { ++reads; });
+    Require(!outcome && outcome.error().code == carta::zarr::ErrorCode::cancelled,
+            "a cancelled pass reports cancelled");
+    Require(reads == 2, "and stops at the read after the one that asked");
+}
+
+void TestAnExpiredDeadlineStopsThePass() {
+    const auto image = MakeImage(64, 40, 8);
+    const auto geometry = MakeGeometry(16, 20, 2, AxisRole::spatial_y);
+    ReadOptions options;
+    options.deadline = std::chrono::steady_clock::now() - std::chrono::seconds(1);
+    const auto plan = Plan(image, geometry, Range{0, 8, 1}, options);
+    SyntheticSlabSource source(image, geometry, Encoded);
+
+    std::uint64_t chunks_done = 0;
+    const auto outcome = RunPass(
+        source, plan, options, 0, 8, chunks_done, [](std::uint64_t) -> carta::zarr::Result<void> { return {}; },
+        [](const Slab&) {});
+    Require(!outcome && outcome.error().code == carta::zarr::ErrorCode::cancelled,
+            "a pass past its deadline reports cancelled before reading anything");
+    Require(source.pixel_reads() == 0, "and does not read");
+}
+
+// A failure from the source is the caller's failure, not a partial answer.
+void TestAReadFailureStopsThePass() {
+    const auto image = MakeImage(128, 130, 8);
+    const auto geometry = MakeGeometry(32, 65, 2, AxisRole::spatial_y);
+    ReadOptions options;
+    options.temporary_memory_limit_bytes = 32 * 65 * 2 * 4;
+    const auto plan = Plan(image, geometry, Range{0, 8, 1}, options);
+    SyntheticSlabSource source(image, geometry, Encoded);
+    source.fail_read(2, carta::zarr::ErrorCode::io_error);
+
+    int visits = 0;
+    std::uint64_t chunks_done = 0;
+    const auto outcome = RunPass(
+        source, plan, options, 0, 8, chunks_done, [](std::uint64_t) -> carta::zarr::Result<void> { return {}; },
+        [&](const Slab&) { ++visits; });
+    Require(!outcome && outcome.error().code == carta::zarr::ErrorCode::io_error,
+            "the source's error is the pass's error");
+    Require(visits == 1, "and nothing is visited after it");
+}
+
+// The size the design comments argue about, which no fixture reaches. The point is not the answer
+// but that the splitting runs at all: a 4096-square plane over one budget is many bands.
+void TestALargePlaneSplitsIntoBands() {
+    const auto image = MakeImage(4096, 4096, 4);
+    const auto geometry = MakeGeometry(512, 512, 1, AxisRole::spatial_y);
+    ReadOptions options;
+    // Eight chunks to a read, which is the floor chunk_blocks measured.
+    options.temporary_memory_limit_bytes = 8 * 512 * 512 * 4;
+    const auto plan = Plan(image, geometry, Range{0, 4, 1}, options);
+    SyntheticSlabSource source(image, geometry, Encoded);
+    // This one is about the splitting, not the pixels, so it does not pay for them.
+    source.set_constant(1.0F);
+
+    std::uint64_t slabs = 0;
+    std::uint64_t chunks_done = 0;
+    const auto outcome = RunPass(
+        source, plan, options, 0, 4, chunks_done,
+        [](std::uint64_t) -> carta::zarr::Result<void> { return {}; }, [&](const Slab&) { ++slabs; });
+    Require(static_cast<bool>(outcome), "the pass failed on a large plane");
+    Require(source.elements_read() == 4096ULL * 4096ULL * 4ULL, "every pixel of a sixty-seven megapixel cube");
+    Require(slabs > 8, "and it took many reads to do it");
+    Require(source.most_hits_on_one_chunk() == 1, "still decoding each chunk once at this size");
+    Require(source.chunks_touched() == 8ULL * 8ULL * 4ULL, "over every chunk of it");
+}
+
 }  // namespace
 
 int main() {
@@ -227,6 +438,13 @@ int main() {
         TestABandIsNeverEmpty();
         TestSamplingFloorsAtOne();
         TestSampledRangePicksTheMultiplesInside();
+        TestEachChunkIsReadOnce();
+        TestThePassVisitsEveryPixelOnce();
+        TestAFlaggedPixelArrivesAsNaN();
+        TestCancellationStopsThePass();
+        TestAnExpiredDeadlineStopsThePass();
+        TestAReadFailureStopsThePass();
+        TestALargePlaneSplitsIntoBands();
     } catch (const std::exception& error) {
         std::fprintf(stderr, "pass test failed: %s\n", error.what());
         return 1;

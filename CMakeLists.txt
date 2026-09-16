@@ -281,6 +281,16 @@ if(CARTA_ZARR_BUILD_TESTS AND BUILD_TESTING)
         CARTA_ZARR_PIXEL_FIXTURE_WIDE="${CARTA_ZARR_FIXTURE_DIR}/xradio/pixels_wide")
     add_test(NAME carta-zarr-histogram COMMAND carta_zarr_histogram_tests)
 
+    # Not a ctest: it reports durations and has no opinion about them, because every fixture here is
+    # too small for a threshold to mean anything. It is the guard described in ADR 0005 -- run it
+    # against build-release/ before and after a change to the pass, and compare. See its own header
+    # for why a Debug number is worthless.
+    add_executable(carta_zarr_pass_timing tests/pass_timing.cc)
+    target_link_libraries(carta_zarr_pass_timing PRIVATE CARTA::zarr)
+    target_compile_features(carta_zarr_pass_timing PRIVATE cxx_std_17)
+    target_compile_definitions(carta_zarr_pass_timing PRIVATE
+        CARTA_ZARR_PIXEL_FIXTURE_WIDE="${CARTA_ZARR_FIXTURE_DIR}/xradio/pixels_wide")
+
     if(CARTA_ZARR_BUILD_PACKAGE_TEST)
         add_test(
             NAME carta-zarr-package-consumer

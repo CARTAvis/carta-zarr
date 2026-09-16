@@ -27,9 +27,21 @@ numeric codec decoding for no present gain.
 
 The profile no longer knows what a filesystem is. It previously reached through `Store` to build
 `root / "SKY" / "zarr.json"` and stat it directly, which was not equivalent to asking the `Store`:
-`ReadNodeMetadata` consults consolidated metadata before the filesystem, so a store whose child
-metadata exists only in consolidated metadata is still discovered. The `not_found` branch it used
-to feed was unreachable and has been deleted.
+`ReadNodeMetadata` consults consolidated metadata before the transport, so a store that consolidated
+its metadata is discovered without reading a document per variable. The `not_found` branch the
+profile used to feed was unreachable and has been deleted.
+
+Consolidated metadata is a copy that saves those reads, not a substitute for the documents it
+copies. zarr-python writes it with `must_understand: false`, which says a reader may ignore it and
+still read the same hierarchy, and it never removes the children when it writes one. This library
+could not honour the other reading anyway: the array data behind those names is opened by
+TensorStore from each array's own metadata, so a store whose children exist only in the root
+describes images that nothing — this library included — can read pixels from. Such a store is
+malformed, and the error it earns names the document that is missing. What the saving is worth is
+measurable: on a local filesystem with the page cache warm, consolidating an 11-variable XRADIO
+dataset takes `Dataset::Open` from 3.1 ms to 2.4 ms. The reason it is kept is not that 0.7 ms —
+it is that the same reads become one network round trip each on the transport `design.md` §4
+anticipates, which is what consolidated metadata was invented for.
 
 The seam is partial, and honestly so. Everything a probe needs is metadata, so a probe runs entirely
 in memory; a descriptor that reports coordinate values still wants a store on disk. That asymmetry
@@ -45,3 +57,7 @@ An in-memory transport makes hand-writing store metadata easy, which is in tensi
 rule that fixtures come from the pinned generator. The line: the in-memory transport serves negative
 and structural cases only — missing fields, wrong types, mismatched axes, consolidated metadata that
 disagrees with the directory tree. Positive conformance is settled by generator fixtures on disk.
+
+It also counts the nodes it was asked for, which is how the consolidated-metadata test states what
+the copy is for. Asserting the images that come back cannot distinguish a store that used the copy
+from one that ignored it, because both reach the same answer; asserting that no child was read can.

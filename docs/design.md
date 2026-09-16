@@ -419,7 +419,7 @@ During the experimental phase, compatibility is defined by the pinned XRADIO fix
 | Chunking | Regular chunk grid | TensorStore-dependent |
 | Sharding | Declare supported codec combinations explicitly | Storage-info parsing exists; image read unimplemented |
 | Compression | bytes plus selected zstd/gzip/blosc/checksum chains | Mixed TensorStore/custom behavior |
-| Consolidated metadata | Inline consolidated metadata and per-node fallback | Supported |
+| Consolidated metadata | Inline copy in the root read in place of the per-node documents, which remain the store's own record | Supported |
 | Missing chunks / fill | Unspecified until pixel reads are implemented | Not implemented |
 | Masks / NaN | Unspecified until pixel reads are implemented | Not implemented |
 

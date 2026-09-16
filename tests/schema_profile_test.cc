@@ -18,6 +18,7 @@
 
 #include <iostream>
 #include <map>
+#include <set>
 #include <stdexcept>
 #include <string>
 #include <vector>
@@ -115,29 +116,34 @@ std::map<std::string, std::string> CompleteStore() {
     };
 }
 
-// A store whose child metadata lives only in the root's consolidated_metadata, with no node of its
-// own. Discovery must find its images there rather than relying on filesystem children. See
-// The profile must use the Store abstraction for both filesystem and consolidated metadata.
-std::map<std::string, std::string> ConsolidatedOnlyStore() {
-    auto children = CompleteStore();
-    children.erase("");
+// The same store with a copy of every child's metadata in the root, which is what zarr-python
+// writes when a dataset is consolidated. The children keep their own metadata: consolidated
+// metadata is a copy that saves reading them, carrying `must_understand: false` precisely so that a
+// reader which ignores it still reads the same hierarchy. A store whose children exist only in the
+// root is malformed, and no reader but this one could open it -- the array data behind those names
+// is read by TensorStore, which needs each array's own metadata.
+std::map<std::string, std::string> ConsolidatedStore() {
+    auto nodes = CompleteStore();
 
     std::string metadata;
-    for (const auto& child : children) {
+    for (const auto& child : nodes) {
+        if (child.first.empty()) {
+            continue;
+        }
         if (!metadata.empty()) {
             metadata += ",";
         }
         metadata += "\"" + child.first + "\":" + child.second;
     }
-    return {{"",
-             "{\"attributes\":{\"coordinate_system_info\":{"
-             "\"projection\":\"SIN\","
-             "\"reference_direction\":{\"data\":[1.0,0.5]},"
-             "\"native_pole_direction\":{\"data\":[0.0,1.5707963267948966]},"
-             "\"pixel_coordinate_transformation_matrix\":[[1.0,0.0],[0.0,1.0]]}},"
-             "\"zarr_format\":3,\"node_type\":\"group\","
-             "\"consolidated_metadata\":{\"metadata\":{" +
-                 metadata + "}}}"}};
+    nodes[""] = "{\"attributes\":{\"coordinate_system_info\":{"
+                "\"projection\":\"SIN\","
+                "\"reference_direction\":{\"data\":[1.0,0.5]},"
+                "\"native_pole_direction\":{\"data\":[0.0,1.5707963267948966]},"
+                "\"pixel_coordinate_transformation_matrix\":[[1.0,0.0],[0.0,1.0]]}},"
+                "\"zarr_format\":3,\"node_type\":\"group\","
+                "\"consolidated_metadata\":{\"kind\":\"inline\",\"must_understand\":false,\"metadata\":{" +
+                metadata + "}}}";
+    return nodes;
 }
 
 carta::zarr::internal::SchemaProfile XradioProfile() {
@@ -300,21 +306,42 @@ void TestDefaultImageSkipsUnreadablePreferredImage() {
             "the unreadable image did not carry its capability diagnostic");
 }
 
-// Regression for discovery through consolidated metadata. It used to stat the filesystem directly,
-// which cannot see consolidated metadata.
+// What consolidated metadata is for: the root's copy answers for every child, so discovery reads
+// one node instead of one per variable. That saving is the whole reason the block exists -- on a
+// store reached over a network each of those reads is a round trip -- so it is asserted as reads
+// not taken, which is the only thing that tells a store that used the copy from one that ignored
+// it. The children are present throughout: this is a cache, and the test would pass either way if
+// it only checked the answer.
 void TestConsolidatedMetadataDiscovery() {
-    auto nodes = ConsolidatedOnlyStore();
-    Require(nodes.size() == 1, "the consolidated store must carry no node entries of its own");
+    auto nodes = ConsolidatedStore();
+    Require(nodes.size() > 1, "the consolidated store must carry its child nodes as well as the root copy");
 
     const auto probe = Probe(nodes);
     Require(probe.kind == SchemaMatchKind::match, "a store using consolidated metadata was not matched");
 
-    auto store = Open(nodes);
+    auto transport = MakeInMemoryTransport(nodes);
+    auto store = carta::zarr::internal::OpenStore(transport);
     Require(static_cast<bool>(store), "the consolidated store failed to open");
     auto discovery = XradioProfile().Discover(store.value());
     Require(static_cast<bool>(discovery), "discovery over consolidated metadata reported an error");
     Require(ReadableImageIds(discovery.value().images) == std::vector<std::string>{"SKY"},
             "discovery did not find SKY through consolidated metadata");
+    Require(transport->nodes_read() == std::set<std::string>{""},
+            "discovery read a child node that the root's consolidated copy already answered for");
+    Require(transport->listings() == 0,
+            "discovery listed the hierarchy although consolidated metadata names every node");
+
+    // The control: the same store without the root's copy reads every child instead, and reaches
+    // the same answer. Both are supported; only one of them costs a read per variable.
+    auto plain = MakeInMemoryTransport(CompleteStore());
+    auto plain_store = carta::zarr::internal::OpenStore(plain);
+    Require(static_cast<bool>(plain_store), "the unconsolidated store failed to open");
+    auto plain_discovery = XradioProfile().Discover(plain_store.value());
+    Require(static_cast<bool>(plain_discovery), "discovery without consolidated metadata reported an error");
+    Require(ReadableImageIds(plain_discovery.value().images) == ReadableImageIds(discovery.value().images),
+            "the two metadata layouts did not describe the same images");
+    Require(plain->nodes_read().size() > 1,
+            "a store without consolidated metadata has to read its children");
 }
 
 // The report latches: once a requirement is unmet, later ones are no-ops. A store with two faults

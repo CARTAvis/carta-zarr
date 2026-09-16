@@ -252,6 +252,11 @@ Result<nlohmann::json> Store::ReadNodeMetadata(std::string_view node) const {
     const std::string node_name = std::move(node_name_result.value());
 
     return _caches->node_metadata.GetOrCompute(node_name, [&]() -> Result<nlohmann::json> {
+        // The root's copy first, the node's own document second. Consolidated metadata is a copy
+        // that saves a read, not a substitute for the document it copies: it carries
+        // `must_understand: false`, so a reader that ignores it reads the same hierarchy, and the
+        // array data behind these names is opened by TensorStore from each array's own metadata
+        // whatever this decides. A node the copy does not mention is therefore read, not missing.
         if (_has_consolidated_metadata) {
             const auto found = _consolidated_metadata.find(node_name);
             if (found != _consolidated_metadata.end()) {
@@ -281,6 +286,13 @@ Result<std::vector<std::pair<std::string, nlohmann::json>>> Store::ListNodeMetad
     using Listing = Result<std::vector<std::pair<std::string, nlohmann::json>>>;
     return _caches->listed_metadata.GetOrCompute([&]() -> Listing {
         std::vector<std::string> node_names;
+        // The one place the copy is taken as the whole truth rather than as a first look. Listing
+        // is what consolidated metadata exists to avoid -- on a store reached over a network,
+        // enumerating a hierarchy is the expensive question -- so a store that consolidated its
+        // metadata is taken at its word about which nodes it has. The cost is a node added after
+        // the copy was written: it is invisible until the dataset is consolidated again, the same
+        // staleness zarr-python's own consolidated open accepts. Reading a node it does not
+        // mention still falls through to the node itself, above.
         if (_has_consolidated_metadata) {
             node_names.reserve(_consolidated_metadata.size());
             for (const auto& [node, _] : _consolidated_metadata) {

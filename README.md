@@ -15,7 +15,9 @@ its public headers, which need only the C++ standard library.
 - **Images**: real-valued variables carrying all five of `time`, `frequency`, `polarization`, `l`
   and `m`. Complex and aperture-plane (`u`, `v`) variables are listed with a diagnostic saying why
   they cannot be opened.
-- **Local filesystem stores.** Metadata may be per-node or consolidated into the root.
+- **Local filesystem stores.** Every node carries its own metadata document; a root
+  `consolidated_metadata` copy, which is what zarr-python writes for a consolidated dataset, is used
+  to answer for them without reading each one.
 
 Writing is out of scope, and so is anything but the `xradio.image` profile.
 

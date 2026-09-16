@@ -8,6 +8,8 @@
 
 #include "../../zarr/array_metadata.h"
 #include "../../zarr/array_view.h"
+#include "attributes.h"
+#include "direction.h"
 #include "linear_axis.h"
 #include "probe_report.h"
 
@@ -31,11 +33,6 @@ Error MakeError(ErrorCode code, std::string message, std::string node_path = {})
     return Error{code, std::move(message), std::move(node_path)};
 }
 
-std::string Upper(std::string value) {
-    std::transform(value.begin(), value.end(), value.begin(), [](unsigned char c) { return static_cast<char>(std::toupper(c)); });
-    return value;
-}
-
 constexpr std::string_view kVersion = "1.2";
 constexpr std::array<std::string_view, 5> kSkyAxes{"time", "frequency", "polarization", "l", "m"};
 
@@ -49,10 +46,6 @@ int KnownImageRank(std::string_view image_id) {
         "SKY", "MODEL", "RESIDUAL", "POINT_SPREAD_FUNCTION", "PRIMARY_BEAM", "MASK_DECONVOLVE"};
     const auto* const found = std::find(known.begin(), known.end(), image_id);
     return found == known.end() ? static_cast<int>(known.size()) : static_cast<int>(found - known.begin());
-}
-
-bool HasAttribute(const nlohmann::json& attributes, std::string_view name) {
-    return attributes.is_object() && attributes.contains(name);
 }
 
 // Every image carries a coordinate array for each axis it uses. Both XRADIO readers write all five
@@ -74,17 +67,6 @@ void AppendDiagnostics(ImageDescriptor& descriptor, std::vector<Diagnostic> diag
                                   std::make_move_iterator(diagnostics.end()));
 }
 
-std::string AttributeString(const nlohmann::json& attributes, std::string_view name) {
-    if (attributes.is_object() && attributes.contains(name) && attributes.at(name).is_string()) {
-        return attributes.at(name).get<std::string>();
-    }
-    return {};
-}
-
-std::optional<double> AttributeNumber(const nlohmann::json& value) {
-    return value.is_number() ? std::optional<double>(value.get<double>()) : std::nullopt;
-}
-
 constexpr std::array<std::string_view, 5> kApertureAxes{"time", "frequency", "polarization", "u", "v"};
 
 // An image carries every axis of its plane. XRADIO writes optional coordinate arrays that share the
@@ -97,13 +79,6 @@ bool HasAllAxes(const zarr_metadata::ArrayMetadata& metadata, const std::array<s
     return std::all_of(axes.begin(), axes.end(), [&metadata](const auto axis) {
         return zarr_metadata::FindDimensionIndex(metadata, axis).has_value();
     });
-}
-
-const nlohmann::json* ObjectMember(const nlohmann::json& object, std::string_view name) {
-    if (!object.is_object() || !object.contains(name)) {
-        return nullptr;
-    }
-    return &object.at(name);
 }
 
 std::vector<std::string> FindDataGroups(const nlohmann::json& root_attributes, std::string_view image_id) {
@@ -183,90 +158,6 @@ Result<std::vector<double>> ReadNumericCoordinate(const Store& store, std::strin
         return metadata.error();
     }
     return store.ReadNumericArray(name);
-}
-
-std::optional<DirectionCoordinate> DescribeDirection(const nlohmann::json& root_attributes,
-                                                     const std::vector<double>& l_values,
-                                                     const std::vector<double>& m_values, ImageDescriptor& descriptor) {
-    const auto* coordinate_system = ObjectMember(root_attributes, "coordinate_system_info");
-    const bool has_coordinate_system = coordinate_system != nullptr && coordinate_system->is_object();
-    if (!has_coordinate_system && (l_values.empty() || m_values.empty())) {
-        return std::nullopt;
-    }
-
-    DirectionCoordinate direction;
-    if (has_coordinate_system) {
-        const auto& cs_info = *coordinate_system;
-        if (const auto* projection = ObjectMember(cs_info, "projection");
-            projection != nullptr && projection->is_string()) {
-            direction.projection = Upper(projection->get<std::string>());
-        }
-        if (const auto* reference_direction = ObjectMember(cs_info, "reference_direction");
-            reference_direction != nullptr && reference_direction->is_object()) {
-            if (const auto* data = ObjectMember(*reference_direction, "data");
-                data != nullptr && zarr_metadata::IsNumericVector(*data, 2)) {
-                direction.reference_value.at(0) = data->at(0).get<double>() * kRadToDeg;
-                direction.reference_value.at(1) = data->at(1).get<double>() * kRadToDeg;
-            }
-            if (const auto* attributes = ObjectMember(*reference_direction, "attrs");
-                attributes != nullptr && attributes->is_object()) {
-                direction.reference_frame = Upper(AttributeString(*attributes, "frame"));
-                if (const auto* equinox = ObjectMember(*attributes, "equinox"); equinox != nullptr) {
-                    if (equinox->is_number()) {
-                        direction.equinox = equinox->get<double>();
-                    } else if (equinox->is_string()) {
-                        const std::string value = equinox->get<std::string>();
-                        const std::size_t position = (value.size() > 1 && (value.at(0) == 'J' || value.at(0) == 'B' ||
-                                                                           value.at(0) == 'j' || value.at(0) == 'b'))
-                                                       ? 1
-                                                       : 0;
-                        try {
-                            direction.equinox = std::stod(value.substr(position));
-                        } catch (...) {
-                        }
-                    }
-                }
-            }
-        }
-        if (const auto* parameters = ObjectMember(cs_info, "projection_parameters");
-            parameters != nullptr && parameters->is_array()) {
-            for (const auto& value : *parameters) {
-                if (value.is_number()) {
-                    direction.projection_parameters.push_back(value.get<double>());
-                }
-            }
-        }
-        if (const auto* native_pole = ObjectMember(cs_info, "native_pole_direction");
-            native_pole != nullptr && native_pole->is_object()) {
-            const auto* data = ObjectMember(*native_pole, "data");
-            if (data != nullptr && zarr_metadata::IsNumericVector(*data, 2)) {
-                direction.native_pole_direction.at(0) = data->at(0).get<double>() * kRadToDeg;
-                direction.native_pole_direction.at(1) = data->at(1).get<double>() * kRadToDeg;
-            }
-        }
-        if (const auto* matrix = ObjectMember(cs_info, "pixel_coordinate_transformation_matrix");
-            matrix != nullptr && zarr_metadata::IsNumericMatrix(*matrix, 2, 2)) {
-            direction.transformation_matrix.at(0).at(0) = matrix->at(0).at(0).get<double>();
-            direction.transformation_matrix.at(0).at(1) = matrix->at(0).at(1).get<double>();
-            direction.transformation_matrix.at(1).at(0) = matrix->at(1).at(0).get<double>();
-            direction.transformation_matrix.at(1).at(1) = matrix->at(1).at(1).get<double>();
-        }
-    }
-
-    const auto set_direction_axis = [&](const std::vector<double>& values, double& increment, double& reference_pixel,
-                                        std::string_view name) {
-        auto fit = FitDirectionAxis(values, name);
-        if (fit.increment) {
-            increment = *fit.increment;
-        }
-        if (fit.reference_pixel) {
-            reference_pixel = *fit.reference_pixel;
-        }
-        AppendDiagnostics(descriptor, std::move(fit.diagnostics));
-    };
-    set_direction_axis(l_values, direction.increment.at(0), direction.reference_pixel.at(0), "l");
-    set_direction_axis(m_values, direction.increment.at(1), direction.reference_pixel.at(1), "m");
-    return direction;
 }
 
 std::optional<SpectralCoordinate> DescribeSpectralCoordinate(const Store& store,
@@ -620,7 +511,7 @@ Result<ImageDescriptor> DescribeImage(const Store& store, std::string_view image
 
     // A direction axis is linear by construction, so its increment is reported even when the samples
     // are not evenly spaced; the fit says so in a diagnostic rather than withholding the value.
-    if (auto direction = DescribeDirection(root_attrs, l_values, m_values, descriptor); direction) {
+    if (auto direction = DescribeDirection(root_attrs, l_values, m_values, descriptor.diagnostics); direction) {
         descriptor.direction = std::move(direction);
     }
 

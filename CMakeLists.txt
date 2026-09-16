@@ -52,6 +52,7 @@ add_library(carta_zarr SHARED
     src/reduce/spectral_reduce.cc
     src/schema/profile.cc
     src/schema/xradio/probe_report.cc
+    src/schema/xradio/direction.cc
     src/schema/xradio/linear_axis.cc
     src/schema/xradio/image.cc
     src/zarr/array_metadata.cc
@@ -170,7 +171,8 @@ if(CARTA_ZARR_BUILD_TESTS AND BUILD_TESTING)
         src/store.cc
         src/schema/profile.cc
         src/schema/xradio/probe_report.cc
-        src/schema/xradio/linear_axis.cc
+        src/schema/xradio/direction.cc
+    src/schema/xradio/linear_axis.cc
         src/schema/xradio/image.cc
         src/zarr/array_metadata.cc
         src/zarr/array_view.cc
@@ -227,6 +229,22 @@ if(CARTA_ZARR_BUILD_TESTS AND BUILD_TESTING)
     # The linear axis fit is pure: values in, a linear description out. It is tested on its own,
     # with no store and no transport, so the cases that are awkward to build as a directory tree --
     # unevenly spaced samples, an extrapolated reference pixel, degenerate axes -- are cheap here.
+    # Where an image points, from its root attributes and its l and m samples. No store, no
+    # transport: the whole thing takes JSON and two vectors. ADR 0002 rests on these fields reaching
+    # casacore intact, and the two that were asserted nowhere -- the increment and the
+    # transformation matrix -- are checked here.
+    add_executable(carta_zarr_direction_tests
+        tests/direction_test.cc
+        src/schema/xradio/direction.cc
+        src/schema/xradio/linear_axis.cc
+        src/zarr/array_metadata.cc)
+    target_compile_features(carta_zarr_direction_tests PRIVATE cxx_std_17)
+    target_include_directories(carta_zarr_direction_tests PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/include
+        ${CMAKE_CURRENT_SOURCE_DIR}/src)
+    target_link_libraries(carta_zarr_direction_tests PRIVATE nlohmann_json::nlohmann_json)
+    add_test(NAME carta-zarr-direction COMMAND carta_zarr_direction_tests)
+
     add_executable(carta_zarr_linear_axis_tests
         tests/linear_axis_test.cc
         src/schema/xradio/linear_axis.cc)

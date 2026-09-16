@@ -25,6 +25,11 @@ namespace carta::zarr::internal {
  * A failed computation is remembered like any other value. That is deliberate for a read-only view
  * of a store: a node that was missing stays missing for the life of the view, so what a caller
  * observes does not change under it.
+ *
+ * Values are handed back by reference. An entry is written once and never erased or replaced, and a
+ * std::map does not move the ones it already holds when another is inserted, so a reference stays
+ * valid for as long as the table does -- which is what makes a table of parsed JSON documents worth
+ * having at all. A caller that stores one keeps the table alive for at least as long.
  */
 template <typename Key, typename Value>
 class Memo {
@@ -37,7 +42,7 @@ public:
     ~Memo() = default;
 
     template <typename Compute>
-    Value GetOrCompute(const Key& key, Compute compute) const {
+    const Value& GetOrCompute(const Key& key, Compute compute) const {
         std::scoped_lock const lock(_mutex);
         const auto found = _entries.find(key);
         if (found != _entries.end()) {
@@ -45,6 +50,15 @@ public:
         }
         const auto insertion = _entries.emplace(key, compute());
         return insertion.first->second;
+    }
+
+    // Put a value in that was not computed here. It is for a table whose entries are already in
+    // hand -- the node metadata a store's consolidated copy arrives holding -- so that they are one
+    // value looked up one way rather than a second copy consulted first. An entry that is already
+    // there wins, because it is the one callers may be holding a reference to.
+    void Insert(Key key, Value value) const {
+        std::scoped_lock const lock(_mutex);
+        _entries.emplace(std::move(key), std::move(value));
     }
 
 private:
@@ -68,7 +82,7 @@ public:
     ~Lazy() = default;
 
     template <typename Compute>
-    Value GetOrCompute(Compute compute) const {
+    const Value& GetOrCompute(Compute compute) const {
         std::scoped_lock const lock(_mutex);
         if (!_value.has_value()) {
             _value.emplace(compute());

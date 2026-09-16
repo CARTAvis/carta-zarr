@@ -39,14 +39,13 @@ TensorStore from each array's own metadata, so a store whose children exist only
 describes images that nothing — this library included — can read pixels from. Such a store is
 malformed, and the error it earns names the document that is missing. What the saving is worth is
 measurable: in a release build, on a local filesystem with the page cache warm, consolidating an
-11-variable XRADIO dataset takes `Dataset::Open` from 0.87 ms to 0.34 ms. Both numbers are metadata
-almost end to end — a sampling profile of the consolidated open puts roughly a fifth of it in
-parsing the root document and most of the rest in copying the parsed documents from the store into
-the caches and the descriptor, and frees them again on the way out — so the reads the copy saves are
-a real fraction of a real cost rather than a rounding error. They are still under a millisecond
-either way, and that is not the reason to keep it: it is that each of those reads becomes one
-network round trip on the transport `design.md` §4 anticipates, which is what consolidated metadata
-was invented for.
+11-variable XRADIO dataset takes `Dataset::Open` from 0.78 ms to 0.19 ms. Both numbers are metadata
+end to end — a sampling profile of the consolidated open puts about two fifths of it in parsing the
+root document and most of the rest in reading that document off the filesystem — so what the copy
+saves is a real fraction of a real cost rather than a rounding error. They are still under a
+millisecond either way, and that is not the reason to keep it: it is that each of those reads
+becomes one network round trip on the transport `design.md` §4 anticipates, which is what
+consolidated metadata was invented for.
 
 The seam is partial, and honestly so. Everything a probe needs is metadata, so a probe runs entirely
 in memory; a descriptor that reports coordinate values still wants a store on disk. That asymmetry

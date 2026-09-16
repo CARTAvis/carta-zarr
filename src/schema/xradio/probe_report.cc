@@ -75,7 +75,7 @@ bool ProbeReport::RequireCoordinateOf(const zarr::ArrayMetadata& image, std::str
     }
 
     const std::string node(axis);
-    auto metadata_result = _store->ReadNodeMetadata(axis);
+    const auto& metadata_result = _store->ReadNodeMetadata(axis);
     if (!metadata_result) {
         if (metadata_result.error().code == ErrorCode::not_found) {
             return Fail("invalid_metadata", "Missing required coordinate array", node);
@@ -86,7 +86,7 @@ bool ProbeReport::RequireCoordinateOf(const zarr::ArrayMetadata& image, std::str
 
     // ReadArrayMetadata reuses both the raw metadata and parsed array metadata caches. Keeping the
     // raw read above preserves the distinction between missing metadata and other I/O errors.
-    auto array_result = _store->ReadArrayMetadata(axis);
+    const auto& array_result = _store->ReadArrayMetadata(axis);
     if (!RequireArrayMetadata(array_result, node)) {
         return false;
     }

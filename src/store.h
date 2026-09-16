@@ -43,7 +43,7 @@ struct ImageDiscovery {
 // forms a DAG, and a reader added later must not add an edge back:
 //
 //     string_arrays ---> array_metadata ---> node_metadata ---> transport
-//     listed_metadata ---------------------> node_metadata ---> transport
+//     listed_nodes ------------------------> node_metadata ---> transport
 //     double_arrays -------------------------------------------> transport
 //
 // These locks are not the store's concurrency story. Descriptor construction is serialized a level
@@ -54,7 +54,7 @@ struct ImageDiscovery {
 struct StoreCaches {
     Memo<std::string, Result<nlohmann::json>> node_metadata;
     Memo<std::string, Result<zarr::ArrayMetadata>> array_metadata;
-    Lazy<Result<std::vector<std::pair<std::string, nlohmann::json>>>> listed_metadata;
+    Lazy<Result<std::vector<std::string>>> listed_nodes;
     Memo<std::string, Result<ImageDiscovery>> image_discoveries;
     Memo<std::string, Result<std::vector<double>>> double_arrays;
     Memo<std::string, Result<std::vector<std::string>>> string_arrays;
@@ -71,6 +71,8 @@ using StoreContextPtr = std::shared_ptr<const StoreContext>;
 // every read uses one consistent session. Nothing above this module learns where the bytes came from.
 class Store {
 public:
+    // `consolidated_metadata` is the root's copy of its children's documents, which the store takes
+    // over as the node metadata it has already read rather than keeping beside it.
     Store(TransportPtr transport, nlohmann::json root_attributes,
           std::map<std::string, nlohmann::json> consolidated_metadata, bool has_consolidated_metadata,
           StoreContextPtr context);
@@ -78,9 +80,13 @@ public:
     // The root group's attributes, or an empty object when it declares none.
     const nlohmann::json& RootAttributes() const noexcept;
 
-    Result<nlohmann::json> ReadNodeMetadata(std::string_view node) const;
-    Result<zarr::ArrayMetadata> ReadArrayMetadata(std::string_view node) const;
-    Result<std::vector<std::pair<std::string, nlohmann::json>>> ListNodeMetadata() const;
+    // These hand back what the store holds, not a copy of it: the reference is good for as long as
+    // the store is, and a caller that wants its own copy says so.
+    const Result<nlohmann::json>& ReadNodeMetadata(std::string_view node) const;
+    const Result<zarr::ArrayMetadata>& ReadArrayMetadata(std::string_view node) const;
+    // Every node in the hierarchy, sorted, each one's metadata read and parsed. The names are what a
+    // caller walks; what a node holds it asks for by name, which is already in hand by then.
+    const Result<std::vector<std::string>>& ListNodes() const;
     template <typename Compute>
     Result<ImageDiscovery> CachedImageDiscovery(std::string_view profile_id, Compute compute) const {
         return _caches->image_discoveries.GetOrCompute(std::string(profile_id), compute);
@@ -109,7 +115,9 @@ private:
 
     TransportPtr _transport;
     nlohmann::json _root_attributes;
-    std::map<std::string, nlohmann::json> _consolidated_metadata;
+    // The names the root's copy accounted for. The documents themselves went into the node metadata
+    // table at construction, so there is one place a node's metadata is looked up rather than two.
+    std::vector<std::string> _consolidated_nodes;
     bool _has_consolidated_metadata = false;
     StoreContextPtr _context;
     // Held indirectly so that Store stays movable: the tables own mutexes and cannot be moved.

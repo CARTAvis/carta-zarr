@@ -98,17 +98,22 @@ std::string NormalizeMetadataKey(std::string key) {
     return key;
 }
 
-void CollectConsolidatedMetadata(const nlohmann::json& metadata, const std::string& prefix,
+// The documents are moved out of the root rather than copied out of it. The root is parsed here and
+// nothing reads it again afterwards, and these are whole node metadata documents: copying them is
+// the single largest cost of opening a consolidated store, and it buys a second copy of what the
+// store is about to own anyway.
+void CollectConsolidatedMetadata(nlohmann::json& metadata, const std::string& prefix,
                                  std::map<std::string, nlohmann::json>& output) {
     if (!metadata.is_object()) {
         return;
     }
-    for (const auto& [key, value] : metadata.items()) {
-        std::string path = prefix.empty() ? key : prefix + "/" + key;
+    for (auto& entry : metadata.items()) {
+        std::string path = prefix.empty() ? entry.key() : prefix + "/" + entry.key();
         path = NormalizeMetadataKey(std::move(path));
+        auto& value = entry.value();
         if (value.is_object() && value.contains("node_type")) {
             if (!path.empty()) {
-                output[path] = value;
+                output[path] = std::move(value);
             }
         } else if (value.is_object()) {
             CollectConsolidatedMetadata(value, path, output);
@@ -178,10 +183,18 @@ Store::Store(TransportPtr transport, nlohmann::json root_attributes,
              StoreContextPtr context)
     : _transport(std::move(transport)),
       _root_attributes(std::move(root_attributes)),
-      _consolidated_metadata(std::move(consolidated_metadata)),
       _has_consolidated_metadata(has_consolidated_metadata),
       _context(std::move(context)),
-      _caches(std::make_shared<StoreCaches>()) {}
+      _caches(std::make_shared<StoreCaches>()) {
+    // The root's copy is node metadata this store has already read, so it goes where node metadata
+    // is kept. Reading one of these nodes is then a lookup in the one table, rather than a second
+    // table consulted first and a document copied out of it on every call.
+    _consolidated_nodes.reserve(consolidated_metadata.size());
+    for (auto& [node, metadata] : consolidated_metadata) {
+        _consolidated_nodes.push_back(node);
+        _caches->node_metadata.Insert(node, Result<nlohmann::json>{std::move(metadata)});
+    }
+}
 
 Result<Store> OpenStore(std::string_view location, StoreContextPtr context) {
     auto transport = OpenFilesystemTransport(location);
@@ -209,7 +222,7 @@ Result<Store> OpenStore(TransportPtr transport, StoreContextPtr context) {
     if (!metadata_result) {
         return metadata_result.error();
     }
-    const nlohmann::json& metadata = metadata_result.value();
+    nlohmann::json& metadata = metadata_result.value();
     if (!metadata.is_object()) {
         return MakeError(ErrorCode::invalid_metadata, "Root Zarr metadata must be a JSON object", "zarr.json");
     }
@@ -224,10 +237,14 @@ Result<Store> OpenStore(TransportPtr transport, StoreContextPtr context) {
         return MakeError(ErrorCode::not_zarr, "The Zarr root must be a group", "zarr.json");
     }
 
+    // Taken before the children are moved out from under it, so that what the root says about itself
+    // does not depend on the order of the two.
+    auto root_attributes = metadata.value("attributes", nlohmann::json::object());
+
     std::map<std::string, nlohmann::json> consolidated;
     bool has_consolidated = false;
     if (metadata.contains("consolidated_metadata")) {
-        const auto& block = metadata.at("consolidated_metadata");
+        auto& block = metadata.at("consolidated_metadata");
         if (!block.is_object() || !block.contains("metadata") || !block.at("metadata").is_object()) {
             return MakeError(ErrorCode::invalid_metadata,
                              "Zarr consolidated_metadata must contain an object metadata member", "zarr.json");
@@ -236,34 +253,32 @@ Result<Store> OpenStore(TransportPtr transport, StoreContextPtr context) {
         CollectConsolidatedMetadata(block.at("metadata"), {}, consolidated);
     }
 
-    return Store{std::move(transport), metadata.value("attributes", nlohmann::json::object()), std::move(consolidated),
-                 has_consolidated, std::move(context)};
+    return Store{std::move(transport), std::move(root_attributes), std::move(consolidated), has_consolidated,
+                 std::move(context)};
 }
 
 const nlohmann::json& Store::RootAttributes() const noexcept {
     return _root_attributes;
 }
 
-Result<nlohmann::json> Store::ReadNodeMetadata(std::string_view node) const {
+const Result<nlohmann::json>& Store::ReadNodeMetadata(std::string_view node) const {
     auto node_name_result = NormalizeNodeName(node);
     if (!node_name_result) {
-        return node_name_result.error();
+        // A rejected name is remembered like any other answer, so that everything handed back from
+        // here is a reference to something the store owns. It is keyed by the name as asked for,
+        // which cannot collide with a normalized one: this is the name normalization refused.
+        return _caches->node_metadata.GetOrCompute(
+            std::string(node), [&]() -> Result<nlohmann::json> { return node_name_result.error(); });
     }
     const std::string node_name = std::move(node_name_result.value());
 
+    // The root's consolidated copy was put in this table when the store was built, so a node it
+    // accounted for is found here and never read. Consolidated metadata is a copy that saves a
+    // read, not a substitute for the document it copies: it carries `must_understand: false`, so a
+    // reader that ignores it reads the same hierarchy, and the array data behind these names is
+    // opened by TensorStore from each array's own metadata whatever this decides. A node the copy
+    // does not mention is therefore read, not missing.
     return _caches->node_metadata.GetOrCompute(node_name, [&]() -> Result<nlohmann::json> {
-        // The root's copy first, the node's own document second. Consolidated metadata is a copy
-        // that saves a read, not a substitute for the document it copies: it carries
-        // `must_understand: false`, so a reader that ignores it reads the same hierarchy, and the
-        // array data behind these names is opened by TensorStore from each array's own metadata
-        // whatever this decides. A node the copy does not mention is therefore read, not missing.
-        if (_has_consolidated_metadata) {
-            const auto found = _consolidated_metadata.find(node_name);
-            if (found != _consolidated_metadata.end()) {
-                return found->second;
-            }
-        }
-
         auto bytes = _transport->ReadNodeBytes(node_name);
         if (!bytes) {
             return bytes.error();
@@ -272,9 +287,9 @@ Result<nlohmann::json> Store::ReadNodeMetadata(std::string_view node) const {
     });
 }
 
-Result<zarr::ArrayMetadata> Store::ReadArrayMetadata(std::string_view node) const {
+const Result<zarr::ArrayMetadata>& Store::ReadArrayMetadata(std::string_view node) const {
     return _caches->array_metadata.GetOrCompute(std::string(node), [&]() -> Result<zarr::ArrayMetadata> {
-        auto metadata_result = ReadNodeMetadata(node);
+        const auto& metadata_result = ReadNodeMetadata(node);
         if (!metadata_result) {
             return metadata_result.error();
         }
@@ -282,9 +297,9 @@ Result<zarr::ArrayMetadata> Store::ReadArrayMetadata(std::string_view node) cons
     });
 }
 
-Result<std::vector<std::pair<std::string, nlohmann::json>>> Store::ListNodeMetadata() const {
-    using Listing = Result<std::vector<std::pair<std::string, nlohmann::json>>>;
-    return _caches->listed_metadata.GetOrCompute([&]() -> Listing {
+const Result<std::vector<std::string>>& Store::ListNodes() const {
+    using Listing = Result<std::vector<std::string>>;
+    return _caches->listed_nodes.GetOrCompute([&]() -> Listing {
         std::vector<std::string> node_names;
         // The one place the copy is taken as the whole truth rather than as a first look. Listing
         // is what consolidated metadata exists to avoid -- on a store reached over a network,
@@ -294,10 +309,7 @@ Result<std::vector<std::pair<std::string, nlohmann::json>>> Store::ListNodeMetad
         // staleness zarr-python's own consolidated open accepts. Reading a node it does not
         // mention still falls through to the node itself, above.
         if (_has_consolidated_metadata) {
-            node_names.reserve(_consolidated_metadata.size());
-            for (const auto& [node, _] : _consolidated_metadata) {
-                node_names.push_back(node);
-            }
+            node_names = _consolidated_nodes;
         } else {
             auto listed = _transport->ListNodes();
             if (!listed) {
@@ -309,34 +321,34 @@ Result<std::vector<std::pair<std::string, nlohmann::json>>> Store::ListNodeMetad
         std::sort(node_names.begin(), node_names.end());
         node_names.erase(std::unique(node_names.begin(), node_names.end()), node_names.end());
 
-        std::vector<std::pair<std::string, nlohmann::json>> result;
-        result.reserve(node_names.size());
+        // Every node is read here, so a listing either accounts for the whole hierarchy or reports
+        // why it cannot. What each one holds stays in the node metadata table, where a caller
+        // walking these names asks for it by name.
         for (const auto& node : node_names) {
-            auto metadata = ReadNodeMetadata(node);
-            if (!metadata) {
+            if (const auto& metadata = ReadNodeMetadata(node); !metadata) {
                 return metadata.error();
             }
-            result.emplace_back(node, std::move(metadata.value()));
         }
-        return result;
+        return node_names;
     });
 }
 
 Result<std::uint64_t> Store::ComputeTotalArraySizeBytes() const {
-    auto nodes_result = ListNodeMetadata();
+    const auto& nodes_result = ListNodes();
     if (!nodes_result) {
         return nodes_result.error();
     }
 
     std::uint64_t total_bytes = 0;
     std::size_t array_count = 0;
-    for (const auto& [node, metadata] : nodes_result.value()) {
-        if (!metadata.is_object() || metadata.value("node_type", "") != "array") {
+    for (const auto& node : nodes_result.value()) {
+        const auto& metadata = ReadNodeMetadata(node);
+        if (!metadata || !metadata.value().is_object() || metadata.value().value("node_type", "") != "array") {
             continue;
         }
         ++array_count;
 
-        auto array_metadata_result = ReadArrayMetadata(node);
+        const auto& array_metadata_result = ReadArrayMetadata(node);
         if (!array_metadata_result) {
             return array_metadata_result.error();
         }
@@ -400,7 +412,7 @@ Result<void> Store::ReadPixelsFloat32(std::string_view node, const zarr::PixelSe
                                       float* destination, std::size_t destination_elements,
                                       const ReadOptions& options) const {
     try {
-        auto metadata = ReadArrayMetadata(node);
+        const auto& metadata = ReadArrayMetadata(node);
         if (!metadata) {
             return metadata.error();
         }
@@ -419,7 +431,7 @@ Result<void> Store::ReadPixelMaskBytes(std::string_view node, const zarr::PixelS
                                        std::uint8_t* destination, std::size_t destination_elements,
                                        const ReadOptions& options) const {
     try {
-        auto metadata = ReadArrayMetadata(node);
+        const auto& metadata = ReadArrayMetadata(node);
         if (!metadata) {
             return metadata.error();
         }
@@ -439,12 +451,12 @@ Result<std::vector<std::string>> Store::ReadStringArray1D(std::string_view node)
 }
 
 Result<std::vector<std::string>> Store::ReadStringArray1DUncached(std::string_view node) const {
-    auto meta_res = ReadNodeMetadata(node);
+    const auto& meta_res = ReadNodeMetadata(node);
     if (!meta_res) {
         return meta_res.error();
     }
     const auto& metadata = meta_res.value();
-    auto array_meta_res = ReadArrayMetadata(node);
+    const auto& array_meta_res = ReadArrayMetadata(node);
     if (!array_meta_res) {
         return array_meta_res.error();
     }
@@ -461,12 +473,12 @@ Result<std::vector<std::string>> Store::ReadStringArray1DUncached(std::string_vi
 }
 
 Result<StorageLayout> Store::ReadStorageLayout(std::string_view node) const {
-    auto meta_res = ReadNodeMetadata(node);
+    const auto& meta_res = ReadNodeMetadata(node);
     if (!meta_res) {
         return meta_res.error();
     }
     const auto& metadata = meta_res.value();
-    auto array_meta_res = ReadArrayMetadata(node);
+    const auto& array_meta_res = ReadArrayMetadata(node);
     if (!array_meta_res) {
         return array_meta_res.error();
     }

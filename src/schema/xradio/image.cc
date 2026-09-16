@@ -140,7 +140,7 @@ std::vector<AxisDescriptor> DescribeAxes(const Store& store, const zarr_metadata
             continue;
         }
         std::string unit;
-        auto coordinate_metadata = store.ReadArrayMetadata(name);
+        const auto& coordinate_metadata = store.ReadArrayMetadata(name);
         if (coordinate_metadata) {
             unit = AttributeString(coordinate_metadata.value().attributes, "units");
         }
@@ -160,7 +160,7 @@ Result<void> RequireMatchingCoordinates(const Store& store, const zarr_metadata:
     const auto rank = std::min(image.dimension_names.size(), image.shape.size());
     for (std::size_t axis = 0; axis < rank; ++axis) {
         const auto& name = image.dimension_names.at(axis);
-        auto coordinate = store.ReadArrayMetadata(name);
+        const auto& coordinate = store.ReadArrayMetadata(name);
         // A coordinate the dataset does not carry at all is the probe's business, and reading one
         // reports its own absence. This is only about the two disagreeing.
         if (!coordinate) {
@@ -176,7 +176,7 @@ Result<void> RequireMatchingCoordinates(const Store& store, const zarr_metadata:
 }
 
 Result<std::vector<double>> ReadNumericCoordinate(const Store& store, std::string_view name) {
-    auto metadata = store.ReadNodeMetadata(name);
+    const auto& metadata = store.ReadNodeMetadata(name);
     if (!metadata) {
         if (metadata.error().code == ErrorCode::not_found) {
             return std::vector<double>{};
@@ -281,7 +281,7 @@ std::optional<SpectralCoordinate> DescribeSpectralCoordinate(const Store& store,
     SpectralCoordinate spectral;
     spectral.channel_frequencies = frequency_values;
     nlohmann::json frequency_attributes = nlohmann::json::object();
-    if (auto frequency_metadata = store.ReadNodeMetadata("frequency"); frequency_metadata) {
+    if (const auto& frequency_metadata = store.ReadNodeMetadata("frequency"); frequency_metadata) {
         if (const auto* attributes = ObjectMember(frequency_metadata.value(), "attributes");
             attributes != nullptr && attributes->is_object()) {
             frequency_attributes = *attributes;
@@ -342,7 +342,7 @@ std::optional<TemporalCoordinate> DescribeTemporalCoordinate(const Store& store,
 
     TemporalCoordinate temporal;
     temporal.values = std::move(values);
-    if (auto metadata = store.ReadNodeMetadata("time"); metadata) {
+    if (const auto& metadata = store.ReadNodeMetadata("time"); metadata) {
         if (const auto* attributes = ObjectMember(metadata.value(), "attributes");
             attributes != nullptr && attributes->is_object()) {
             temporal.unit = AttributeString(*attributes, "units");
@@ -436,7 +436,7 @@ Result<std::string> DeterminePixelMask(const Store& store, const zarr_metadata::
     // default: an unusable mask reported as no mask would show flagged pixels as valid, which is
     // the one failure a consumer has no way to notice.
     if (auto declared = AttributeString(image.attributes, "flag"); !declared.empty()) {
-        auto flag_array = store.ReadArrayMetadata(declared);
+        const auto& flag_array = store.ReadArrayMetadata(declared);
         if (!flag_array) {
             return flag_array.error();
         }
@@ -446,14 +446,13 @@ Result<std::string> DeterminePixelMask(const Store& store, const zarr_metadata::
         return declared;
     }
 
-    auto nodes = store.ListNodeMetadata();
+    const auto& nodes = store.ListNodes();
     if (!nodes) {
         return nodes.error();
     }
     std::vector<std::string> matching_flags;
-    for (const auto& entry : nodes.value()) {
-        const auto& node = entry.first;
-        auto flag_array = store.ReadArrayMetadata(node);
+    for (const auto& node : nodes.value()) {
+        const auto& flag_array = store.ReadArrayMetadata(node);
         // Nothing declared one, so this is a guess from the metadata alone. A variable that does not
         // match exactly is simply not this image's mask, which is not an error in the store.
         if (!flag_array || !RequireUsableFlag(flag_array.value(), image, node)) {
@@ -506,15 +505,14 @@ Result<double> ReadBeamValue(const zarr_metadata::ArrayView& values, std::uint64
 }  // namespace
 
 Result<::carta::zarr::internal::ImageDiscovery> DiscoverImages(const Store& store) {
-    auto nodes = store.ListNodeMetadata();
+    const auto& nodes = store.ListNodes();
     if (!nodes) {
         return nodes.error();
     }
 
     ::carta::zarr::internal::ImageDiscovery result;
-    for (const auto& entry : nodes.value()) {
-        const auto& node = entry.first;
-        auto array_result = store.ReadArrayMetadata(node);
+    for (const auto& node : nodes.value()) {
+        const auto& array_result = store.ReadArrayMetadata(node);
         if (!array_result) {
             continue;
         }
@@ -574,7 +572,7 @@ Result<SchemaProbeResult> ProbeImage(const Store& store) {
 
     // Once discovery found an openable image, validate the metadata needed by the image reader.
     const auto& first_image = *discovery.value().default_image_id;
-    auto array_result = store.ReadArrayMetadata(first_image);
+    const auto& array_result = store.ReadArrayMetadata(first_image);
     if (report.RequireArrayMetadata(array_result, first_image)) {
         RequirePresentCoordinates(report, array_result.value());
         if (report.ok() && HasAttribute(root_attributes, "coordinate_system_info")) {
@@ -585,7 +583,7 @@ Result<SchemaProbeResult> ProbeImage(const Store& store) {
 }
 
 Result<ImageDescriptor> DescribeImage(const Store& store, std::string_view image_id) {
-    auto array_result = store.ReadArrayMetadata(image_id);
+    const auto& array_result = store.ReadArrayMetadata(image_id);
     if (!array_result) {
         return array_result.error();
     }
@@ -648,7 +646,7 @@ Result<ImageDescriptor> DescribeImage(const Store& store, std::string_view image
         descriptor.spectral = std::move(spectral);
     }
 
-    auto const polarization_metadata = store.ReadNodeMetadata("polarization");
+    const auto& polarization_metadata = store.ReadNodeMetadata("polarization");
     if (polarization_metadata) {
         auto pol_labels = store.ReadStringArray1D("polarization");
         if (!pol_labels) {
@@ -687,7 +685,7 @@ Result<ImageDescriptor> DescribeImage(const Store& store, std::string_view image
 }
 
 Result<std::vector<Beam>> ReadBeams(const Store& store, std::string_view image_id) {
-    auto sky_meta = store.ReadNodeMetadata(image_id);
+    const auto& sky_meta = store.ReadNodeMetadata(image_id);
     if (!sky_meta) {
         return sky_meta.error();
     }
@@ -701,7 +699,7 @@ Result<std::vector<Beam>> ReadBeams(const Store& store, std::string_view image_i
         return std::vector<Beam>{};
     }
 
-    auto beam_arr_res = store.ReadArrayMetadata(beam_array_name);
+    const auto& beam_arr_res = store.ReadArrayMetadata(beam_array_name);
     if (!beam_arr_res) {
         return beam_arr_res.error();
     }

@@ -106,3 +106,10 @@ _Avoid_: native order, disk order, physical order
 The coordinate order the library reports and reads in, chosen by the schema profile rather than by
 the file.
 _Avoid_: canonical order, CARTA order, display order
+
+**Pass**:
+One ordered visit to every chunk an image read covers, made once and shared by every reduction that
+wants those pixels. It decides how much to decode at a time, when to hand a result over, and how to
+split the work across workers. It never knows what a region is and never does the arithmetic the
+caller came for.
+_Avoid_: walk, traversal, scan, loop

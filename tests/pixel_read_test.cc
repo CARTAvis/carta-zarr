@@ -175,9 +175,13 @@ void TestPixelMask(const carta::zarr::Image& sky) {
         for (std::uint64_t f = 0; f < kFrequency; ++f) {
             for (std::uint64_t m = 0; m < kM; ++m) {
                 for (std::uint64_t l = 0; l < kL; ++l) {
-                    const bool good = mask.at(LogicalOffset(l, m, f, p)) != 0;
-                    Require(good == ExpectedFlag(l, m), "wrong mask value at l=" + std::to_string(l) +
-                                                            " m=" + std::to_string(m));
+                    const std::uint8_t byte = mask.at(LogicalOffset(l, m, f, p));
+                    const std::string where = "at l=" + std::to_string(l) + " m=" + std::to_string(m);
+                    // The mask arrives as bytes the caller owns, converted from the boolean the
+                    // store holds. A byte that is neither 0 nor 1 would mean the bytes were written
+                    // as some other type through this buffer.
+                    Require(byte == 0 || byte == 1, "a mask byte should be exactly 0 or 1 " + where);
+                    Require((byte != 0) == ExpectedFlag(l, m), "wrong mask value " + where);
                 }
             }
         }

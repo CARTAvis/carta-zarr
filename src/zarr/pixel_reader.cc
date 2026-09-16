@@ -291,8 +291,12 @@ Result<void> ReadFloat32(const std::filesystem::path& array_path, const StoreCon
 Result<void> ReadMaskBytes(const std::filesystem::path& array_path, const StoreContextPtr& context,
                            std::string_view node, std::string_view expected_data_type, const PixelSelection& selection, std::uint8_t* destination,
                            std::size_t destination_elements, const ReadOptions& options) {
-    return ReadInto(array_path, context, node, expected_data_type, selection, tensorstore::dtype_v<bool>,
-                    reinterpret_cast<bool*>(destination), destination_elements, options);
+    // The caller's buffer holds bytes, so the read converts into bytes. Asking TensorStore for
+    // bool and writing it through a reinterpret_cast of that buffer assumed bool and uint8_t are
+    // the same object, which C++ does not say they are; the conversion costs nothing here because
+    // it rides the copy the read already performs.
+    return ReadInto(array_path, context, node, expected_data_type, selection, tensorstore::dtype_v<std::uint8_t>,
+                    destination, destination_elements, options);
 }
 
 }  // namespace carta::zarr::internal::zarr

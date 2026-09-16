@@ -4,42 +4,20 @@
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
 
+// Companion to value_reader_stub.cc: the schema profile tests link without TensorStore. The
+// in-memory transport holds no array data, so a pixel read has no answer to give and
+// unsupported_transport is the honest one.
+//
+// Only the reads are stubbed. Building a selection, counting what it holds and checking the read
+// controls are arithmetic rather than reads, so they come from src/zarr/pixel_selection.cc -- the
+// same code the real build runs. They used to be copied out by hand here, which meant a build that
+// reads no pixels could disagree with the one that does about which requests are legal.
+
 #include "zarr/pixel_reader.h"
 
-#include <chrono>
-#include <limits>
 #include <string>
 
 namespace carta::zarr::internal::zarr {
-
-Result<void> CheckReadControl(const ReadOptions& options, std::string_view node) {
-    if (options.cancellation_requested && options.cancellation_requested()) {
-        return Error{ErrorCode::cancelled, "Pixel read was cancelled", std::string(node)};
-    }
-    if (std::chrono::steady_clock::now() >= options.deadline) {
-        return Error{ErrorCode::cancelled, "Pixel read deadline expired", std::string(node)};
-    }
-    return {};
-}
-
-// Companion to value_reader_stub.cc: the schema profile tests link without TensorStore. The
-// in-memory transport holds no array data, so a pixel read has no answer to give and
-// unsupported_transport is the honest one. Only SelectionElementCount is real, because it is
-// arithmetic over the request rather than a read.
-
-std::uint64_t SelectionElementCount(const PixelSelection& selection) {
-    if (selection.count.empty()) {
-        return 0;
-    }
-    std::uint64_t elements = 1;
-    for (const auto value : selection.count) {
-        if (value == 0 || elements > std::numeric_limits<std::uint64_t>::max() / value) {
-            return 0;
-        }
-        elements *= value;
-    }
-    return elements;
-}
 
 Result<void> ReadFloat32(const std::filesystem::path&, const StoreContextPtr&, std::string_view node,
                          std::string_view, const PixelSelection&, float*, std::size_t, const ReadOptions&) {

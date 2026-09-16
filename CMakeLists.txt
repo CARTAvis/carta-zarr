@@ -57,6 +57,7 @@ add_library(carta_zarr SHARED
     src/zarr/array_metadata.cc
     src/zarr/array_view.cc
     src/zarr/pixel_reader.cc
+    src/zarr/pixel_selection.cc
     src/zarr/store_context.cc
     src/zarr/string_array.cc
     src/zarr/transport.cc
@@ -173,6 +174,7 @@ if(CARTA_ZARR_BUILD_TESTS AND BUILD_TESTING)
         src/schema/xradio/image.cc
         src/zarr/array_metadata.cc
         src/zarr/array_view.cc
+        src/zarr/pixel_selection.cc
         src/zarr/string_array.cc
         src/zarr/transport.cc)
     target_compile_features(carta_zarr_profile_tests PRIVATE cxx_std_17)

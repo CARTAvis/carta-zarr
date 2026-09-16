@@ -7,7 +7,7 @@
 #ifndef CARTA_ZARR_SRC_CHUNK_BLOCKS_H_
 #define CARTA_ZARR_SRC_CHUNK_BLOCKS_H_
 
-#include "carta-zarr/types.h"
+#include "carta-zarr/reduce.h"
 
 #include <algorithm>
 #include <cstdint>

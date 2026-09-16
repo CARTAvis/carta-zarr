@@ -7,9 +7,11 @@
 #ifndef CARTA_ZARR_CARTA_ZARR_H_
 #define CARTA_ZARR_CARTA_ZARR_H_
 
+#include "carta-zarr/descriptor.h"
 #include "carta-zarr/export.h"
+#include "carta-zarr/read.h"
+#include "carta-zarr/reduce.h"
 #include "carta-zarr/result.h"
-#include "carta-zarr/types.h"
 
 #include <chrono>
 #include <memory>

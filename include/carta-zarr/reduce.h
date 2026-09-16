@@ -4,316 +4,26 @@
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
 
-#ifndef CARTA_ZARR_TYPES_H_
-#define CARTA_ZARR_TYPES_H_
+#ifndef CARTA_ZARR_REDUCE_H_
+#define CARTA_ZARR_REDUCE_H_
 
-#include "carta-zarr/error.h"
+// Asking for an answer about pixels rather than for the pixels: statistics over regions of a
+// spectrum, and histograms of a plane or of a whole cube.
+//
+// Separate from read.h because a consumer that only opens images and reads them needs none of it,
+// and because this vocabulary is where the library has been changing: it arrived whole in the
+// fourteen commits before this split, and every one of them edited the header that describes what
+// an image dataset is.
+
+#include "carta-zarr/read.h"
 
 #include <array>
-#include <chrono>
 #include <cstddef>
 #include <cstdint>
 #include <functional>
-#include <optional>
-#include <string>
-#include <string_view>
 #include <vector>
 
 namespace carta::zarr {
-
-struct Diagnostic {
-    std::string code;
-    std::string message;
-    std::string node_path;
-};
-
-enum class ProbeKind {
-    not_zarr,
-    zarr_without_supported_schema,
-    supported_dataset,
-    invalid_dataset,
-};
-
-using SchemaId = std::string;
-
-inline constexpr std::string_view kXradioImageSchema = "xradio.image";
-
-enum class SchemaMatchKind {
-    no_match,
-    match,
-    invalid,
-};
-
-struct SchemaProbeResult {
-    SchemaMatchKind kind = SchemaMatchKind::no_match;
-    SchemaId schema_id;
-    std::string schema_version;
-    std::vector<Diagnostic> diagnostics;
-};
-
-struct ImageEntry {
-    std::string id;
-    bool readable = false;
-    std::vector<Diagnostic> diagnostics;
-};
-
-struct ProbeOptions {};
-
-struct ProbeResult {
-    ProbeKind kind = ProbeKind::not_zarr;
-    SchemaId schema_id;
-    std::string schema_version;
-    std::vector<ImageEntry> images;
-    std::optional<std::string> default_image_id;
-    std::vector<Diagnostic> diagnostics;
-};
-
-struct OpenOptions {
-    std::size_t cache_bytes = 0;
-    unsigned int io_threads = 0;
-    unsigned int decode_threads = 0;
-    bool disable_cache = false;
-};
-
-enum class AxisRole {
-    spatial_x,
-    spatial_y,
-    spectral,
-    polarization,
-    time,
-    other,
-};
-
-inline constexpr std::array<AxisRole, 5> kXradioImageAxisOrder{
-    AxisRole::spatial_x, AxisRole::spatial_y, AxisRole::spectral, AxisRole::polarization, AxisRole::time};
-
-struct AxisDescriptor {
-    std::string name;
-    AxisRole role = AxisRole::other;
-    std::uint64_t length = 0;
-    std::string unit;
-    std::size_t storage_index = 0;
-};
-
-enum class DataType {
-    unknown,
-    boolean,
-    int8,
-    uint8,
-    int16,
-    uint16,
-    int32,
-    uint32,
-    int64,
-    uint64,
-    float16,
-    float32,
-    float64,
-    complex64,
-    complex128,
-};
-
-struct DirectionCoordinate {
-    std::string projection;
-    std::string reference_frame;  // e.g. "FK5", "ICRS", "GALACTIC"
-    std::optional<double> equinox;
-    std::array<double, 2> reference_pixel{
-        0.0, 0.0};  // CRPIX (0-indexed or 1-indexed convention noted, standard FITS CRPIX is stored)
-    std::array<double, 2> reference_value{0.0, 0.0};                                       // CRVAL in degrees
-    std::array<double, 2> increment{0.0, 0.0};                                             // CDELT in degrees
-    std::array<std::array<double, 2>, 2> transformation_matrix{{{1.0, 0.0}, {0.0, 1.0}}};  // PC matrix
-    std::vector<double> projection_parameters;
-    std::array<double, 2> native_pole_direction{0.0, 0.0};  // longPole/latPole in degrees
-};
-
-struct SpectralCoordinate {
-    std::string unit;
-    std::string system;                     // SPECSYS, e.g. "LSRK", "BARY", "TOPOCENT"
-    std::optional<double> reference_pixel;  // CRPIX3
-    std::optional<double> reference_value;  // CRVAL3
-    std::optional<double> increment;        // CDELT3
-    std::optional<double> rest_frequency;
-    std::vector<double> channel_frequencies;
-};
-
-struct TemporalCoordinate {
-    std::vector<double> values;  // XRADIO unix seconds
-    std::string unit;
-    std::string scale;
-    std::string format;
-};
-
-struct PolarizationCoordinate {
-    std::vector<std::string> labels;
-};
-
-struct ObservationInfo {
-    std::string object_name;
-    std::string observer;
-    std::string telescope_name;
-    std::string timesys;
-    std::string date_obs;
-    std::optional<double> mjd_obs;
-    std::optional<std::array<double, 3>> observatory_position;  // OBSGEO-X, Y, Z (meters)
-};
-
-struct StorageLayout {
-    std::vector<std::uint64_t> chunk_shape;
-    std::vector<std::uint64_t> shard_shape;
-    std::string compressor;
-    bool sharded = false;
-};
-
-// The read geometry of one image, reported in the logical axis order of ImageDescriptor::axes so
-// that a consumer never has to undo the stored order itself.
-//
-// Two granularities, deliberately separate: an inner chunk is what must be decoded to reach any
-// byte inside it, while a shard is what one I/O request fetches. They are equal when the array is
-// not sharded, and can differ by a large factor when it is, so a consumer sizing a cache reasons
-// about chunk_shape and one predicting request count reasons about shard_shape.
-struct ChunkGeometry {
-    // The spatial axis the store varies fastest, which is the one a reduction walks along.
-    //
-    // Reading a plane with the other one fastest means transposing every chunk on the way into the
-    // destination, and that is not a rounding error: measured on two stores holding the same
-    // 2048x2048x16 image and differing only in whether l or m is written last, a whole-plane
-    // spectral profile took 172.3 ms against 130.3 with zstd and 139.7 against 94.5 uncompressed.
-    //
-    // So the walk follows the store rather than the other way round, and a region that describes
-    // itself as runs must run them along this axis. See RegionMask::run_axis.
-    AxisRole fastest_spatial_axis = AxisRole::spatial_x;
-    std::vector<std::uint64_t> chunk_shape;
-    std::vector<std::uint64_t> shard_shape;
-    // Number of inner chunks along each axis.
-    std::vector<std::uint64_t> grid_shape;
-    bool sharded = false;
-    // True when the logical order differs from the stored order, so every read carries a transpose.
-    bool transpose_required = false;
-    std::string compressor;
-};
-
-struct Beam {
-    // The plane this beam was fitted on. Every plane is reported; a consumer that handles one time
-    // step selects it rather than being handed it.
-    std::size_t time = 0;
-    std::size_t channel = 0;
-    std::size_t polarization = 0;
-    double major = 0.0;
-    double minor = 0.0;
-    double position_angle = 0.0;
-    std::string unit;
-};
-
-struct DatasetDescriptor {
-    SchemaId schema_id;
-    std::string schema_version;
-    std::vector<ImageEntry> images;
-    std::optional<std::string> default_image_id;
-    std::vector<Diagnostic> diagnostics;
-};
-
-struct DatasetSize {
-    // The size of the on-disk store when it could be enumerated quickly, or the total logical
-    // bytes represented by all arrays when the directory scan timed out.
-    std::uint64_t bytes = 0;
-    bool is_upper_bound = false;
-};
-
-struct ImageDescriptor {
-    std::string id;
-    std::string image_role;
-    std::vector<std::string> data_groups;
-    DataType stored_type = DataType::unknown;
-    // XRADIO images report axes in kXradioImageAxisOrder; storage_index identifies each stored dimension.
-    std::vector<AxisDescriptor> axes;
-    std::string unit;
-    bool has_pixel_mask = false;
-    // The flag variable supplying this image's pixel mask, empty when it has none. Reported for the
-    // same reason `id` is: it names a data variable the consumer may want to see in diagnostics.
-    std::string pixel_mask_id;
-    std::optional<DirectionCoordinate> direction;
-    std::optional<SpectralCoordinate> spectral;
-    std::optional<PolarizationCoordinate> polarization;
-    std::optional<TemporalCoordinate> temporal;
-    std::optional<ObservationInfo> observation;
-    std::optional<StorageLayout> storage;
-    std::vector<Diagnostic> diagnostics;
-};
-
-struct Range {
-    std::uint64_t start = 0;
-    std::uint64_t count = 0;
-    std::uint64_t stride = 1;
-};
-
-struct ReadRequest {
-    // One range per ImageDescriptor::axes entry, in the same order.
-    std::vector<Range> axes;
-    DataType output_type = DataType::float32;
-};
-
-// What a read should do with the decoded-chunk cache.
-//
-// A scan over a cube touches every chunk once and reuses none of them, so caching what it decodes
-// evicts an interactive working set to no purpose -- and rebuilding that working set costs
-// decompression, which is the resource the scan is already saturating. `bypass` runs the read
-// against a cache pool of zero bytes, leaving the shared one alone.
-//
-// Arrays are opened per pool, so the first bypassed read of an array pays to open it again. That is
-// once per array, against a scan that reads all of it.
-enum class CachePolicy {
-    inherit,
-    bypass,
-};
-
-struct ReadOptions {
-    // Write NaN wherever the pixel mask is false, so that one call answers what would otherwise be
-    // a pixel read plus a mask read. On by default: masking during the read costs one pass over
-    // data already in hand, while a caller doing it afterwards pays for a second traversal.
-    bool apply_pixel_mask = true;
-    // Cooperative cancellation checked before and after each storage operation. The callback
-    // must be safe to invoke from the calling thread.
-    std::function<bool()> cancellation_requested;
-    // A steady-clock deadline checked at the same storage-operation boundaries. An in-flight
-    // TensorStore operation is not interrupted, but a request never starts another operation once
-    // this deadline has passed.
-    std::chrono::steady_clock::time_point deadline = std::chrono::steady_clock::time_point::max();
-    // Called as the read advances, with the number of destination elements that are final and the
-    // number the request will produce in total. Returning false cancels the read, which then
-    // reports cancelled.
-    //
-    // Supplying this changes how the read is issued: it is split into chunk-aligned pieces along
-    // the slowest-varying selected axis, so that there is somewhere to report from and somewhere to
-    // stop. The destination is dense in logical order with axis 0 fastest, which is what makes the
-    // finished part a prefix rather than a scatter -- a caller can render or forward it as it
-    // arrives. Leave it unset and the read is issued exactly as it was before, in one piece.
-    //
-    // A read that nothing interrupts is not made slower by this: the pieces are sized to hold
-    // enough chunks to decode in parallel, and at that size a split read measures the same as an
-    // unsplit one.
-    std::function<bool(std::size_t elements_written, std::size_t elements_total)> progress;
-    // Maximum temporary memory one piece of the read may use. Zero means the library's own budget.
-    //
-    // This bounds the pixel mask buffer, and it is also what a progressive read sizes its pieces
-    // by -- both are "how much this read may hold at once", and splitting to fit is a better answer
-    // than refusing. A read that cannot be split still reports buffer_too_small rather than
-    // allocating past the limit.
-    //
-    // For ReduceSpectral it is a target rather than a limit. That walk splits along x, along the
-    // chunk rows and along the spectrum, and each of the three bottoms out at one chunk, which is
-    // the smallest thing that can be decoded: asking for part of a chunk decodes all of it anyway,
-    // and asking twice decodes it twice. So an image whose chunk is larger than this exceeds it by
-    // the ratio, and refusing to reduce would be the worse answer. ChunkGeometry::chunk_shape says
-    // in advance when that will happen.
-    std::size_t temporary_memory_limit_bytes = 0;
-    // Whether this read may put what it decodes in the shared cache. See CachePolicy.
-    CachePolicy cache_policy = CachePolicy::inherit;
-};
-
-struct MutableBufferView {
-    void* data = nullptr;
-    std::size_t byte_size = 0;
-};
 
 // One statistic a spectral reduction can produce. The enumerators are bit flags so that a request
 // names a set in one field.
@@ -348,10 +58,6 @@ inline constexpr bool Contains(StatisticSet set, Statistic statistic) noexcept {
     return (set & static_cast<StatisticSet>(statistic)) != 0;
 }
 
-// Every statistic, in the order a SpectralBlock lays them out.
-inline constexpr std::array<Statistic, 6> kStatisticOrder{Statistic::num_pixels, Statistic::nan_count,
-                                                          Statistic::sum, Statistic::sum_sq,
-                                                          Statistic::min, Statistic::max};
 
 // A 2D (x, y) mask in logical image coordinates, addressed row-major with x fastest.
 //
@@ -498,8 +204,9 @@ struct CubeHistogramRequest {
     std::uint64_t time = 0;
     // The bins the caller wants back.
     std::uint32_t bins = 0;
-    // The resolution the walk bins at. Zero takes the library's default; larger is more faithful and
-    // costs eight bytes a bin. Rounded up to a power of two so that merging in pairs leaves nothing
+    // The resolution the walk bins at. Zero takes the library's default, which is sixteen times the
+    // bins asked for; larger is more faithful and costs eight bytes a bin. Held between 4,096 and
+    // 65,536 either way, and rounded up to a power of two so that merging in pairs leaves nothing
     // behind.
     std::uint32_t provisional_bins = 0;
     // Take every nth pixel along both spatial axes. One reads every pixel.
@@ -514,21 +221,6 @@ struct CubeHistogramRequest {
 };
 
 
-// The provisional resolution a cube histogram bins at when the caller does not choose one.
-//
-// Sixteen provisional bins for every bin asked for, because what decides the error is how finely
-// the walk resolves one target bin, not how many bins it holds in total -- and because the
-// provisional histogram is eight bytes a bin and there is one per worker, so the ones nobody needs
-// are paid for in cache. A thousand target bins get 16,384 of them, which is 128 kB.
-//
-// Held between 4,096 and 65,536. Measured on a billion-pixel ASKAP cube against the exact two-pass
-// answer, with the walk on twenty-eight threads: 65,536 misplaced 0.003% of pixels in 3.64 s,
-// 16,384 misplaced 0.004% in 2.40 s, 8,192 misplaced 0.006% in 2.21 s, 4,096 misplaced 0.011% in
-// 2.14 s, and below that both numbers get worse at once. Sixteen is where the time has flattened
-// out, with a few times the resolution the error would need.
-inline constexpr std::uint32_t kProvisionalBinsPerBin = 16;
-inline constexpr std::uint32_t kLeastProvisionalBins = 1u << 12;
-inline constexpr std::uint32_t kMostProvisionalBins = 1u << 16;
 
 // The largest number of bins one histogram accepts. CARTA's automatic bin count is the square root
 // of the plane's pixel count, which is 32,768 for the largest image anyone has; this is a guard
@@ -542,9 +234,6 @@ inline constexpr std::uint32_t kMaxHistogramBins = 1u << 20;
 // a caller passing an uninitialised count gets invalid_argument instead of a 16 GB allocation.
 inline constexpr std::size_t kMaxSpectralRegions = 1u << 20;
 
-// The memory one emitted block may occupy. emit_every_channels is reduced to fit it; see
-// SpectralReduceRequest::emit_every_channels.
-inline constexpr std::size_t kSpectralEmitBudgetBytes = 64u << 20;
 
 struct SpectralReduceRequest {
     // The channels to reduce, over the image's spectral axis. Strides are honoured.
@@ -560,7 +249,7 @@ struct SpectralReduceRequest {
     // any smaller, so a region covering the image reports a chunk layer at a time while a
     // cursor-sized one reports far less often, and neither pays for the difference.
     //
-    // The library lowers a hint to fit kSpectralEmitBudgetBytes and then to a whole number of
+    // The library lowers a hint to fit a 64 MiB block budget and then to a whole number of
     // spectral chunks, because a block boundary inside a chunk would split one decode's results
     // across two blocks. A caller that wants the whole reduction in one block asks for
     // SpectralReduceRequest::spectral.count. The value actually used is reported as
@@ -608,4 +297,4 @@ using SpectralSink = std::function<bool(const SpectralBlock&)>;
 
 }  // namespace carta::zarr
 
-#endif  // CARTA_ZARR_TYPES_H_
+#endif  // CARTA_ZARR_REDUCE_H_

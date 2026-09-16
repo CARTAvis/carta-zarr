@@ -21,7 +21,7 @@
 #include <vector>
 
 #include <carta-zarr/carta_zarr.h>
-#include <carta-zarr/types.h>
+#include <carta-zarr/descriptor.h>
 
 namespace {
 

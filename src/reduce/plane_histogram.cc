@@ -8,6 +8,7 @@
 
 #include "chunk_blocks.h"
 #include "reduce/axis_map.h"
+#include "reduce/tuning.h"
 #include "reduce/pass.h"
 
 #include <algorithm>

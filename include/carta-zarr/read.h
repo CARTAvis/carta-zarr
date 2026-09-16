@@ -1,0 +1,99 @@
+/*
+ * This file is part of the CARTA Image Viewer: https://github.com/CARTAvis
+ * Copyright 2026 Academia Sinica Institute of Astronomy and Astrophysics (ASIAA)
+ * SPDX-License-Identifier: GPL-3.0-or-later
+ */
+
+#ifndef CARTA_ZARR_READ_H_
+#define CARTA_ZARR_READ_H_
+
+// Asking for pixels: which of them, into what, and under what limits.
+
+#include "carta-zarr/descriptor.h"
+
+#include <chrono>
+#include <cstddef>
+#include <cstdint>
+#include <functional>
+#include <vector>
+
+namespace carta::zarr {
+
+struct Range {
+    std::uint64_t start = 0;
+    std::uint64_t count = 0;
+    std::uint64_t stride = 1;
+};
+
+struct ReadRequest {
+    // One range per ImageDescriptor::axes entry, in the same order.
+    std::vector<Range> axes;
+    DataType output_type = DataType::float32;
+};
+
+// What a read should do with the decoded-chunk cache.
+//
+// A scan over a cube touches every chunk once and reuses none of them, so caching what it decodes
+// evicts an interactive working set to no purpose -- and rebuilding that working set costs
+// decompression, which is the resource the scan is already saturating. `bypass` runs the read
+// against a cache pool of zero bytes, leaving the shared one alone.
+//
+// Arrays are opened per pool, so the first bypassed read of an array pays to open it again. That is
+// once per array, against a scan that reads all of it.
+enum class CachePolicy {
+    inherit,
+    bypass,
+};
+
+struct ReadOptions {
+    // Write NaN wherever the pixel mask is false, so that one call answers what would otherwise be
+    // a pixel read plus a mask read. On by default: masking during the read costs one pass over
+    // data already in hand, while a caller doing it afterwards pays for a second traversal.
+    bool apply_pixel_mask = true;
+    // Cooperative cancellation checked before and after each storage operation. The callback
+    // must be safe to invoke from the calling thread.
+    std::function<bool()> cancellation_requested;
+    // A steady-clock deadline checked at the same storage-operation boundaries. An in-flight
+    // TensorStore operation is not interrupted, but a request never starts another operation once
+    // this deadline has passed.
+    std::chrono::steady_clock::time_point deadline = std::chrono::steady_clock::time_point::max();
+    // Called as the read advances, with the number of destination elements that are final and the
+    // number the request will produce in total. Returning false cancels the read, which then
+    // reports cancelled.
+    //
+    // Supplying this changes how the read is issued: it is split into chunk-aligned pieces along
+    // the slowest-varying selected axis, so that there is somewhere to report from and somewhere to
+    // stop. The destination is dense in logical order with axis 0 fastest, which is what makes the
+    // finished part a prefix rather than a scatter -- a caller can render or forward it as it
+    // arrives. Leave it unset and the read is issued exactly as it was before, in one piece.
+    //
+    // A read that nothing interrupts is not made slower by this: the pieces are sized to hold
+    // enough chunks to decode in parallel, and at that size a split read measures the same as an
+    // unsplit one.
+    std::function<bool(std::size_t elements_written, std::size_t elements_total)> progress;
+    // Maximum temporary memory one piece of the read may use. Zero means the library's own budget.
+    //
+    // This bounds the pixel mask buffer, and it is also what a progressive read sizes its pieces
+    // by -- both are "how much this read may hold at once", and splitting to fit is a better answer
+    // than refusing. A read that cannot be split still reports buffer_too_small rather than
+    // allocating past the limit.
+    //
+    // For ReduceSpectral it is a target rather than a limit. That walk splits along x, along the
+    // chunk rows and along the spectrum, and each of the three bottoms out at one chunk, which is
+    // the smallest thing that can be decoded: asking for part of a chunk decodes all of it anyway,
+    // and asking twice decodes it twice. So an image whose chunk is larger than this exceeds it by
+    // the ratio, and refusing to reduce would be the worse answer. ChunkGeometry::chunk_shape says
+    // in advance when that will happen.
+    std::size_t temporary_memory_limit_bytes = 0;
+    // Whether this read may put what it decodes in the shared cache. See CachePolicy.
+    CachePolicy cache_policy = CachePolicy::inherit;
+};
+
+struct MutableBufferView {
+    void* data = nullptr;
+    std::size_t byte_size = 0;
+};
+
+}  // namespace carta::zarr
+
+#endif  // CARTA_ZARR_READ_H_

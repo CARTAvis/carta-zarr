@@ -13,7 +13,7 @@
 #include "linear_axis.h"
 #include "probe_report.h"
 
-#include <carta-zarr/types.h>
+#include <carta-zarr/descriptor.h>
 
 #include <algorithm>
 #include <array>

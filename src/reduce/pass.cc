@@ -6,6 +6,8 @@
 
 #include "reduce/pass.h"
 
+#include "reduce/tuning.h"
+
 namespace carta::zarr::internal {
 
 PassPlan PlanPass(const ImageDescriptor& descriptor, const ChunkGeometry& geometry, const AxisMap& map,

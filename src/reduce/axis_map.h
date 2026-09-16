@@ -7,7 +7,7 @@
 #ifndef CARTA_ZARR_SRC_REDUCE_AXIS_MAP_H_
 #define CARTA_ZARR_SRC_REDUCE_AXIS_MAP_H_
 
-#include "carta-zarr/types.h"
+#include "carta-zarr/reduce.h"
 #include "carta-zarr/result.h"
 
 #include <cstddef>

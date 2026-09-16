@@ -150,6 +150,31 @@ std::vector<AxisDescriptor> DescribeAxes(const Store& store, const zarr_metadata
     return axes;
 }
 
+// A dataset stores each coordinate once and every image references it by dimension name, so an
+// image whose own extent disagrees with the coordinate it names cannot be described with it. The
+// probe checks this against the default image, which is the only one it looks at; a dataset may
+// hold several images, and this is where the rest of them are held to the same requirement rather
+// than being described with a coordinate vector of another image's length.
+Result<void> RequireMatchingCoordinates(const Store& store, const zarr_metadata::ArrayMetadata& image,
+                                        std::string_view image_id) {
+    const auto rank = std::min(image.dimension_names.size(), image.shape.size());
+    for (std::size_t axis = 0; axis < rank; ++axis) {
+        const auto& name = image.dimension_names.at(axis);
+        auto coordinate = store.ReadArrayMetadata(name);
+        // A coordinate the dataset does not carry at all is the probe's business, and reading one
+        // reports its own absence. This is only about the two disagreeing.
+        if (!coordinate) {
+            continue;
+        }
+        if (coordinate.value().shape.size() != 1 || coordinate.value().shape.front() != image.shape.at(axis)) {
+            return MakeError(ErrorCode::invalid_metadata,
+                             "Image dimension '" + name + "' is not the length of the coordinate of that name",
+                             std::string(image_id));
+        }
+    }
+    return {};
+}
+
 Result<std::vector<double>> ReadNumericCoordinate(const Store& store, std::string_view name) {
     auto metadata = store.ReadNodeMetadata(name);
     if (!metadata) {
@@ -569,6 +594,10 @@ Result<ImageDescriptor> DescribeImage(const Store& store, std::string_view image
         !zarr_metadata::FindDimensionIndex(image, "m") || !zarr_metadata::IsRealDataType(image.data_type)) {
         return MakeError(ErrorCode::unsupported_data_type, "Image variable is not an openable sky-plane image",
                          std::string(image_id));
+    }
+
+    if (auto matching = RequireMatchingCoordinates(store, image, image_id); !matching) {
+        return matching.error();
     }
 
     ImageDescriptor descriptor;

@@ -549,6 +549,33 @@ void TestMalformedObservationMetadata(const std::filesystem::path& root) {
             "a telescope position holding a string was converted rather than skipped");
 }
 
+// Coordinates belong to the dataset, not to one image, and discovery lists an image on its
+// dimension names alone. A second image whose own frequency axis is a different length was listed
+// as readable and then described with the dataset's frequency coordinate as though it were its
+// own: an image reporting three channels' worth of coordinates over seven channels of pixels.
+void TestImageDisagreeingWithACoordinate(const std::filesystem::path& root) {
+    CreateValidStore(root);
+    Write(root / "MODEL" / "zarr.json",
+          "{\"shape\":[1,7,2,4,5],\"data_type\":\"float32\",\"chunk_grid\":{\"name\":\"regular\","
+          "\"configuration\":{\"chunk_shape\":[1,1,1,2,5]}},\"attributes\":{\"units\":\"Jy/beam\"},"
+          "\"dimension_names\":[\"time\",\"frequency\",\"polarization\",\"l\",\"m\"],"
+          "\"zarr_format\":3,\"node_type\":\"array\"}");
+
+    const auto context = carta::zarr::Context::Create();
+    Require(static_cast<bool>(context), "Context::Create failed for a disagreeing image");
+    const auto dataset = carta::zarr::Dataset::Open(context.value(), root.string());
+    Require(static_cast<bool>(dataset), "the dataset holding a disagreeing image did not open");
+    Require(ImageIds(dataset.value().descriptor().images) == std::vector<std::string>{"SKY", "MODEL"},
+            "the dataset did not list both images");
+
+    const auto sky = dataset.value().OpenImage("SKY");
+    Require(static_cast<bool>(sky), "the image that agrees with the coordinates did not open");
+
+    const auto model = dataset.value().OpenImage("MODEL");
+    Require(!model && model.error().code == ErrorCode::invalid_metadata,
+            "an image whose frequency axis disagrees with the frequency coordinate was described anyway");
+}
+
 void TestAmbiguousPixelMask(const std::filesystem::path& root) {
     CreateValidStore(root);
     Write(root / "MODEL" / "zarr.json", SkyArray());
@@ -824,6 +851,7 @@ int main() {
         TestCoordinateCompletion(root / "coordinates");
         TestNonDoubleCoordinates(root / "float32-coordinates");
         TestAmbiguousPixelMask(root / "ambiguous-mask");
+        TestImageDisagreeingWithACoordinate(root / "coordinate-disagreement");
         TestMalformedObservationMetadata(root / "observation");
         TestDeclaredPixelMaskIsValidated(root / "declared-mask");
         TestDiscoveryIgnoresNameAllowlist(root / "unlisted-image");

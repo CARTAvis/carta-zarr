@@ -7,7 +7,7 @@
 #include "carta-zarr/carta_zarr.h"
 
 #include "chunk_blocks.h"
-#include "pixel_mask.h"
+#include "read/pieces.h"
 #include "reduce/plane_histogram.h"
 #include "reduce/spectral_reduce.h"
 #include "reduce/store_slab_source.h"
@@ -170,44 +170,6 @@ public:
 
 namespace {
 
-// The axis a split read is cut along: the slowest-varying one that selects more than a single
-// element. The destination is dense in logical order with axis 0 fastest, so splitting there
-// and nowhere else is what makes each finished piece extend a prefix instead of leaving holes.
-std::optional<std::size_t> SlowestSelectedAxis(const ReadRequest& request) {
-    for (std::size_t i = request.axes.size(); i-- > 0;) {
-        if (request.axes.at(i).count > 1) {
-            return i;
-        }
-    }
-    return std::nullopt;
-}
-
-// How many elements of the split axis one piece should cover, so that the piece pulls roughly the
-// budgeted amount of decompressed chunk data through. The other axes already contribute whatever
-// they span, so a plane read needs far fewer rows per piece than a single-pixel column needs
-// channels -- and an image with very large chunks gets pieces of one chunk rather than pieces it
-// could never afford.
-std::uint64_t ElementsPerPiece(const ImageDescriptor& descriptor, const ReadRequest& request,
-                               const ChunkGeometry& geometry, std::size_t axis, std::size_t budget_bytes,
-                               bool apply_mask) {
-    std::uint64_t other_chunks = 1;
-    for (std::size_t i = 0; i < request.axes.size(); ++i) {
-        if (i == axis) {
-            continue;
-        }
-        const auto chunk = i < geometry.chunk_shape.size() ? geometry.chunk_shape.at(i) : 0;
-        const auto& range = request.axes.at(i);
-        other_chunks *= internal::ChunksSpanned(range.start, range.count, range.stride, chunk);
-    }
-    const auto row_bytes = internal::DecodedChunkBytes(descriptor, geometry, apply_mask) * other_chunks;
-    // At least one chunk: a piece smaller than that would decode the same chunk twice.
-    const auto chunks = std::max<std::uint64_t>(1, budget_bytes / std::max<std::uint64_t>(1, row_bytes));
-    const auto chunk = axis < geometry.chunk_shape.size() ? geometry.chunk_shape.at(axis) : 0;
-    const auto stride = std::max<std::uint64_t>(1, request.axes.at(axis).stride);
-    // AlignedBlockEnd rounds this out to a whole chunk, so a low estimate costs nothing.
-    return std::max<std::uint64_t>(1, (chunks * std::max<std::uint64_t>(1, chunk)) / stride);
-}
-
 ChunkGeometry BuildChunkGeometry(const ImageDescriptor& descriptor, const StorageLayout& layout) {
     ChunkGeometry geometry;
     geometry.sharded = layout.sharded;
@@ -273,128 +235,8 @@ Result<std::size_t> Image::Read(const ReadRequest& request, BufferView<float> de
         if (!_impl) {
             return MakeError(ErrorCode::invalid_argument, "Image handle is empty");
         }
-        auto selection = internal::zarr::BuildSelection(_impl->descriptor, request);
-        if (!selection) {
-            return selection.error();
-        }
-        const auto elements = internal::zarr::SelectionElementCount(selection.value());
-        if (elements == 0 || elements > destination.size) {
-            return MakeError(ErrorCode::invalid_argument, "Destination buffer is too small for the request",
-                             _impl->descriptor.id);
-        }
-
-        // Do this before allocating a mask or starting any storage work. A cancelled request must not
-        // consume temporary memory just to discover that it cannot proceed.
-        auto control = internal::zarr::CheckReadControl(options, _impl->descriptor.id);
-        if (!control) {
-            return control.error();
-        }
-
-        const bool apply_mask = options.apply_pixel_mask && _impl->descriptor.has_pixel_mask;
-
-        // One piece unless there is a reason to split, in which case the request is cut along its
-        // slowest-varying selected axis. Splitting anywhere else, or without aligning to the chunk
-        // grid, would decode chunks twice and report a destination that is finished in patches
-        // rather than as a prefix.
-        //
-        // There are two reasons, and either one on its own is enough. Somebody to report progress to
-        // is the obvious one. A stated memory ceiling is the other: it says how much this read may
-        // hold at once, and splitting to fit is a better answer than refusing to read at all. Tying
-        // it to the progress callback meant a caller who asked for a ceiling and did not care to
-        // watch was simply told no, which is not what the ceiling asked for.
-        //
-        // A read with neither takes the same single-piece path it always did.
-        const auto slab_axis = SlowestSelectedAxis(request);
-        const bool split = slab_axis.has_value() &&
-                           (static_cast<bool>(options.progress) || options.temporary_memory_limit_bytes != 0);
-
-        // Not splitting is the same loop with one piece covering everything, so there is one path to
-        // read rather than two to keep in agreement.
-        std::uint64_t slab_total = 1;
-        std::uint64_t slab_stride = elements;
-        std::uint64_t slab_step = 1;
-        std::uint64_t slab_chunk = 0;
-        if (split) {
-            const auto axis = slab_axis.value();
-            slab_total = request.axes.at(axis).count;
-            slab_stride = 1;
-            for (std::size_t i = 0; i < axis; ++i) {
-                slab_stride *= request.axes.at(i).count;
-            }
-            slab_chunk = axis < _impl->geometry.chunk_shape.size() ? _impl->geometry.chunk_shape.at(axis) : 0;
-            // The flag is decoded beside the pixels when this read will apply it, so both halves of
-            // the sizing count it: the budget the library chooses for itself, and the per-row cost
-            // that budget is divided by. Counting it in one and not the other would size pieces
-            // against a cost the read does not have.
-            const auto chunk_bytes =
-                internal::DecodedChunkBytes(_impl->descriptor, _impl->geometry, apply_mask);
-            const auto budget = options.temporary_memory_limit_bytes != 0
-                                    ? options.temporary_memory_limit_bytes
-                                    : internal::DefaultReadBytes(chunk_bytes);
-            slab_step =
-                ElementsPerPiece(_impl->descriptor, request, _impl->geometry, axis, budget, apply_mask);
-        }
-
-        auto* pixels = destination.data;
-        std::vector<std::uint8_t> mask;
-
-        for (std::uint64_t begin = 0; begin < slab_total;) {
-            const std::uint64_t end =
-                split
-                    ? internal::AlignedBlockEnd(begin, slab_step, slab_total, request.axes.at(slab_axis.value()).start,
-                                                request.axes.at(slab_axis.value()).stride, slab_chunk)
-                    : slab_total;
-
-            ReadRequest piece = request;
-            if (split) {
-                auto& range = piece.axes.at(slab_axis.value());
-                range.start = request.axes.at(slab_axis.value()).start + (begin * range.stride);
-                range.count = end - begin;
-            }
-            auto piece_selection = internal::zarr::BuildSelection(_impl->descriptor, piece);
-            if (!piece_selection) {
-                return piece_selection.error();
-            }
-            const auto piece_elements = static_cast<std::size_t>((end - begin) * slab_stride);
-            float* piece_pixels = pixels + (begin * slab_stride);
-
-            if (apply_mask) {
-                // The limit bounds a piece, and a read that is not split is one piece, so an
-                // unsplittable request that exceeds it still has to say so rather than allocate.
-                if (options.temporary_memory_limit_bytes != 0 &&
-                    piece_elements > options.temporary_memory_limit_bytes) {
-                    return MakeError(ErrorCode::buffer_too_small,
-                                     "Pixel mask temporary buffer exceeds the configured memory limit",
-                                     _impl->descriptor.id);
-                }
-                mask.assign(piece_elements, 0);
-                // The mask is read first so that an unavailable or cancelled mask cannot leave this
-                // piece of the destination updated. TensorStore still owns the pixel operation's
-                // in-flight completion before it returns, so the destination remains valid for the
-                // next read.
-                auto mask_read = _impl->store->ReadPixelMaskBytes(
-                    _impl->descriptor.pixel_mask_id, piece_selection.value(), mask.data(), mask.size(), options);
-                if (!mask_read) {
-                    return mask_read.error();
-                }
-            }
-            auto read = _impl->store->ReadPixelsFloat32(_impl->descriptor.id, piece_selection.value(), piece_pixels,
-                                                        piece_elements, options);
-            if (!read) {
-                return read.error();
-            }
-            if (apply_mask) {
-                internal::ApplyPixelMask(piece_pixels, mask.data(), piece_elements);
-            }
-
-            begin = end;
-            if (options.progress && !options.progress(static_cast<std::size_t>(begin * slab_stride),
-                                                      static_cast<std::size_t>(elements))) {
-                return MakeError(ErrorCode::cancelled, "The read was cancelled by its progress callback",
-                                 _impl->descriptor.id);
-            }
-        }
-        return static_cast<std::size_t>(elements);
+        return internal::ReadInPieces(*_impl->store, _impl->descriptor, _impl->geometry, request, destination,
+                                      options);
     });
 }
 

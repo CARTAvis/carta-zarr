@@ -46,6 +46,8 @@ endif()
 
 add_library(carta_zarr SHARED
     src/carta_zarr.cc
+    src/read/pieces.cc
+    src/read/pieces_read.cc
     src/reduce/pass.cc
     src/reduce/pass_read.cc
     src/reduce/plane_histogram.cc
@@ -275,6 +277,14 @@ if(CARTA_ZARR_BUILD_TESTS AND BUILD_TESTING)
     carta_zarr_add_test(carta_zarr_linear_axis_tests INTERNAL
         TEST_NAME carta-zarr-linear-axis
         SOURCES tests/linear_axis_test.cc src/schema/xradio/linear_axis.cc)
+
+    # What an ordinary read decides before it reads anything. Compiled against pieces.cc alone:
+    # PlanPieces touches no store and no transport, so where a read is cut and how big a piece is --
+    # which is where the progress callback and the memory ceiling meet -- is checkable without a
+    # directory tree.
+    carta_zarr_add_test(carta_zarr_piece_plan_tests INTERNAL
+        TEST_NAME carta-zarr-piece-plan
+        SOURCES tests/piece_plan_test.cc src/read/pieces.cc)
 
     # What a pass decides before it reads anything. Compiled against pass.cc alone: PlanPass touches
     # no store and no transport, so the read strategy -- which has moved more than once, and moved

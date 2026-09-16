@@ -113,3 +113,10 @@ wants those pixels. It decides how much to decode at a time, when to hand a resu
 split the work across workers. It never knows what a region is and never does the arithmetic the
 caller came for.
 _Avoid_: walk, traversal, scan, loop
+
+**Piece**:
+One chunk-aligned part of an ordinary read, cut along the slowest-varying axis the request selects
+more than one element of. A read is always made of pieces; an unsplit one is a single piece covering
+everything. Cutting there and nowhere else is what keeps the finished part of the destination a
+prefix rather than a scatter, which is what lets a caller be told how far along it is, or stop it.
+_Avoid_: block, slab, chunk, batch

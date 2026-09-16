@@ -665,7 +665,7 @@ Result<void> ReduceSpectral(const Store& store, const ImageDescriptor& descripto
                     slab_request.u_count = u_end - u_begin;
                     slab_request.v_start = v_begin;
                     slab_request.v_count = v_end - v_begin;
-                    slab_request.channel_begin = slab_begin;
+                    slab_request.channel_index = slab_begin;
                     slab_request.channel_count = slab_length;
 
                     auto read = ReadSlab(source, plan, options, slab_request, buffers);

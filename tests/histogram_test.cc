@@ -207,6 +207,47 @@ void TestAnUnfinishedBlockIsHandedOver(const carta::zarr::Image& sky) {
     }
 }
 
+// A block that does not begin at the first channel.
+//
+// Without a hint the library emits everything these fixtures hold in one block, so every walk
+// started at channel zero -- and a slab that took its channel from the wrong end of a subtraction
+// read channel zero again and still produced a full count for every channel. The totals were right
+// and the answers came from the wrong plane. Only a second block shows it.
+void TestEachBlockCountsItsOwnChannels(const carta::zarr::Image& sky) {
+    const std::uint64_t polarization = 0;
+    carta::zarr::HistogramRequest request;
+    request.spectral = {0, kFrequency, 1};
+    request.polarization = polarization;
+    request.bins = 16;
+    request.lower = 0.0;
+    request.upper = 2000.0;
+    request.emit_every_channels = 1;
+
+    std::vector<std::vector<std::uint64_t>> by_channel(kFrequency);
+    std::uint64_t complete_blocks = 0;
+    const auto result = sky.ComputeHistogram(request, [&](const carta::zarr::HistogramBlock& block) {
+        if (!block.complete) {
+            return true;
+        }
+        ++complete_blocks;
+        Require(block.channel_count == 1, "a hint of one channel should emit one channel at a time");
+        by_channel.at(block.first_channel).assign(block.counts, block.counts + block.bin_count);
+        return true;
+    });
+    Require(static_cast<bool>(result),
+            std::string("the histogram failed: ") + (result ? "" : result.error().message));
+    Require(complete_blocks == kFrequency, "one complete block for each channel");
+
+    for (std::uint64_t f = 0; f < kFrequency; ++f) {
+        const auto expected = Expected(f, polarization, 0.0, 2000.0, 16);
+        for (std::size_t bin = 0; bin < expected.size(); ++bin) {
+            Require(by_channel.at(f).at(bin) == expected.at(bin),
+                    "channel " + std::to_string(f) + ", bin " + std::to_string(bin) +
+                        ": a block beginning at a later channel has to count that channel");
+        }
+    }
+}
+
 void TestSinkCancels(const carta::zarr::Image& sky) {
     int calls = 0;
     const auto result = sky.ComputeHistogram(WholeSpectrum(0, 0.0F, 2000.0F, 16),
@@ -654,6 +695,7 @@ int main() {
             TestPixelsOutsideTheRangeAreNotCounted(sky);
             TestTheMissingChunkIsNotCounted(sky);
             TestAnUnfinishedBlockIsHandedOver(sky);
+            TestEachBlockCountsItsOwnChannels(sky);
             TestSinkCancels(sky);
             TestRejectedRequests(sky);
             TestOnePassMatchesTheTwoPassAnswer(sky);

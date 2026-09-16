@@ -82,7 +82,9 @@ private:
  * wants planes loops over `channel_count` itself, which costs it nothing.
  */
 struct Slab {
-    // Index into the channel range the pass was given, not an image channel.
+    // Index into the channel range this RunPass was given -- so a visitor accumulating into a block
+    // of its own indexes by it directly. Not an index into the pass's spectral selection; see
+    // SlabRequest::channel_index.
     std::uint64_t first_channel = 0;
     std::uint64_t channel_count = 0;
     const float* pixels = nullptr;
@@ -162,8 +164,12 @@ struct SlabRequest {
     std::uint64_t v_start = 0;
     std::uint64_t v_count = 0;
     std::uint64_t v_stride = 1;
-    // Index into the channel range the pass was given, and how many of them this slab holds.
-    std::uint64_t channel_begin = 0;
+    // Which channels to read, as an index into the pass's own spectral selection -- so channel
+    // `channel_index` of the image is `spectral.start + channel_index * spectral.stride`. Absolute,
+    // unlike Slab::first_channel, which is relative to the range one RunPass was given. They are
+    // the same number only when a pass starts at the beginning of the selection, which is why
+    // confusing them is invisible until something asks for a later block.
+    std::uint64_t channel_index = 0;
     std::uint64_t channel_count = 0;
 };
 
@@ -257,13 +263,15 @@ Result<void> RunPass(const SlabSource& source, const PassPlan& plan, const ReadO
             slab_request.v_start = v_start;
             slab_request.v_count = v_count;
             slab_request.v_stride = plan.sample;
-            slab_request.channel_begin = slab_begin - begin;
+            slab_request.channel_index = slab_begin;
             slab_request.channel_count = slab_length;
 
             auto slab = ReadSlab(source, plan, options, slab_request, buffers);
             if (!slab) {
                 return slab.error();
             }
+            // What was read is absolute; what the visitor indexes by is relative to this call.
+            slab.value().first_channel = slab_begin - begin;
 
             visit(slab.value());
 

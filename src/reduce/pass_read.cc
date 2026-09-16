@@ -26,7 +26,7 @@ Result<Slab> ReadSlab(const SlabSource& source, const PassPlan& plan, const Read
     read_request.axes.at(plan.axis_u) = Range{request.u_start, request.u_count, request.u_stride};
     read_request.axes.at(plan.axis_v) = Range{request.v_start, request.v_count, request.v_stride};
     read_request.axes.at(plan.map.spectral) = Range{
-        spectral.start + (request.channel_begin * spectral.stride), request.channel_count, spectral.stride};
+        spectral.start + (request.channel_index * spectral.stride), request.channel_count, spectral.stride};
     if (plan.map.has_polarization) {
         read_request.axes.at(plan.map.polarization) = Range{plan.polarization, 1, 1};
     }
@@ -79,7 +79,7 @@ Result<Slab> ReadSlab(const SlabSource& source, const PassPlan& plan, const Read
     }
 
     Slab slab;
-    slab.first_channel = request.channel_begin;
+    slab.first_channel = request.channel_index;
     slab.channel_count = request.channel_count;
     slab.pixels = buffers.pixels.data();
     slab.stride_u = stored_stride.at(descriptor.axes.at(plan.axis_u).storage_index);

@@ -1,0 +1,60 @@
+/*
+ * This file is part of the CARTA Image Viewer: https://github.com/CARTAvis
+ * Copyright 2026 Academia Sinica Institute of Astronomy and Astrophysics (ASIAA)
+ * SPDX-License-Identifier: GPL-3.0-or-later
+ */
+
+#ifndef CARTA_ZARR_SRC_ZARR_PIXEL_SELECTION_H_
+#define CARTA_ZARR_SRC_ZARR_PIXEL_SELECTION_H_
+
+// What a pixel read asks for, as opposed to how it is served.
+//
+// Split from pixel_reader.h so that a caller deciding what to read does not take a dependency on
+// the thing that reads it. A pass needs all of this and none of the Store, which is what lets a
+// reduction run against pixels that were never on disk.
+
+#include "carta-zarr/carta_zarr.h"
+
+#include <cstdint>
+#include <string>
+#include <string_view>
+#include <vector>
+
+namespace carta::zarr::internal::zarr {
+
+// Check cooperative cancellation and the deadline at a storage-operation boundary.
+Result<void> CheckReadControl(const ReadOptions& options, std::string_view node);
+
+/**
+ * One hyperslab of an array, addressed in the array's own stored axis order.
+ *
+ * The permutation is carried alongside rather than applied by the caller because TensorStore can
+ * fold it into the same copy that moves the decoded chunk into the destination: transposing here
+ * costs a strided write, transposing afterwards costs a second full pass over the data.
+ */
+struct PixelSelection {
+    // All in stored axis order, one entry per stored dimension.
+    std::vector<std::uint64_t> start;
+    std::vector<std::uint64_t> count;
+    std::vector<std::uint64_t> stride;
+    // The full array shape from the Store's canonical metadata, in stored axis order.
+    std::vector<std::uint64_t> shape;
+    // The canonical dimension names from the Store's metadata, in stored axis order.
+    std::vector<std::string> dimension_names;
+    // logical_to_stored[i] is the stored dimension that logical axis i names. The destination is
+    // written densely in logical order with axis 0 fastest-varying.
+    std::vector<std::size_t> logical_to_stored;
+};
+
+// Translate a request over the logical axes into the stored axis order the array is written in,
+// checking it against the descriptor on the way. Ranges are validated here rather than left to
+// TensorStore so that an out-of-range request is an invalid_argument naming the axis, instead of an
+// I/O error naming a domain.
+Result<PixelSelection> BuildSelection(const ImageDescriptor& descriptor, const ReadRequest& request);
+
+// Element count the selection produces, or zero when it is malformed.
+std::uint64_t SelectionElementCount(const PixelSelection& selection);
+
+}  // namespace carta::zarr::internal::zarr
+
+#endif  // CARTA_ZARR_SRC_ZARR_PIXEL_SELECTION_H_

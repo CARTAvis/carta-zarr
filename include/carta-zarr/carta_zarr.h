@@ -73,8 +73,10 @@ public:
     // Results stream rather than accumulate: those 5,792 regions over 30,000 channels would be
     // 2.59 GiB returned at once. Each block is valid only inside the sink call.
     //
-    // The image's pixel mask is always applied when it has one. ReadOptions supplies cancellation,
-    // the deadline, and a ceiling on the pixel buffer the pass may hold.
+    // The image's pixel mask is applied when it has one and ReadOptions::apply_pixel_mask is left
+    // on, exactly as it is for a read: a flagged pixel reaches the statistics as NaN, and declining
+    // the mask means the flag is never read at all. ReadOptions also supplies cancellation, the
+    // deadline, and a ceiling on the pixel buffer the pass may hold.
     Result<void> ReduceSpectral(const SpectralReduceRequest& request, const SpectralSink& sink) const;
     Result<void> ReduceSpectral(const SpectralReduceRequest& request, const SpectralSink& sink,
                                 const ReadOptions& options) const;
@@ -83,16 +85,19 @@ public:
     //
     // Separate from ReduceSpectral because a histogram is not one of the statistics that reduction
     // accumulates, and because it needs none of that machinery: the region is always the whole
-    // plane, so there is nothing to index and no mask to consult.
+    // plane, so there is nothing to index and no region raster to consult. The image's own pixel
+    // mask is a different thing and still applies -- see below.
     //
-    // The image's pixel mask is applied when it has one, so a flagged pixel is not counted -- the
-    // same thing that happens to a NaN.
+    // The image's pixel mask is applied when it has one and ReadOptions::apply_pixel_mask is left
+    // on, so a flagged pixel is not counted -- the same thing that happens to a NaN. Declining the
+    // mask counts every stored pixel, flagged or not.
     Result<void> ComputeHistogram(const HistogramRequest& request, const HistogramSink& sink) const;
     Result<void> ComputeHistogram(const HistogramRequest& request, const HistogramSink& sink,
                                   const ReadOptions& options) const;
 
     // One histogram for the whole selection in a single pass, when the range is not known in
-    // advance. See CubeHistogramRequest for what that costs and what it keeps exact.
+    // advance. See CubeHistogramRequest for what that costs and what it keeps exact. The pixel mask
+    // is applied on the same terms as ComputeHistogram, and on both passes it makes.
     Result<CubeHistogramResult> ComputeCubeHistogram(const CubeHistogramRequest& request) const;
     Result<CubeHistogramResult> ComputeCubeHistogram(const CubeHistogramRequest& request,
                                                      const ReadOptions& options) const;

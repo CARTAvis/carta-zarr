@@ -59,14 +59,14 @@ carta::zarr::Image OpenSky(const char* fixture, const carta::zarr::OpenOptions& 
 
 // The same rule the library follows, written out here so the two cannot drift together.
 std::vector<std::uint64_t> Expected(std::uint64_t frequency, std::uint64_t polarization, double range_lower,
-                                    double range_upper, std::size_t bins) {
+                                    double range_upper, std::size_t bins, bool apply_mask = true) {
     std::vector<std::uint64_t> counts(bins, 0);
     const float width = static_cast<float>((range_upper - range_lower) / bins);
     const float lower = static_cast<float>(range_lower);
     const float upper = static_cast<float>(range_upper);
     for (std::uint64_t m = 0; m < kM; ++m) {
         for (std::uint64_t l = 0; l < kL; ++l) {
-            if (!ExpectedFlag(l, m) || InMissingChunk(l, frequency, polarization)) {
+            if ((apply_mask && !ExpectedFlag(l, m)) || InMissingChunk(l, frequency, polarization)) {
                 continue;  // a flagged pixel and one in the deleted chunk are both absent
             }
             const float value = ExpectedValue(l, m, frequency, polarization);
@@ -121,6 +121,41 @@ carta::zarr::HistogramRequest WholeSpectrum(std::uint64_t polarization, double l
     request.upper = upper;
     request.bins = bins;
     return request;
+}
+
+// A caller may decline the pixel mask here exactly as it may for a read, and then a flagged pixel
+// is counted like any other. The public comment on ComputeHistogram used to say the mask was
+// applied full stop, which was never what the code did -- the pass reads the flag only when the
+// caller has not declined it. Pinned through the public API, because that is where the two
+// disagreed; the pass's own test covers the same switch a level down.
+//
+// A pixel in the deleted chunk stays absent either way: the flag says a pixel is bad, and a missing
+// chunk means there is no pixel to speak of.
+void TestDecliningTheMaskCountsTheFlaggedPixels(const carta::zarr::Image& sky) {
+    const auto request = WholeSpectrum(0, 0.0F, 2000.0F, 16);
+    carta::zarr::ReadOptions declining;
+    declining.apply_pixel_mask = false;
+
+    const auto declined = Collect(sky, request, declining);
+    const auto applied = Collect(sky, request, {});
+
+    std::uint64_t declined_total = 0;
+    std::uint64_t applied_total = 0;
+    for (std::uint64_t f = 0; f < kFrequency; ++f) {
+        const auto expected = Expected(f, 0, 0.0F, 2000.0F, 16, false);
+        const auto& actual = declined.per_channel.at(static_cast<std::size_t>(f));
+        Require(actual.size() == expected.size(), "a declined-mask block reported the wrong bin count");
+        for (std::size_t bin = 0; bin < expected.size(); ++bin) {
+            Require(actual.at(bin) == expected.at(bin),
+                    "declining the mask should count every stored pixel in bin " + std::to_string(bin));
+            declined_total += actual.at(bin);
+            applied_total += applied.per_channel.at(static_cast<std::size_t>(f)).at(bin);
+        }
+    }
+    // Without this the test would still pass on a fixture that happened to flag nothing, and would
+    // then be pinning the absence of a difference rather than the difference.
+    Require(declined_total > applied_total,
+            "the fixture flags pixels inside this range, so declining the mask must count more of them");
 }
 
 // The wide case: a range that holds every value, so the counts say how many pixels survived the
@@ -692,6 +727,7 @@ int main() {
         try {
             const auto sky = OpenSky(fixture);
             TestCountsMatchTheOracle(sky);
+            TestDecliningTheMaskCountsTheFlaggedPixels(sky);
             TestPixelsOutsideTheRangeAreNotCounted(sky);
             TestTheMissingChunkIsNotCounted(sky);
             TestAnUnfinishedBlockIsHandedOver(sky);

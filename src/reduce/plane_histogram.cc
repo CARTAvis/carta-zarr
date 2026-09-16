@@ -8,6 +8,7 @@
 
 #include "chunk_blocks.h"
 #include "reduce/axis_map.h"
+#include "reduce/pass.h"
 #include "zarr/pixel_reader.h"
 
 #include <algorithm>
@@ -230,206 +231,6 @@ private:
     bool _seeded = false;
 };
 
-// Everything one walk over the planes needs that does not change from read to read.
-//
-// Extracted because two entry points share it and the read strategy has moved more than once: how
-// wide a band is, how deep a slab goes, which axis is contiguous. One copy of that, not two.
-struct PlaneWalk {
-    const Store* store = nullptr;
-    const ImageDescriptor* descriptor = nullptr;
-    const ReadOptions* options = nullptr;
-    AxisMap map;
-    std::size_t axis_u = 0;
-    std::size_t axis_v = 0;
-    std::uint64_t u_length = 0;
-    std::uint64_t v_length = 0;
-    std::uint64_t chunk_u = 1;
-    std::uint64_t chunk_v = 1;
-    std::uint64_t chunk_depth = 1;
-    std::uint64_t least_channels = 1;
-    std::uint64_t chunk_bytes = 1;
-    std::size_t slab_budget_bytes = 0;
-    std::uint64_t band_rows = 1;
-    std::uint64_t layer_chunks = 1;
-    Range spectral;
-    std::uint64_t polarization = 0;
-    std::uint64_t time = 0;
-    // Take every nth pixel along both spatial axes. This does not reduce the chunks a read decodes
-    // -- a chunk comes back whole however few of its pixels are wanted -- so it pays only when it
-    // steps over chunks entirely.
-    std::uint64_t sample = 1;
-    bool apply_mask = false;
-};
-
-PlaneWalk MakeWalk(const Store& store, const ImageDescriptor& descriptor, const ChunkGeometry& geometry,
-                   const AxisMap& map, const Range& spectral, std::uint64_t polarization, std::uint64_t time,
-                   std::uint64_t sample, const ReadOptions& options) {
-    PlaneWalk walk;
-    walk.store = &store;
-    walk.descriptor = &descriptor;
-    walk.options = &options;
-    walk.map = map;
-    // The spatial axis the store varies fastest is the one to ask for first; see the reduction.
-    const bool swap_spatial = SpatialYIsFastest(geometry);
-    walk.axis_u = swap_spatial ? map.y : map.x;
-    walk.axis_v = swap_spatial ? map.x : map.y;
-    walk.u_length = descriptor.axes.at(walk.axis_u).length;
-    walk.v_length = descriptor.axes.at(walk.axis_v).length;
-    walk.chunk_u = std::max<std::uint64_t>(1, geometry.chunk_shape.at(walk.axis_u));
-    walk.chunk_v = std::max<std::uint64_t>(1, geometry.chunk_shape.at(walk.axis_v));
-    walk.chunk_depth = std::max<std::uint64_t>(1, geometry.chunk_shape.at(map.spectral));
-    walk.apply_mask = options.apply_pixel_mask && descriptor.has_pixel_mask;
-    walk.chunk_bytes = DecodedChunkBytes(descriptor, geometry) * (walk.apply_mask ? 2 : 1);
-    walk.slab_budget_bytes = options.temporary_memory_limit_bytes != 0 ? options.temporary_memory_limit_bytes
-                                                                       : DefaultReadBytes(walk.chunk_bytes);
-    walk.least_channels = ((walk.chunk_depth + spectral.stride - 1) / spectral.stride);
-    const std::uint64_t row_chunks = std::max<std::uint64_t>(1, ((walk.u_length - 1) / walk.chunk_u) + 1);
-    const std::uint64_t column_chunks = std::max<std::uint64_t>(1, ((walk.v_length - 1) / walk.chunk_v) + 1);
-    walk.layer_chunks = std::max<std::uint64_t>(1, row_chunks * column_chunks);
-    // How many chunk rows one read may hold, so that a read is a budget's worth of chunk data.
-    walk.band_rows = std::max<std::uint64_t>(
-        1, walk.slab_budget_bytes / std::max<std::uint64_t>(1, row_chunks * walk.chunk_bytes));
-    walk.spectral = spectral;
-    walk.polarization = polarization;
-    walk.time = time;
-    walk.sample = std::max<std::uint64_t>(1, sample);
-    return walk;
-}
-
-// Samples of `stride` that fall in [begin, end), as a start and a count.
-void SampledRange(std::uint64_t begin, std::uint64_t end, std::uint64_t stride, std::uint64_t& start,
-                  std::uint64_t& count) {
-    const std::uint64_t first = (begin + stride - 1) / stride;
-    const std::uint64_t last = (end + stride - 1) / stride;
-    start = first * stride;
-    count = last > first ? last - first : 0;
-}
-
-/**
- * Visit every plane of one channel range, a band of chunk rows at a time.
- *
- * `before_read` runs before each read after the first of the range, which is where a caller reports
- * what it has or decides to stop. `visit` receives a whole read as a pointer and three strides
- * rather than a packed buffer, because the destination comes back in the store's own order and
- * packing it would be the transpose this walk exists to avoid.
- *
- * A read, not a plane: a caller that splits the work across threads needs a piece big enough to pay
- * for the dispatch, and a plane of a few hundred thousand pixels is not one. A caller that wants
- * planes loops over `channel_count` itself, which costs it nothing.
- */
-template <typename BeforeRead, typename Visit>
-Result<void> WalkChannels(const PlaneWalk& walk, std::uint64_t begin, std::uint64_t end,
-                          std::uint64_t& chunks_done, BeforeRead&& before_read, Visit&& visit) {
-    const auto& descriptor = *walk.descriptor;
-    const auto& options = *walk.options;
-    const auto& node = descriptor.id;
-    const auto rank = descriptor.axes.size();
-    const Range spectral = walk.spectral;
-    std::vector<float> pixels;
-    std::vector<std::uint8_t> mask;
-    std::uint64_t reads_done = 0;
-
-    for (std::uint64_t v_begin = 0; v_begin < walk.v_length;) {
-        const std::uint64_t v_end = std::min(walk.v_length, v_begin + (walk.band_rows * walk.chunk_v));
-        std::uint64_t v_start = 0;
-        std::uint64_t v_count = 0;
-        SampledRange(v_begin, v_end, walk.sample, v_start, v_count);
-        const std::uint64_t band_chunks = std::max<std::uint64_t>(
-            1, (((walk.u_length - 1) / walk.chunk_u) + 1) * ((((v_end - v_begin) - 1) / walk.chunk_v) + 1));
-        if (v_count == 0) {
-            chunks_done += band_chunks * ((end - begin + walk.least_channels - 1) / walk.least_channels);
-            v_begin = v_end;
-            continue;
-        }
-        const std::uint64_t spectral_chunks =
-            std::max<std::uint64_t>(1, walk.slab_budget_bytes / (band_chunks * walk.chunk_bytes));
-        const std::uint64_t slab_channels = std::max<std::uint64_t>(1, spectral_chunks * walk.least_channels);
-
-        for (std::uint64_t slab_begin = begin; slab_begin < end;) {
-            const std::uint64_t slab_end = AlignedBlockEnd(slab_begin, std::min(slab_channels, end - slab_begin),
-                                                           end, spectral.start, spectral.stride, walk.chunk_depth);
-            const std::uint64_t slab_length = slab_end - slab_begin;
-
-            if (reads_done > 0) {
-                if (auto ready = before_read(chunks_done); !ready) {
-                    return ready.error();
-                }
-            }
-            ++reads_done;
-
-            if (auto control = zarr::CheckReadControl(options, node); !control) {
-                return control.error();
-            }
-
-            std::uint64_t u_start = 0;
-            std::uint64_t u_count = 0;
-            SampledRange(0, walk.u_length, walk.sample, u_start, u_count);
-
-            ReadRequest read_request;
-            read_request.axes.assign(rank, Range{0, 1, 1});
-            read_request.axes.at(walk.axis_u) = Range{u_start, u_count, walk.sample};
-            read_request.axes.at(walk.axis_v) = Range{v_start, v_count, walk.sample};
-            read_request.axes.at(walk.map.spectral) =
-                Range{spectral.start + (slab_begin * spectral.stride), slab_length, spectral.stride};
-            if (walk.map.has_polarization) {
-                read_request.axes.at(walk.map.polarization) = Range{walk.polarization, 1, 1};
-            }
-            if (walk.map.has_time) {
-                read_request.axes.at(walk.map.time) = Range{walk.time, 1, 1};
-            }
-
-            auto selection = zarr::BuildSelection(descriptor, read_request);
-            if (!selection) {
-                return selection.error();
-            }
-            // Ask for the stored dimensions reversed, which against a destination whose dimension 0
-            // is fastest is asking for no transpose at all.
-            for (std::size_t i = 0; i < rank; ++i) {
-                selection.value().logical_to_stored.at(i) = rank - 1 - i;
-            }
-
-            std::vector<std::uint64_t> stored_stride(rank, 1);
-            std::uint64_t running = 1;
-            for (std::size_t stored = rank; stored-- > 0;) {
-                stored_stride.at(stored) = running;
-                running *= selection.value().count.at(stored);
-            }
-            const std::uint64_t stride_u = stored_stride.at(descriptor.axes.at(walk.axis_u).storage_index);
-            const std::uint64_t stride_v = stored_stride.at(descriptor.axes.at(walk.axis_v).storage_index);
-            const std::uint64_t stride_z = stored_stride.at(descriptor.axes.at(walk.map.spectral).storage_index);
-            const auto elements = static_cast<std::size_t>(running);
-
-            pixels.resize(elements);
-            if (auto read = walk.store->ReadPixelsFloat32(descriptor.id, selection.value(), pixels.data(),
-                                                          pixels.size(), options);
-                !read) {
-                return read.error();
-            }
-            if (walk.apply_mask) {
-                mask.resize(elements);
-                if (auto read = walk.store->ReadPixelMaskBytes(descriptor.pixel_mask_id, selection.value(),
-                                                               mask.data(), mask.size(), options);
-                    !read) {
-                    return read.error();
-                }
-                for (std::size_t i = 0; i < elements; ++i) {
-                    if (mask[i] == 0) {
-                        pixels[i] = std::numeric_limits<float>::quiet_NaN();
-                    }
-                }
-            }
-
-            visit(slab_begin - begin, slab_length, pixels.data(), stride_u, stride_v, stride_z, u_count,
-                  v_count);
-
-            chunks_done += band_chunks * ((slab_length + walk.least_channels - 1) / walk.least_channels);
-            slab_begin = slab_end;
-        }
-        v_begin = v_end;
-    }
-    return {};
-}
-
 }  // namespace
 
 Result<void> ComputeHistogram(const Store& store, const ImageDescriptor& descriptor,
@@ -452,8 +253,9 @@ Result<void> ComputeHistogram(const Store& store, const ImageDescriptor& descrip
     }
 
     const Range spectral = request.spectral;
-    const auto walk = MakeWalk(store, descriptor, geometry, map, spectral, request.polarization, request.time,
-                               1, options);
+    const auto plan = PlanPass(descriptor, geometry, map, spectral, request.polarization, request.time, 1,
+                               options);
+    const StoreSlabSource source(store, descriptor);
 
     // Emit granularity, as in the reduction: without a hint a block costs one read budget, so it is
     // as often as the walk can report without making any read smaller.
@@ -461,11 +263,11 @@ Result<void> ComputeHistogram(const Store& store, const ImageDescriptor& descrip
     const std::uint64_t budget_channels =
         std::max<std::uint64_t>(1, kSpectralEmitBudgetBytes / std::max<std::size_t>(1, bytes_per_channel));
     const std::uint64_t block_chunks =
-        std::min(spectral.count, std::max<std::uint64_t>(1, walk.slab_budget_bytes /
-                                                                std::max<std::uint64_t>(1, walk.layer_chunks *
-                                                                                               walk.chunk_bytes)));
+        std::min(spectral.count, std::max<std::uint64_t>(1, plan.slab_budget_bytes /
+                                                                std::max<std::uint64_t>(1, plan.layer_chunks *
+                                                                                               plan.chunk_bytes)));
     const std::uint64_t wanted_channels =
-        std::min({request.emit_every_channels == 0 ? block_chunks * walk.least_channels
+        std::min({request.emit_every_channels == 0 ? block_chunks * plan.least_channels
                                                    : static_cast<std::uint64_t>(request.emit_every_channels),
                   budget_channels, spectral.count});
 
@@ -490,7 +292,7 @@ Result<void> ComputeHistogram(const Store& store, const ImageDescriptor& descrip
     const std::size_t partials_by_memory =
         std::max<std::size_t>(1, kPartialBudgetBytes / std::max<std::size_t>(1, bins * sizeof(std::uint64_t)));
     const std::size_t max_tasks = std::min(workers.size(), partials_by_memory);
-    // One allocation for the whole walk. Each task owns one row of it, so no two of them ever touch
+    // One allocation for the whole plan. Each task owns one row of it, so no two of them ever touch
     // the same bin and the sum at the end is the only place they meet.
     std::vector<std::uint64_t> partials;
     if (max_tasks > 1) {
@@ -499,14 +301,14 @@ Result<void> ComputeHistogram(const Store& store, const ImageDescriptor& descrip
 
     for (std::uint64_t block_begin = 0; block_begin < spectral.count;) {
         const std::uint64_t block_end = AlignedBlockEnd(block_begin, wanted_channels, spectral.count,
-                                                        spectral.start, spectral.stride, walk.chunk_depth);
+                                                        spectral.start, spectral.stride, plan.chunk_depth);
         const auto block_length = static_cast<std::size_t>(block_end - block_begin);
         counts.assign(block_length * bins, 0);
 
         const std::uint64_t block_spectral_chunks =
-            (block_length + walk.least_channels - 1) / walk.least_channels;
+            (block_length + plan.least_channels - 1) / plan.least_channels;
         const std::uint64_t block_chunks_total =
-            std::max<std::uint64_t>(1, walk.layer_chunks * block_spectral_chunks);
+            std::max<std::uint64_t>(1, plan.layer_chunks * block_spectral_chunks);
         std::uint64_t chunks_done = 0;
 
         const auto hand_over = [&](bool complete) -> Result<void> {
@@ -524,16 +326,21 @@ Result<void> ComputeHistogram(const Store& store, const ImageDescriptor& descrip
             return {};
         };
 
-        const auto walked = WalkChannels(
-            walk, block_begin, block_end, chunks_done,
+        const auto walked = RunPass(
+            source, plan, options, block_begin, block_end, chunks_done,
             [&](std::uint64_t) -> Result<void> { return hand_over(false); },
-            [&](std::uint64_t first_channel, std::uint64_t channel_count, const float* base,
-                std::uint64_t stride_u, std::uint64_t stride_v, std::uint64_t stride_z,
-                std::uint64_t u_count, std::uint64_t v_count) {
-              for (std::uint64_t offset = 0; offset < channel_count; ++offset) {
-                const float* plane = base + (offset * stride_z);
+            [&](const Slab& slab) {
+              // Hoisted into locals so that the loops below are the same text they were when the
+              // pass handed these over as eight separate arguments.
+              const std::uint64_t stride_u = slab.stride_u;
+              const std::uint64_t stride_v = slab.stride_v;
+              const std::uint64_t stride_z = slab.stride_z;
+              const std::uint64_t u_count = slab.u_count;
+              const std::uint64_t v_count = slab.v_count;
+              for (std::uint64_t offset = 0; offset < slab.channel_count; ++offset) {
+                const float* plane = slab.pixels + (offset * stride_z);
                 std::uint64_t* into =
-                    counts.data() + (static_cast<std::size_t>(first_channel + offset) * bins);
+                    counts.data() + (static_cast<std::size_t>(slab.first_channel + offset) * bins);
 
                 const auto bin_rows = [&](std::uint64_t v_first, std::uint64_t v_last,
                                           std::uint64_t* destination) {
@@ -641,11 +448,12 @@ Result<CubeHistogramResult> ComputeCubeHistogram(const Store& store, const Image
     }
     provisional = rounded;
 
-    const auto walk = MakeWalk(store, descriptor, geometry, map, request.spectral, request.polarization,
+    const auto plan = PlanPass(descriptor, geometry, map, request.spectral, request.polarization,
                                request.time, request.spatial_sample, options);
+    const StoreSlabSource source(store, descriptor);
     const std::uint64_t total_chunks =
-        std::max<std::uint64_t>(1, walk.layer_chunks * ((request.spectral.count + walk.least_channels - 1) /
-                                                        walk.least_channels));
+        std::max<std::uint64_t>(1, plan.layer_chunks * ((request.spectral.count + plan.least_channels - 1) /
+                                                        plan.least_channels));
 
     // One accumulator per task, which is safe because the split below never asks for more tasks than
     // there are accumulators, so no two bodies ever hold the same one at once. See the split itself
@@ -731,8 +539,8 @@ Result<CubeHistogramResult> ComputeCubeHistogram(const Store& store, const Image
     };
 
     std::uint64_t chunks_done = 0;
-    const auto walked = WalkChannels(
-        walk, 0, request.spectral.count, chunks_done,
+    const auto walked = RunPass(
+        source, plan, options, 0, request.spectral.count, chunks_done,
         [&](std::uint64_t done) -> Result<void> {
             if (request.progress) {
                 CubeHistogramProgress update;
@@ -748,9 +556,15 @@ Result<CubeHistogramResult> ComputeCubeHistogram(const Store& store, const Image
             }
             return {};
         },
-        [&](std::uint64_t, std::uint64_t channel_count, const float* base, std::uint64_t stride_u,
-            std::uint64_t stride_v, std::uint64_t stride_z, std::uint64_t u_count,
-            std::uint64_t v_count) {
+        [&](const Slab& slab) {
+            // As in ComputeHistogram: hoisted so the per-pixel loop reads as it did before.
+            const float* const base = slab.pixels;
+            const std::uint64_t stride_u = slab.stride_u;
+            const std::uint64_t stride_v = slab.stride_v;
+            const std::uint64_t stride_z = slab.stride_z;
+            const std::uint64_t u_count = slab.u_count;
+            const std::uint64_t v_count = slab.v_count;
+            const std::uint64_t channel_count = slab.channel_count;
             // Rows of the whole read, numbered across its planes, rather than rows of one plane.
             // A provisional histogram is half a megabyte, so a task has to be long enough to earn
             // the cache it pulls in: split per plane, a task was a few hundred thousand pixels

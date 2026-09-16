@@ -58,13 +58,6 @@ inline Result<AxisMap> MapAxes(const ImageDescriptor& descriptor) {
     return map;
 }
 
-// Of the two spatial axes, the one the store varies fastest -- the last one written. A walk takes
-// this as its own inner axis so that a plane arrives without being transposed; see
-// ChunkGeometry::fastest_spatial_axis.
-inline bool SpatialYIsFastest(const ChunkGeometry& geometry) {
-    return geometry.fastest_spatial_axis == AxisRole::spatial_y;
-}
-
 }  // namespace carta::zarr::internal
 
 #endif  // CARTA_ZARR_SRC_REDUCE_AXIS_MAP_H_

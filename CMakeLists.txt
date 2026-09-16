@@ -47,6 +47,7 @@ endif()
 add_library(carta_zarr SHARED
     src/carta_zarr.cc
     src/reduce/pass.cc
+    src/reduce/pass_read.cc
     src/reduce/plane_histogram.cc
     src/reduce/spectral_reduce.cc
     src/schema/profile.cc

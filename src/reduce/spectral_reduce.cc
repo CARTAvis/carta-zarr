@@ -8,6 +8,7 @@
 
 #include "chunk_blocks.h"
 #include "reduce/axis_map.h"
+#include "reduce/pass.h"
 #include "zarr/pixel_reader.h"
 
 #include <algorithm>
@@ -403,8 +404,6 @@ Result<void> ReduceSpectral(const Store& store, const ImageDescriptor& descripto
     // asking for it first is what keeps a plane from being transposed on its way into the
     // destination; everything below is in terms of that axis (u) and the other one (v).
     const bool swap_spatial = geometry.fastest_spatial_axis == AxisRole::spatial_y;
-    const auto axis_u = swap_spatial ? map.y : map.x;
-    const auto axis_v = swap_spatial ? map.x : map.y;
 
     if (auto valid = ValidateRequest(descriptor, map, request, geometry.fastest_spatial_axis); !valid) {
         return valid.error();
@@ -429,15 +428,11 @@ Result<void> ReduceSpectral(const Store& store, const ImageDescriptor& descripto
         regions.push_back(region);
     }
 
-    // The spectral range is checked here as well as inside each slab request, so that a bad range
-    // is one error naming the axis rather than a partial reduction that fails on some later slab. The
-    // last selected channel is compared by dividing the room that is left rather than by
-    // multiplying out the span: (count - 1) * stride wraps, and a wrapped span passes.
+    // Checked here as well as inside each slab request, so that a bad range is one error naming the
+    // axis rather than a partial reduction that fails on some later slab.
     const Range spectral = request.spectral;
-    const auto channels = descriptor.axes.at(map.spectral).length;
-    if (spectral.stride == 0 || spectral.count == 0 || spectral.start >= channels ||
-        spectral.count - 1 > (channels - 1 - spectral.start) / spectral.stride) {
-        return MakeError(ErrorCode::invalid_argument, "The spectral range falls outside the image", node);
+    if (auto valid = ValidateSpectralRange(descriptor, map, spectral); !valid) {
+        return valid.error();
     }
 
     // The requested statistics, in the one order a block reports them.
@@ -458,31 +453,25 @@ Result<void> ReduceSpectral(const Store& store, const ImageDescriptor& descripto
     const int slot_min = slot_of.at(4);
     const int slot_max = slot_of.at(5);
 
-    const auto chunk_u = std::max<std::uint64_t>(1, geometry.chunk_shape.at(axis_u));
-    const auto chunk_v = std::max<std::uint64_t>(1, geometry.chunk_shape.at(axis_v));
-    const auto chunk_depth = std::max<std::uint64_t>(1, geometry.chunk_shape.at(map.spectral));
+    const auto plan = PlanPass(descriptor, geometry, map, spectral, request.polarization, request.time, 1,
+                               options);
+    const StoreSlabSource source(store, descriptor);
 
     auto buckets_result =
-        BuildChunkBuckets(regions.data(), regions.size(), chunk_u, chunk_v, node);
+        BuildChunkBuckets(regions.data(), regions.size(), plan.chunk_u, plan.chunk_v, node);
     if (!buckets_result) {
         return buckets_result.error();
     }
     const auto& buckets = buckets_result.value();
     const auto runs_per_row = BuildColumnRuns(buckets);
 
-    const bool apply_mask = options.apply_pixel_mask && descriptor.has_pixel_mask;
-    // Budget the chunk data a slab decodes, not the pixels it keeps. A one-pixel region asks for
-    // almost nothing and still decodes an entire chunk per chunk it touches, so sizing by the
-    // region's own area would let a cursor-sized request pull an unbounded amount through.
-    const std::uint64_t chunk_bytes = DecodedChunkBytes(descriptor, geometry) * (apply_mask ? 2 : 1);
-    const std::size_t slab_budget_bytes = options.temporary_memory_limit_bytes != 0
-                                              ? options.temporary_memory_limit_bytes
-                                              : DefaultReadBytes(chunk_bytes);
-    // The smallest slab that still decodes each spectral chunk once. Reading fewer channels than
-    // this would decode a chunk and use part of it, then decode it again for the rest.
-    const std::uint64_t least_channels = ((chunk_depth + spectral.stride - 1) / spectral.stride);
+    // The budget is over the chunk data a slab decodes, not the pixels it keeps. A one-pixel region
+    // asks for almost nothing and still decodes an entire chunk per chunk it touches, so sizing by
+    // the region's own area would let a cursor-sized request pull an unbounded amount through. That
+    // is the plan's rule as much as it is this one's, which is why the plan holds it.
 
-    // The chunks one spectral layer of the whole region set occupies.
+    // The chunks one spectral layer of the whole region set occupies. Not the plan's layer, which
+    // is the whole plane: a reduction spends its emit budget against the region set it was given.
     std::uint64_t layer_chunks = 0;
     for (const auto& runs : runs_per_row) {
         for (const auto& run : runs) {
@@ -505,15 +494,8 @@ Result<void> ReduceSpectral(const Store& store, const ImageDescriptor& descripto
     // the whole reduction takes. One layer of a 7763x4742 image is 160 MiB and 70 ms; a thousand
     // channels of it is a minute of work with no partial answer and nowhere to cancel.
     const std::size_t bytes_per_channel = request.region_count * statistic_count * sizeof(double);
-    const std::uint64_t budget_channels =
-        std::max<std::uint64_t>(1, kSpectralEmitBudgetBytes / std::max<std::size_t>(1, bytes_per_channel));
-    const std::uint64_t block_chunks = std::min(
-        spectral.count,
-        std::max<std::uint64_t>(1, slab_budget_bytes / std::max<std::uint64_t>(1, layer_chunks * chunk_bytes)));
     const std::uint64_t wanted_channels =
-        std::min({request.emit_every_channels == 0 ? block_chunks * least_channels
-                                                   : static_cast<std::uint64_t>(request.emit_every_channels),
-                  budget_channels, spectral.count});
+        PlanEmitChannels(plan, layer_chunks, bytes_per_channel, request.emit_every_channels);
 
     // Below this a unit is not worth its share of a dispatch, so the reduction runs in place. A
     // unit is one chunk cell of one channel, so this is a statement about chunk size: an image
@@ -521,17 +503,15 @@ Result<void> ReduceSpectral(const Store& store, const ImageDescriptor& descripto
     // the fixtures and for a cursor-sized region.
     constexpr std::uint64_t kLeastPixelsPerUnit = 1U << 16U;
 
-    const auto rank = descriptor.axes.size();
     std::vector<double> accumulator;
     // One private accumulator per task, reused across slabs. See the dispatch below.
     std::vector<double> sinks;
-    std::vector<float> pixels;
-    std::vector<std::uint8_t> mask;
+    SlabBuffers buffers;
     std::vector<ColumnRun> segments;
 
     for (std::uint64_t block_begin = 0; block_begin < spectral.count;) {
         const std::uint64_t block_end = AlignedBlockEnd(block_begin, wanted_channels, spectral.count,
-                                                        spectral.start, spectral.stride, chunk_depth);
+                                                        spectral.start, spectral.stride, plan.chunk_depth);
         const auto block_length = static_cast<std::size_t>(block_end - block_begin);
         const std::size_t statistic_stride = block_length;
         const std::size_t region_stride = statistic_count * statistic_stride;
@@ -550,7 +530,7 @@ Result<void> ReduceSpectral(const Store& store, const ImageDescriptor& descripto
             }
         }
 
-        const std::uint64_t block_spectral_chunks = (block_length + least_channels - 1) / least_channels;
+        const std::uint64_t block_spectral_chunks = (block_length + plan.least_channels - 1) / plan.least_channels;
         const std::uint64_t block_chunks_total =
             std::max<std::uint64_t>(1, std::max<std::uint64_t>(1, layer_chunks) * block_spectral_chunks);
         std::uint64_t block_chunks_done = 0;
@@ -621,8 +601,8 @@ Result<void> ReduceSpectral(const Store& store, const ImageDescriptor& descripto
             for (const auto& run : runs) {
                 widest = std::max(widest, run.last - run.first + 1);
             }
-            const std::uint64_t row_bytes = std::max<std::uint64_t>(1, widest * chunk_bytes);
-            const std::uint64_t band_limit = std::max<std::uint64_t>(1, slab_budget_bytes / row_bytes);
+            const std::uint64_t row_bytes = std::max<std::uint64_t>(1, widest * plan.chunk_bytes);
+            const std::uint64_t band_limit = std::max<std::uint64_t>(1, plan.slab_budget_bytes / row_bytes);
             std::uint64_t band_end = row + 1;
             while (band_end < buckets.rows && (band_end - row) < band_limit &&
                    runs_per_row.at(static_cast<std::size_t>(band_end)) == runs) {
@@ -631,8 +611,8 @@ Result<void> ReduceSpectral(const Store& store, const ImageDescriptor& descripto
 
             const std::uint64_t chunk_cv_begin = buckets.chunk_cv0 + row;
             const std::uint64_t chunk_cv_end = buckets.chunk_cv0 + band_end;
-            const std::uint64_t v_begin = std::max(buckets.v0, chunk_cv_begin * chunk_v);
-            const std::uint64_t v_end = std::min(buckets.v1, chunk_cv_end * chunk_v);
+            const std::uint64_t v_begin = std::max(buckets.v0, chunk_cv_begin * plan.chunk_v);
+            const std::uint64_t v_end = std::min(buckets.v1, chunk_cv_end * plan.chunk_v);
 
             // A run wider than the budget is read in pieces, not in one request. Without this the
             // smallest request is a whole chunk row of the region: 157 chunks of a 80000-pixel-wide
@@ -640,7 +620,7 @@ Result<void> ReduceSpectral(const Store& store, const ImageDescriptor& descripto
             // report or cancel from until all of it lands.
             const std::uint64_t band_rows = std::max<std::uint64_t>(1, band_end - row);
             const std::uint64_t segment_limit =
-                std::max<std::uint64_t>(1, slab_budget_bytes / (band_rows * chunk_bytes));
+                std::max<std::uint64_t>(1, plan.slab_budget_bytes / (band_rows * plan.chunk_bytes));
             segments.clear();
             for (const auto& whole : runs) {
                 for (std::uint64_t first = whole.first; first <= whole.last;) {
@@ -653,18 +633,18 @@ Result<void> ReduceSpectral(const Store& store, const ImageDescriptor& descripto
             for (const auto& run : segments) {
                 const std::uint64_t chunk_cu_begin = buckets.chunk_cu0 + run.first;
                 const std::uint64_t chunk_cu_end = buckets.chunk_cu0 + run.last + 1;
-                const std::uint64_t u_begin = std::max(buckets.u0, chunk_cu_begin * chunk_u);
-                const std::uint64_t u_end = std::min(buckets.u1, chunk_cu_end * chunk_u);
+                const std::uint64_t u_begin = std::max(buckets.u0, chunk_cu_begin * plan.chunk_u);
+                const std::uint64_t u_end = std::min(buckets.u1, chunk_cu_end * plan.chunk_u);
                 const std::uint64_t run_chunks =
                     std::max<std::uint64_t>(1, (run.last - run.first + 1) * (band_end - row));
                 const std::uint64_t spectral_chunks =
-                    std::max<std::uint64_t>(1, slab_budget_bytes / (run_chunks * chunk_bytes));
-                const std::uint64_t slab_channels = std::max<std::uint64_t>(1, spectral_chunks * least_channels);
+                    std::max<std::uint64_t>(1, plan.slab_budget_bytes / (run_chunks * plan.chunk_bytes));
+                const std::uint64_t slab_channels = std::max<std::uint64_t>(1, spectral_chunks * plan.least_channels);
 
                 for (std::uint64_t slab_begin = block_begin; slab_begin < block_end;) {
                     const std::uint64_t slab_end =
                         AlignedBlockEnd(slab_begin, std::min(slab_channels, block_end - slab_begin), block_end,
-                                        spectral.start, spectral.stride, chunk_depth);
+                                        spectral.start, spectral.stride, plan.chunk_depth);
                     const std::uint64_t slab_length = slab_end - slab_begin;
 
                     // What is in hand before spending another budget on this block. A block that
@@ -680,69 +660,24 @@ Result<void> ReduceSpectral(const Store& store, const ImageDescriptor& descripto
                         return control.error();
                     }
 
-                    ReadRequest read_request;
-                    read_request.axes.assign(rank, Range{0, 1, 1});
-                    read_request.axes.at(axis_u) = Range{u_begin, u_end - u_begin, 1};
-                    read_request.axes.at(axis_v) = Range{v_begin, v_end - v_begin, 1};
-                    read_request.axes.at(map.spectral) =
-                        Range{spectral.start + (slab_begin * spectral.stride), slab_length, spectral.stride};
-                    if (map.has_polarization) {
-                        read_request.axes.at(map.polarization) = Range{request.polarization, 1, 1};
-                    }
-                    if (map.has_time) {
-                        read_request.axes.at(map.time) = Range{request.time, 1, 1};
-                    }
+                    SlabRequest slab_request;
+                    slab_request.u_start = u_begin;
+                    slab_request.u_count = u_end - u_begin;
+                    slab_request.v_start = v_begin;
+                    slab_request.v_count = v_end - v_begin;
+                    slab_request.channel_begin = slab_begin;
+                    slab_request.channel_count = slab_length;
 
-                    auto selection = zarr::BuildSelection(descriptor, read_request);
-                    if (!selection) {
-                        return selection.error();
-                    }
-
-                    // Take the plane in the order the store wrote it. The reader's destination has
-                    // its own dimension 0 fastest, so asking for the stored dimensions reversed is
-                    // asking for no transpose at all: the last stored dimension, the one the array
-                    // is contiguous along, lands fastest. Read hands back logical order because its
-                    // callers want a densely packed image; a reduction wants whatever is cheapest to
-                    // read, and pays for the difference in nothing but these strides.
-                    for (std::size_t i = 0; i < rank; ++i) {
-                        selection.value().logical_to_stored.at(i) = rank - 1 - i;
-                    }
-
-                    // Strides of that destination, by stored dimension: the last one steps by 1 and
-                    // each earlier one by the product of those after it.
-                    std::vector<std::uint64_t> stored_stride(rank, 1);
-                    std::uint64_t running = 1;
-                    for (std::size_t stored = rank; stored-- > 0;) {
-                        stored_stride.at(stored) = running;
-                        running *= selection.value().count.at(stored);
-                    }
-                    const std::uint64_t stride_u = stored_stride.at(descriptor.axes.at(axis_u).storage_index);
-                    const std::uint64_t stride_v = stored_stride.at(descriptor.axes.at(axis_v).storage_index);
-                    const std::uint64_t stride_z = stored_stride.at(descriptor.axes.at(map.spectral).storage_index);
-                    const auto elements = static_cast<std::size_t>(running);
-
-                    pixels.resize(elements);
-                    if (auto read = store.ReadPixelsFloat32(descriptor.id, selection.value(), pixels.data(),
-                                                            pixels.size(), options);
-                        !read) {
+                    auto read = ReadSlab(source, plan, options, slab_request, buffers);
+                    if (!read) {
                         return read.error();
                     }
-                    if (apply_mask) {
-                        mask.resize(elements);
-                        if (auto read = store.ReadPixelMaskBytes(descriptor.pixel_mask_id, selection.value(),
-                                                                 mask.data(), mask.size(), options);
-                            !read) {
-                            return read.error();
-                        }
-                        // Fold the flag into the pixels rather than carry it into the inner loop: a
-                        // flagged pixel and a NaN pixel mean the same thing to every statistic here,
-                        // and this is the rule Image::Read already applies.
-                        for (std::size_t i = 0; i < elements; ++i) {
-                            if (mask[i] == 0) {
-                                pixels[i] = std::numeric_limits<float>::quiet_NaN();
-                            }
-                        }
-                    }
+                    // Into locals so that the accumulation below is the text it was when this
+                    // function did its own reading.
+                    const float* const slab_pixels = read.value().pixels;
+                    const std::uint64_t stride_u = read.value().stride_u;
+                    const std::uint64_t stride_v = read.value().stride_v;
+                    const std::uint64_t stride_z = read.value().stride_z;
 
                     const std::uint64_t cv_span = chunk_cv_end - chunk_cv_begin;
                     const std::uint64_t cu_span = chunk_cu_end - chunk_cu_begin;
@@ -759,17 +694,17 @@ Result<void> ReduceSpectral(const Store& store, const ImageDescriptor& descripto
                     // spans several cells -- so they would otherwise be adding to one double.
                     const auto accumulate_unit = [&](std::uint64_t channel, std::uint64_t cell_cv,
                                                      std::uint64_t cell_cu, double* sink) {
-                        const float* plane = pixels.data() + (channel * stride_z);
+                        const float* plane = slab_pixels + (channel * stride_z);
 
                         for (std::uint64_t chunk_cv = cell_cv; chunk_cv < cell_cv + 1; ++chunk_cv) {
-                            const std::uint64_t cell_v0 = std::max(v_begin, chunk_cv * chunk_v);
-                            const std::uint64_t cell_v1 = std::min(v_end, (chunk_cv + 1) * chunk_v);
+                            const std::uint64_t cell_v0 = std::max(v_begin, chunk_cv * plan.chunk_v);
+                            const std::uint64_t cell_v1 = std::min(v_end, (chunk_cv + 1) * plan.chunk_v);
                             if (cell_v0 >= cell_v1) {
                                 continue;
                             }
                             for (std::uint64_t chunk_cu = cell_cu; chunk_cu < cell_cu + 1; ++chunk_cu) {
-                                const std::uint64_t cell_u0 = std::max(u_begin, chunk_cu * chunk_u);
-                                const std::uint64_t cell_u1 = std::min(u_end, (chunk_cu + 1) * chunk_u);
+                                const std::uint64_t cell_u0 = std::max(u_begin, chunk_cu * plan.chunk_u);
+                                const std::uint64_t cell_u1 = std::min(u_end, (chunk_cu + 1) * plan.chunk_u);
                                 if (cell_u0 >= cell_u1) {
                                     continue;
                                 }
@@ -891,7 +826,7 @@ Result<void> ReduceSpectral(const Store& store, const ImageDescriptor& descripto
                         std::max<std::size_t>(1, kSinkBudgetBytes / (sink_stride * sizeof(double)));
                     const std::size_t max_tasks = std::min(workers.size(), tasks_by_memory);
                     const std::size_t tasks =
-                        PlanRowTasks(chunk_u * chunk_v, units, max_tasks, kLeastPixelsPerUnit);
+                        PlanRowTasks(plan.chunk_u * plan.chunk_v, units, max_tasks, kLeastPixelsPerUnit);
 
                     sinks.assign(tasks * sink_stride, 0.0);
                     for (std::size_t task = 0; task < tasks; ++task) {
@@ -942,7 +877,7 @@ Result<void> ReduceSpectral(const Store& store, const ImageDescriptor& descripto
                         }
                     }
                     block_chunks_done +=
-                        run_chunks * ((slab_length + least_channels - 1) / least_channels);
+                        run_chunks * ((slab_length + plan.least_channels - 1) / plan.least_channels);
                     slab_begin = slab_end;
                 }
             }

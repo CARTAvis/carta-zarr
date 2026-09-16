@@ -42,4 +42,27 @@ PassPlan PlanPass(const ImageDescriptor& descriptor, const ChunkGeometry& geomet
     return plan;
 }
 
+
+Result<void> ValidateSpectralRange(const ImageDescriptor& descriptor, const AxisMap& map,
+                                   const Range& spectral) {
+    const auto channels = descriptor.axes.at(map.spectral).length;
+    if (spectral.stride == 0 || spectral.count == 0 || spectral.start >= channels ||
+        spectral.count - 1 > (channels - 1 - spectral.start) / spectral.stride) {
+        return Error{ErrorCode::invalid_argument, "The spectral range falls outside the image", descriptor.id};
+    }
+    return {};
+}
+
+std::uint64_t PlanEmitChannels(const PassPlan& plan, std::uint64_t layer_chunks,
+                               std::size_t bytes_per_channel, std::uint32_t hint) {
+    const std::uint64_t budget_channels =
+        std::max<std::uint64_t>(1, kSpectralEmitBudgetBytes / std::max<std::size_t>(1, bytes_per_channel));
+    const std::uint64_t block_chunks =
+        std::min(plan.spectral.count,
+                 std::max<std::uint64_t>(1, plan.slab_budget_bytes / std::max<std::uint64_t>(
+                                                                         1, layer_chunks * plan.chunk_bytes)));
+    return std::min({hint == 0 ? block_chunks * plan.least_channels : static_cast<std::uint64_t>(hint),
+                     budget_channels, plan.spectral.count});
+}
+
 }  // namespace carta::zarr::internal

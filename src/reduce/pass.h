@@ -132,6 +132,61 @@ PassPlan PlanPass(const ImageDescriptor& descriptor, const ChunkGeometry& geomet
                   const Range& spectral, std::uint64_t polarization, std::uint64_t time,
                   std::uint64_t sample, const ReadOptions& options);
 
+// The spectral range a pass was asked for has to fall inside the image. Compared by dividing the
+// room that is left rather than by multiplying out the span: (count - 1) * stride wraps, and a
+// wrapped span passes a check it should fail.
+Result<void> ValidateSpectralRange(const ImageDescriptor& descriptor, const AxisMap& map,
+                                   const Range& spectral);
+
+/**
+ * How many channels one emitted block may hold.
+ *
+ * The hint is the caller's, the budgets are the library's, and the chunk alignment is the pass's;
+ * the smallest wins and the block reports what it used. Without a hint a block costs one budget of
+ * decoded bytes -- the same invariant a piece of Read carries -- so it is free: the block spends
+ * whatever the spatial walk left over. A small region leaves almost all of it and the block spans
+ * many chunks along the spectrum; a region covering the image spends the budget spatially and the
+ * block becomes the single chunk layer the pass is already reading.
+ *
+ * `layer_chunks` is the chunks one spectral layer of whatever the caller is walking occupies, which
+ * is the plan's for a whole plane and the region set's own for a reduction.
+ */
+std::uint64_t PlanEmitChannels(const PassPlan& plan, std::uint64_t layer_chunks,
+                               std::size_t bytes_per_channel, std::uint32_t hint);
+
+// One slab to read, in the pass's own axes.
+struct SlabRequest {
+    std::uint64_t u_start = 0;
+    std::uint64_t u_count = 0;
+    std::uint64_t u_stride = 1;
+    std::uint64_t v_start = 0;
+    std::uint64_t v_count = 0;
+    std::uint64_t v_stride = 1;
+    // Index into the channel range the pass was given, and how many of them this slab holds.
+    std::uint64_t channel_begin = 0;
+    std::uint64_t channel_count = 0;
+};
+
+// Reused across slabs, so that a pass allocates once rather than once per read.
+struct SlabBuffers {
+    std::vector<float> pixels;
+    std::vector<std::uint8_t> mask;
+};
+
+/**
+ * Read one slab and hand back how to walk it.
+ *
+ * This is what every pass over a cube has in common, whatever order it visits chunks in: ask for
+ * the stored dimensions reversed so the plane arrives untransposed, derive the strides of what
+ * comes back, read the pixels, and -- when the image has a flag the caller did not decline -- read
+ * that too and fold it into the pixels, because a flagged pixel and a NaN pixel mean the same thing
+ * to everything downstream.
+ *
+ * The returned Slab points into `buffers`, so it is valid until the next call with them.
+ */
+Result<Slab> ReadSlab(const SlabSource& source, const PassPlan& plan, const ReadOptions& options,
+                      const SlabRequest& request, SlabBuffers& buffers);
+
 // Samples of `stride` that fall in [begin, end), as a start and a count.
 inline void SampledRange(std::uint64_t begin, std::uint64_t end, std::uint64_t stride, std::uint64_t& start,
                          std::uint64_t& count) {
@@ -154,12 +209,9 @@ template <typename BeforeRead, typename Visit>
 Result<void> RunPass(const SlabSource& source, const PassPlan& plan, const ReadOptions& options,
                      std::uint64_t begin, std::uint64_t end, std::uint64_t& chunks_done,
                      BeforeRead&& before_read, Visit&& visit) {
-    const auto& descriptor = *plan.descriptor;
-    const auto& node = descriptor.id;
-    const auto rank = descriptor.axes.size();
+    const auto& node = plan.descriptor->id;
     const Range spectral = plan.spectral;
-    std::vector<float> pixels;
-    std::vector<std::uint8_t> mask;
+    SlabBuffers buffers;
     std::uint64_t reads_done = 0;
 
     for (std::uint64_t v_begin = 0; v_begin < plan.v_length;) {
@@ -198,63 +250,22 @@ Result<void> RunPass(const SlabSource& source, const PassPlan& plan, const ReadO
             std::uint64_t u_count = 0;
             SampledRange(0, plan.u_length, plan.sample, u_start, u_count);
 
-            ReadRequest read_request;
-            read_request.axes.assign(rank, Range{0, 1, 1});
-            read_request.axes.at(plan.axis_u) = Range{u_start, u_count, plan.sample};
-            read_request.axes.at(plan.axis_v) = Range{v_start, v_count, plan.sample};
-            read_request.axes.at(plan.map.spectral) =
-                Range{spectral.start + (slab_begin * spectral.stride), slab_length, spectral.stride};
-            if (plan.map.has_polarization) {
-                read_request.axes.at(plan.map.polarization) = Range{plan.polarization, 1, 1};
-            }
-            if (plan.map.has_time) {
-                read_request.axes.at(plan.map.time) = Range{plan.time, 1, 1};
+            SlabRequest slab_request;
+            slab_request.u_start = u_start;
+            slab_request.u_count = u_count;
+            slab_request.u_stride = plan.sample;
+            slab_request.v_start = v_start;
+            slab_request.v_count = v_count;
+            slab_request.v_stride = plan.sample;
+            slab_request.channel_begin = slab_begin - begin;
+            slab_request.channel_count = slab_length;
+
+            auto slab = ReadSlab(source, plan, options, slab_request, buffers);
+            if (!slab) {
+                return slab.error();
             }
 
-            auto selection = zarr::BuildSelection(descriptor, read_request);
-            if (!selection) {
-                return selection.error();
-            }
-            // Ask for the stored dimensions reversed, which against a destination whose dimension 0
-            // is fastest is asking for no transpose at all.
-            for (std::size_t i = 0; i < rank; ++i) {
-                selection.value().logical_to_stored.at(i) = rank - 1 - i;
-            }
-
-            std::vector<std::uint64_t> stored_stride(rank, 1);
-            std::uint64_t running = 1;
-            for (std::size_t stored = rank; stored-- > 0;) {
-                stored_stride.at(stored) = running;
-                running *= selection.value().count.at(stored);
-            }
-            Slab slab;
-            slab.first_channel = slab_begin - begin;
-            slab.channel_count = slab_length;
-            slab.stride_u = stored_stride.at(descriptor.axes.at(plan.axis_u).storage_index);
-            slab.stride_v = stored_stride.at(descriptor.axes.at(plan.axis_v).storage_index);
-            slab.stride_z = stored_stride.at(descriptor.axes.at(plan.map.spectral).storage_index);
-            slab.u_count = u_count;
-            slab.v_count = v_count;
-            const auto elements = static_cast<std::size_t>(running);
-
-            pixels.resize(elements);
-            if (auto read = source.ReadPixels(selection.value(), pixels.data(), pixels.size(), options); !read) {
-                return read.error();
-            }
-            if (plan.apply_mask) {
-                mask.resize(elements);
-                if (auto read = source.ReadMask(selection.value(), mask.data(), mask.size(), options); !read) {
-                    return read.error();
-                }
-                for (std::size_t i = 0; i < elements; ++i) {
-                    if (mask[i] == 0) {
-                        pixels[i] = std::numeric_limits<float>::quiet_NaN();
-                    }
-                }
-            }
-            slab.pixels = pixels.data();
-
-            visit(slab);
+            visit(slab.value());
 
             chunks_done += band_chunks * ((slab_length + plan.least_channels - 1) / plan.least_channels);
             slab_begin = slab_end;

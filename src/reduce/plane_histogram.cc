@@ -70,19 +70,6 @@ Result<void> ValidateRequest(const ImageDescriptor& descriptor, const AxisMap& a
 }
 
 
-Result<void> ValidateSpectral(const ImageDescriptor& descriptor, const AxisMap& axes, const Range& spectral) {
-    const auto channels = descriptor.axes.at(axes.spectral).length;
-    // The last selected channel has to fall inside the axis, compared by dividing the room that is
-    // left rather than by multiplying out the span: (count - 1) * stride wraps, and a wrapped span
-    // passes a check it should fail. The pixel selection states the same rule the same way.
-    if (spectral.stride == 0 || spectral.count == 0 || spectral.start >= channels ||
-        spectral.count - 1 > (channels - 1 - spectral.start) / spectral.stride) {
-        return MakeError(ErrorCode::invalid_argument, "The spectral range falls outside the image",
-                         descriptor.id);
-    }
-    return {};
-}
-
 // A histogram whose range grows to fit whatever arrives.
 //
 // Doubling to one side and merging bins in pairs keeps every count: the old range becomes one half
@@ -248,7 +235,7 @@ Result<void> ComputeHistogram(const Store& store, const ImageDescriptor& descrip
     if (auto valid = ValidateRequest(descriptor, map, request); !valid) {
         return valid.error();
     }
-    if (auto valid = ValidateSpectral(descriptor, map, request.spectral); !valid) {
+    if (auto valid = ValidateSpectralRange(descriptor, map, request.spectral); !valid) {
         return valid.error();
     }
 
@@ -257,19 +244,10 @@ Result<void> ComputeHistogram(const Store& store, const ImageDescriptor& descrip
                                options);
     const StoreSlabSource source(store, descriptor);
 
-    // Emit granularity, as in the reduction: without a hint a block costs one read budget, so it is
-    // as often as the walk can report without making any read smaller.
+    // A whole plane, so the layer the emit budget is spent against is the plan's own.
     const std::size_t bytes_per_channel = static_cast<std::size_t>(request.bins) * sizeof(std::uint64_t);
-    const std::uint64_t budget_channels =
-        std::max<std::uint64_t>(1, kSpectralEmitBudgetBytes / std::max<std::size_t>(1, bytes_per_channel));
-    const std::uint64_t block_chunks =
-        std::min(spectral.count, std::max<std::uint64_t>(1, plan.slab_budget_bytes /
-                                                                std::max<std::uint64_t>(1, plan.layer_chunks *
-                                                                                               plan.chunk_bytes)));
     const std::uint64_t wanted_channels =
-        std::min({request.emit_every_channels == 0 ? block_chunks * plan.least_channels
-                                                   : static_cast<std::uint64_t>(request.emit_every_channels),
-                  budget_channels, spectral.count});
+        PlanEmitChannels(plan, plan.layer_chunks, bytes_per_channel, request.emit_every_channels);
 
     // The caller's own sequence: divide in double, narrow the width, compare against the narrowed
     // bounds. Doing any one of those in the other type moves pixels across bin edges.
@@ -431,7 +409,7 @@ Result<CubeHistogramResult> ComputeCubeHistogram(const Store& store, const Image
     if (auto valid = ValidateRequest(descriptor, map, shape); !valid) {
         return valid.error();
     }
-    if (auto valid = ValidateSpectral(descriptor, map, request.spectral); !valid) {
+    if (auto valid = ValidateSpectralRange(descriptor, map, request.spectral); !valid) {
         return valid.error();
     }
 

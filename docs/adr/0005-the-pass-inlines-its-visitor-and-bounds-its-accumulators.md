@@ -1,4 +1,4 @@
-# The pass inlines its visitor, and accumulates once per worker
+# The pass inlines its visitor, and has one accumulator per task
 
 A **pass** is one ordered visit to every chunk an image read covers, shared by every reduction that
 wants those pixels. Two things about its shape look like accidents of implementation and are not,
@@ -26,17 +26,29 @@ change was nearly discarded as useless."
 `WorkPool::Run` does take a `std::function`, and that is not in tension with this: it is paid once
 per task, outside the pixel loop, not once per slab inside it.
 
-## Accumulators are keyed by worker, not by task
+## There is one accumulator per task, and never more tasks than accumulators
 
-A provisional histogram is half a megabyte of scattered writes. Keyed by task it is dragged from one
-core's cache to another's once per plane. Measured on a 512x512x7776 ASKAP cube, warm, against 8.8 s
-for not splitting at all: four workers 4.9 s, eight 8.7 s, twenty-eight 16.5 s. Keying by task
-measured slower than not splitting at all, which is why the cap is the memory budget divided by what
-one accumulator costs, and why `Accumulator` is `alignas(64)` — two accumulators sharing a cache
-line trade it between cores once per pixel.
+A provisional histogram is half a megabyte of scattered writes, and every worker streams its share
+of the pixels through the same cache. Past a couple of megabytes of them the pixels evict the
+histograms and the pass gets slower the more workers it uses. Measured on a 512x512x7776 ASKAP cube,
+warm, against 8.8 s for not splitting at all: four workers 4.9 s, eight 8.7 s, twenty-eight 16.5 s.
 
-This is why the pass hands the visitor a worker index rather than a task index, and why
-`WorkPool::Run` passes both.
+So what bounds the split is cache rather than the pool: the cap is a memory budget divided by what
+one accumulator costs, which at the default resolution comes out at four. `Accumulator` is
+`alignas(64)` because `Add` writes the range and a bin on every pixel, and two accumulators sharing
+a cache line would trade it between cores once per pixel.
+
+The accumulator a body writes is chosen by **task** index, and it is safe because the split never
+asks for more tasks than there are accumulators, so no two bodies ever hold the same one at once.
+
+This is worth stating precisely because the pool offers the other choice and nothing uses it.
+`WorkPool::Run` hands the body a worker index as well as a task index, exactly so that "a caller
+that needs private accumulation can address one slot per worker without a map or a lock" -- and all
+three reduction call sites take `(std::size_t task, std::size_t)` and ignore it. Since tasks are
+claimed from a shared counter rather than divided up front, task n is run by a different thread on
+each slab, so a task-keyed accumulator does migrate between cores as the pass advances. Whether
+keying by worker instead would recover anything is unmeasured, and is not settled here; what is
+settled is that the two are different and that the code does the first.
 
 ## Consequences
 
@@ -52,3 +64,7 @@ what stands in for a regression test, and it is the only thing that does.
 
 Neither decision reaches the public interface. `src/reduce/` is entirely
 `carta::zarr::internal`, and only `include/carta-zarr/` is installed.
+
+Collapsing the three walks into one pass preserves the task keying rather than settling it. Changing
+it in the same step would move a number the collapse is being measured by, and there is no
+measurement either way to move it toward.

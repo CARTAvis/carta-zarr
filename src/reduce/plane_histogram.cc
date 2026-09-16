@@ -647,11 +647,15 @@ Result<CubeHistogramResult> ComputeCubeHistogram(const Store& store, const Image
         std::max<std::uint64_t>(1, walk.layer_chunks * ((request.spectral.count + walk.least_channels - 1) /
                                                         walk.least_channels));
 
-    // One accumulator per worker -- not per task. Tasks are claimed from a shared counter, so task
-    // n is run by a different thread on every plane, and a provisional histogram is half a megabyte
-    // of scattered writes: keyed by task it would be dragged from one core's cache to another's
-    // once per plane, which measured slower than not splitting at all. Keyed by the worker index
-    // the pool hands out, each one stays on the thread that owns it for the whole walk.
+    // One accumulator per task, which is safe because the split below never asks for more tasks than
+    // there are accumulators, so no two bodies ever hold the same one at once. See the split itself
+    // for why the cap that guarantees it is a cache budget rather than the pool's size.
+    //
+    // Tasks are claimed from a shared counter rather than divided up front, so task n is run by a
+    // different thread on each slab and an accumulator does move between cores as the pass
+    // advances. The pool hands the body a worker index that would avoid that, and nothing here uses
+    // it; whether it is worth anything is unmeasured. ADR 0005 records the state rather than
+    // pretending it is settled.
     //
     // Padded to a cache line because Add writes the range and a bin on every pixel, and two
     // accumulators sharing a line would trade it between cores a billion times over a cube this

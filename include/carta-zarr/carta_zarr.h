@@ -14,6 +14,7 @@
 #include "carta-zarr/result.h"
 
 #include <chrono>
+#include <cstdint>
 #include <memory>
 
 namespace carta::zarr {
@@ -54,13 +55,17 @@ public:
     // Reads a densely packed result in logical axis order, axis 0 fastest-varying. Returns the
     // number of elements written. Safe to call concurrently on one handle. On failure, the
     // destination may be unchanged, partially written, or fully written; callers must discard it.
-    Result<std::size_t> Read(const ReadRequest& request, MutableBufferView destination) const;
-    Result<std::size_t> Read(const ReadRequest& request, MutableBufferView destination,
+    //
+    // float is the only output this library produces. It is said in the destination's type rather
+    // than asked for in the request, because a request that could name a type the buffer was not
+    // shaped for is a mistake worth making unspellable.
+    Result<std::size_t> Read(const ReadRequest& request, BufferView<float> destination) const;
+    Result<std::size_t> Read(const ReadRequest& request, BufferView<float> destination,
                              const ReadOptions& options) const;
 
     // Reads this image's pixel mask over the same region, one byte per pixel, true meaning a good
     // pixel. Reports not_found when the image has no mask.
-    Result<std::size_t> ReadPixelMask(const ReadRequest& request, MutableBufferView destination) const;
+    Result<std::size_t> ReadPixelMask(const ReadRequest& request, BufferView<std::uint8_t> destination) const;
 
     // Reduces every region over the same channels in one pass over the pixels, handing results to
     // the sink block by block.

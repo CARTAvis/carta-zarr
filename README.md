@@ -59,7 +59,7 @@ auto image = dataset.value().OpenImage(*dataset.value().descriptor().default_ima
 carta::zarr::ReadRequest request;                        // one Range per logical axis
 request.axes = {{0, 512, 1}, {0, 512, 1}, {0, 1, 1}, {0, 1, 1}, {0, 1, 1}};
 std::vector<float> pixels(512 * 512);
-auto written = image.value().Read(request, {pixels.data(), pixels.size() * sizeof(float)});
+auto written = image.value().Read(request, {pixels.data(), pixels.size()});
 ```
 
 `carta::zarr::IsXradioImage(path)` answers the "can this library open it?" question on its own, and

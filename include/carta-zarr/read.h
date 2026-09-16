@@ -28,7 +28,6 @@ struct Range {
 struct ReadRequest {
     // One range per ImageDescriptor::axes entry, in the same order.
     std::vector<Range> axes;
-    DataType output_type = DataType::float32;
 };
 
 // What a read should do with the decoded-chunk cache.
@@ -93,9 +92,18 @@ struct ReadOptions {
     CachePolicy cache_policy = CachePolicy::inherit;
 };
 
-struct MutableBufferView {
-    void* data = nullptr;
-    std::size_t byte_size = 0;
+// Somewhere for a read to write, counted in elements rather than in bytes.
+//
+// Typed because the element type is not the caller's to choose: pixels arrive as float, and a pixel
+// mask as one byte per pixel. An untyped view with a byte count could express neither fact, so the
+// same field meant "bytes" at one entry point and "elements" at the other, and a buffer of the
+// wrong kind was a run-time error at best.
+//
+// The library never holds one past the call it was passed to.
+template <typename T>
+struct BufferView {
+    T* data = nullptr;
+    std::size_t size = 0;  // elements, not bytes
 };
 
 }  // namespace carta::zarr

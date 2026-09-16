@@ -138,7 +138,7 @@ int main(int argc, char** argv) {
             elements *= request.axes.at(i).count;
         }
         std::vector<float> destination(elements);
-        carta::zarr::MutableBufferView view{destination.data(), destination.size() * sizeof(float)};
+        carta::zarr::BufferView<float> view{destination.data(), destination.size()};
         const auto outcome = sky.Read(request, view);
         return outcome ? std::string{} : outcome.error().message;
     });

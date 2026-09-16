@@ -116,7 +116,7 @@ carta::zarr::ReadOptions Unmasked() {
 void TestWholeImage(const carta::zarr::Image& sky) {
     const auto request = WholeImage(sky.descriptor());
     std::vector<float> pixels(kL * kM * kFrequency * kPolarization * kTime);
-    const auto read = sky.Read(request, {pixels.data(), pixels.size() * sizeof(float)}, Unmasked());
+    const auto read = sky.Read(request, {pixels.data(), pixels.size()}, Unmasked());
     Require(static_cast<bool>(read), "reading the whole image failed");
     Require(read.value() == pixels.size(), "the whole-image read reported the wrong element count");
 
@@ -150,7 +150,7 @@ void TestSubsetAndStride(const carta::zarr::Image& sky) {
     carta::zarr::ReadRequest request;
     request.axes = {{0, 2, 2}, {1, 2, 2}, {0, 1, 1}, {1, 1, 1}, {0, 1, 1}};
     std::vector<float> pixels(4);
-    const auto read = sky.Read(request, {pixels.data(), pixels.size() * sizeof(float)}, Unmasked());
+    const auto read = sky.Read(request, {pixels.data(), pixels.size()}, Unmasked());
     Require(static_cast<bool>(read), "a strided read failed");
     Require(read.value() == pixels.size(), "a strided read reported the wrong element count");
 
@@ -192,7 +192,7 @@ void TestMaskFusion(const carta::zarr::Image& sky) {
     const auto request = WholeImage(sky.descriptor());
     std::vector<float> pixels(kL * kM * kFrequency * kPolarization * kTime);
     // Masking is the default, so this is the plain two-argument read.
-    const auto read = sky.Read(request, {pixels.data(), pixels.size() * sizeof(float)});
+    const auto read = sky.Read(request, {pixels.data(), pixels.size()});
     Require(static_cast<bool>(read), "a masked read failed");
 
     for (std::uint64_t p = 0; p < kPolarization; ++p) {
@@ -215,7 +215,7 @@ void TestMaskFusion(const carta::zarr::Image& sky) {
 void TestRejectedRequests(const carta::zarr::Image& sky) {
     const auto whole = WholeImage(sky.descriptor());
     std::vector<float> pixels(kL * kM * kFrequency * kPolarization * kTime);
-    const carta::zarr::MutableBufferView buffer{pixels.data(), pixels.size() * sizeof(float)};
+    const carta::zarr::BufferView<float> buffer{pixels.data(), pixels.size()};
 
     const auto expect_rejected = [&](const carta::zarr::ReadRequest& request, const std::string& what) {
         const auto read = sky.Read(request, buffer);
@@ -258,7 +258,7 @@ void TestRejectedRequests(const carta::zarr::Image& sky) {
 
     // A buffer that cannot hold the result is caught before any bytes are read.
     std::vector<float> small(2);
-    const auto short_buffer = sky.Read(whole, {small.data(), small.size() * sizeof(float)});
+    const auto short_buffer = sky.Read(whole, {small.data(), small.size()});
     Require(!short_buffer, "a destination that is too small should be rejected");
     Require(short_buffer.error().code == carta::zarr::ErrorCode::invalid_argument,
             "a short destination is an invalid argument");
@@ -271,7 +271,7 @@ void TestReadControls(const carta::zarr::Image& sky) {
 
     carta::zarr::ReadOptions cancelled;
     cancelled.cancellation_requested = [] { return true; };
-    const auto cancelled_read = sky.Read(request, {pixels.data(), pixels.size() * sizeof(float)}, cancelled);
+    const auto cancelled_read = sky.Read(request, {pixels.data(), pixels.size()}, cancelled);
     Require(!cancelled_read && cancelled_read.error().code == carta::zarr::ErrorCode::cancelled,
             "a cancelled read was not rejected");
     Require(std::all_of(pixels.begin(), pixels.end(), [](float value) { return value == 123.0F; }),
@@ -279,7 +279,7 @@ void TestReadControls(const carta::zarr::Image& sky) {
 
     carta::zarr::ReadOptions expired;
     expired.deadline = std::chrono::steady_clock::now() - std::chrono::milliseconds(1);
-    const auto expired_read = sky.Read(request, {pixels.data(), pixels.size() * sizeof(float)}, expired);
+    const auto expired_read = sky.Read(request, {pixels.data(), pixels.size()}, expired);
     Require(!expired_read && expired_read.error().code == carta::zarr::ErrorCode::cancelled,
             "a read past its deadline was not rejected");
 
@@ -288,7 +288,7 @@ void TestReadControls(const carta::zarr::Image& sky) {
     // how much memory the read could have and did not care to watch was told no, which is the one
     // thing the ceiling was not asking for.
     std::vector<float> reference(elements, 0.0F);
-    const auto reference_read = sky.Read(request, {reference.data(), reference.size() * sizeof(float)});
+    const auto reference_read = sky.Read(request, {reference.data(), reference.size()});
     Require(static_cast<bool>(reference_read), "the unrestricted read this compares against failed");
 
     carta::zarr::ReadOptions budgeted;
@@ -297,7 +297,7 @@ void TestReadControls(const carta::zarr::Image& sky) {
     budgeted.temporary_memory_limit_bytes = elements - 1;
     std::vector<float> budgeted_pixels(elements, 0.0F);
     const auto budgeted_read =
-        sky.Read(request, {budgeted_pixels.data(), budgeted_pixels.size() * sizeof(float)}, budgeted);
+        sky.Read(request, {budgeted_pixels.data(), budgeted_pixels.size()}, budgeted);
     Require(static_cast<bool>(budgeted_read),
             "a read with a memory ceiling was refused instead of split" +
                 (budgeted_read ? std::string{} : ": " + budgeted_read.error().message));
@@ -312,7 +312,7 @@ void TestReadControls(const carta::zarr::Image& sky) {
     // anyway, so below that there is nothing left to give.
     carta::zarr::ReadOptions unreachable;
     unreachable.temporary_memory_limit_bytes = 1;
-    const auto refused = sky.Read(request, {pixels.data(), pixels.size() * sizeof(float)}, unreachable);
+    const auto refused = sky.Read(request, {pixels.data(), pixels.size()}, unreachable);
     Require(!refused && refused.error().code == carta::zarr::ErrorCode::buffer_too_small,
             "a masked read that cannot be split under its ceiling was not rejected");
     Require(std::all_of(pixels.begin(), pixels.end(), [](float value) { return value == 123.0F; }),
@@ -334,7 +334,7 @@ void TestConcurrentReads(const carta::zarr::Image& sky) {
         threads.emplace_back([&] {
             for (int repeat = 0; repeat < 4; ++repeat) {
                 std::vector<float> pixels(elements);
-                const auto read = sky.Read(request, {pixels.data(), pixels.size() * sizeof(float)}, Unmasked());
+                const auto read = sky.Read(request, {pixels.data(), pixels.size()}, Unmasked());
                 if (!read || read.value() != elements) {
                     ++failures;
                     return;
@@ -370,7 +370,7 @@ void TestProgressiveRead(const carta::zarr::Image& sky) {
     const std::size_t total = kL * kM * kFrequency * kPolarization * kTime;
 
     std::vector<float> expected(total);
-    Require(static_cast<bool>(sky.Read(request, {expected.data(), expected.size() * sizeof(float)}, Unmasked())),
+    Require(static_cast<bool>(sky.Read(request, {expected.data(), expected.size()}, Unmasked())),
             "the reference read failed");
 
     std::vector<float> pixels(total, -1.0f);
@@ -393,7 +393,7 @@ void TestProgressiveRead(const carta::zarr::Image& sky) {
         reported.push_back(written);
         return true;
     };
-    const auto read = sky.Read(request, {pixels.data(), pixels.size() * sizeof(float)}, options);
+    const auto read = sky.Read(request, {pixels.data(), pixels.size()}, options);
     Require(static_cast<bool>(read), "a progressive read failed");
     Require(read.value() == total, "a progressive read reported the wrong element count");
     Require(!reported.empty() && reported.back() == total, "the last progress report should cover everything");
@@ -409,7 +409,7 @@ void TestProgressiveRead(const carta::zarr::Image& sky) {
     // The same read with the pixel mask applied, because the mask buffer and the NaN it writes are
     // per piece too, and a wrong offset there would corrupt every piece but the first.
     std::vector<float> masked_expected(total);
-    Require(static_cast<bool>(sky.Read(request, {masked_expected.data(), masked_expected.size() * sizeof(float)})),
+    Require(static_cast<bool>(sky.Read(request, {masked_expected.data(), masked_expected.size()})),
             "the masked reference read failed");
     std::vector<float> masked(total, -1.0f);
     carta::zarr::ReadOptions masked_options;
@@ -419,7 +419,7 @@ void TestProgressiveRead(const carta::zarr::Image& sky) {
         ++masked_pieces;
         return true;
     };
-    Require(static_cast<bool>(sky.Read(request, {masked.data(), masked.size() * sizeof(float)}, masked_options)),
+    Require(static_cast<bool>(sky.Read(request, {masked.data(), masked.size()}, masked_options)),
             "a progressive masked read failed");
     Require(masked_pieces > 1, "the masked read should have been split too");
     for (std::size_t i = 0; i < total; ++i) {
@@ -436,7 +436,7 @@ void TestProgressiveRead(const carta::zarr::Image& sky) {
         ++calls;
         return false;
     };
-    const auto cancelled = sky.Read(request, {abandoned.data(), abandoned.size() * sizeof(float)}, cancelling);
+    const auto cancelled = sky.Read(request, {abandoned.data(), abandoned.size()}, cancelling);
     Require(!cancelled, "a progress callback returning false should cancel the read");
     Require(cancelled.error().code == carta::zarr::ErrorCode::cancelled, "cancelling should report cancelled");
     Require(calls == 1, "a cancelled read should stop at the piece that refused");
@@ -479,7 +479,7 @@ void TestAnOpenImageOutlivesTheWorkingDirectory(const char* fixture) {
     const auto& sky = image.value();
     std::vector<float> pixels(static_cast<std::size_t>(kL * kM * kFrequency * kPolarization * kTime), 0.0F);
     const auto read =
-        sky.Read(WholeImage(sky.descriptor()), {pixels.data(), pixels.size() * sizeof(float)}, Unmasked());
+        sky.Read(WholeImage(sky.descriptor()), {pixels.data(), pixels.size()}, Unmasked());
     Require(static_cast<bool>(read), "an image opened relatively could not be read from another directory" +
                                          (read ? std::string{} : ": " + read.error().message));
     Require(pixels.at(LogicalOffset(1, 2, 1, 2)) == ExpectedValue(1, 2, 1, 2, 0),

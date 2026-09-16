@@ -344,19 +344,19 @@ struct Range {
 
 struct ReadRequest {
     std::vector<Range> axes; // same order and rank as ImageDescriptor::axes
-    DataType output_type = DataType::float32;
 };
 
-struct MutableBufferView {
-    void* data;
-    std::size_t byte_size;
+template <typename T>
+struct BufferView {
+    T* data;
+    std::size_t size; // elements, not bytes
 };
 
 class Image final {
 public:
     const ImageDescriptor& descriptor() const noexcept;
     Result<std::size_t> Read(const ReadRequest& request,
-                             MutableBufferView destination) const;
+                             BufferView<float> destination) const;
     Result<std::vector<Beam>> ReadBeams() const;
 };
 
@@ -569,7 +569,7 @@ The main architecture decisions are resolved. These implementation details still
 1. Which exact XRADIO v1.2 patch version or source commit is the fixture and behavior baseline?
 2. Besides generated fixtures, which real XRADIO v1.2 `SKY` datasets should be kept as integration/conformance samples?
 3. Must one image handle support simultaneous reads from multiple backend worker threads? Is cancellation required for long reads?
-4. When pixel reading begins, should `carta-zarr` expose native output types as well as `float32`, or implement only the conversion needed by CARTA first?
+4. ~~When pixel reading begins, should `carta-zarr` expose native output types as well as `float32`, or implement only the conversion needed by CARTA first?~~ **Answered: `float32` only.** `ReadRequest::output_type` existed and rejected every value but `float32`, which is a knob whose only setting is an error. The restriction now lives in the destination's type -- `BufferView<float>` -- where a caller cannot spell the combination that used to fail. Adding `double` later is an overload taking `BufferView<double>`, not a field: the buffer and the type it holds have to agree, and only the type system enforces that.
 5. For `time > 1`, should the backend initially reject the dataset or select a time plane through a new CARTA-facing option? This does not change library acceptance but affects integration behavior.
 6. Is support for additional schemas expected to remain built-in, or is a public third-party schema plugin mechanism likely to be needed later?
 

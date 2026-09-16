@@ -262,28 +262,23 @@ const ChunkGeometry& Image::chunk_geometry() const noexcept {
     return _impl ? _impl->geometry : empty_geometry;
 }
 
-Result<std::size_t> Image::Read(const ReadRequest& request, MutableBufferView destination) const {
+Result<std::size_t> Image::Read(const ReadRequest& request, BufferView<float> destination) const {
     return Read(request, destination, ReadOptions{});
 }
 
-Result<std::size_t> Image::Read(const ReadRequest& request, MutableBufferView destination,
+Result<std::size_t> Image::Read(const ReadRequest& request, BufferView<float> destination,
                                 const ReadOptions& options) const {
     const std::string node = _impl ? _impl->descriptor.id : std::string{};
     return Guarded(ErrorCode::io_error, node, [&]() -> Result<std::size_t> {
         if (!_impl) {
             return MakeError(ErrorCode::invalid_argument, "Image handle is empty");
         }
-        if (request.output_type != DataType::float32) {
-            return MakeError(ErrorCode::unsupported_data_type, "Only float32 output is implemented",
-                             _impl->descriptor.id);
-        }
-
         auto selection = internal::zarr::BuildSelection(_impl->descriptor, request);
         if (!selection) {
             return selection.error();
         }
         const auto elements = internal::zarr::SelectionElementCount(selection.value());
-        if (elements == 0 || elements > destination.byte_size / sizeof(float)) {
+        if (elements == 0 || elements > destination.size) {
             return MakeError(ErrorCode::invalid_argument, "Destination buffer is too small for the request",
                              _impl->descriptor.id);
         }
@@ -340,7 +335,7 @@ Result<std::size_t> Image::Read(const ReadRequest& request, MutableBufferView de
                 ElementsPerPiece(_impl->descriptor, request, _impl->geometry, axis, budget, apply_mask);
         }
 
-        auto* pixels = static_cast<float*>(destination.data);
+        auto* pixels = destination.data;
         std::vector<std::uint8_t> mask;
 
         for (std::uint64_t begin = 0; begin < slab_total;) {
@@ -403,7 +398,7 @@ Result<std::size_t> Image::Read(const ReadRequest& request, MutableBufferView de
     });
 }
 
-Result<std::size_t> Image::ReadPixelMask(const ReadRequest& request, MutableBufferView destination) const {
+Result<std::size_t> Image::ReadPixelMask(const ReadRequest& request, BufferView<std::uint8_t> destination) const {
     const std::string node = _impl ? _impl->descriptor.id : std::string{};
     return Guarded(ErrorCode::io_error, node, [&]() -> Result<std::size_t> {
         if (!_impl) {
@@ -418,14 +413,14 @@ Result<std::size_t> Image::ReadPixelMask(const ReadRequest& request, MutableBuff
             return selection.error();
         }
         const auto elements = internal::zarr::SelectionElementCount(selection.value());
-        if (elements == 0 || elements > destination.byte_size) {
+        if (elements == 0 || elements > destination.size) {
             return MakeError(ErrorCode::invalid_argument, "Destination buffer is too small for the request",
                              _impl->descriptor.id);
         }
 
         auto read = _impl->store->ReadPixelMaskBytes(_impl->descriptor.pixel_mask_id, selection.value(),
-                                                     static_cast<std::uint8_t*>(destination.data),
-                                                     static_cast<std::size_t>(elements), ReadOptions{});
+                                                     destination.data, static_cast<std::size_t>(elements),
+                                                     ReadOptions{});
         if (!read) {
             return read.error();
         }

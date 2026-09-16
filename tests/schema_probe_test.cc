@@ -220,6 +220,38 @@ void TestNonMatchAndInvalid(const std::filesystem::path& root) {
             "Probe did not report invalid XRADIO-like metadata");
 }
 
+// A store Dataset::Open refuses must say why it refused. The probe has already worked the reason
+// out -- often down to the attribute -- and the consumer puts this message in front of whoever
+// picked the file, so answering "not a supported dataset" spends a probe and reports nothing.
+void TestOpenSaysWhyItRefused(const std::filesystem::path& root) {
+    const auto context = carta::zarr::Context::Create();
+
+    // Zarr that no built-in profile claims: nothing is wrong with it, so there is no diagnostic to
+    // pass on and the message has to stand on its own.
+    const auto unclaimed = root / "unclaimed";
+    Write(unclaimed / "zarr.json", RootMetadata());
+    Write(unclaimed / "OTHER" / "zarr.json", NumericArray("[2]", "[\"x\"]"));
+    const auto not_ours = carta::zarr::Dataset::Open(context.value(), unclaimed.string());
+    Require(!not_ours && not_ours.error().code == ErrorCode::unsupported_schema,
+            "an unclaimed Zarr store was not reported as an unsupported schema");
+    Require(!not_ours.error().message.empty(), "an unclaimed Zarr store was refused without a message");
+
+    // A store this profile claims and then finds malformed. Here the probe does have something to
+    // say, and it is what the caller must be told.
+    const auto malformed = root / "malformed";
+    CreateValidStore(malformed);
+    std::filesystem::remove(malformed / "time" / "zarr.json");
+    const auto probe = carta::zarr::Probe(malformed.string());
+    Require(probe.kind == ProbeKind::invalid_dataset && !probe.diagnostics.empty(),
+            "the malformed store did not probe as invalid with a diagnostic");
+    const auto opened = carta::zarr::Dataset::Open(context.value(), malformed.string());
+    Require(!opened && opened.error().code == ErrorCode::invalid_metadata,
+            "a malformed store was not reported as invalid metadata");
+    Require(opened.error().message == probe.diagnostics.front().message,
+            "Dataset::Open replaced the probe's diagnostic with a message of its own: " +
+                opened.error().message);
+}
+
 void TestMissingAndUnsupported(const std::filesystem::path& root) {
     const auto missing = carta::zarr::IsXradioImage((root / "missing").string());
     Require(!missing && missing.error().code == ErrorCode::not_found, "missing store error category changed");
@@ -923,6 +955,7 @@ int main() {
         TestTimeGreaterThanOne(root / "time-two");
         TestNonMatchAndInvalid(root / "classification");
         TestMissingAndUnsupported(root);
+        TestOpenSaysWhyItRefused(root / "refusal");
         TestCoordinateCompletion(root / "coordinates");
         TestNonDoubleCoordinates(root / "float32-coordinates");
         TestAmbiguousPixelMask(root / "ambiguous-mask");

@@ -13,6 +13,8 @@
 
 #include "reduce/pass.h"
 
+#include "pixel_mask.h"
+
 namespace carta::zarr::internal {
 
 Result<Slab> ReadSlab(const SlabSource& source, const PassPlan& plan, const ReadOptions& options,
@@ -68,14 +70,9 @@ Result<Slab> ReadSlab(const SlabSource& source, const PassPlan& plan, const Read
             !read) {
             return read.error();
         }
-        // Fold the flag into the pixels rather than carry it into the inner loop: a flagged pixel
-        // and a NaN pixel mean the same thing to every statistic here, and this is the rule
-        // Image::Read already applies.
-        for (std::size_t i = 0; i < elements; ++i) {
-            if (buffers.mask[i] == 0) {
-                buffers.pixels[i] = std::numeric_limits<float>::quiet_NaN();
-            }
-        }
+        // Folded into the pixels rather than carried into the inner loop, because a flagged pixel
+        // and a NaN pixel mean the same thing to every statistic here.
+        ApplyPixelMask(buffers.pixels.data(), buffers.mask.data(), elements);
     }
 
     Slab slab;

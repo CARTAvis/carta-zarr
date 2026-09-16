@@ -7,6 +7,7 @@
 #include "carta-zarr/carta_zarr.h"
 
 #include "chunk_blocks.h"
+#include "pixel_mask.h"
 #include "reduce/plane_histogram.h"
 #include "reduce/spectral_reduce.h"
 #include "reduce/store_slab_source.h"
@@ -48,12 +49,12 @@ auto Guarded(ErrorCode code, std::string node, Function&& function) -> decltype(
     }
 }
 
-std::string SchemaErrorMessage(const SchemaProbeResult& result) {
-    std::string message = "The requested schema did not match";
-    if (!result.diagnostics.empty()) {
-        message = result.diagnostics.front().message;
-    }
-    return message;
+// A probe that rejects a store has already worked out why, often down to the attribute, and a
+// consumer shows whatever comes back here to whoever picked the file. Reporting "not a supported
+// dataset" instead throws that away and names a schema profile the store may have nothing to do
+// with. The fallback is for the case the probe genuinely had nothing to say.
+std::string RejectionMessage(const std::vector<Diagnostic>& diagnostics, std::string fallback) {
+    return diagnostics.empty() ? std::move(fallback) : diagnostics.front().message;
 }
 
 bool TryComputeDirectorySize(std::string_view location, std::chrono::milliseconds timeout, std::uint64_t& size) {
@@ -140,18 +141,21 @@ Result<Context> Context::Create(const OpenOptions& options) {
 
 class Image::Impl {
 public:
-    Impl(std::shared_ptr<Context::Impl> context, std::string location, std::string schema_id,
+    Impl(std::shared_ptr<Context::Impl> context, std::string location, internal::SchemaProfile profile,
          std::shared_ptr<internal::Store> store, ImageDescriptor descriptor, ChunkGeometry geometry)
         : context(std::move(context)),
           location(std::move(location)),
-          schema_id(std::move(schema_id)),
+          profile(profile),
           store(std::move(store)),
           descriptor(std::move(descriptor)),
           geometry(std::move(geometry)) {}
 
     std::shared_ptr<Context::Impl> context;
     std::string location;
-    std::string schema_id;
+    // The profile that described this image, rather than the name of one to look up again. It is a
+    // pointer into a table that outlives every store, so holding it costs nothing and removes an
+    // error path that could only fire if a descriptor named a profile the library does not have.
+    internal::SchemaProfile profile;
     std::shared_ptr<internal::Store> store;
     ImageDescriptor descriptor;
     ChunkGeometry geometry;
@@ -369,12 +373,7 @@ Result<std::size_t> Image::Read(const ReadRequest& request, MutableBufferView de
                 return read.error();
             }
             if (apply_mask) {
-                // XRADIO stores flags with true meaning a good pixel.
-                for (std::size_t i = 0; i < piece_elements; ++i) {
-                    if (mask[i] == 0) {
-                        piece_pixels[i] = std::numeric_limits<float>::quiet_NaN();
-                    }
-                }
+                internal::ApplyPixelMask(piece_pixels, mask.data(), piece_elements);
             }
 
             begin = end;
@@ -478,26 +477,26 @@ Result<std::vector<Beam>> Image::ReadBeams() const {
         if (!_impl->store) {
             return MakeError(ErrorCode::invalid_argument, "Image store is unavailable");
         }
-        auto profile = internal::SchemaProfile::For(_impl->schema_id);
-        if (!profile) {
-            return profile.error();
-        }
-        return profile.value().ReadBeams(*_impl->store, _impl->descriptor.id);
+        return _impl->profile.ReadBeams(*_impl->store, _impl->descriptor.id);
     });
 }
 
 class Dataset::Impl {
 public:
     Impl(std::shared_ptr<Context::Impl> context, std::string location, DatasetDescriptor descriptor,
-         internal::Store store)
+         internal::SchemaProfile profile, internal::Store store)
         : context(std::move(context)),
           location(std::move(location)),
           descriptor(std::move(descriptor)),
+          profile(profile),
           store(std::make_shared<internal::Store>(std::move(store))) {}
 
     std::shared_ptr<Context::Impl> context;
     std::string location;
     DatasetDescriptor descriptor;
+    // The profile the probe matched. descriptor.schema_id names it for the consumer; this is the
+    // one the library asks, resolved where the match happened rather than at each use.
+    internal::SchemaProfile profile;
     std::shared_ptr<internal::Store> store;
     mutable std::mutex mutex;
     mutable std::unordered_map<std::string, ImageDescriptor> image_descriptors;
@@ -527,12 +526,18 @@ Result<Dataset> Dataset::Open(const Context& context, std::string_view location)
         if (probe.kind != ProbeKind::supported_dataset) {
             const ErrorCode code =
                 probe.kind == ProbeKind::invalid_dataset ? ErrorCode::invalid_metadata : ErrorCode::unsupported_schema;
-            return MakeError(code, "The Zarr store is not a supported XRADIO image dataset", std::string(location));
+            return MakeError(
+                code, RejectionMessage(probe.diagnostics, "No built-in schema profile matched the Zarr store"),
+                std::string(location));
         }
 
         if (probe.images.empty()) {
             return MakeError(ErrorCode::invalid_metadata, "Supported schema has no image variables",
                              std::string(location));
+        }
+        auto profile = internal::SchemaProfile::For(probe.schema_id);
+        if (!profile) {
+            return profile.error();
         }
         DatasetDescriptor descriptor;
         descriptor.schema_id = probe.schema_id;
@@ -541,7 +546,7 @@ Result<Dataset> Dataset::Open(const Context& context, std::string_view location)
         descriptor.default_image_id = probe.default_image_id;
         descriptor.diagnostics = probe.diagnostics;
         return Dataset{std::make_shared<Impl>(context._impl, std::string(location), std::move(descriptor),
-                                              std::move(store_result.value()))};
+                                              profile.value(), std::move(store_result.value()))};
     } catch (const std::exception& error) {
         return MakeError(ErrorCode::invalid_metadata, error.what(), std::string(location));
     }
@@ -594,19 +599,14 @@ Result<Image> Dataset::OpenImage(std::string_view image_id) const {
             // The descriptor already carries the stored layout; the geometry is that layout permuted
             // into logical order, so it is derived here rather than read again.
             const StorageLayout layout = descriptor.storage ? *descriptor.storage : StorageLayout{};
-            return Image{std::make_shared<Image::Impl>(_impl->context, _impl->location, _impl->descriptor.schema_id,
-                                                       _impl->store, descriptor,
-                                                       BuildChunkGeometry(descriptor, layout))};
+            return Image{std::make_shared<Image::Impl>(_impl->context, _impl->location, _impl->profile, _impl->store,
+                                                       descriptor, BuildChunkGeometry(descriptor, layout))};
         };
         const auto cached = _impl->image_descriptors.find(image_name);
         if (cached != _impl->image_descriptors.end()) {
             return make_image(cached->second);
         }
-        auto profile = internal::SchemaProfile::For(_impl->descriptor.schema_id);
-        if (!profile) {
-            return profile.error();
-        }
-        auto image_descriptor = profile.value().DescribeVerified(*_impl->store, image_id);
+        auto image_descriptor = _impl->profile.DescribeVerified(*_impl->store, image_id);
         if (!image_descriptor) {
             return image_descriptor.error();
         }
@@ -673,7 +673,9 @@ Result<bool> IsXradioImage(std::string_view location) {
         return true;
     }
     if (result.value().kind == SchemaMatchKind::invalid) {
-        return MakeError(ErrorCode::invalid_metadata, SchemaErrorMessage(result.value()), std::string(location));
+        return MakeError(ErrorCode::invalid_metadata,
+                         RejectionMessage(result.value().diagnostics, "The requested schema did not match"),
+                         std::string(location));
     }
     return false;
 }

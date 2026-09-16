@@ -86,6 +86,10 @@ enum class AxisRole {
     other,
 };
 
+// The logical order the XRADIO image profile reports, which is the order a descriptor's axes and
+// every request's ranges are in. Named for that profile rather than for the library because the
+// order is the profile's choice: an image described by a different one need not be in it, and a
+// consumer that must not assume should read descriptor().axes instead of this.
 inline constexpr std::array<AxisRole, 5> kXradioImageAxisOrder{
     AxisRole::spatial_x, AxisRole::spatial_y, AxisRole::spectral, AxisRole::polarization, AxisRole::time};
 

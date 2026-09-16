@@ -9,7 +9,6 @@
 #include <nlohmann/json.hpp>
 
 #include <fstream>
-#include <sstream>
 #include <string>
 #include <utility>
 
@@ -57,18 +56,33 @@ public:
             return MakeError(ErrorCode::not_found, "Zarr node is missing zarr.json", metadata_path.string());
         }
 
-        std::ifstream const input(metadata_path, std::ios::binary);
+        // Opened at the end so that the document can be sized, then read in one go. Streaming
+        // rdbuf() into an ostringstream instead moves it a character at a time through two stream
+        // buffers and a growing string, which measured as a quarter of the cost of opening a
+        // consolidated store -- more than the read it was there to perform.
+        std::ifstream input(metadata_path, std::ios::binary | std::ios::ate);
         if (!input.is_open()) {
             return MakeError(ErrorCode::io_error, "Unable to read Zarr metadata", metadata_path.string());
         }
-        std::ostringstream buffer;
-        buffer << input.rdbuf();
-        // An empty file leaves failbit set but is not an I/O failure; it reaches the JSON parser
-        // above the seam and is reported as invalid metadata, which is what it is.
-        if (input.bad()) {
+        const auto size = input.tellg();
+        if (size < 0) {
             return MakeError(ErrorCode::io_error, "Unable to read Zarr metadata", metadata_path.string());
         }
-        return buffer.str();
+        input.seekg(0);
+
+        // An empty file is not an I/O failure: it reaches the JSON parser above the seam and is
+        // reported as invalid metadata, which is what it is. Asking for no bytes would set failbit
+        // and say nothing, so it is not asked for.
+        std::string bytes(static_cast<std::size_t>(size), '\0');
+        if (!bytes.empty()) {
+            input.read(bytes.data(), static_cast<std::streamsize>(bytes.size()));
+            if (input.bad()) {
+                return MakeError(ErrorCode::io_error, "Unable to read Zarr metadata", metadata_path.string());
+            }
+            // A file that shrank between being sized and being read hands back what was there.
+            bytes.resize(static_cast<std::size_t>(input.gcount()));
+        }
+        return bytes;
     }
 
     Result<std::vector<std::string>> ListNodes() const override {

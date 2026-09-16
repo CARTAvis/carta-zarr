@@ -234,6 +234,34 @@ void TestMissingAndUnsupported(const std::filesystem::path& root) {
             "unknown schema error category changed");
 }
 
+// What the transport does with a document it can open but whose bytes say nothing. An empty
+// zarr.json is not an I/O failure -- the read worked, the file is simply not metadata -- and the
+// answer has to come from the parser above the seam rather than from the read.
+void TestEmptyAndOversizedMetadata(const std::filesystem::path& root) {
+    CreateValidStore(root / "empty-root");
+    Write(root / "empty-root" / "zarr.json", "");
+    const auto empty_root = carta::zarr::ProbeSchema((root / "empty-root").string(), carta::zarr::kXradioImageSchema);
+    Require(!empty_root && empty_root.error().code == ErrorCode::invalid_metadata,
+            "an empty root zarr.json should be invalid metadata, not an I/O failure");
+
+    // The same one node down, where it is reached through the node metadata table instead.
+    CreateValidStore(root / "empty-child");
+    Write(root / "empty-child" / "frequency" / "zarr.json", "");
+    const auto empty_child = carta::zarr::ProbeSchema((root / "empty-child").string(), carta::zarr::kXradioImageSchema);
+    Require(!empty_child && empty_child.error().code == ErrorCode::invalid_metadata,
+            "an empty child zarr.json should be invalid metadata, not an I/O failure");
+
+    // A document larger than any buffer the reader might have sized for one: it is read whole, and
+    // the store it describes opens.
+    CreateValidStore(root / "padded");
+    std::string padded = RootMetadata();
+    padded.insert(padded.size() - 1, ",\n  \"note\": \"" + std::string(400000, 'x') + "\"");
+    Write(root / "padded" / "zarr.json", padded);
+    const auto probe = carta::zarr::ProbeSchema((root / "padded").string(), carta::zarr::kXradioImageSchema);
+    Require(probe && probe.value().kind == SchemaMatchKind::match,
+            "a root document of several hundred kilobytes was not read whole");
+}
+
 void TestReferenceFixture() {
     const std::filesystem::path fixture(CARTA_ZARR_REFERENCE_FIXTURE);
     Require(std::filesystem::exists(fixture), "the XRADIO reference fixture is missing from tests/data");
@@ -907,6 +935,7 @@ int main() {
         TestImageDatasetWithoutSky(root / "image-no-sky");
         TestImageDatasetMissingTimeCoordinate(root / "image-no-time");
         TestShardedStorageLayout(root / "sharded");
+        TestEmptyAndOversizedMetadata(root / "metadata-bytes");
         TestBeamTableIndexing(root / "beam-table");
         TestBeamTableTimePlanes(root / "beam-time");
         TestBeamTableWithoutTimeDimension(root / "beam-notime");

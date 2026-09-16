@@ -39,10 +39,11 @@ TensorStore from each array's own metadata, so a store whose children exist only
 describes images that nothing — this library included — can read pixels from. Such a store is
 malformed, and the error it earns names the document that is missing. What the saving is worth is
 measurable: in a release build, on a local filesystem with the page cache warm, consolidating an
-11-variable XRADIO dataset takes `Dataset::Open` from 0.78 ms to 0.19 ms. Both numbers are metadata
-end to end — a sampling profile of the consolidated open puts about two fifths of it in parsing the
-root document and most of the rest in reading that document off the filesystem — so what the copy
-saves is a real fraction of a real cost rather than a rounding error. They are still under a
+11-variable XRADIO dataset takes `Dataset::Open` from 0.73 ms to 0.13 ms. Both numbers are metadata
+end to end — a sampling profile of the consolidated open puts over half of it in parsing the root
+document, a seventh in freeing it again, an eighth in turning it into array metadata, and two per
+cent in the read itself — so what the copy saves is a real fraction of a real cost rather than a
+rounding error. They are still under a
 millisecond either way, and that is not the reason to keep it: it is that each of those reads
 becomes one network round trip on the transport `design.md` §4 anticipates, which is what
 consolidated metadata was invented for.

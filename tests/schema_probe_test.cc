@@ -457,6 +457,69 @@ void TestNonDoubleCoordinates(const std::filesystem::path& root) {
             "float32 frequency values were not converted to their double equivalents");
 }
 
+// A declared flag is trusted by every read: reads apply the pixel mask by default, and the mask is
+// read with the selection built for the image. A flag that is missing, not boolean, or shaped
+// differently used to be accepted here and rejected on every read -- or, for a numeric array of the
+// right shape, converted to bool and applied as if nonzero meant valid.
+void TestDeclaredPixelMaskIsValidated(const std::filesystem::path& root) {
+    const auto context = carta::zarr::Context::Create();
+    Require(static_cast<bool>(context), "Context::Create failed for declared pixel masks");
+
+    const std::string sky_with_flag =
+        "{\"shape\":[1,3,2,4,5],\"data_type\":\"float32\",\"chunk_grid\":{\"name\":\"regular\","
+        "\"configuration\":{\"chunk_shape\":[1,1,1,2,5]}},"
+        "\"attributes\":{\"units\":\"Jy/beam\",\"flag\":\"MASK_0\"},"
+        "\"dimension_names\":[\"time\",\"frequency\",\"polarization\",\"l\",\"m\"],"
+        "\"zarr_format\":3,\"node_type\":\"array\"}";
+    const std::string mask_dimensions = R"(["time","frequency","polarization","l","m"])";
+
+    // The mask a well-formed image declares: boolean, and the image's own dimensions in order.
+    CreateValidStore(root / "good");
+    Write(root / "good" / "SKY" / "zarr.json", sky_with_flag);
+    Write(root / "good" / "MASK_0" / "zarr.json",
+          NumericArray("[1,3,2,4,5]", mask_dimensions, "bool", R"({"type":"flag"})"));
+    const auto good = carta::zarr::Dataset::Open(context.value(), (root / "good").string());
+    Require(static_cast<bool>(good), "the declared-mask dataset did not open");
+    const auto good_image = good.value().OpenImage("SKY");
+    Require(static_cast<bool>(good_image), "an image declaring a well-formed mask did not open");
+    Require(good_image.value().descriptor().has_pixel_mask, "a well-formed declared mask was not selected");
+    Require(good_image.value().descriptor().pixel_mask_id == "MASK_0", "the declared mask was not the one selected");
+
+    const auto open_with_mask = [&](const std::string& name, const std::string& mask_metadata) {
+        CreateValidStore(root / name);
+        Write(root / name / "SKY" / "zarr.json", sky_with_flag);
+        if (!mask_metadata.empty()) {
+            Write(root / name / "MASK_0" / "zarr.json", mask_metadata);
+        }
+        const auto dataset = carta::zarr::Dataset::Open(context.value(), (root / name).string());
+        Require(static_cast<bool>(dataset), "the declared-mask dataset " + name + " did not open");
+        return dataset.value().OpenImage("SKY");
+    };
+
+    const auto absent = open_with_mask("absent", {});
+    Require(!absent, "an image declaring a flag variable that does not exist was opened");
+
+    const auto numeric = open_with_mask(
+        "numeric", NumericArray("[1,3,2,4,5]", mask_dimensions, "float32", R"({"type":"flag"})"));
+    Require(!numeric && numeric.error().code == ErrorCode::unsupported_data_type,
+            "a numeric variable was accepted as a pixel mask");
+
+    const auto unmarked = open_with_mask("unmarked", NumericArray("[1,3,2,4,5]", mask_dimensions, "bool"));
+    Require(!unmarked && unmarked.error().code == ErrorCode::invalid_metadata,
+            "a boolean variable that is not a flag was accepted as a pixel mask");
+
+    const auto reshaped =
+        open_with_mask("reshaped", NumericArray("[1,3,2,4,4]", mask_dimensions, "bool", R"({"type":"flag"})"));
+    Require(!reshaped && reshaped.error().code == ErrorCode::invalid_metadata,
+            "a flag whose shape differs from the image was accepted as a pixel mask");
+
+    const auto transposed = open_with_mask(
+        "transposed", NumericArray("[1,3,2,5,4]", R"(["time","frequency","polarization","m","l"])", "bool",
+                                   R"({"type":"flag"})"));
+    Require(!transposed && transposed.error().code == ErrorCode::invalid_metadata,
+            "a flag whose dimension order differs from the image was accepted as a pixel mask");
+}
+
 void TestAmbiguousPixelMask(const std::filesystem::path& root) {
     CreateValidStore(root);
     Write(root / "MODEL" / "zarr.json", SkyArray());
@@ -732,6 +795,7 @@ int main() {
         TestCoordinateCompletion(root / "coordinates");
         TestNonDoubleCoordinates(root / "float32-coordinates");
         TestAmbiguousPixelMask(root / "ambiguous-mask");
+        TestDeclaredPixelMaskIsValidated(root / "declared-mask");
         TestDiscoveryIgnoresNameAllowlist(root / "unlisted-image");
         TestMetadataCache(root / "metadata-cache");
         TestDiscoveryDoesNotDescendIntoArrayChunks(root / "array-chunks");

@@ -520,6 +520,35 @@ void TestDeclaredPixelMaskIsValidated(const std::filesystem::path& root) {
             "a flag whose dimension order differs from the image was accepted as a pixel mask");
 }
 
+// Optional metadata comes from a file, so its shape is whatever was written, not whatever the
+// schema describes. A telescope position holding a string where a number belongs used to throw out
+// of nlohmann and past the Result the caller is holding. It is a value the image can do without:
+// the image opens, and only the position it could not read is missing.
+void TestMalformedObservationMetadata(const std::filesystem::path& root) {
+    CreateValidStore(root);
+    Write(root / "SKY" / "zarr.json",
+          "{\"shape\":[1,3,2,4,5],\"data_type\":\"float32\",\"chunk_grid\":{\"name\":\"regular\","
+          "\"configuration\":{\"chunk_shape\":[1,1,1,2,5]}},"
+          "\"attributes\":{\"units\":\"Jy/beam\",\"object_name\":\"Zarr test source\","
+          "\"telescope\":{\"name\":\"Test scope\",\"direction\":{\"data\":[\"north\",0.0]},"
+          "\"distance\":{\"data\":[6371000.0]}}},"
+          "\"dimension_names\":[\"time\",\"frequency\",\"polarization\",\"l\",\"m\"],"
+          "\"zarr_format\":3,\"node_type\":\"array\"}");
+
+    const auto context = carta::zarr::Context::Create();
+    Require(static_cast<bool>(context), "Context::Create failed for malformed observation metadata");
+    const auto dataset = carta::zarr::Dataset::Open(context.value(), root.string());
+    Require(static_cast<bool>(dataset), "the malformed-observation dataset did not open");
+    const auto image = dataset.value().OpenImage("SKY");
+    Require(static_cast<bool>(image), "a malformed telescope position closed an otherwise readable image");
+
+    const auto& observation = image.value().descriptor().observation;
+    Require(observation.has_value(), "the image reported no observation metadata at all");
+    Require(observation->telescope_name == "Test scope", "the readable telescope metadata was dropped as well");
+    Require(!observation->observatory_position.has_value(),
+            "a telescope position holding a string was converted rather than skipped");
+}
+
 void TestAmbiguousPixelMask(const std::filesystem::path& root) {
     CreateValidStore(root);
     Write(root / "MODEL" / "zarr.json", SkyArray());
@@ -795,6 +824,7 @@ int main() {
         TestCoordinateCompletion(root / "coordinates");
         TestNonDoubleCoordinates(root / "float32-coordinates");
         TestAmbiguousPixelMask(root / "ambiguous-mask");
+        TestMalformedObservationMetadata(root / "observation");
         TestDeclaredPixelMaskIsValidated(root / "declared-mask");
         TestDiscoveryIgnoresNameAllowlist(root / "unlisted-image");
         TestMetadataCache(root / "metadata-cache");

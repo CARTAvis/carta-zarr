@@ -34,6 +34,19 @@ Error MakeError(ErrorCode code, std::string message, std::string node_path = {})
     return Error{code, std::move(message), std::move(node_path)};
 }
 
+// Every public entry point reports its failures as a Result, and a consumer that checks one should
+// never have to catch as well. Underneath, though, metadata comes from a file and buffers are sized
+// from what it says: nlohmann throws on a value that is not the type it is read as, and the standard
+// library throws on a length it cannot allocate. This is where that becomes an Error.
+template <typename Function>
+auto Guarded(ErrorCode code, std::string node, Function&& function) -> decltype(function()) {
+    try {
+        return function();
+    } catch (const std::exception& error) {
+        return MakeError(code, error.what(), std::move(node));
+    }
+}
+
 std::string SchemaErrorMessage(const SchemaProbeResult& result) {
     std::string message = "The requested schema did not match";
     if (!result.diagnostics.empty()) {
@@ -242,151 +255,159 @@ Result<std::size_t> Image::Read(const ReadRequest& request, MutableBufferView de
 
 Result<std::size_t> Image::Read(const ReadRequest& request, MutableBufferView destination,
                                 const ReadOptions& options) const {
-    if (!_impl) {
-        return MakeError(ErrorCode::invalid_argument, "Image handle is empty");
-    }
-    if (request.output_type != DataType::float32) {
-        return MakeError(ErrorCode::unsupported_data_type, "Only float32 output is implemented",
-                         _impl->descriptor.id);
-    }
-
-    auto selection = internal::zarr::BuildSelection(_impl->descriptor, request);
-    if (!selection) {
-        return selection.error();
-    }
-    const auto elements = internal::zarr::SelectionElementCount(selection.value());
-    if (elements == 0 || elements > destination.byte_size / sizeof(float)) {
-        return MakeError(ErrorCode::invalid_argument, "Destination buffer is too small for the request",
-                         _impl->descriptor.id);
-    }
-
-    // Do this before allocating a mask or starting any storage work. A cancelled request must not
-    // consume temporary memory just to discover that it cannot proceed.
-    auto control = internal::zarr::CheckReadControl(options, _impl->descriptor.id);
-    if (!control) {
-        return control.error();
-    }
-
-    const bool apply_mask = options.apply_pixel_mask && _impl->descriptor.has_pixel_mask;
-
-    // One piece unless the caller asked to hear about progress, in which case the request is split
-    // along its slowest-varying selected axis. Splitting anywhere else, or without aligning to the
-    // chunk grid, would decode chunks twice and report a destination that is finished in patches
-    // rather than as a prefix.
-    const auto slab_axis = SlowestSelectedAxis(request);
-    const bool progressive = static_cast<bool>(options.progress) && slab_axis.has_value();
-
-    // Not splitting is the same loop with one piece covering everything, so there is one path to
-    // read rather than two to keep in agreement.
-    std::uint64_t slab_total = 1;
-    std::uint64_t slab_stride = elements;
-    std::uint64_t slab_step = 1;
-    std::uint64_t slab_chunk = 0;
-    if (progressive) {
-        const auto axis = slab_axis.value();
-        slab_total = request.axes.at(axis).count;
-        slab_stride = 1;
-        for (std::size_t i = 0; i < axis; ++i) {
-            slab_stride *= request.axes.at(i).count;
+    const std::string node = _impl ? _impl->descriptor.id : std::string{};
+    return Guarded(ErrorCode::io_error, node, [&]() -> Result<std::size_t> {
+        if (!_impl) {
+            return MakeError(ErrorCode::invalid_argument, "Image handle is empty");
         }
-        slab_chunk = axis < _impl->geometry.chunk_shape.size() ? _impl->geometry.chunk_shape.at(axis) : 0;
-        const auto budget =
-            options.temporary_memory_limit_bytes != 0
-                ? options.temporary_memory_limit_bytes
-                : internal::DefaultReadBytes(internal::DecodedChunkBytes(_impl->descriptor, _impl->geometry));
-        slab_step = ElementsPerPiece(_impl->descriptor, request, _impl->geometry, axis, budget);
-    }
-
-    auto* pixels = static_cast<float*>(destination.data);
-    std::vector<std::uint8_t> mask;
-
-    for (std::uint64_t begin = 0; begin < slab_total;) {
-        const std::uint64_t end =
-            progressive ? internal::AlignedBlockEnd(begin, slab_step, slab_total, request.axes.at(slab_axis.value()).start,
-                                                    request.axes.at(slab_axis.value()).stride, slab_chunk)
-                        : slab_total;
-
-        ReadRequest piece = request;
-        if (progressive) {
-            auto& range = piece.axes.at(slab_axis.value());
-            range.start = request.axes.at(slab_axis.value()).start + (begin * range.stride);
-            range.count = end - begin;
-        }
-        auto piece_selection = internal::zarr::BuildSelection(_impl->descriptor, piece);
-        if (!piece_selection) {
-            return piece_selection.error();
-        }
-        const auto piece_elements = static_cast<std::size_t>((end - begin) * slab_stride);
-        float* piece_pixels = pixels + (begin * slab_stride);
-
-        if (apply_mask) {
-            // The limit bounds a piece, and a read that is not split is one piece, so an
-            // unsplittable request that exceeds it still has to say so rather than allocate.
-            if (options.temporary_memory_limit_bytes != 0 && piece_elements > options.temporary_memory_limit_bytes) {
-                return MakeError(ErrorCode::buffer_too_small,
-                                 "Pixel mask temporary buffer exceeds the configured memory limit",
-                                 _impl->descriptor.id);
-            }
-            mask.assign(piece_elements, 0);
-            // The mask is read first so that an unavailable or cancelled mask cannot leave this
-            // piece of the destination updated. TensorStore still owns the pixel operation's
-            // in-flight completion before it returns, so the destination remains valid for the
-            // next read.
-            auto mask_read = _impl->store->ReadPixelMaskBytes(_impl->descriptor.pixel_mask_id,
-                                                              piece_selection.value(), mask.data(), mask.size(), options);
-            if (!mask_read) {
-                return mask_read.error();
-            }
-        }
-        auto read = _impl->store->ReadPixelsFloat32(_impl->descriptor.id, piece_selection.value(), piece_pixels,
-                                                    piece_elements, options);
-        if (!read) {
-            return read.error();
-        }
-        if (apply_mask) {
-            // XRADIO stores flags with true meaning a good pixel.
-            for (std::size_t i = 0; i < piece_elements; ++i) {
-                if (mask[i] == 0) {
-                    piece_pixels[i] = std::numeric_limits<float>::quiet_NaN();
-                }
-            }
-        }
-
-        begin = end;
-        if (options.progress && !options.progress(static_cast<std::size_t>(begin * slab_stride),
-                                                  static_cast<std::size_t>(elements))) {
-            return MakeError(ErrorCode::cancelled, "The read was cancelled by its progress callback",
+        if (request.output_type != DataType::float32) {
+            return MakeError(ErrorCode::unsupported_data_type, "Only float32 output is implemented",
                              _impl->descriptor.id);
         }
-    }
-    return static_cast<std::size_t>(elements);
+
+        auto selection = internal::zarr::BuildSelection(_impl->descriptor, request);
+        if (!selection) {
+            return selection.error();
+        }
+        const auto elements = internal::zarr::SelectionElementCount(selection.value());
+        if (elements == 0 || elements > destination.byte_size / sizeof(float)) {
+            return MakeError(ErrorCode::invalid_argument, "Destination buffer is too small for the request",
+                             _impl->descriptor.id);
+        }
+
+        // Do this before allocating a mask or starting any storage work. A cancelled request must not
+        // consume temporary memory just to discover that it cannot proceed.
+        auto control = internal::zarr::CheckReadControl(options, _impl->descriptor.id);
+        if (!control) {
+            return control.error();
+        }
+
+        const bool apply_mask = options.apply_pixel_mask && _impl->descriptor.has_pixel_mask;
+
+        // One piece unless the caller asked to hear about progress, in which case the request is split
+        // along its slowest-varying selected axis. Splitting anywhere else, or without aligning to the
+        // chunk grid, would decode chunks twice and report a destination that is finished in patches
+        // rather than as a prefix.
+        const auto slab_axis = SlowestSelectedAxis(request);
+        const bool progressive = static_cast<bool>(options.progress) && slab_axis.has_value();
+
+        // Not splitting is the same loop with one piece covering everything, so there is one path to
+        // read rather than two to keep in agreement.
+        std::uint64_t slab_total = 1;
+        std::uint64_t slab_stride = elements;
+        std::uint64_t slab_step = 1;
+        std::uint64_t slab_chunk = 0;
+        if (progressive) {
+            const auto axis = slab_axis.value();
+            slab_total = request.axes.at(axis).count;
+            slab_stride = 1;
+            for (std::size_t i = 0; i < axis; ++i) {
+                slab_stride *= request.axes.at(i).count;
+            }
+            slab_chunk = axis < _impl->geometry.chunk_shape.size() ? _impl->geometry.chunk_shape.at(axis) : 0;
+            const auto budget =
+                options.temporary_memory_limit_bytes != 0
+                    ? options.temporary_memory_limit_bytes
+                    : internal::DefaultReadBytes(internal::DecodedChunkBytes(_impl->descriptor, _impl->geometry));
+            slab_step = ElementsPerPiece(_impl->descriptor, request, _impl->geometry, axis, budget);
+        }
+
+        auto* pixels = static_cast<float*>(destination.data);
+        std::vector<std::uint8_t> mask;
+
+        for (std::uint64_t begin = 0; begin < slab_total;) {
+            const std::uint64_t end =
+                progressive
+                    ? internal::AlignedBlockEnd(begin, slab_step, slab_total, request.axes.at(slab_axis.value()).start,
+                                                request.axes.at(slab_axis.value()).stride, slab_chunk)
+                    : slab_total;
+
+            ReadRequest piece = request;
+            if (progressive) {
+                auto& range = piece.axes.at(slab_axis.value());
+                range.start = request.axes.at(slab_axis.value()).start + (begin * range.stride);
+                range.count = end - begin;
+            }
+            auto piece_selection = internal::zarr::BuildSelection(_impl->descriptor, piece);
+            if (!piece_selection) {
+                return piece_selection.error();
+            }
+            const auto piece_elements = static_cast<std::size_t>((end - begin) * slab_stride);
+            float* piece_pixels = pixels + (begin * slab_stride);
+
+            if (apply_mask) {
+                // The limit bounds a piece, and a read that is not split is one piece, so an
+                // unsplittable request that exceeds it still has to say so rather than allocate.
+                if (options.temporary_memory_limit_bytes != 0 &&
+                    piece_elements > options.temporary_memory_limit_bytes) {
+                    return MakeError(ErrorCode::buffer_too_small,
+                                     "Pixel mask temporary buffer exceeds the configured memory limit",
+                                     _impl->descriptor.id);
+                }
+                mask.assign(piece_elements, 0);
+                // The mask is read first so that an unavailable or cancelled mask cannot leave this
+                // piece of the destination updated. TensorStore still owns the pixel operation's
+                // in-flight completion before it returns, so the destination remains valid for the
+                // next read.
+                auto mask_read = _impl->store->ReadPixelMaskBytes(
+                    _impl->descriptor.pixel_mask_id, piece_selection.value(), mask.data(), mask.size(), options);
+                if (!mask_read) {
+                    return mask_read.error();
+                }
+            }
+            auto read = _impl->store->ReadPixelsFloat32(_impl->descriptor.id, piece_selection.value(), piece_pixels,
+                                                        piece_elements, options);
+            if (!read) {
+                return read.error();
+            }
+            if (apply_mask) {
+                // XRADIO stores flags with true meaning a good pixel.
+                for (std::size_t i = 0; i < piece_elements; ++i) {
+                    if (mask[i] == 0) {
+                        piece_pixels[i] = std::numeric_limits<float>::quiet_NaN();
+                    }
+                }
+            }
+
+            begin = end;
+            if (options.progress && !options.progress(static_cast<std::size_t>(begin * slab_stride),
+                                                      static_cast<std::size_t>(elements))) {
+                return MakeError(ErrorCode::cancelled, "The read was cancelled by its progress callback",
+                                 _impl->descriptor.id);
+            }
+        }
+        return static_cast<std::size_t>(elements);
+    });
 }
 
 Result<std::size_t> Image::ReadPixelMask(const ReadRequest& request, MutableBufferView destination) const {
-    if (!_impl) {
-        return MakeError(ErrorCode::invalid_argument, "Image handle is empty");
-    }
-    if (!_impl->descriptor.has_pixel_mask) {
-        return MakeError(ErrorCode::not_found, "This image has no pixel mask", _impl->descriptor.id);
-    }
+    const std::string node = _impl ? _impl->descriptor.id : std::string{};
+    return Guarded(ErrorCode::io_error, node, [&]() -> Result<std::size_t> {
+        if (!_impl) {
+            return MakeError(ErrorCode::invalid_argument, "Image handle is empty");
+        }
+        if (!_impl->descriptor.has_pixel_mask) {
+            return MakeError(ErrorCode::not_found, "This image has no pixel mask", _impl->descriptor.id);
+        }
 
-    auto selection = internal::zarr::BuildSelection(_impl->descriptor, request);
-    if (!selection) {
-        return selection.error();
-    }
-    const auto elements = internal::zarr::SelectionElementCount(selection.value());
-    if (elements == 0 || elements > destination.byte_size) {
-        return MakeError(ErrorCode::invalid_argument, "Destination buffer is too small for the request",
-                         _impl->descriptor.id);
-    }
+        auto selection = internal::zarr::BuildSelection(_impl->descriptor, request);
+        if (!selection) {
+            return selection.error();
+        }
+        const auto elements = internal::zarr::SelectionElementCount(selection.value());
+        if (elements == 0 || elements > destination.byte_size) {
+            return MakeError(ErrorCode::invalid_argument, "Destination buffer is too small for the request",
+                             _impl->descriptor.id);
+        }
 
-    auto read = _impl->store->ReadPixelMaskBytes(_impl->descriptor.pixel_mask_id, selection.value(),
-                                                 static_cast<std::uint8_t*>(destination.data),
-                                                 static_cast<std::size_t>(elements), ReadOptions{});
-    if (!read) {
-        return read.error();
-    }
-    return static_cast<std::size_t>(elements);
+        auto read = _impl->store->ReadPixelMaskBytes(_impl->descriptor.pixel_mask_id, selection.value(),
+                                                     static_cast<std::uint8_t*>(destination.data),
+                                                     static_cast<std::size_t>(elements), ReadOptions{});
+        if (!read) {
+            return read.error();
+        }
+        return static_cast<std::size_t>(elements);
+    });
 }
 
 Result<void> Image::ReduceSpectral(const SpectralReduceRequest& request, const SpectralSink& sink) const {
@@ -395,11 +416,14 @@ Result<void> Image::ReduceSpectral(const SpectralReduceRequest& request, const S
 
 Result<void> Image::ReduceSpectral(const SpectralReduceRequest& request, const SpectralSink& sink,
                                    const ReadOptions& options) const {
-    if (!_impl || !_impl->store) {
-        return MakeError(ErrorCode::invalid_argument, "Image handle is empty");
-    }
-    return internal::ReduceSpectral(*_impl->store, _impl->descriptor, _impl->geometry, request, sink, options,
-                                    *_impl->context->workers);
+    const std::string node = _impl ? _impl->descriptor.id : std::string{};
+    return Guarded(ErrorCode::io_error, node, [&]() -> Result<void> {
+        if (!_impl || !_impl->store) {
+            return MakeError(ErrorCode::invalid_argument, "Image handle is empty");
+        }
+        return internal::ReduceSpectral(*_impl->store, _impl->descriptor, _impl->geometry, request, sink, options,
+                                        *_impl->context->workers);
+    });
 }
 
 Result<void> Image::ComputeHistogram(const HistogramRequest& request, const HistogramSink& sink) const {
@@ -408,11 +432,14 @@ Result<void> Image::ComputeHistogram(const HistogramRequest& request, const Hist
 
 Result<void> Image::ComputeHistogram(const HistogramRequest& request, const HistogramSink& sink,
                                      const ReadOptions& options) const {
-    if (!_impl || !_impl->store) {
-        return MakeError(ErrorCode::invalid_argument, "Image handle is empty");
-    }
-    return internal::ComputeHistogram(*_impl->store, _impl->descriptor, _impl->geometry, request, sink, options,
-                                      *_impl->context->workers);
+    const std::string node = _impl ? _impl->descriptor.id : std::string{};
+    return Guarded(ErrorCode::io_error, node, [&]() -> Result<void> {
+        if (!_impl || !_impl->store) {
+            return MakeError(ErrorCode::invalid_argument, "Image handle is empty");
+        }
+        return internal::ComputeHistogram(*_impl->store, _impl->descriptor, _impl->geometry, request, sink, options,
+                                          *_impl->context->workers);
+    });
 }
 
 Result<CubeHistogramResult> Image::ComputeCubeHistogram(const CubeHistogramRequest& request) const {
@@ -421,25 +448,31 @@ Result<CubeHistogramResult> Image::ComputeCubeHistogram(const CubeHistogramReque
 
 Result<CubeHistogramResult> Image::ComputeCubeHistogram(const CubeHistogramRequest& request,
                                                         const ReadOptions& options) const {
-    if (!_impl || !_impl->store) {
-        return MakeError(ErrorCode::invalid_argument, "Image handle is empty");
-    }
-    return internal::ComputeCubeHistogram(*_impl->store, _impl->descriptor, _impl->geometry, request, options,
-                                          *_impl->context->workers);
+    const std::string node = _impl ? _impl->descriptor.id : std::string{};
+    return Guarded(ErrorCode::io_error, node, [&]() -> Result<CubeHistogramResult> {
+        if (!_impl || !_impl->store) {
+            return MakeError(ErrorCode::invalid_argument, "Image handle is empty");
+        }
+        return internal::ComputeCubeHistogram(*_impl->store, _impl->descriptor, _impl->geometry, request, options,
+                                              *_impl->context->workers);
+    });
 }
 
 Result<std::vector<Beam>> Image::ReadBeams() const {
-    if (!_impl) {
-        return MakeError(ErrorCode::invalid_argument, "Image handle is empty");
-    }
-    if (!_impl->store) {
-        return MakeError(ErrorCode::invalid_argument, "Image store is unavailable");
-    }
-    auto profile = internal::SchemaProfile::For(_impl->schema_id);
-    if (!profile) {
-        return profile.error();
-    }
-    return profile.value().ReadBeams(*_impl->store, _impl->descriptor.id);
+    const std::string node = _impl ? _impl->descriptor.id : std::string{};
+    return Guarded(ErrorCode::invalid_metadata, node, [&]() -> Result<std::vector<Beam>> {
+        if (!_impl) {
+            return MakeError(ErrorCode::invalid_argument, "Image handle is empty");
+        }
+        if (!_impl->store) {
+            return MakeError(ErrorCode::invalid_argument, "Image store is unavailable");
+        }
+        auto profile = internal::SchemaProfile::For(_impl->schema_id);
+        if (!profile) {
+            return profile.error();
+        }
+        return profile.value().ReadBeams(*_impl->store, _impl->descriptor.id);
+    });
 }
 
 class Dataset::Impl {
@@ -509,60 +542,66 @@ const DatasetDescriptor& Dataset::descriptor() const noexcept {
 }
 
 Result<DatasetSize> Dataset::Size(std::chrono::milliseconds directory_size_timeout) const {
-    if (!_impl) {
-        return MakeError(ErrorCode::invalid_argument, "Dataset handle is empty");
-    }
+    const std::string node = _impl ? _impl->location : std::string{};
+    return Guarded(ErrorCode::io_error, node, [&]() -> Result<DatasetSize> {
+        if (!_impl) {
+            return MakeError(ErrorCode::invalid_argument, "Dataset handle is empty");
+        }
 
-    std::uint64_t physical_size = 0;
-    if (TryComputeDirectorySize(_impl->location, directory_size_timeout, physical_size)) {
-        return DatasetSize{physical_size, false};
-    }
+        std::uint64_t physical_size = 0;
+        if (TryComputeDirectorySize(_impl->location, directory_size_timeout, physical_size)) {
+            return DatasetSize{physical_size, false};
+        }
 
-    auto logical_size = _impl->store->ComputeTotalArraySizeBytes();
-    if (!logical_size) {
-        return logical_size.error();
-    }
-    return DatasetSize{logical_size.value(), true};
+        auto logical_size = _impl->store->ComputeTotalArraySizeBytes();
+        if (!logical_size) {
+            return logical_size.error();
+        }
+        return DatasetSize{logical_size.value(), true};
+    });
 }
 
 Result<Image> Dataset::OpenImage(std::string_view image_id) const {
-    if (!_impl) {
-        return MakeError(ErrorCode::invalid_argument, "Dataset handle is empty");
-    }
-    std::scoped_lock const lock(_impl->mutex);
-    const std::string image_name(image_id);
-    const auto entry = std::find_if(_impl->descriptor.images.begin(), _impl->descriptor.images.end(),
-                                    [&](const ImageEntry& image) { return image.id == image_name; });
-    if (entry == _impl->descriptor.images.end()) {
-        return MakeError(ErrorCode::not_found, "Image variable was not found", image_name);
-    }
-    if (!entry->readable) {
-        const auto message = entry->diagnostics.empty() ? "Image variable is not openable by this profile"
-                                                        : entry->diagnostics.front().message;
-        return MakeError(ErrorCode::unsupported_data_type, message, image_name);
-    }
-    const auto make_image = [&](const ImageDescriptor& descriptor) {
-        // The descriptor already carries the stored layout; the geometry is that layout permuted
-        // into logical order, so it is derived here rather than read again.
-        const StorageLayout layout = descriptor.storage ? *descriptor.storage : StorageLayout{};
-        return Image{std::make_shared<Image::Impl>(_impl->context, _impl->location, _impl->descriptor.schema_id,
-                                                   _impl->store, descriptor,
-                                                   BuildChunkGeometry(descriptor, layout))};
-    };
-    const auto cached = _impl->image_descriptors.find(image_name);
-    if (cached != _impl->image_descriptors.end()) {
-        return make_image(cached->second);
-    }
-    auto profile = internal::SchemaProfile::For(_impl->descriptor.schema_id);
-    if (!profile) {
-        return profile.error();
-    }
-    auto image_descriptor = profile.value().DescribeVerified(*_impl->store, image_id);
-    if (!image_descriptor) {
-        return image_descriptor.error();
-    }
-    auto [inserted, _] = _impl->image_descriptors.emplace(image_name, std::move(image_descriptor.value()));
-    return make_image(inserted->second);
+    const std::string node(image_id);
+    return Guarded(ErrorCode::invalid_metadata, node, [&]() -> Result<Image> {
+        if (!_impl) {
+            return MakeError(ErrorCode::invalid_argument, "Dataset handle is empty");
+        }
+        std::scoped_lock const lock(_impl->mutex);
+        const std::string image_name(image_id);
+        const auto entry = std::find_if(_impl->descriptor.images.begin(), _impl->descriptor.images.end(),
+                                        [&](const ImageEntry& image) { return image.id == image_name; });
+        if (entry == _impl->descriptor.images.end()) {
+            return MakeError(ErrorCode::not_found, "Image variable was not found", image_name);
+        }
+        if (!entry->readable) {
+            const auto message = entry->diagnostics.empty() ? "Image variable is not openable by this profile"
+                                                            : entry->diagnostics.front().message;
+            return MakeError(ErrorCode::unsupported_data_type, message, image_name);
+        }
+        const auto make_image = [&](const ImageDescriptor& descriptor) {
+            // The descriptor already carries the stored layout; the geometry is that layout permuted
+            // into logical order, so it is derived here rather than read again.
+            const StorageLayout layout = descriptor.storage ? *descriptor.storage : StorageLayout{};
+            return Image{std::make_shared<Image::Impl>(_impl->context, _impl->location, _impl->descriptor.schema_id,
+                                                       _impl->store, descriptor,
+                                                       BuildChunkGeometry(descriptor, layout))};
+        };
+        const auto cached = _impl->image_descriptors.find(image_name);
+        if (cached != _impl->image_descriptors.end()) {
+            return make_image(cached->second);
+        }
+        auto profile = internal::SchemaProfile::For(_impl->descriptor.schema_id);
+        if (!profile) {
+            return profile.error();
+        }
+        auto image_descriptor = profile.value().DescribeVerified(*_impl->store, image_id);
+        if (!image_descriptor) {
+            return image_descriptor.error();
+        }
+        auto [inserted, _] = _impl->image_descriptors.emplace(image_name, std::move(image_descriptor.value()));
+        return make_image(inserted->second);
+    });
 }
 
 ProbeResult Probe(std::string_view location, const ProbeOptions&) {

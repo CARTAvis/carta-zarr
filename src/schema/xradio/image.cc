@@ -180,7 +180,7 @@ std::optional<DirectionCoordinate> DescribeDirection(const nlohmann::json& root_
         if (const auto* reference_direction = ObjectMember(cs_info, "reference_direction");
             reference_direction != nullptr && reference_direction->is_object()) {
             if (const auto* data = ObjectMember(*reference_direction, "data");
-                data != nullptr && data->is_array() && data->size() >= 2) {
+                data != nullptr && zarr_metadata::IsNumericVector(*data, 2)) {
                 direction.reference_value.at(0) = data->at(0).get<double>() * kRadToDeg;
                 direction.reference_value.at(1) = data->at(1).get<double>() * kRadToDeg;
             }
@@ -221,8 +221,7 @@ std::optional<DirectionCoordinate> DescribeDirection(const nlohmann::json& root_
             }
         }
         if (const auto* matrix = ObjectMember(cs_info, "pixel_coordinate_transformation_matrix");
-            matrix != nullptr && matrix->is_array() && matrix->size() >= 2 && matrix->at(0).is_array() &&
-            matrix->at(0).size() >= 2 && matrix->at(1).is_array() && matrix->at(1).size() >= 2) {
+            matrix != nullptr && zarr_metadata::IsNumericMatrix(*matrix, 2, 2)) {
             direction.transformation_matrix.at(0).at(0) = matrix->at(0).at(0).get<double>();
             direction.transformation_matrix.at(0).at(1) = matrix->at(0).at(1).get<double>();
             direction.transformation_matrix.at(1).at(0) = matrix->at(1).at(0).get<double>();
@@ -354,9 +353,14 @@ ObservationInfo DescribeObservation(const zarr_metadata::ArrayMetadata& image) {
         if (distance != nullptr) {
             distance_data = ObjectMember(*distance, "data");
         }
+        // Every element is checked before it is converted, not just the array around it: a value of
+        // the wrong type throws out of nlohmann, and this is optional metadata reached while
+        // describing an image, where the caller is holding a Result and expecting a diagnostic at
+        // worst rather than an exception.
         if (direction != nullptr && direction->is_object() && direction_data != nullptr && direction_data->is_array() &&
-            direction_data->size() >= 2 && distance != nullptr && distance->is_object() && distance_data != nullptr &&
-            distance_data->is_array() && !distance_data->empty()) {
+            direction_data->size() >= 2 && direction_data->at(0).is_number() && direction_data->at(1).is_number() &&
+            distance != nullptr && distance->is_object() && distance_data != nullptr && distance_data->is_array() &&
+            !distance_data->empty() && distance_data->at(0).is_number()) {
             const double lon = direction_data->at(0).get<double>();
             const double lat = direction_data->at(1).get<double>();
             const double radius = distance_data->at(0).get<double>();

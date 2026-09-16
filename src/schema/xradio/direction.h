@@ -7,7 +7,7 @@
 #ifndef CARTA_ZARR_SRC_SCHEMA_XRADIO_DIRECTION_H_
 #define CARTA_ZARR_SRC_SCHEMA_XRADIO_DIRECTION_H_
 
-#include "carta-zarr/carta_zarr.h"
+#include "carta-zarr/descriptor.h"
 
 #include <nlohmann/json.hpp>
 

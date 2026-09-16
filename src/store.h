@@ -7,7 +7,8 @@
 #ifndef CARTA_ZARR_SRC_STORE_H_
 #define CARTA_ZARR_SRC_STORE_H_
 
-#include "carta-zarr/carta_zarr.h"
+#include "carta-zarr/read.h"
+#include "carta-zarr/result.h"
 
 #include "memo.h"
 #include "zarr/array_metadata.h"

@@ -13,7 +13,8 @@
 // the thing that reads it. A pass needs all of this and none of the Store, which is what lets a
 // reduction run against pixels that were never on disk.
 
-#include "carta-zarr/carta_zarr.h"
+#include "carta-zarr/read.h"
+#include "carta-zarr/result.h"
 
 #include <cstdint>
 #include <string>

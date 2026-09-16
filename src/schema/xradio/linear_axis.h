@@ -7,7 +7,7 @@
 #ifndef CARTA_ZARR_SRC_SCHEMA_XRADIO_LINEAR_AXIS_H_
 #define CARTA_ZARR_SRC_SCHEMA_XRADIO_LINEAR_AXIS_H_
 
-#include "carta-zarr/carta_zarr.h"
+#include "carta-zarr/descriptor.h"
 
 #include <cmath>
 #include <optional>

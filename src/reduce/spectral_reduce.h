@@ -7,7 +7,8 @@
 #ifndef CARTA_ZARR_SRC_REDUCE_SPECTRAL_REDUCE_H_
 #define CARTA_ZARR_SRC_REDUCE_SPECTRAL_REDUCE_H_
 
-#include "carta-zarr/carta_zarr.h"
+#include "carta-zarr/reduce.h"
+#include "carta-zarr/result.h"
 
 #include "reduce/pass.h"
 #include "work_pool.h"

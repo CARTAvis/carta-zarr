@@ -7,7 +7,8 @@
 #ifndef CARTA_ZARR_SRC_ZARR_ARRAY_METADATA_H_
 #define CARTA_ZARR_SRC_ZARR_ARRAY_METADATA_H_
 
-#include "carta-zarr/carta_zarr.h"
+#include "carta-zarr/descriptor.h"
+#include "carta-zarr/result.h"
 
 #include <nlohmann/json.hpp>
 

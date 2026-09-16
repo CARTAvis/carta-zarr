@@ -7,7 +7,7 @@
 #ifndef CARTA_ZARR_SRC_ZARR_TRANSPORT_H_
 #define CARTA_ZARR_SRC_ZARR_TRANSPORT_H_
 
-#include "carta-zarr/carta_zarr.h"
+#include "carta-zarr/result.h"
 
 #include <filesystem>
 #include <memory>

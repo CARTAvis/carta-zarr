@@ -7,7 +7,8 @@
 #ifndef CARTA_ZARR_SRC_REDUCE_PASS_H_
 #define CARTA_ZARR_SRC_REDUCE_PASS_H_
 
-#include "carta-zarr/carta_zarr.h"
+#include "carta-zarr/read.h"
+#include "carta-zarr/result.h"
 
 #include "chunk_blocks.h"
 #include "reduce/axis_map.h"

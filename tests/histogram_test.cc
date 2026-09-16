@@ -230,6 +230,15 @@ void TestRejectedRequests(const carta::zarr::Image& sky) {
     auto outside = WholeSpectrum(0, 0.0F, 10.0F, 8);
     outside.spectral = {0, kFrequency + 1, 1};
     rejects(outside, "a spectral range outside the image should be rejected");
+
+    // Pixels are binned in float. Each of these ranges is finite and non-empty in the double the
+    // caller states it in, and is neither by the time a pixel is binned against it: the first
+    // narrows to a single float, the second keeps its bounds apart but loses its bin width to
+    // underflow -- which is the division by zero whose NaN used to be converted to a bin index --
+    // and the third loses its width to overflow.
+    rejects(WholeSpectrum(0, 1.0, 1.0 + 1e-9, 8), "a range narrower than a float should be rejected");
+    rejects(WholeSpectrum(0, 0.0, 1e-44, 100), "a bin width that underflows a float should be rejected");
+    rejects(WholeSpectrum(0, -1e307, 1e307, 1), "a bin width that overflows a float should be rejected");
 }
 
 // One pass over the whole selection, with the range discovered on the way. What it keeps exact is

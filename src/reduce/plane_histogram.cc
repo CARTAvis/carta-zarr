@@ -39,6 +39,20 @@ Result<void> ValidateRequest(const ImageDescriptor& descriptor, const AxisMap& a
         return MakeError(ErrorCode::invalid_argument,
                          "A histogram needs a finite range with a lower bound below its upper bound", node);
     }
+    // Pixels are float, so the range is narrowed once and every pixel is binned against the
+    // narrowed copy. A range that is finite and non-empty in double need not still be either: two
+    // distinct doubles can narrow to one float, a bin width can underflow to zero or overflow to
+    // infinity, and (value - lower) / 0 is a NaN whose conversion to a bin index is undefined.
+    // Checking the narrowed values is therefore checking the ones the loop will actually use.
+    if (const float lower = static_cast<float>(request.lower), upper = static_cast<float>(request.upper),
+        width = static_cast<float>((request.upper - request.lower) / request.bins);
+        !std::isfinite(lower) || !std::isfinite(upper) || !(lower < upper) || !std::isfinite(width) ||
+        !(width > 0.0F)) {
+        return MakeError(ErrorCode::invalid_argument,
+                         "A histogram needs a range that stays finite and non-empty, and bins that stay wider "
+                         "than nothing, in the precision its pixels are counted in",
+                         node);
+    }
     if (!axes.has_polarization && request.polarization != 0) {
         return MakeError(ErrorCode::invalid_argument, "The image has no polarization axis to select", node);
     }

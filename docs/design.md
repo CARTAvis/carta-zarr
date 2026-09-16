@@ -260,12 +260,18 @@ struct SchemaProbeResult {
     std::vector<Diagnostic> diagnostics;
 };
 
-struct ProbeResult {
-    ProbeKind kind;
+struct DatasetDescriptor {
     SchemaId schema_id;          // selected schema, e.g. "xradio.image"
     std::string schema_version;  // empty when not declared
-    std::vector<std::string> image_ids;
+    std::vector<ImageEntry> images;
+    std::optional<std::string> default_image_id;
     std::vector<Diagnostic> diagnostics;
+};
+
+// A probe answers one more question than a descriptor, and otherwise reports the same thing
+// Dataset::descriptor() reports for the same location.
+struct ProbeResult : DatasetDescriptor {
+    ProbeKind kind;
 };
 
 struct OpenOptions {

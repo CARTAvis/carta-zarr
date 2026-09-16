@@ -539,12 +539,9 @@ Result<Dataset> Dataset::Open(const Context& context, std::string_view location)
         if (!profile) {
             return profile.error();
         }
-        DatasetDescriptor descriptor;
-        descriptor.schema_id = probe.schema_id;
-        descriptor.schema_version = probe.schema_version;
-        descriptor.images = probe.images;
-        descriptor.default_image_id = probe.default_image_id;
-        descriptor.diagnostics = probe.diagnostics;
+        // The descriptor is the probe's answer without the question it was answering, so it is taken
+        // rather than rebuilt field by field -- and taken by move, since the probe result dies here.
+        DatasetDescriptor descriptor = std::move(static_cast<DatasetDescriptor&>(probe_result.value()));
         return Dataset{std::make_shared<Impl>(context._impl, std::string(location), std::move(descriptor),
                                               profile.value(), std::move(store_result.value()))};
     } catch (const std::exception& error) {

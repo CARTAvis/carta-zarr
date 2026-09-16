@@ -252,6 +252,36 @@ void TestOpenSaysWhyItRefused(const std::filesystem::path& root) {
                 opened.error().message);
 }
 
+// Probing a path and opening it must describe the same dataset. They no longer can disagree by
+// construction -- ProbeResult is a DatasetDescriptor -- but the two are filled on different code
+// paths, so this pins that Dataset::Open still hands on what the probe found rather than
+// reconstructing some of it. What it cannot catch is a field added to DatasetDescriptor that neither
+// side fills; the type is what covers that.
+void TestProbingAndOpeningDescribeTheSameDataset(const std::filesystem::path& root) {
+    CreateValidStore(root);
+    const auto probe = carta::zarr::Probe(root.string());
+    Require(probe.kind == ProbeKind::supported_dataset, "the valid store did not probe as supported");
+
+    const auto context = carta::zarr::Context::Create();
+    const auto dataset = carta::zarr::Dataset::Open(context.value(), root.string());
+    Require(static_cast<bool>(dataset), "Dataset::Open failed on the store it had just probed");
+    const auto& opened = dataset.value().descriptor();
+
+    Require(opened.schema_id == probe.schema_id, "the probe and the open disagree about the schema");
+    Require(opened.schema_version == probe.schema_version, "the probe and the open disagree about the version");
+    Require(opened.default_image_id == probe.default_image_id, "they disagree about the default image");
+    Require(ImageIds(opened.images) == ImageIds(probe.images), "they disagree about which images exist");
+    Require(opened.images.size() == probe.images.size(), "they disagree about how many images exist");
+    for (std::size_t i = 0; i < opened.images.size(); ++i) {
+        Require(opened.images.at(i).readable == probe.images.at(i).readable,
+                "they disagree about whether " + opened.images.at(i).id + " is openable");
+        Require(opened.images.at(i).diagnostics.size() == probe.images.at(i).diagnostics.size(),
+                "they disagree about what was diagnosed for " + opened.images.at(i).id);
+    }
+    Require(opened.diagnostics.size() == probe.diagnostics.size(),
+            "they disagree about what was diagnosed for the dataset");
+}
+
 void TestMissingAndUnsupported(const std::filesystem::path& root) {
     const auto missing = carta::zarr::IsXradioImage((root / "missing").string());
     Require(!missing && missing.error().code == ErrorCode::not_found, "missing store error category changed");
@@ -956,6 +986,7 @@ int main() {
         TestNonMatchAndInvalid(root / "classification");
         TestMissingAndUnsupported(root);
         TestOpenSaysWhyItRefused(root / "refusal");
+        TestProbingAndOpeningDescribeTheSameDataset(root / "probe-open-agree");
         TestCoordinateCompletion(root / "coordinates");
         TestNonDoubleCoordinates(root / "float32-coordinates");
         TestAmbiguousPixelMask(root / "ambiguous-mask");

@@ -50,6 +50,30 @@ each slab, so a task-keyed accumulator does migrate between cores as the pass ad
 keying by worker instead would recover anything is unmeasured, and is not settled here; what is
 settled is that the two are different and that the code does the first.
 
+## Image::Read stays outside the pass
+
+The pass was built to collapse three walks over a cube into one. Two of them collapsed. The third,
+`Image::Read`, was migrated last precisely so that it would be the test of the shape, and it failed
+that test, which is the answer rather than a disappointment.
+
+`ReadSlab` reverses `logical_to_stored` so a plane arrives in the order the store wrote it and is
+never transposed; the visitor pays for that in strides it was going to walk anyway. `Image::Read`
+has to do the opposite, because its destination is the caller's buffer and its contract is a dense
+image in logical order. Beyond that it splits along the slowest selected axis of an arbitrary
+request rather than along u, v and the spectrum; it reads the flag *before* the pixels, so that an
+unavailable mask cannot leave a piece of the caller's destination updated, where the pass reads
+pixels first; and it reports progress in elements rather than in chunks. Fitting it would take a
+second entry point or a handful of parameters that do nothing for anybody else.
+
+What it shares it already shared: `DecodedChunkBytes`, `DefaultReadBytes`, `ChunksSpanned` and
+`AlignedBlockEnd` in `chunk_blocks.h`. `ElementsPerPiece` does not duplicate that policy -- it
+converts the byte budget the policy returns into a count of elements along one axis, which is a
+thing the pass never needs.
+
+One difference between them is not a decision and should be looked at separately: the pass doubles
+its budget when it will also read a flag, and `Image::Read` does not, so a masked progressive read
+pulls roughly twice the decompressed data its budget names.
+
 ## Consequences
 
 The pass cannot be given a non-template entry point for convenience, and a second overload taking a

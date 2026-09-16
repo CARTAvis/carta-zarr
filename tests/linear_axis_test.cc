@@ -19,7 +19,10 @@
 
 namespace {
 
+using carta::zarr::internal::xradio::FitDirectionAxis;
 using carta::zarr::internal::xradio::FitLinearAxis;
+using carta::zarr::internal::xradio::FitSpectralAxis;
+using carta::zarr::internal::xradio::kRadToDeg;
 using carta::zarr::internal::xradio::LinearAxisFit;
 
 void Require(bool condition, const std::string& message) {
@@ -114,6 +117,87 @@ void TestDescendingAxis() {
     Require(fit.reference_pixel && Near(*fit.reference_pixel, 3.0), "a descending axis mislocated its reference pixel");
 }
 
+// ---------------------------------------------------------------------------------------------
+// What the two callers make of a fit.
+//
+// The fit reports; these decide, and they decide opposite things for opposite reasons. Both
+// decisions used to be written out at their call sites inside a 101-line function that only a
+// directory tree could reach, so neither was covered: DirectionCoordinate::increment is asserted
+// nowhere in the suite, which means the conversion below could have been deleted and every test
+// would still have passed while l and m reached the consumer wrong by a factor of 57.3.
+
+template <typename Fit>
+bool Diagnosed(const Fit& fit, const std::string& code) {
+    for (const auto& diagnostic : fit.diagnostics) {
+        if (diagnostic.code == code) {
+            return true;
+        }
+    }
+    return false;
+}
+
+// The samples are direction cosines and the descriptor reports degrees.
+void TestADirectionAxisReportsDegrees() {
+    // A tenth of a milliradian per pixel, which is about 0.0057 degrees.
+    const std::vector<double> cosines{-2.0e-4, -1.0e-4, 0.0, 1.0e-4, 2.0e-4};
+    const auto fit = FitDirectionAxis(cosines, "l");
+    Require(fit.increment.has_value(), "a direction axis always has an increment");
+    Require(Near(*fit.increment, 1.0e-4 * kRadToDeg),
+            "the increment was not converted from radians to degrees: expected " +
+                std::to_string(1.0e-4 * kRadToDeg) + ", got " + std::to_string(*fit.increment));
+    Require(!Near(*fit.increment, 1.0e-4), "the increment was left in radians");
+    Require(fit.reference_pixel.has_value() && Near(*fit.reference_pixel, 3.0),
+            "the tangent point is the third sample, 1-based");
+    Require(fit.diagnostics.empty(), "an evenly spaced direction axis is not worth a diagnostic");
+}
+
+// A direction axis is linear by construction, so it keeps its increment even when the samples come
+// back uneven. It says so, and the consumer uses it anyway.
+void TestADirectionAxisKeepsAnUnevenIncrement() {
+    const std::vector<double> cosines{0.0, 1.0e-4, 2.5e-4, 3.0e-4};
+    const auto fit = FitDirectionAxis(cosines, "m");
+    Require(fit.increment.has_value(), "an uneven direction axis still reports an increment");
+    Require(Near(*fit.increment, 1.0e-4 * kRadToDeg), "and it is the first pair's spacing, in degrees");
+    Require(Diagnosed(fit, "nonuniform_axis"), "and it says the samples were not evenly spaced");
+}
+
+void TestADegenerateDirectionAxisHasNoIncrement() {
+    Require(!FitDirectionAxis({1.0e-4}, "l").increment, "a single sample describes no axis");
+    Require(!FitDirectionAxis({}, "l").increment, "and neither does none");
+}
+
+// The opposite rule: unevenly spaced channels get no linear description at all, because a consumer
+// that received one could not tell it was an approximation. See ADR 0002.
+void TestASpectralAxisWithholdsWhatItCannotDescribe() {
+    const std::vector<double> channels{1.0e9, 1.001e9, 1.0035e9, 1.004e9};
+    const auto fit = FitSpectralAxis(channels, 1.0e9, "frequency");
+    Require(!fit.increment && !fit.reference_pixel && !fit.reference_value,
+            "an unevenly spaced spectral axis reports no linear description");
+    Require(Diagnosed(fit, "nonuniform_axis"), "it keeps the reason, which says to build a tabular axis");
+    Require(!Diagnosed(fit, "inexact_reference_pixel"),
+            "and drops the one describing a reference pixel the consumer never receives");
+}
+
+// The diagnostic that is dropped above is genuinely raised underneath, so the dropping is a decision
+// rather than a coincidence of this sample set.
+void TestTheDroppedDiagnosticWasReallyThere() {
+    const std::vector<double> channels{1.0e9, 1.001e9, 1.0035e9, 1.004e9};
+    const auto underneath = FitLinearAxis(channels, 1.0005e9, "frequency");
+    Require(HasDiagnostic(underneath, "nonuniform_axis") && HasDiagnostic(underneath, "inexact_reference_pixel"),
+            "the fit underneath raises both, which is what makes the filter above a decision");
+    const auto fit = FitSpectralAxis(channels, 1.0005e9, "frequency");
+    Require(fit.diagnostics.size() == 1 && Diagnosed(fit, "nonuniform_axis"), "only one of them survives");
+}
+
+void TestAnEvenSpectralAxisKeepsItsDescription() {
+    const std::vector<double> channels{1.0e9, 1.001e9, 1.002e9, 1.003e9};
+    const auto fit = FitSpectralAxis(channels, 1.002e9, "frequency");
+    Require(fit.increment && Near(*fit.increment, 1.0e6), "an even spectral axis reports its increment");
+    Require(fit.reference_value && Near(*fit.reference_value, 1.002e9), "and the value it was given");
+    Require(fit.reference_pixel && Near(*fit.reference_pixel, 3.0), "and the pixel that value lands on");
+    Require(fit.diagnostics.empty(), "with nothing to report");
+}
+
 }  // namespace
 
 int main() {
@@ -125,6 +209,12 @@ int main() {
         TestTwoSamplesAreUniform();
         TestDegenerateAxesAreSilent();
         TestDescendingAxis();
+        TestADirectionAxisReportsDegrees();
+        TestADirectionAxisKeepsAnUnevenIncrement();
+        TestADegenerateDirectionAxisHasNoIncrement();
+        TestASpectralAxisWithholdsWhatItCannotDescribe();
+        TestTheDroppedDiagnosticWasReallyThere();
+        TestAnEvenSpectralAxisKeepsItsDescription();
         std::cout << "carta-zarr linear axis tests passed\n";
         return 0;
     } catch (const std::exception& error) {

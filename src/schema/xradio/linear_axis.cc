@@ -98,4 +98,35 @@ LinearAxisFit FitLinearAxis(const std::vector<double>& values, std::optional<dou
     return fit;
 }
 
+
+DirectionAxisFit FitDirectionAxis(const std::vector<double>& cosines, std::string_view axis_name) {
+    auto fit = FitLinearAxis(cosines, std::nullopt, axis_name);
+    DirectionAxisFit direction;
+    if (fit.increment) {
+        direction.increment = *fit.increment * kRadToDeg;
+    }
+    direction.reference_pixel = fit.reference_pixel;
+    direction.diagnostics = std::move(fit.diagnostics);
+    return direction;
+}
+
+SpectralAxisFit FitSpectralAxis(const std::vector<double>& channels, double reference,
+                                std::string_view axis_name) {
+    auto fit = FitLinearAxis(channels, reference, axis_name);
+    SpectralAxisFit spectral;
+    if (fit.uniform) {
+        spectral.reference_pixel = fit.reference_pixel;
+        spectral.reference_value = fit.reference_value;
+        spectral.increment = fit.increment;
+        spectral.diagnostics = std::move(fit.diagnostics);
+        return spectral;
+    }
+    for (auto& diagnostic : fit.diagnostics) {
+        if (diagnostic.code == "nonuniform_axis") {
+            spectral.diagnostics.push_back(std::move(diagnostic));
+        }
+    }
+    return spectral;
+}
+
 }  // namespace carta::zarr::internal::xradio

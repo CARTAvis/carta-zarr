@@ -9,6 +9,7 @@
 
 #include "carta-zarr/carta_zarr.h"
 
+#include <cmath>
 #include <optional>
 #include <string_view>
 #include <vector>
@@ -46,6 +47,50 @@ struct LinearAxisFit {
  */
 LinearAxisFit FitLinearAxis(const std::vector<double>& values, std::optional<double> reference,
                             std::string_view axis_name);
+
+inline constexpr double kRadToDeg = 180.0 / M_PI;
+
+// What a direction axis makes of a fit.
+struct DirectionAxisFit {
+    std::optional<double> increment;  // CDELT, in degrees
+    std::optional<double> reference_pixel;
+    std::vector<Diagnostic> diagnostics;
+};
+
+/**
+ * The linear description of one direction axis, from its direction cosines.
+ *
+ * A direction axis is linear by construction, so it keeps the increment whether or not the samples
+ * came back evenly spaced -- an uneven one is a rounding story about the samples, not a statement
+ * that the axis is tabular. The diagnostic saying so is carried either way.
+ *
+ * The samples are direction cosines and the descriptor reports degrees, so the increment is scaled
+ * here. That conversion used to sit at the call site, where nothing could reach it: dropping it
+ * would have shipped an l/m pixel scale wrong by a factor of 57.3 with every test still passing.
+ */
+DirectionAxisFit FitDirectionAxis(const std::vector<double>& cosines, std::string_view axis_name);
+
+// What a spectral axis makes of a fit. Every field is absent unless the channels are evenly spaced.
+struct SpectralAxisFit {
+    std::optional<double> reference_pixel;
+    std::optional<double> reference_value;
+    std::optional<double> increment;
+    std::vector<Diagnostic> diagnostics;
+};
+
+/**
+ * The linear description of a spectral coordinate, from its channel frequencies.
+ *
+ * The opposite rule to a direction axis, and for the opposite reason: XRADIO warns that neighbouring
+ * channels need not be evenly spaced, so unevenly spaced ones get no linear description at all and
+ * the consumer builds a tabular axis instead. See ADR 0002.
+ *
+ * A diagnostic about a reference pixel the consumer will never see would only confuse it, so that
+ * one is dropped when the description is withheld. The reason why is kept, because it is what tells
+ * the consumer to go tabular.
+ */
+SpectralAxisFit FitSpectralAxis(const std::vector<double>& channels, double reference,
+                                std::string_view axis_name);
 
 }  // namespace carta::zarr::internal::xradio
 

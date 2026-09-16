@@ -38,7 +38,6 @@ std::string Upper(std::string value) {
 
 constexpr std::string_view kVersion = "1.2";
 constexpr std::array<std::string_view, 5> kSkyAxes{"time", "frequency", "polarization", "l", "m"};
-constexpr double kRadToDeg = 180.0 / M_PI;
 
 bool IsFlag(const zarr_metadata::ArrayMetadata& metadata) {
     return metadata.attributes.contains("type") && metadata.attributes.at("type").is_string() &&
@@ -256,10 +255,9 @@ std::optional<DirectionCoordinate> DescribeDirection(const nlohmann::json& root_
 
     const auto set_direction_axis = [&](const std::vector<double>& values, double& increment, double& reference_pixel,
                                         std::string_view name) {
-        auto fit = FitLinearAxis(values, std::nullopt, name);
+        auto fit = FitDirectionAxis(values, name);
         if (fit.increment) {
-            // The samples are direction cosines; the descriptor reports degrees.
-            increment = *fit.increment * kRadToDeg;
+            increment = *fit.increment;
         }
         if (fit.reference_pixel) {
             reference_pixel = *fit.reference_pixel;
@@ -316,22 +314,11 @@ std::optional<SpectralCoordinate> DescribeSpectralCoordinate(const Store& store,
         }
     }
 
-    auto fit = FitLinearAxis(spectral.channel_frequencies, reference_value, "frequency");
-    if (fit.uniform) {
-        spectral.reference_pixel = fit.reference_pixel;
-        spectral.reference_value = fit.reference_value;
-        spectral.increment = fit.increment;
-        AppendDiagnostics(descriptor, std::move(fit.diagnostics));
-    } else {
-        // Unevenly spaced channels get no linear description, so a diagnostic about its reference
-        // pixel would describe a value the consumer never sees. Only the reason why is worth
-        // carrying; it tells the consumer to build a tabular axis.
-        for (auto& diagnostic : fit.diagnostics) {
-            if (diagnostic.code == "nonuniform_axis") {
-                descriptor.diagnostics.push_back(std::move(diagnostic));
-            }
-        }
-    }
+    auto fit = FitSpectralAxis(spectral.channel_frequencies, reference_value, "frequency");
+    spectral.reference_pixel = fit.reference_pixel;
+    spectral.reference_value = fit.reference_value;
+    spectral.increment = fit.increment;
+    AppendDiagnostics(descriptor, std::move(fit.diagnostics));
     return spectral;
 }
 

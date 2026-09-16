@@ -170,8 +170,8 @@ public:
 
 namespace {
 
-// The axis a progressive read is split along: the slowest-varying one that selects more than a
-// single element. The destination is dense in logical order with axis 0 fastest, so splitting there
+// The axis a split read is cut along: the slowest-varying one that selects more than a single
+// element. The destination is dense in logical order with axis 0 fastest, so splitting there
 // and nowhere else is what makes each finished piece extend a prefix instead of leaving holes.
 std::optional<std::size_t> SlowestSelectedAxis(const ReadRequest& request) {
     for (std::size_t i = request.axes.size(); i-- > 0;) {
@@ -297,12 +297,21 @@ Result<std::size_t> Image::Read(const ReadRequest& request, MutableBufferView de
 
         const bool apply_mask = options.apply_pixel_mask && _impl->descriptor.has_pixel_mask;
 
-        // One piece unless the caller asked to hear about progress, in which case the request is split
-        // along its slowest-varying selected axis. Splitting anywhere else, or without aligning to the
-        // chunk grid, would decode chunks twice and report a destination that is finished in patches
+        // One piece unless there is a reason to split, in which case the request is cut along its
+        // slowest-varying selected axis. Splitting anywhere else, or without aligning to the chunk
+        // grid, would decode chunks twice and report a destination that is finished in patches
         // rather than as a prefix.
+        //
+        // There are two reasons, and either one on its own is enough. Somebody to report progress to
+        // is the obvious one. A stated memory ceiling is the other: it says how much this read may
+        // hold at once, and splitting to fit is a better answer than refusing to read at all. Tying
+        // it to the progress callback meant a caller who asked for a ceiling and did not care to
+        // watch was simply told no, which is not what the ceiling asked for.
+        //
+        // A read with neither takes the same single-piece path it always did.
         const auto slab_axis = SlowestSelectedAxis(request);
-        const bool progressive = static_cast<bool>(options.progress) && slab_axis.has_value();
+        const bool split = slab_axis.has_value() &&
+                           (static_cast<bool>(options.progress) || options.temporary_memory_limit_bytes != 0);
 
         // Not splitting is the same loop with one piece covering everything, so there is one path to
         // read rather than two to keep in agreement.
@@ -310,7 +319,7 @@ Result<std::size_t> Image::Read(const ReadRequest& request, MutableBufferView de
         std::uint64_t slab_stride = elements;
         std::uint64_t slab_step = 1;
         std::uint64_t slab_chunk = 0;
-        if (progressive) {
+        if (split) {
             const auto axis = slab_axis.value();
             slab_total = request.axes.at(axis).count;
             slab_stride = 1;
@@ -336,13 +345,13 @@ Result<std::size_t> Image::Read(const ReadRequest& request, MutableBufferView de
 
         for (std::uint64_t begin = 0; begin < slab_total;) {
             const std::uint64_t end =
-                progressive
+                split
                     ? internal::AlignedBlockEnd(begin, slab_step, slab_total, request.axes.at(slab_axis.value()).start,
                                                 request.axes.at(slab_axis.value()).stride, slab_chunk)
                     : slab_total;
 
             ReadRequest piece = request;
-            if (progressive) {
+            if (split) {
                 auto& range = piece.axes.at(slab_axis.value());
                 range.start = request.axes.at(slab_axis.value()).start + (begin * range.stride);
                 range.count = end - begin;

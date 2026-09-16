@@ -283,13 +283,40 @@ void TestReadControls(const carta::zarr::Image& sky) {
     Require(!expired_read && expired_read.error().code == carta::zarr::ErrorCode::cancelled,
             "a read past its deadline was not rejected");
 
-    carta::zarr::ReadOptions over_budget;
-    over_budget.temporary_memory_limit_bytes = elements - 1;
-    const auto budget_read = sky.Read(request, {pixels.data(), pixels.size() * sizeof(float)}, over_budget);
-    Require(!budget_read && budget_read.error().code == carta::zarr::ErrorCode::buffer_too_small,
-            "a masked read over its temporary memory budget was not rejected");
+    // A stated ceiling splits the read to fit rather than refusing it, and it does so whether or not
+    // anyone asked to watch. This used to depend on supplying a progress callback: a caller who said
+    // how much memory the read could have and did not care to watch was told no, which is the one
+    // thing the ceiling was not asking for.
+    std::vector<float> reference(elements, 0.0F);
+    const auto reference_read = sky.Read(request, {reference.data(), reference.size() * sizeof(float)});
+    Require(static_cast<bool>(reference_read), "the unrestricted read this compares against failed");
+
+    carta::zarr::ReadOptions budgeted;
+    // Less than one piece covering everything needs, and more than one polarization's worth -- so it
+    // has to be split, and splitting is enough.
+    budgeted.temporary_memory_limit_bytes = elements - 1;
+    std::vector<float> budgeted_pixels(elements, 0.0F);
+    const auto budgeted_read =
+        sky.Read(request, {budgeted_pixels.data(), budgeted_pixels.size() * sizeof(float)}, budgeted);
+    Require(static_cast<bool>(budgeted_read),
+            "a read with a memory ceiling was refused instead of split" +
+                (budgeted_read ? std::string{} : ": " + budgeted_read.error().message));
+    for (std::size_t i = 0; i < elements; ++i) {
+        const bool both_nan = std::isnan(budgeted_pixels.at(i)) && std::isnan(reference.at(i));
+        Require(both_nan || budgeted_pixels.at(i) == reference.at(i),
+                "splitting to fit a memory ceiling changed the pixel at offset " + std::to_string(i));
+    }
+
+    // A ceiling no amount of splitting gets under is still refused rather than allocated past. The
+    // pieces bottom out at one chunk, because asking for less than a chunk decodes the whole chunk
+    // anyway, so below that there is nothing left to give.
+    carta::zarr::ReadOptions unreachable;
+    unreachable.temporary_memory_limit_bytes = 1;
+    const auto refused = sky.Read(request, {pixels.data(), pixels.size() * sizeof(float)}, unreachable);
+    Require(!refused && refused.error().code == carta::zarr::ErrorCode::buffer_too_small,
+            "a masked read that cannot be split under its ceiling was not rejected");
     Require(std::all_of(pixels.begin(), pixels.end(), [](float value) { return value == 123.0F; }),
-            "a masked read rejected for memory budget modified its destination");
+            "a read rejected for memory budget modified its destination");
 }
 
 // The header promises that one handle may be read from any number of threads. This cannot prove

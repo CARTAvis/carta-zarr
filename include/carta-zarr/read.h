@@ -61,11 +61,13 @@ struct ReadOptions {
     // number the request will produce in total. Returning false cancels the read, which then
     // reports cancelled.
     //
-    // Supplying this changes how the read is issued: it is split into chunk-aligned pieces along
-    // the slowest-varying selected axis, so that there is somewhere to report from and somewhere to
-    // stop. The destination is dense in logical order with axis 0 fastest, which is what makes the
-    // finished part a prefix rather than a scatter -- a caller can render or forward it as it
-    // arrives. Leave it unset and the read is issued exactly as it was before, in one piece.
+    // Supplying this splits the read into chunk-aligned pieces along the slowest-varying selected
+    // axis, so that there is somewhere to report from and somewhere to stop. The destination is
+    // dense in logical order with axis 0 fastest, which is what makes the finished part a prefix
+    // rather than a scatter -- a caller can render or forward it as it arrives.
+    //
+    // It is not the only thing that splits a read; temporary_memory_limit_bytes does too. A read
+    // with neither is issued in one piece.
     //
     // A read that nothing interrupts is not made slower by this: the pieces are sized to hold
     // enough chunks to decode in parallel, and at that size a split read measures the same as an
@@ -73,10 +75,12 @@ struct ReadOptions {
     std::function<bool(std::size_t elements_written, std::size_t elements_total)> progress;
     // Maximum temporary memory one piece of the read may use. Zero means the library's own budget.
     //
-    // This bounds the pixel mask buffer, and it is also what a progressive read sizes its pieces
-    // by -- both are "how much this read may hold at once", and splitting to fit is a better answer
-    // than refusing. A read that cannot be split still reports buffer_too_small rather than
-    // allocating past the limit.
+    // This bounds the pixel mask buffer, and it is also what a split read sizes its pieces by --
+    // both are "how much this read may hold at once", and splitting to fit is a better answer than
+    // refusing. So setting it splits the read, whether or not anyone asked to watch: a ceiling is a
+    // statement about memory, not about wanting progress. A read that cannot be split far enough --
+    // no axis selects more than one element, or a piece of one chunk is still too large -- reports
+    // buffer_too_small rather than allocating past the limit.
     //
     // For ReduceSpectral it is a target rather than a limit. That walk splits along x, along the
     // chunk rows and along the spectrum, and each of the three bottoms out at one chunk, which is

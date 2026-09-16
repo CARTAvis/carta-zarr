@@ -233,6 +233,17 @@ if(CARTA_ZARR_BUILD_TESTS AND BUILD_TESTING)
         ${CMAKE_CURRENT_SOURCE_DIR}/src)
     add_test(NAME carta-zarr-linear-axis COMMAND carta_zarr_linear_axis_tests)
 
+    # What a pass decides before it reads anything. Compiled against pass.cc alone: PlanPass touches
+    # no store and no transport, so the read strategy -- which has moved more than once, and moved
+    # in three places each time -- is checkable without a directory tree.
+    add_executable(carta_zarr_pass_tests tests/pass_test.cc src/reduce/pass.cc)
+    target_compile_features(carta_zarr_pass_tests PRIVATE cxx_std_17)
+    target_include_directories(carta_zarr_pass_tests PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/include
+        ${CMAKE_CURRENT_SOURCE_DIR}/src)
+    target_link_libraries(carta_zarr_pass_tests PRIVATE nlohmann_json::nlohmann_json)
+    add_test(NAME carta-zarr-pass COMMAND carta_zarr_pass_tests)
+
     add_executable(carta_zarr_chunk_blocks_tests tests/chunk_blocks_test.cc)
     target_compile_features(carta_zarr_chunk_blocks_tests PRIVATE cxx_std_17)
     target_include_directories(carta_zarr_chunk_blocks_tests PRIVATE

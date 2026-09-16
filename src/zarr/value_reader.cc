@@ -9,11 +9,12 @@
 #include "store_context.h"
 
 #include <tensorstore/array.h>
+#include <tensorstore/cast.h>
 #include <tensorstore/context.h>
+#include <tensorstore/data_type.h>
 #include <tensorstore/open.h>
 #include <tensorstore/open_mode.h>
 #include <tensorstore/spec.h>
-#include <tensorstore/static_cast.h>
 #include <tensorstore/tensorstore.h>
 #include <tensorstore/util/result.h>
 
@@ -52,12 +53,17 @@ Result<std::vector<double>> ReadNumericValues(const std::filesystem::path& array
                              std::string(node));
         }
 
-        auto typed_store_result = tensorstore::StaticCast<tensorstore::TensorStore<double>>(open_result.value());
-        if (!typed_store_result.ok()) {
-            return MakeError(ErrorCode::unsupported_data_type, "Array is not readable as double", std::string(node));
+        // Every real Zarr type a coordinate may be stored in is read as double. Converting rather
+        // than requiring float64 is what the probe already promises: it accepts any real type, and
+        // an image whose coordinates are float32 or integer has to open rather than fail here.
+        // Conversion rides the read's own copy, as it does for pixels.
+        auto converted = tensorstore::Cast(open_result.value(), tensorstore::dtype_v<double>);
+        if (!converted.ok()) {
+            return MakeError(ErrorCode::unsupported_data_type,
+                             "Array is not readable as double: " + converted.status().ToString(), std::string(node));
         }
 
-        auto read_result = tensorstore::Read(typed_store_result.value()).result();
+        auto read_result = tensorstore::Read(converted.value()).result();
         if (!read_result.ok()) {
             return MakeError(ErrorCode::io_error, "TensorStore read failed: " + read_result.status().ToString(),
                              std::string(node));

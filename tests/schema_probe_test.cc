@@ -47,6 +47,15 @@ void WriteDoubles(const std::filesystem::path& path, const std::vector<double>& 
     Require(static_cast<bool>(output), "Unable to finish writing " + path.string());
 }
 
+void WriteFloats(const std::filesystem::path& path, const std::vector<float>& values) {
+    std::filesystem::create_directories(path.parent_path());
+    std::ofstream output(path, std::ios::binary);
+    Require(output.is_open(), "Unable to write " + path.string());
+    output.write(reinterpret_cast<const char*>(values.data()),
+                 static_cast<std::streamsize>(values.size() * sizeof(float)));
+    Require(static_cast<bool>(output), "Unable to finish writing " + path.string());
+}
+
 void WriteUtf32(const std::filesystem::path& path, const std::vector<std::string>& values, std::size_t code_points) {
     std::filesystem::create_directories(path.parent_path());
     std::ofstream output(path, std::ios::binary);
@@ -420,6 +429,34 @@ void TestCoordinateCompletion(const std::filesystem::path& root) {
             "inexact direction reference pixel did not use linear extrapolation");
 }
 
+// The probe accepts a coordinate stored in any real type, so opening one has to accept the same
+// set. A float32 coordinate used to probe as a match and then fail to open, which told a consumer
+// the dataset was supported and then refused it.
+void TestNonDoubleCoordinates(const std::filesystem::path& root) {
+    CreateValidStore(root);
+    Write(root / "frequency" / "zarr.json", NumericArray("[3]", R"(["frequency"])", "float32", R"({"units":"Hz"})"));
+    WriteFloats(root / "frequency" / "c" / "0", {100.0F, 102.0F, 104.0F});
+    Write(root / "l" / "zarr.json", NumericArray("[4]", R"(["l"])", "float32"));
+    WriteFloats(root / "l" / "c" / "0", {-0.003F, -0.002F, -0.001F, 0.0F});
+    Write(root / "m" / "zarr.json", NumericArray("[5]", R"(["m"])", "float32"));
+    WriteFloats(root / "m" / "c" / "0", {-0.004F, -0.003F, -0.002F, -0.001F, 0.0F});
+
+    const auto context = carta::zarr::Context::Create();
+    Require(static_cast<bool>(context), "Context::Create failed for float32 coordinates");
+    const auto supported = carta::zarr::IsXradioImage(root.string());
+    Require(supported && supported.value(), "a float32 coordinate was not probed as a supported image dataset");
+
+    const auto dataset = carta::zarr::Dataset::Open(context.value(), root.string());
+    Require(static_cast<bool>(dataset), "float32-coordinate dataset did not open");
+    const auto image = dataset.value().OpenImage("SKY");
+    Require(static_cast<bool>(image),
+            "float32-coordinate image did not open" + (image ? std::string{} : ": " + image.error().message));
+    const auto& descriptor = image.value().descriptor();
+    Require(descriptor.spectral.has_value(), "float32 frequency coordinate produced no spectral description");
+    Require(descriptor.spectral->reference_value == 100.0 && descriptor.spectral->increment == 2.0,
+            "float32 frequency values were not converted to their double equivalents");
+}
+
 void TestAmbiguousPixelMask(const std::filesystem::path& root) {
     CreateValidStore(root);
     Write(root / "MODEL" / "zarr.json", SkyArray());
@@ -693,6 +730,7 @@ int main() {
         TestNonMatchAndInvalid(root / "classification");
         TestMissingAndUnsupported(root);
         TestCoordinateCompletion(root / "coordinates");
+        TestNonDoubleCoordinates(root / "float32-coordinates");
         TestAmbiguousPixelMask(root / "ambiguous-mask");
         TestDiscoveryIgnoresNameAllowlist(root / "unlisted-image");
         TestMetadataCache(root / "metadata-cache");

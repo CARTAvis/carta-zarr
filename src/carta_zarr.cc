@@ -9,6 +9,7 @@
 #include "chunk_blocks.h"
 #include "reduce/plane_histogram.h"
 #include "reduce/spectral_reduce.h"
+#include "reduce/store_slab_source.h"
 #include "schema/profile.h"
 #include "store.h"
 #include "work_pool.h"
@@ -428,7 +429,8 @@ Result<void> Image::ReduceSpectral(const SpectralReduceRequest& request, const S
         if (!_impl || !_impl->store) {
             return MakeError(ErrorCode::invalid_argument, "Image handle is empty");
         }
-        return internal::ReduceSpectral(*_impl->store, _impl->descriptor, _impl->geometry, request, sink, options,
+        const internal::StoreSlabSource source(*_impl->store, _impl->descriptor);
+        return internal::ReduceSpectral(source, _impl->descriptor, _impl->geometry, request, sink, options,
                                         *_impl->context->workers);
     });
 }
@@ -444,7 +446,8 @@ Result<void> Image::ComputeHistogram(const HistogramRequest& request, const Hist
         if (!_impl || !_impl->store) {
             return MakeError(ErrorCode::invalid_argument, "Image handle is empty");
         }
-        return internal::ComputeHistogram(*_impl->store, _impl->descriptor, _impl->geometry, request, sink, options,
+        const internal::StoreSlabSource source(*_impl->store, _impl->descriptor);
+        return internal::ComputeHistogram(source, _impl->descriptor, _impl->geometry, request, sink, options,
                                           *_impl->context->workers);
     });
 }
@@ -460,7 +463,8 @@ Result<CubeHistogramResult> Image::ComputeCubeHistogram(const CubeHistogramReque
         if (!_impl || !_impl->store) {
             return MakeError(ErrorCode::invalid_argument, "Image handle is empty");
         }
-        return internal::ComputeCubeHistogram(*_impl->store, _impl->descriptor, _impl->geometry, request, options,
+        const internal::StoreSlabSource source(*_impl->store, _impl->descriptor);
+        return internal::ComputeCubeHistogram(source, _impl->descriptor, _impl->geometry, request, options,
                                               *_impl->context->workers);
     });
 }

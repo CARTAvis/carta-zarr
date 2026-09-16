@@ -12,7 +12,7 @@
 // and until now got them from a hand-written copy in tests/support that could disagree with this
 // one about the very ranges it exists to reject.
 
-#include "pixel_reader.h"
+#include "zarr/pixel_selection.h"
 
 #include <chrono>
 #include <limits>

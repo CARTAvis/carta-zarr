@@ -9,7 +9,7 @@
 #include "chunk_blocks.h"
 #include "reduce/axis_map.h"
 #include "reduce/pass.h"
-#include "zarr/pixel_reader.h"
+#include "zarr/pixel_selection.h"
 
 #include <algorithm>
 #include <array>
@@ -387,7 +387,7 @@ std::vector<std::vector<ColumnRun>> BuildColumnRuns(const ChunkBuckets& buckets)
 
 }  // namespace
 
-Result<void> ReduceSpectral(const Store& store, const ImageDescriptor& descriptor,
+Result<void> ReduceSpectral(const SlabSource& source, const ImageDescriptor& descriptor,
                             const ChunkGeometry& geometry, const SpectralReduceRequest& request,
                             const SpectralSink& sink, const ReadOptions& options, WorkPool& workers) {
     const auto& node = descriptor.id;
@@ -455,7 +455,6 @@ Result<void> ReduceSpectral(const Store& store, const ImageDescriptor& descripto
 
     const auto plan = PlanPass(descriptor, geometry, map, spectral, request.polarization, request.time, 1,
                                options);
-    const StoreSlabSource source(store, descriptor);
 
     auto buckets_result =
         BuildChunkBuckets(regions.data(), regions.size(), plan.chunk_u, plan.chunk_v, node);

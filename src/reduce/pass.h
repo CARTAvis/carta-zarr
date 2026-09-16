@@ -11,8 +11,7 @@
 
 #include "chunk_blocks.h"
 #include "reduce/axis_map.h"
-#include "store.h"
-#include "zarr/pixel_reader.h"
+#include "zarr/pixel_selection.h"
 
 #include <algorithm>
 #include <cstdint>
@@ -24,10 +23,10 @@ namespace carta::zarr::internal {
 /**
  * Where a pass gets its pixels.
  *
- * One adapter today, which reads them from a `Store`. It is a parameter rather than a `Store&`
- * reached for directly so that a second adapter -- one that answers from memory, and lets a test
- * state a cube the size of a real one without writing it to disk -- arrives without this signature
- * changing. Until that one exists this is a hypothetical seam, not a real one.
+ * Two adapters: StoreSlabSource, which reads them from a `Store`, and the synthetic one in
+ * tests/support, which computes them from their own coordinates. The second is what lets a pass be
+ * asked how it walks a cube -- how many times it decodes a chunk, what it does when a read fails,
+ * what it does at four thousand pixels square -- none of which a directory tree can answer.
  *
  * Consulted once per slab, so the indirect call is paid per megabyte of pixels rather than per
  * pixel. That is the whole reason it can be an interface at all while the visitor cannot: see
@@ -47,28 +46,6 @@ public:
     // Only called when the plan says the image has a pixel mask to apply.
     virtual Result<void> ReadMask(const zarr::PixelSelection& selection, std::uint8_t* destination,
                                   std::size_t elements, const ReadOptions& options) const = 0;
-};
-
-// The adapter that serves production: the image's own data variable, and the flag that masks it.
-class StoreSlabSource final : public SlabSource {
-public:
-    StoreSlabSource(const Store& store, const ImageDescriptor& descriptor)
-        : _store(&store), _descriptor(&descriptor) {}
-
-    Result<void> ReadPixels(const zarr::PixelSelection& selection, float* destination, std::size_t elements,
-                            const ReadOptions& options) const override {
-        return _store->ReadPixelsFloat32(_descriptor->id, selection, destination, elements, options);
-    }
-
-    Result<void> ReadMask(const zarr::PixelSelection& selection, std::uint8_t* destination,
-                          std::size_t elements, const ReadOptions& options) const override {
-        return _store->ReadPixelMaskBytes(_descriptor->pixel_mask_id, selection, destination, elements,
-                                          options);
-    }
-
-private:
-    const Store* _store;
-    const ImageDescriptor* _descriptor;
 };
 
 /**

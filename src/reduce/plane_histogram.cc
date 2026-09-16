@@ -9,7 +9,6 @@
 #include "chunk_blocks.h"
 #include "reduce/axis_map.h"
 #include "reduce/pass.h"
-#include "zarr/pixel_reader.h"
 
 #include <algorithm>
 #include <cmath>
@@ -220,7 +219,7 @@ private:
 
 }  // namespace
 
-Result<void> ComputeHistogram(const Store& store, const ImageDescriptor& descriptor,
+Result<void> ComputeHistogram(const SlabSource& source, const ImageDescriptor& descriptor,
                               const ChunkGeometry& geometry, const HistogramRequest& request,
                               const HistogramSink& sink, const ReadOptions& options, WorkPool& workers) {
     const auto& node = descriptor.id;
@@ -242,7 +241,6 @@ Result<void> ComputeHistogram(const Store& store, const ImageDescriptor& descrip
     const Range spectral = request.spectral;
     const auto plan = PlanPass(descriptor, geometry, map, spectral, request.polarization, request.time, 1,
                                options);
-    const StoreSlabSource source(store, descriptor);
 
     // A whole plane, so the layer the emit budget is spent against is the plan's own.
     const std::size_t bytes_per_channel = static_cast<std::size_t>(request.bins) * sizeof(std::uint64_t);
@@ -379,7 +377,7 @@ Result<void> ComputeHistogram(const Store& store, const ImageDescriptor& descrip
     return {};
 }
 
-Result<CubeHistogramResult> ComputeCubeHistogram(const Store& store, const ImageDescriptor& descriptor,
+Result<CubeHistogramResult> ComputeCubeHistogram(const SlabSource& source, const ImageDescriptor& descriptor,
                                                  const ChunkGeometry& geometry,
                                                  const CubeHistogramRequest& request,
                                                  const ReadOptions& options, WorkPool& workers) {
@@ -428,7 +426,6 @@ Result<CubeHistogramResult> ComputeCubeHistogram(const Store& store, const Image
 
     const auto plan = PlanPass(descriptor, geometry, map, request.spectral, request.polarization,
                                request.time, request.spatial_sample, options);
-    const StoreSlabSource source(store, descriptor);
     const std::uint64_t total_chunks =
         std::max<std::uint64_t>(1, plan.layer_chunks * ((request.spectral.count + plan.least_channels - 1) /
                                                         plan.least_channels));

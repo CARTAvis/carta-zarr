@@ -252,6 +252,26 @@ if(CARTA_ZARR_BUILD_TESTS AND BUILD_TESTING)
     target_link_libraries(carta_zarr_pass_tests PRIVATE nlohmann_json::nlohmann_json)
     add_test(NAME carta-zarr-pass COMMAND carta_zarr_pass_tests)
 
+    # A whole reduction against pixels that were never written down. This target links no Store and
+    # no TensorStore, which is the seam the pass's SlabSource exists to create: the oracle is the
+    # formula the pixels come from, so the image can be whatever size the question needs rather than
+    # whatever size is worth committing.
+    add_executable(carta_zarr_reduce_synthetic_tests
+        tests/reduce_synthetic_test.cc
+        src/reduce/pass.cc
+        src/reduce/pass_read.cc
+        src/reduce/plane_histogram.cc
+        src/reduce/spectral_reduce.cc
+        src/work_pool.cc
+        src/zarr/pixel_selection.cc)
+    target_compile_features(carta_zarr_reduce_synthetic_tests PRIVATE cxx_std_17)
+    target_include_directories(carta_zarr_reduce_synthetic_tests PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/include
+        ${CMAKE_CURRENT_SOURCE_DIR}/src
+        ${CMAKE_CURRENT_SOURCE_DIR}/tests)
+    target_link_libraries(carta_zarr_reduce_synthetic_tests PRIVATE Threads::Threads)
+    add_test(NAME carta-zarr-reduce-synthetic COMMAND carta_zarr_reduce_synthetic_tests)
+
     add_executable(carta_zarr_chunk_blocks_tests tests/chunk_blocks_test.cc)
     target_compile_features(carta_zarr_chunk_blocks_tests PRIVATE cxx_std_17)
     target_include_directories(carta_zarr_chunk_blocks_tests PRIVATE

@@ -19,12 +19,26 @@ WorkPool::WorkPool(std::size_t threads) {
     // of one starts nothing and runs everything inline, which is what a consumer asking for a
     // single-threaded library gets.
     _workers.reserve(threads - 1);
-    for (std::size_t index = 1; index < threads; ++index) {
-        _workers.emplace_back([this, index] { Worker(index); });
+    try {
+        for (std::size_t index = 1; index < threads; ++index) {
+            _workers.emplace_back([this, index] { Worker(index); });
+        }
+    } catch (...) {
+        // A constructor that throws never runs its own destructor, but its members are destroyed
+        // anyway -- and ~thread on a joinable thread is std::terminate, not an error. So the
+        // workers already started have to be stopped here or the process dies during unwinding,
+        // taking the consumer with it. They would also never end on their own: each one is parked
+        // in _wake, and nothing else is going to set _stopping.
+        StopWorkers();
+        throw;
     }
 }
 
 WorkPool::~WorkPool() {
+    StopWorkers();
+}
+
+void WorkPool::StopWorkers() noexcept {
     {
         std::lock_guard<std::mutex> lock(_mutex);
         _stopping = true;
@@ -35,6 +49,9 @@ WorkPool::~WorkPool() {
             worker.join();
         }
     }
+    // Leaves nothing joinable behind, which is the postcondition the constructor's failure path
+    // needs and the destructor gets for free.
+    _workers.clear();
 }
 
 void WorkPool::Worker(std::size_t index) {

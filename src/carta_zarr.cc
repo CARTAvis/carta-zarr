@@ -132,11 +132,18 @@ Context::Context(std::shared_ptr<Impl> impl) : _impl(std::move(impl)) {}
 Context::~Context() = default;
 
 Result<Context> Context::Create(const OpenOptions& options) {
-    auto store_context = internal::MakeStoreContext(options);
-    if (!store_context) {
-        return store_context.error();
-    }
-    return Context{std::make_shared<Impl>(options, std::move(store_context.value()))};
+    // Guarded like every other public entry point, and for a reason the others do not have: building
+    // an Impl starts the worker threads, and a system that refuses one throws std::system_error.
+    // Without this, the one call a consumer makes before it can do anything else is also the only
+    // one that could throw at it. io_error is the nearest existing code for "the machine would not
+    // give us what we asked for"; the message says which resource it was.
+    return Guarded(ErrorCode::io_error, {}, [&]() -> Result<Context> {
+        auto store_context = internal::MakeStoreContext(options);
+        if (!store_context) {
+            return store_context.error();
+        }
+        return Context{std::make_shared<Impl>(options, std::move(store_context.value()))};
+    });
 }
 
 class Image::Impl {

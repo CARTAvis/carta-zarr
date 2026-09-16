@@ -41,6 +41,10 @@ class WorkPool {
 public:
     // `threads` of zero asks for one worker per hardware thread. One means everything runs inline
     // on the calling thread and no threads are started at all.
+    //
+    // Throws std::system_error if the system refuses a thread. Nothing is left running when it
+    // does, and the caller gets no pool rather than a smaller one: a pool that quietly started
+    // three of thirty-two workers would report the difference only as everything being slow.
     explicit WorkPool(std::size_t threads);
     ~WorkPool();
 
@@ -66,6 +70,9 @@ public:
 
 private:
     void Worker(std::size_t index);
+    // Wake every worker, tell it to return, and join it. Idempotent, and the only way a worker ever
+    // ends -- one that is parked in _wake has nothing else to wake it.
+    void StopWorkers() noexcept;
 
     std::vector<std::thread> _workers;
 

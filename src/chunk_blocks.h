@@ -58,12 +58,18 @@ inline std::uint64_t DefaultReadBytes(std::uint64_t chunk_bytes) {
                                    std::max<std::uint64_t>(kDecodedBytesPerRead, wanted));
 }
 
-// Bytes one chunk of this image decompresses to.
-inline std::uint64_t DecodedChunkBytes(const ImageDescriptor& descriptor, const ChunkGeometry& geometry) {
+// Elements in one chunk of this image.
+inline std::uint64_t ChunkElements(const ChunkGeometry& geometry) {
     std::uint64_t elements = 1;
     for (const auto length : geometry.chunk_shape) {
         elements *= std::max<std::uint64_t>(1, length);
     }
+    return elements;
+}
+
+// Bytes one chunk of this image decompresses to.
+inline std::uint64_t DecodedChunkBytes(const ImageDescriptor& descriptor, const ChunkGeometry& geometry) {
+    const std::uint64_t elements = ChunkElements(geometry);
     std::uint64_t element_bytes = 4;
     switch (descriptor.stored_type) {
         case DataType::boolean:
@@ -80,6 +86,20 @@ inline std::uint64_t DecodedChunkBytes(const ImageDescriptor& descriptor, const 
         default: element_bytes = 4; break;
     }
     return std::max<std::uint64_t>(1, elements * element_bytes);
+}
+
+// The same, counting the flag chunk a read decodes beside the pixels when it will apply the image's
+// pixel mask.
+//
+// One byte an element rather than another copy of the pixels: a flag is boolean over the image's own
+// shape by construction -- RequireUsableFlag holds it to both -- so beside a float32 chunk it is a
+// quarter of one, not a second one. Whichever way this is wrong it is wrong in the units the budget
+// is spent in, and a read sized too small is the mistake this header exists to prevent: on a 1 MiB
+// chunk image a whole-plane profile took 97.8 ms at 64 chunks per request and 462.2 at one.
+inline std::uint64_t DecodedChunkBytes(const ImageDescriptor& descriptor, const ChunkGeometry& geometry,
+                                       bool apply_mask) {
+    const std::uint64_t pixels = DecodedChunkBytes(descriptor, geometry);
+    return apply_mask ? pixels + ChunkElements(geometry) : pixels;
 }
 
 // The end of a block of selected indices that begins at `begin` and would like to be `desired`

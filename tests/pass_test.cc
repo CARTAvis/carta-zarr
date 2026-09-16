@@ -101,19 +101,24 @@ void TestTheInnerAxisFollowsTheStore() {
     Require(l_fastest.u_length == 512 && l_fastest.v_length == 520, "the lengths follow the axes");
 }
 
-// A budget is in decoded chunk bytes, and a masked read decodes the flag too.
-void TestAMaskDoublesWhatAReadDecodes() {
+// A budget is in decoded chunk bytes, and a masked read decodes the flag too -- at the flag's own
+// cost, which is the thing this used to get wrong. RequireUsableFlag holds a flag to bool over the
+// image's shape, so beside a float32 chunk it is a quarter of one and not a second one. Counting it
+// as a second one shrank every masked read by the difference.
+void TestAMaskCostsWhatTheFlagCosts() {
     const Range spectral{0, 32, 1};
     const auto geometry = MakeGeometry(256, 260, 2, AxisRole::spatial_y);
+    const std::uint64_t chunk_elements = 256ULL * 260ULL * 2ULL;
     ReadOptions options;
     options.apply_pixel_mask = true;
 
     const auto plain = Plan(MakeImage(512, 520, 32, false), geometry, spectral, options);
     const auto masked = Plan(MakeImage(512, 520, 32, true), geometry, spectral, options);
     Require(masked.apply_mask && !plain.apply_mask, "only an image with a flag applies one");
-    Require(masked.chunk_bytes == plain.chunk_bytes * 2,
-            "a masked read decodes a chunk of the flag beside the chunk of pixels, and the budget "
-            "has to know it");
+    Require(plain.chunk_bytes == chunk_elements * 4, "a float32 chunk is four bytes an element");
+    Require(masked.chunk_bytes == plain.chunk_bytes + chunk_elements,
+            "the flag beside it is one byte an element, so a masked float32 chunk costs a quarter "
+            "more and not twice as much");
 
     ReadOptions declined;
     declined.apply_pixel_mask = false;
@@ -215,7 +220,7 @@ void TestSampledRangePicksTheMultiplesInside() {
 int main() {
     try {
         TestTheInnerAxisFollowsTheStore();
-        TestAMaskDoublesWhatAReadDecodes();
+        TestAMaskCostsWhatTheFlagCosts();
         TestTheCallersCeilingWins();
         TestASlabIsCountedInChunksOfTheSpectralAxis();
         TestALayerIsCountedInWholeChunks();

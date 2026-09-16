@@ -176,7 +176,8 @@ std::optional<std::size_t> SlowestSelectedAxis(const ReadRequest& request) {
 // channels -- and an image with very large chunks gets pieces of one chunk rather than pieces it
 // could never afford.
 std::uint64_t ElementsPerPiece(const ImageDescriptor& descriptor, const ReadRequest& request,
-                               const ChunkGeometry& geometry, std::size_t axis, std::size_t budget_bytes) {
+                               const ChunkGeometry& geometry, std::size_t axis, std::size_t budget_bytes,
+                               bool apply_mask) {
     std::uint64_t other_chunks = 1;
     for (std::size_t i = 0; i < request.axes.size(); ++i) {
         if (i == axis) {
@@ -186,7 +187,7 @@ std::uint64_t ElementsPerPiece(const ImageDescriptor& descriptor, const ReadRequ
         const auto& range = request.axes.at(i);
         other_chunks *= internal::ChunksSpanned(range.start, range.count, range.stride, chunk);
     }
-    const auto row_bytes = internal::DecodedChunkBytes(descriptor, geometry) * other_chunks;
+    const auto row_bytes = internal::DecodedChunkBytes(descriptor, geometry, apply_mask) * other_chunks;
     // At least one chunk: a piece smaller than that would decode the same chunk twice.
     const auto chunks = std::max<std::uint64_t>(1, budget_bytes / std::max<std::uint64_t>(1, row_bytes));
     const auto chunk = axis < geometry.chunk_shape.size() ? geometry.chunk_shape.at(axis) : 0;
@@ -305,11 +306,17 @@ Result<std::size_t> Image::Read(const ReadRequest& request, MutableBufferView de
                 slab_stride *= request.axes.at(i).count;
             }
             slab_chunk = axis < _impl->geometry.chunk_shape.size() ? _impl->geometry.chunk_shape.at(axis) : 0;
-            const auto budget =
-                options.temporary_memory_limit_bytes != 0
-                    ? options.temporary_memory_limit_bytes
-                    : internal::DefaultReadBytes(internal::DecodedChunkBytes(_impl->descriptor, _impl->geometry));
-            slab_step = ElementsPerPiece(_impl->descriptor, request, _impl->geometry, axis, budget);
+            // The flag is decoded beside the pixels when this read will apply it, so both halves of
+            // the sizing count it: the budget the library chooses for itself, and the per-row cost
+            // that budget is divided by. Counting it in one and not the other would size pieces
+            // against a cost the read does not have.
+            const auto chunk_bytes =
+                internal::DecodedChunkBytes(_impl->descriptor, _impl->geometry, apply_mask);
+            const auto budget = options.temporary_memory_limit_bytes != 0
+                                    ? options.temporary_memory_limit_bytes
+                                    : internal::DefaultReadBytes(chunk_bytes);
+            slab_step =
+                ElementsPerPiece(_impl->descriptor, request, _impl->geometry, axis, budget, apply_mask);
         }
 
         auto* pixels = static_cast<float*>(destination.data);

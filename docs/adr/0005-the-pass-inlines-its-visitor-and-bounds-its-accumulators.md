@@ -70,9 +70,13 @@ What it shares it already shared: `DecodedChunkBytes`, `DefaultReadBytes`, `Chun
 converts the byte budget the policy returns into a count of elements along one axis, which is a
 thing the pass never needs.
 
-One difference between them is not a decision and should be looked at separately: the pass doubles
-its budget when it will also read a flag, and `Image::Read` does not, so a masked progressive read
-pulls roughly twice the decompressed data its budget names.
+They do now agree on what a masked read costs, which they did not when the pass was written. The
+pass doubled its budget when it would also read a flag and `Image::Read` ignored the flag entirely,
+so one overstated the cost and the other understated it. Neither figure was right: `RequireUsableFlag`
+holds a flag to `bool` over the image's own shape, so beside a float32 chunk it is a quarter of one.
+`DecodedChunkBytes` takes an `apply_mask` argument and both sides call it -- in `Image::Read`'s case
+in both halves of its sizing, the budget and the per-row cost that budget is divided by, because
+counting it in one and not the other sizes pieces against a cost the read does not have.
 
 ## Consequences
 

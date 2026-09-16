@@ -76,6 +76,40 @@ void TestASmallChunkKeepsTheByteBudget() {
             "an image reporting no chunk size should fall back to the byte budget");
 }
 
+// What a chunk costs when the read will apply the image's pixel mask.
+//
+// This was twice the pixels, on the reasoning that a masked slab decodes a flag chunk beside the
+// pixel chunk. It does -- but a flag is bool over the image's own shape, so it is one byte an
+// element and not another float32. Counting it as another float32 spends a masked read's budget on
+// bytes it never decodes, and the smaller read that leaves is the one thing this header exists to
+// prevent.
+void TestAMaskCostsOneByteAnElement() {
+    using carta::zarr::internal::ChunkElements;
+    using carta::zarr::internal::DecodedChunkBytes;
+
+    carta::zarr::ChunkGeometry geometry;
+    geometry.chunk_shape = {256, 260, 2, 1, 1};
+    const std::uint64_t elements = 256ULL * 260ULL * 2ULL;
+    Require(ChunkElements(geometry) == elements, "a chunk holds the product of its extents");
+
+    carta::zarr::ImageDescriptor image;
+    image.stored_type = carta::zarr::DataType::float32;
+    Require(DecodedChunkBytes(image, geometry, false) == elements * 4, "float32 is four bytes an element");
+    Require(DecodedChunkBytes(image, geometry, true) == elements * 5,
+            "four bytes of pixels and one of flag, so a masked float32 chunk is a quarter more");
+
+    // The ratio is the image's, not a constant: the flag costs the same whatever the pixels are.
+    carta::zarr::ImageDescriptor doubles;
+    doubles.stored_type = carta::zarr::DataType::float64;
+    Require(DecodedChunkBytes(doubles, geometry, true) == elements * 9,
+            "beside float64 the same flag is an eighth more, not a doubling");
+
+    carta::zarr::ImageDescriptor bytes;
+    bytes.stored_type = carta::zarr::DataType::int8;
+    Require(DecodedChunkBytes(bytes, geometry, true) == elements * 2,
+            "only a one-byte image is actually doubled by its flag");
+}
+
 }  // namespace
 
 int main() {
@@ -83,6 +117,7 @@ int main() {
         TestRealChunkShapesGetEnoughChunks();
         TestAnOversizedChunkIsCappedRatherThanMultiplied();
         TestASmallChunkKeepsTheByteBudget();
+        TestAMaskCostsOneByteAnElement();
     } catch (const std::exception& error) {
         std::fprintf(stderr, "chunk blocks test failed: %s\n", error.what());
         return 1;

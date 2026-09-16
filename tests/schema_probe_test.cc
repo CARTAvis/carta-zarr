@@ -766,6 +766,53 @@ void TestBeamTableWithoutTimeDimension(const std::filesystem::path& root) {
 
 // A sharded array grids its store by shard; the inner chunk shape lives in the sharding codec.
 // An image dataset without SKY is valid: discovery identifies the dataset from its image variables.
+// An image that names a beam table is an image with a beam. When the labels that say which
+// parameter is which could not be read, the parameters were simply not found and the answer was an
+// empty beam list -- indistinguishable from an image that carries no beam at all, which a consumer
+// acts on differently: CARTA reports no beam rather than a beam it failed to read.
+void TestBeamTableWithUnreadableLabels(const std::filesystem::path& root) {
+    const auto sky_with_beam =
+        "{\"shape\":[1,3,2,4,5],\"data_type\":\"float32\",\"chunk_grid\":{\"name\":\"regular\","
+        "\"configuration\":{\"chunk_shape\":[1,1,1,2,5]}},"
+        "\"attributes\":{\"units\":\"Jy/beam\",\"beam_fit_params\":\"BEAM\"},"
+        "\"dimension_names\":[\"time\",\"frequency\",\"polarization\",\"l\",\"m\"],"
+        "\"zarr_format\":3,\"node_type\":\"array\"}";
+
+    const auto open_sky = [&](const std::filesystem::path& where) {
+        const auto context = carta::zarr::Context::Create();
+        Require(static_cast<bool>(context), "Context::Create failed for the beam label test");
+        const auto dataset = carta::zarr::Dataset::Open(context.value(), where.string());
+        Require(static_cast<bool>(dataset), "the beam label dataset did not open");
+        const auto image = dataset.value().OpenImage("SKY");
+        Require(static_cast<bool>(image), "SKY did not open in the beam label dataset");
+        return image.value().ReadBeams();
+    };
+
+    // No label array at all, though the image says it has a beam table.
+    CreateValidStore(root / "absent");
+    Write(root / "absent" / "SKY" / "zarr.json", sky_with_beam);
+    Write(root / "absent" / "BEAM" / "zarr.json",
+          NumericArray("[1,3,2,3]", R"(["time","frequency","polarization","beam_params_label"])", "float64",
+                       R"({"units":"rad"})"));
+    const auto absent = open_sky(root / "absent");
+    Require(!absent, "a beam table whose labels are missing was reported as an image with no beam");
+
+    // Labels that read, and name something other than the three parameters a beam is made of.
+    CreateValidStore(root / "unnamed");
+    Write(root / "unnamed" / "SKY" / "zarr.json", sky_with_beam);
+    Write(root / "unnamed" / "BEAM" / "zarr.json",
+          NumericArray("[1,3,2,3]", R"(["time","frequency","polarization","beam_params_label"])", "float64",
+                       R"({"units":"rad"})"));
+    Write(root / "unnamed" / "beam_params_label" / "zarr.json",
+          R"({"shape":[3],"data_type":{"name":"fixed_length_utf32","configuration":{"length_bytes":24}},
+              "chunk_grid":{"name":"regular","configuration":{"chunk_shape":[3]}},"attributes":{},
+              "dimension_names":["beam_params_label"],"zarr_format":3,"node_type":"array"})");
+    WriteUtf32(root / "unnamed" / "beam_params_label" / "c" / "0", {"one", "two", "three"}, 6);
+    const auto unnamed = open_sky(root / "unnamed");
+    Require(!unnamed && unnamed.error().code == ErrorCode::invalid_metadata,
+            "beam labels naming no beam parameter were reported as an image with no beam");
+}
+
 void TestImageDatasetWithoutSky(const std::filesystem::path& root) {
     Write(root / "zarr.json", RootMetadata());
     Write(root / "RESIDUAL" / "zarr.json", SkyArray());
@@ -863,6 +910,7 @@ int main() {
         TestBeamTableIndexing(root / "beam-table");
         TestBeamTableTimePlanes(root / "beam-time");
         TestBeamTableWithoutTimeDimension(root / "beam-notime");
+        TestBeamTableWithUnreadableLabels(root / "beam-labels");
         TestReferenceFixture();
         TestCompatibilityFixture();
         std::filesystem::remove_all(root);

@@ -709,13 +709,17 @@ Result<std::vector<Beam>> ReadBeams(const Store& store, std::string_view image_i
 
     const std::string beam_unit = AttributeString(beam_arr_info.attributes, "units");
 
+    // The image named a beam table, so what the table needs to be read is required rather than
+    // optional. A label array that cannot be read -- absent, malformed, or written with a codec
+    // this build does not carry -- used to be discarded here, and the parameter indices it did not
+    // yield then returned an empty beam list: the answer for an image that has no beam at all,
+    // which this one is not.
     auto param_labels_res = store.ReadStringArray1D("beam_params_label");
-    std::vector<std::string> param_labels;
-    if (param_labels_res) {
-        param_labels = param_labels_res.value();
+    if (!param_labels_res) {
+        return param_labels_res.error();
     }
 
-    const auto parameter_indices = FindBeamParameterIndices(param_labels);
+    const auto parameter_indices = FindBeamParameterIndices(param_labels_res.value());
 
     auto beam_data_res = store.ReadNumericArray(beam_array_name);
     if (!beam_data_res) {
@@ -728,9 +732,15 @@ Result<std::vector<Beam>> ReadBeams(const Store& store, std::string_view image_i
     const auto param_dim = zarr_metadata::FindDimensionIndex(beam_arr_info, "beam_params_label");
     const auto time_dim = zarr_metadata::FindDimensionIndex(beam_arr_info, "time");
 
-    if (!freq_dim || !pol_dim || !param_dim || !parameter_indices.major || !parameter_indices.minor ||
-        !parameter_indices.position_angle) {
-        return std::vector<Beam>{};
+    if (!freq_dim || !pol_dim || !param_dim) {
+        return MakeError(ErrorCode::invalid_metadata,
+                         "Beam table does not carry the frequency, polarization and parameter dimensions",
+                         beam_array_name);
+    }
+    if (!parameter_indices.major || !parameter_indices.minor || !parameter_indices.position_angle) {
+        return MakeError(ErrorCode::invalid_metadata,
+                         "Beam parameter labels do not name a major axis, a minor axis and a position angle",
+                         "beam_params_label");
     }
 
     const std::uint64_t n_time = time_dim ? beam_arr_info.shape.at(*time_dim) : 1;

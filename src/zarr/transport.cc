@@ -103,56 +103,49 @@ public:
                              _root.string()};
             }
 
-            const auto path = iterator->path();
-            if (!iterator->is_directory(error)) {
-                if (error) {
-                    continue;
-                }
-                if (!iterator->is_regular_file(error) || error || path.filename() != "zarr.json") {
-                    continue;
-                }
-            } else if (error) {
+            // Only a directory is ever a node, and only the directory is listed. A group's own
+            // zarr.json is a file inside a directory that has already been named, so counting
+            // files as well named every group twice -- once as itself and once as its metadata's
+            // parent. Store sorts and de-duplicates the listing, which is why that cost a second
+            // walk of the tree rather than a wrong answer, and why nothing noticed.
+            std::error_code entry_error;
+            if (!iterator->is_directory(entry_error) || entry_error) {
                 continue;
             }
 
-            const auto metadata_path = iterator->is_directory() ? path / "zarr.json" : path;
+            const auto path = iterator->path();
+            const auto metadata_path = path / "zarr.json";
             // A directory carrying no readable zarr.json is not a node. Whether the answer was no
             // or the question could not be asked makes no difference here: neither is a node, and
             // a directory that could not be inspected is left for a later read to diagnose.
             std::error_code metadata_error;
-            if (iterator->is_directory() && !std::filesystem::is_regular_file(metadata_path, metadata_error)) {
+            if (!std::filesystem::is_regular_file(metadata_path, metadata_error)) {
                 continue;
             }
 
-            const auto relative_parent = std::filesystem::relative(
-                iterator->is_directory() ? path : path.parent_path(), _root, error);
+            const auto relative_path = std::filesystem::relative(path, _root, error);
             if (error) {
                 return Error{ErrorCode::io_error, "Unable to enumerate Zarr metadata: " + error.message(),
                              path.string()};
             }
-            if (relative_parent.empty() || relative_parent == ".") {
-                if (iterator->is_directory()) {
-                    iterator.disable_recursion_pending();
-                }
+            if (relative_path.empty()) {
                 continue;
             }
-            nodes.push_back(relative_parent.generic_string());
+            nodes.push_back(relative_path.generic_string());
 
             // Array chunks are descendants of the array node, but are not Zarr nodes. Inspect only
             // the small node header to avoid walking millions of chunk files. Malformed metadata is
             // left for Store::ReadNodeMetadata to diagnose; in that case traversal remains conservative.
-            if (iterator->is_directory()) {
-                std::ifstream input(metadata_path);
-                nlohmann::json metadata;
-                if (input.is_open()) {
-                    try {
-                        input >> metadata;
-                        if (metadata.is_object() && metadata.value("node_type", "") == "array") {
-                            iterator.disable_recursion_pending();
-                        }
-                    } catch (const std::exception&) {
-                        // The metadata parser above the transport seam reports the definitive error.
+            std::ifstream input(metadata_path);
+            nlohmann::json metadata;
+            if (input.is_open()) {
+                try {
+                    input >> metadata;
+                    if (metadata.is_object() && metadata.value("node_type", "") == "array") {
+                        iterator.disable_recursion_pending();
                     }
+                } catch (const std::exception&) {
+                    // The metadata parser above the transport seam reports the definitive error.
                 }
             }
         }

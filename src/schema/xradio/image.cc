@@ -180,7 +180,7 @@ std::optional<SpectralCoordinate> DescribeSpectralCoordinate(const Store& store,
     if (const auto* reference_frequency = ObjectMember(frequency_attributes, "reference_frequency");
         reference_frequency != nullptr && reference_frequency->is_object()) {
         if (const auto* data = ObjectMember(*reference_frequency, "data"); data != nullptr) {
-            if (const auto value = AttributeNumber(*data)) {
+            if (const auto value = AsNumber(*data)) {
                 reference_value = *value;
             }
         }

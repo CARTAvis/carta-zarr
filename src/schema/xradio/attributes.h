@@ -39,7 +39,9 @@ inline std::string AttributeString(const nlohmann::json& attributes, std::string
     return {};
 }
 
-inline std::optional<double> AttributeNumber(const nlohmann::json& value) {
+// Takes the value rather than an object and a name, because what it reads is usually already in
+// hand: an XRADIO measure keeps its number under `data`, which the caller has reached for anyway.
+inline std::optional<double> AsNumber(const nlohmann::json& value) {
     return value.is_number() ? std::optional<double>(value.get<double>()) : std::nullopt;
 }
 

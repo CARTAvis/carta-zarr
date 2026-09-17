@@ -3,7 +3,7 @@
 日期：2026-09-17 · 範圍：`include/`（1,100 行）、`src/`（8,300 行）、`tests/`（7,900 行）、`CMakeLists.txt`
 方法：逐檔通讀 `src/` 與 `include/` 全文，`tests/` 與 CMake 做結構性掃描。
 
-調查當下未動任何程式碼。其後 Tier 1 全部、2.1、2.2、2.4、3.1、3.2、3.4、3.6 與測試端的 `check.h` 已在分支 `sweep-up-after-the-moves` 上套用，各項標有狀態；其餘仍是建議。
+調查當下未動任何程式碼。其後 Tier 1 全部、2.1、2.2、2.4、3.1、3.2、3.4、3.6、4.1 與測試端的 `check.h` 已在分支 `sweep-up-after-the-moves` 上套用，各項標有狀態；其餘仍是建議。
 
 ---
 
@@ -291,6 +291,10 @@ if (!l) { return l.error(); }
 
 ### 4.1 `FilesystemTransport::ListNodes` 的檔案分支可能只產生重複項
 
+> **狀態：已驗證並修正**。推導成立：新增的 [tests/transport_test.cc](tests/transport_test.cc) 在修正前
+> 對巢狀 group 得到 `[GROUP, GROUP, GROUP/INNER, GROUP/INNER, SKY]`。檔案分支已移除，連帶拿掉所有
+> `is_directory()` 三元運算式與那個只有 root 自己的 zarr.json 能觸發的 `"."` 防護。
+
 [src/zarr/transport.cc:96-103](src/zarr/transport.cc:96) 對「名為 `zarr.json` 的一般檔案」也會 push 它的 parent。但推導下來：
 
 - 對 **array 目錄**：目錄項先 push，接著讀 metadata 發現 `node_type == "array"` 就 `disable_recursion_pending()`，所以它底下的 `zarr.json` **永遠不會被走訪**。
@@ -373,7 +377,7 @@ tolerance 參數；[spectral_reduce_test.cc:56](tests/spectral_reduce_test.cc:56
 | ~~6~~ | ~~測試端 `check.h`~~ **已完成** | 低 | −44 淨（原估 −150 假設連 `main()` 一起收；實際不該收） |
 | 7 | 2.3 `OverRowRanges` | **中**（碰並行與熱路徑邊緣） | −50 |
 | 8 | 2.6 `WorkPool::DrainTasks` | **中**（並行） | −15 |
-| 9 | 4.1 transport listing | **中**（需先加測試） | −25 |
+| ~~9~~ | ~~4.1 transport listing~~ **已完成** | 中 | 程式 −18；另新增 118 行測試（原本沒有東西 pin 住 listing） |
 
 1–6 合計約減 200 行，且沒有一項會改變任何可觀察行為。7–9 建議各自獨立 commit，並在 `build-release` 上跑一次 `pass_timing` 對照。
 

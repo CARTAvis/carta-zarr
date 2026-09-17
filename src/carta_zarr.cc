@@ -61,14 +61,6 @@ auto Guarded(ErrorCode code, std::string node, Function&& function) -> decltype(
     });
 }
 
-// A probe that rejects a store has already worked out why, often down to the attribute, and a
-// consumer shows whatever comes back here to whoever picked the file. Reporting "not a supported
-// dataset" instead throws that away and names a schema profile the store may have nothing to do
-// with. The fallback is for the case the probe genuinely had nothing to say.
-std::string RejectionMessage(const std::vector<Diagnostic>& diagnostics, std::string fallback) {
-    return diagnostics.empty() ? std::move(fallback) : diagnostics.front().message;
-}
-
 bool TryComputeDirectorySize(std::string_view location, std::chrono::milliseconds timeout, std::uint64_t& size) {
     const std::string location_string(location);
     std::filesystem::path root_path;
@@ -356,18 +348,8 @@ Result<Dataset> Dataset::Open(const Context& context, std::string_view location)
             return probe_result.error();
         }
         const auto& probe = probe_result.value();
-        if (probe.kind != ProbeKind::supported_dataset) {
-            const ErrorCode code = probe.kind == ProbeKind::invalid_dataset
-                                       ? ErrorCode::invalid_metadata
-                                       : ErrorCode::unsupported_schema;
-            return MakeError(
-                code, RejectionMessage(probe.diagnostics, "No built-in schema profile matched the Zarr store"),
-                std::string(location));
-        }
-
-        if (probe.images.empty()) {
-            return MakeError(ErrorCode::invalid_metadata, "Supported schema has no image variables",
-                             std::string(location));
+        if (auto openable = internal::RequireOpenableDataset(probe, location); !openable) {
+            return openable.error();
         }
         auto profile = internal::SchemaProfile::For(probe.schema_id);
         if (!profile) {
@@ -501,9 +483,10 @@ Result<bool> IsXradioImage(std::string_view location) {
         return true;
     }
     if (result.value().kind == SchemaMatchKind::invalid) {
-        return MakeError(ErrorCode::invalid_metadata,
-                         RejectionMessage(result.value().diagnostics, "The requested schema did not match"),
-                         std::string(location));
+        return MakeError(
+            ErrorCode::invalid_metadata,
+            internal::RejectionMessage(result.value().diagnostics, "The requested schema did not match"),
+            std::string(location));
     }
     return false;
 }

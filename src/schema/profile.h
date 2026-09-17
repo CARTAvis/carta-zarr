@@ -45,6 +45,24 @@ struct SchemaInspection {
 // difference.
 Result<void> RequireOpenable(const std::vector<ImageEntry>& images, std::string_view image_id);
 
+// What a probe's refusal should be reported as.
+//
+// A profile that rejects a store has already worked out why, often down to the attribute, and a
+// consumer shows whatever comes back here to whoever picked the file. Reporting "not a supported
+// dataset" instead throws that away and names a schema profile the store may have nothing to do
+// with. The fallback is for the case the probe genuinely had nothing to say.
+std::string RejectionMessage(const std::vector<Diagnostic>& diagnostics, std::string_view fallback);
+
+// Whether a probe's answer is a dataset that can be opened, as the error a caller should report
+// when it is not. The counterpart of RequireOpenable one level up: that one is about an image
+// within a dataset, this one about the dataset.
+//
+// Three ways it is not, and they are three different errors: nothing matched, something matched and
+// was malformed, and a profile matched a store that has no images in it. Each used to be written
+// out at the one call site that needed it, beside a rejection-message rule that lived there too --
+// so what a probe's refusal means was decided by the facade, which is the profile's question.
+Result<void> RequireOpenableDataset(const ProbeResult& probe, std::string_view location);
+
 /**
  * A named, versioned description of how an image dataset is laid out, bound to its identifier.
  *
@@ -61,12 +79,10 @@ public:
     // Reports unsupported_schema when no built-in profile carries this identifier.
     static Result<SchemaProfile> For(std::string_view schema_id);
 
-    const SchemaId& id() const noexcept;
-
-    // One enumeration of the store, answering both of the questions a profile is asked about it.
-    Result<SchemaInspection> Inspect(const Store& store) const;
-    // Halves of an Inspect, for a caller that wants only one of them. Each one inspects: there is
-    // no cache behind them, so a caller wanting both should ask once.
+    // The two questions a profile is asked about a store it is meeting for the first time. Both go
+    // through one enumeration, because deciding whether a store matches means finding out what is in
+    // it -- but there is no cache behind them, so asking both costs two enumerations. Nothing wants
+    // both today; ProbeStore, which does, reaches the enumeration itself.
     Result<SchemaProbeResult> Probe(const Store& store) const;
     Result<ImageDiscovery> Discover(const Store& store) const;
 
@@ -88,6 +104,10 @@ private:
     };
 
     static const std::vector<Entry>& BuiltIn();
+
+    // One enumeration, answering both halves at once. Private because no caller wants both: it is
+    // what Probe and Discover are each one half of.
+    Result<SchemaInspection> Inspect(const Store& store) const;
 
     explicit SchemaProfile(const Entry& entry) : _entry(&entry) {}
 

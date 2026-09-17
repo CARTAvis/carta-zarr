@@ -8,6 +8,8 @@
 
 #include "xradio/image.h"
 
+#include "zarr/array_metadata.h"
+
 #include <algorithm>
 #include <utility>
 
@@ -36,6 +38,29 @@ Result<void> RequireOpenable(const std::vector<ImageEntry>& images, std::string_
     return MakeError(ErrorCode::unsupported_data_type, message, std::string(image_id));
 }
 
+std::string RejectionMessage(const std::vector<Diagnostic>& diagnostics, std::string_view fallback) {
+    return diagnostics.empty() ? std::string(fallback) : diagnostics.front().message;
+}
+
+Result<void> RequireOpenableDataset(const ProbeResult& probe, std::string_view location) {
+    if (probe.kind != ProbeKind::supported_dataset) {
+        // Malformed and unrecognised are different answers, and a consumer acts on the difference:
+        // one is a file to complain about, the other is a file this library is not for.
+        const ErrorCode code = probe.kind == ProbeKind::invalid_dataset ? ErrorCode::invalid_metadata
+                                                                       : ErrorCode::unsupported_schema;
+        return MakeError(code, RejectionMessage(probe.diagnostics, "No built-in schema profile matched the Zarr store"),
+                         std::string(location));
+    }
+    // A store the profile recognised and found nothing openable in. Not a rejection -- the profile
+    // matched -- so there are no diagnostics to report, and a consumer opening this would get a
+    // dataset it can do nothing with.
+    if (probe.images.empty()) {
+        return MakeError(ErrorCode::invalid_metadata, "Supported schema has no image variables",
+                         std::string(location));
+    }
+    return {};
+}
+
 const std::vector<SchemaProfile::Entry>& SchemaProfile::BuiltIn() {
     static const std::vector<SchemaProfile::Entry> profiles{
         {SchemaProfile::Entry{SchemaId(kXradioImageSchema), &xradio::InspectImages, &xradio::DescribeImage,
@@ -52,10 +77,6 @@ Result<SchemaProfile> SchemaProfile::For(std::string_view schema_id) {
                          "No built-in profile exists for schema " + std::string(schema_id));
     }
     return SchemaProfile{*found};
-}
-
-const SchemaId& SchemaProfile::id() const noexcept {
-    return _entry->id;
 }
 
 Result<SchemaInspection> SchemaProfile::Inspect(const Store& store) const {
@@ -117,9 +138,14 @@ Result<ProbeResult> ProbeStore(const Store& store) {
     }
 
     if (matches.size() > 1) {
+        // Unreachable while BuiltIn holds one entry, and the only thing here that a second profile
+        // turns on. The code name comes from the enumerator rather than from a literal beside it so
+        // that the two cannot drift apart in the meantime -- ErrorCode::ambiguous_schema is not
+        // emitted anywhere yet, because this answers with a ProbeResult rather than an Error.
         result.kind = ProbeKind::invalid_dataset;
-        result.diagnostics.push_back(
-            Diagnostic{"ambiguous_schema", "More than one built-in schema profile matched the Zarr store", {}});
+        result.diagnostics.push_back(Diagnostic{zarr::ErrorCodeName(ErrorCode::ambiguous_schema),
+                                                "More than one built-in schema profile matched the Zarr store",
+                                                {}});
     } else if (matches.size() == 1) {
         auto& match = matches.front();
         result.kind = ProbeKind::supported_dataset;

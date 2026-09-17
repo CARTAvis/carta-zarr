@@ -386,14 +386,25 @@ Result<void> ReduceSpectral(const ReadableImage& image, const SpectralReduceRequ
         return Error{ErrorCode::invalid_argument, "A spectral reduction needs a sink", node};
     }
 
-    // The walk follows the store. Of the two spatial axes the one written last varies fastest, so
-    // asking for it first is what keeps a plane from being transposed on its way into the
-    // destination; everything below is in terms of that axis (u) and the other one (v).
-    const bool swap_spatial = geometry.fastest_spatial_axis == AxisRole::spatial_y;
-
     if (auto valid = ValidateRequest(descriptor, map, request, geometry.fastest_spatial_axis); !valid) {
         return valid.error();
     }
+
+    // Checked here as well as inside each slab request, so that a bad range is one error naming the
+    // axis rather than a partial reduction that fails on some later slab.
+    const auto checked = CheckedPlanes::Of(descriptor, map, request.planes);
+    if (!checked) {
+        return checked.error();
+    }
+    const auto& planes = checked.value();
+
+    const auto plan = PlanPass(descriptor, geometry, map, planes, 1, options);
+
+    // The walk follows the store. Of the two spatial axes the one written last varies fastest, so
+    // asking for it first is what keeps a plane from being transposed on its way into the
+    // destination; everything below is in terms of that axis (u) and the other one (v). The plan
+    // made that choice when it picked axis_u, so it is asked rather than made again here.
+    const bool swap_spatial = plan.SwapsSpatial();
 
     // The caller's regions in the walk's own axes. The raster keeps whatever order the caller wrote
     // it in; only the steps through it change.
@@ -414,14 +425,6 @@ Result<void> ReduceSpectral(const ReadableImage& image, const SpectralReduceRequ
         regions.push_back(region);
     }
 
-    // Checked here as well as inside each slab request, so that a bad range is one error naming the
-    // axis rather than a partial reduction that fails on some later slab.
-    const auto checked = CheckedPlanes::Of(descriptor, map, request.planes);
-    if (!checked) {
-        return checked.error();
-    }
-    const auto& planes = checked.value();
-
     // The requested statistics, in the one order a block reports them.
     std::vector<Statistic> statistics;
     std::array<int, kStatisticOrder.size()> slot_of{};
@@ -439,8 +442,6 @@ Result<void> ReduceSpectral(const ReadableImage& image, const SpectralReduceRequ
     const int slot_sum_sq = slot_of.at(3);
     const int slot_min = slot_of.at(4);
     const int slot_max = slot_of.at(5);
-
-    const auto plan = PlanPass(descriptor, geometry, map, planes, 1, options);
 
     auto buckets_result =
         BuildChunkBuckets(regions.data(), regions.size(), plan.chunk_u, plan.chunk_v, node);
@@ -490,12 +491,14 @@ Result<void> ReduceSpectral(const ReadableImage& image, const SpectralReduceRequ
                                "The spectral reduction was cancelled by its sink");
 
     std::vector<double> accumulator;
-    // One private accumulator per task, reused across slabs. See the dispatch below.
-    std::vector<double> sinks;
+    // One private accumulator per task, reused across slabs. See the dispatch below. "Partials" as
+    // in the plane histogram, and deliberately not "sinks": a sink in this library is where a
+    // finished block goes, and this one is named in the same function as the caller's SpectralSink.
+    std::vector<double> partials;
     SlabWalk walk(source, plan, options);
     std::vector<ColumnRun> segments;
     // The accumulator's current shape, which is the length of the block being filled. Set by the
-    // reset below and read by everything that indexes into it, including the sink's own strides.
+    // reset below and read by everything that indexes into it, including the strides a block reports.
     std::size_t statistic_stride = 0;
     std::size_t region_stride = 0;
 
@@ -618,17 +621,17 @@ Result<void> ReduceSpectral(const ReadableImage& image, const SpectralReduceRequ
                         const std::uint64_t cu_span = chunk_cu_end - chunk_cu_begin;
                         const std::uint64_t cells = std::max<std::uint64_t>(1, cv_span * cu_span);
                         const std::uint64_t units = slab_length * cells;
-                        const std::size_t sink_region_stride =
+                        const std::size_t partial_region_stride =
                             statistic_count * static_cast<std::size_t>(slab_length);
-                        const std::size_t sink_stride =
-                            std::max<std::size_t>(1, request.region_count * sink_region_stride);
+                        const std::size_t partial_stride =
+                            std::max<std::size_t>(1, request.region_count * partial_region_stride);
 
-                        // One (channel, chunk cell) unit of the accumulation, into a private sink laid
-                        // out [region][statistic][channel within this slab]. Private because two units
-                        // of the same channel can touch the same region -- a region wider than a chunk
-                        // spans several cells -- so they would otherwise be adding to one double.
+                        // One (channel, chunk cell) unit of the accumulation, into a private partial
+                        // laid out [region][statistic][channel within this slab]. Private because two
+                        // units of the same channel can touch the same region -- a region wider than a
+                        // chunk spans several cells -- so they would otherwise be adding to one double.
                         const auto accumulate_unit = [&](std::uint64_t channel, std::uint64_t cell_cv,
-                                                         std::uint64_t cell_cu, double* sink) {
+                                                         std::uint64_t cell_cu, double* partial) {
                             const float* plane = slab_pixels + (channel * stride_z);
 
                             for (std::uint64_t chunk_cv = cell_cv; chunk_cv < cell_cv + 1; ++chunk_cv) {
@@ -658,7 +661,7 @@ Result<void> ReduceSpectral(const ReadableImage& image, const SpectralReduceRequ
                                             continue;
                                         }
 
-                                        double* out = sink + (r * sink_region_stride);
+                                        double* out = partial + (r * partial_region_stride);
                                         for (std::uint64_t y = rv0; y < rv1; ++y) {
                                             RowTotals totals;
                                             if (region.runs != nullptr) {
@@ -753,20 +756,21 @@ Result<void> ReduceSpectral(const ReadableImage& image, const SpectralReduceRequ
                         // are if anything the more accurate arrangement; the tests compare to 1e-9
                         // relative for exactly this reason, and the counts and extrema are unaffected
                         // because integers and min/max do not care what order they arrive in.
-                        // A sink per task, so the split is also an allocation and a memset of this size
+                        // One per task, so the split is also an allocation and a memset of this size
                         // once per slab. Capped so that a reduction over thousands of regions does not
                         // spend more on the split than on the pixels.
-                        constexpr std::size_t kSinkBudgetBytes = 16U << 20U;
+                        constexpr std::size_t kPartialBudgetBytes = 16U << 20U;
                         const std::size_t tasks_by_memory =
-                            std::max<std::size_t>(1, kSinkBudgetBytes / (sink_stride * sizeof(double)));
+                            std::max<std::size_t>(1, kPartialBudgetBytes / (partial_stride * sizeof(double)));
                         const std::size_t max_tasks = std::min(workers.size(), tasks_by_memory);
                         const std::size_t tasks =
                             PlanRowTasks(plan.chunk_u * plan.chunk_v, units, max_tasks, kLeastPixelsPerUnit);
 
-                        sinks.assign(tasks * sink_stride, 0.0);
+                        partials.assign(tasks * partial_stride, 0.0);
                         for (std::size_t task = 0; task < tasks; ++task) {
                             for (std::size_t r = 0; r < request.region_count; ++r) {
-                                double* base = sinks.data() + (task * sink_stride) + (r * sink_region_stride);
+                                double* base =
+                                    partials.data() + (task * partial_stride) + (r * partial_region_stride);
                                 if (slot_min >= 0) {
                                     auto* from = base + (static_cast<std::size_t>(slot_min) * slab_length);
                                     std::fill(from, from + slab_length, kInfinity);
@@ -779,21 +783,21 @@ Result<void> ReduceSpectral(const ReadableImage& image, const SpectralReduceRequ
                         }
 
                         workers.Run(tasks, [&](std::size_t task, std::size_t) {
-                            double* sink = sinks.data() + (task * sink_stride);
+                            double* partial = partials.data() + (task * partial_stride);
                             for (std::uint64_t unit = task; unit < units; unit += tasks) {
                                 const std::uint64_t channel = unit / cells;
                                 const std::uint64_t cell = unit % cells;
                                 accumulate_unit(channel, chunk_cv_begin + (cell / cu_span),
-                                                chunk_cu_begin + (cell % cu_span), sink);
+                                                chunk_cu_begin + (cell % cu_span), partial);
                             }
                         });
 
                         for (std::size_t task = 0; task < tasks; ++task) {
-                            const double* sink = sinks.data() + (task * sink_stride);
+                            const double* partial = partials.data() + (task * partial_stride);
                             for (std::size_t r = 0; r < request.region_count; ++r) {
                                 for (std::size_t slot = 0; slot < statistic_count; ++slot) {
                                     const double* from =
-                                        sink + (r * sink_region_stride) + (slot * slab_length);
+                                        partial + (r * partial_region_stride) + (slot * slab_length);
                                     double* to = accumulator.data() + (r * region_stride) +
                                                  (slot * statistic_stride) +
                                                  static_cast<std::size_t>(slab.first_channel);

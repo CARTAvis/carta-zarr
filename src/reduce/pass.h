@@ -87,6 +87,16 @@ public:
     std::uint64_t sample = 1;
     bool apply_mask = false;
 
+    // Whether u is the image's y rather than its x -- so a caller holding coordinates in the image's
+    // own axes knows whether to swap them into the walk's.
+    //
+    // Asked rather than re-derived: which spatial axis a store varies fastest is one rule, the plan
+    // applies it to pick axis_u, and a reduction that worked it out again from the geometry would be
+    // a second place for it to be got wrong.
+    bool SwapsSpatial() const noexcept {
+        return axis_u == map.y;
+    }
+
     // How many chunks along the spectrum a run of `channels` selected channels covers.
     //
     // A walk counts its progress in chunks, and the spectral axis is the one where a selection's

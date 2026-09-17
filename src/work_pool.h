@@ -70,6 +70,10 @@ public:
 
 private:
     void Worker(std::size_t index);
+    // Take tasks from the shared counter until there are none left, running each one as `worker`.
+    // Both a pool thread and the thread that called Run do exactly this, which is what makes the
+    // caller worker 0 rather than a special case.
+    void DrainTasks(const std::function<void(std::size_t task, std::size_t worker)>& body, std::size_t worker);
     // Wake every worker, tell it to return, and join it. Idempotent, and the only way a worker ever
     // ends -- one that is parked in _wake has nothing else to wake it.
     void StopWorkers() noexcept;

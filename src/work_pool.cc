@@ -54,6 +54,22 @@ void WorkPool::StopWorkers() noexcept {
     _workers.clear();
 }
 
+void WorkPool::DrainTasks(const std::function<void(std::size_t, std::size_t)>& body, std::size_t worker) {
+    while (true) {
+        std::size_t task = 0;
+        {
+            std::lock_guard<std::mutex> lock(_mutex);
+            if (_next >= _tasks) {
+                return;
+            }
+            task = _next++;
+        }
+        // Outside the lock: a body is the arithmetic a reduction came for, and holding the counter
+        // across it would serialise the very thing the pool exists to spread.
+        body(task, worker);
+    }
+}
+
 void WorkPool::Worker(std::size_t index) {
     std::size_t seen = 0;
     while (true) {
@@ -68,17 +84,7 @@ void WorkPool::Worker(std::size_t index) {
             body = _body;
         }
 
-        while (true) {
-            std::size_t task = 0;
-            {
-                std::lock_guard<std::mutex> lock(_mutex);
-                if (_next >= _tasks) {
-                    break;
-                }
-                task = _next++;
-            }
-            (*body)(task, index);
-        }
+        DrainTasks(*body, index);
 
         {
             std::lock_guard<std::mutex> lock(_mutex);
@@ -121,17 +127,7 @@ void WorkPool::Run(std::size_t tasks, const std::function<void(std::size_t, std:
 
     // The calling thread takes tasks as worker 0 rather than waiting, which is what keeps a pool of
     // N threads worth N and not N-1.
-    while (true) {
-        std::size_t task = 0;
-        {
-            std::lock_guard<std::mutex> lock(_mutex);
-            if (_next >= _tasks) {
-                break;
-            }
-            task = _next++;
-        }
-        body(task, 0);
-    }
+    DrainTasks(body, 0);
 
     {
         std::unique_lock<std::mutex> lock(_mutex);

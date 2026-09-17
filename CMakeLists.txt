@@ -46,6 +46,7 @@ endif()
 
 add_library(carta_zarr SHARED
     src/carta_zarr.cc
+    src/dataset_size.cc
     src/read/pieces.cc
     src/read/pieces_read.cc
     src/reduce/pass.cc
@@ -54,8 +55,11 @@ add_library(carta_zarr SHARED
     src/reduce/spectral_reduce.cc
     src/schema/profile.cc
     src/schema/xradio/probe_report.cc
+    src/schema/xradio/beam_table.cc
     src/schema/xradio/direction.cc
+    src/schema/xradio/flag.cc
     src/schema/xradio/linear_axis.cc
+    src/schema/xradio/observation.cc
     src/schema/xradio/image.cc
     src/zarr/array_metadata.cc
     src/zarr/array_view.cc
@@ -226,8 +230,11 @@ if(CARTA_ZARR_BUILD_TESTS AND BUILD_TESTING)
             src/store.cc
             src/schema/profile.cc
             src/schema/xradio/probe_report.cc
+            src/schema/xradio/beam_table.cc
             src/schema/xradio/direction.cc
+            src/schema/xradio/flag.cc
             src/schema/xradio/linear_axis.cc
+            src/schema/xradio/observation.cc
             src/schema/xradio/image.cc
             src/zarr/array_view.cc
             src/zarr/pixel_selection.cc
@@ -278,6 +285,33 @@ if(CARTA_ZARR_BUILD_TESTS AND BUILD_TESTING)
         TEST_NAME carta-zarr-linear-axis
         SOURCES tests/linear_axis_test.cc src/schema/xradio/linear_axis.cc)
 
+    # What an image's own attributes say about the observation. A pure JSON-to-struct function, so
+    # this links nothing: the geodetic conversion and the obsdate split used to be reachable only by
+    # opening a store, and the conversion was asserted nowhere at all.
+    carta_zarr_add_test(carta_zarr_observation_tests INTERNAL
+        TEST_NAME carta-zarr-observation
+        SOURCES tests/observation_test.cc src/schema/xradio/observation.cc
+        LIBRARIES nlohmann_json::nlohmann_json)
+
+    # What a variable has to be before it can mask an image. RequireUsableFlag is inline, so this
+    # target compiles one file and links nothing -- choosing a flag when none is declared needs a
+    # store and is covered in the profile tests instead.
+    carta_zarr_add_test(carta_zarr_flag_tests INTERNAL
+        TEST_NAME carta-zarr-flag
+        SOURCES tests/flag_test.cc
+        LIBRARIES nlohmann_json::nlohmann_json)
+
+    # The beam table's indexing, against the arrays already read rather than a store. It needs
+    # ArrayView, which is what addresses the flat buffer by dimension name.
+    carta_zarr_add_test(carta_zarr_beam_table_tests INTERNAL
+        TEST_NAME carta-zarr-beam-table
+        SOURCES
+            tests/beam_table_test.cc
+            src/schema/xradio/beam_table.cc
+            src/zarr/array_view.cc
+            ${CARTA_ZARR_METADATA_SOURCES}
+        LIBRARIES nlohmann_json::nlohmann_json)
+
     # What an ordinary read decides before it reads anything. Compiled against pieces.cc alone:
     # PlanPieces touches no store and no transport, so where a read is cut and how big a piece is --
     # which is where the progress callback and the memory ceiling meet -- is checkable without a
@@ -285,6 +319,20 @@ if(CARTA_ZARR_BUILD_TESTS AND BUILD_TESTING)
     carta_zarr_add_test(carta_zarr_piece_plan_tests INTERNAL
         TEST_NAME carta-zarr-piece-plan
         SOURCES tests/piece_plan_test.cc src/read/pieces.cc)
+
+    # What an ordinary read does once it starts, against pixels that were never written down. The
+    # read takes a PixelSource like the pass does, so this links no Store and no TensorStore -- and
+    # the flag-before-pixels contract, which a fixture on disk cannot show because it cannot be told
+    # to fail one read and not another, is checkable here.
+    carta_zarr_add_test(carta_zarr_read_synthetic_tests INTERNAL
+        TEST_NAME carta-zarr-read-synthetic
+        SOURCES
+            tests/read_synthetic_test.cc
+            src/read/pieces.cc
+            src/read/pieces_read.cc
+            src/work_pool.cc
+            src/zarr/pixel_selection.cc
+        LIBRARIES nlohmann_json::nlohmann_json Threads::Threads)
 
     # What a pass decides before it reads anything. Compiled against pass.cc alone: PlanPass touches
     # no store and no transport, so the read strategy -- which has moved more than once, and moved
@@ -295,7 +343,7 @@ if(CARTA_ZARR_BUILD_TESTS AND BUILD_TESTING)
         LIBRARIES nlohmann_json::nlohmann_json)
 
     # A whole reduction against pixels that were never written down. This target links no Store and
-    # no TensorStore, which is the seam the pass's SlabSource exists to create: the oracle is the
+    # no TensorStore, which is the seam the pass's PixelSource exists to create: the oracle is the
     # formula the pixels come from, so the image can be whatever size the question needs rather than
     # whatever size is worth committing.
     carta_zarr_add_test(carta_zarr_reduce_synthetic_tests INTERNAL

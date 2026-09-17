@@ -547,98 +547,6 @@ void TestNonDoubleCoordinates(const std::filesystem::path& root) {
             "float32 frequency values were not converted to their double equivalents");
 }
 
-// A declared flag is trusted by every read: reads apply the pixel mask by default, and the mask is
-// read with the selection built for the image. A flag that is missing, not boolean, or shaped
-// differently used to be accepted here and rejected on every read -- or, for a numeric array of the
-// right shape, converted to bool and applied as if nonzero meant valid.
-void TestDeclaredPixelMaskIsValidated(const std::filesystem::path& root) {
-    const auto context = carta::zarr::Context::Create();
-    Require(static_cast<bool>(context), "Context::Create failed for declared pixel masks");
-
-    const std::string sky_with_flag =
-        "{\"shape\":[1,3,2,4,5],\"data_type\":\"float32\",\"chunk_grid\":{\"name\":\"regular\","
-        "\"configuration\":{\"chunk_shape\":[1,1,1,2,5]}},"
-        "\"attributes\":{\"units\":\"Jy/beam\",\"flag\":\"MASK_0\"},"
-        "\"dimension_names\":[\"time\",\"frequency\",\"polarization\",\"l\",\"m\"],"
-        "\"zarr_format\":3,\"node_type\":\"array\"}";
-    const std::string mask_dimensions = R"(["time","frequency","polarization","l","m"])";
-
-    // The mask a well-formed image declares: boolean, and the image's own dimensions in order.
-    CreateValidStore(root / "good");
-    Write(root / "good" / "SKY" / "zarr.json", sky_with_flag);
-    Write(root / "good" / "MASK_0" / "zarr.json",
-          NumericArray("[1,3,2,4,5]", mask_dimensions, "bool", R"({"type":"flag"})"));
-    const auto good = carta::zarr::Dataset::Open(context.value(), (root / "good").string());
-    Require(static_cast<bool>(good), "the declared-mask dataset did not open");
-    const auto good_image = good.value().OpenImage("SKY");
-    Require(static_cast<bool>(good_image), "an image declaring a well-formed mask did not open");
-    Require(good_image.value().descriptor().has_pixel_mask, "a well-formed declared mask was not selected");
-    Require(good_image.value().descriptor().pixel_mask_id == "MASK_0", "the declared mask was not the one selected");
-
-    const auto open_with_mask = [&](const std::string& name, const std::string& mask_metadata) {
-        CreateValidStore(root / name);
-        Write(root / name / "SKY" / "zarr.json", sky_with_flag);
-        if (!mask_metadata.empty()) {
-            Write(root / name / "MASK_0" / "zarr.json", mask_metadata);
-        }
-        const auto dataset = carta::zarr::Dataset::Open(context.value(), (root / name).string());
-        Require(static_cast<bool>(dataset), "the declared-mask dataset " + name + " did not open");
-        return dataset.value().OpenImage("SKY");
-    };
-
-    const auto absent = open_with_mask("absent", {});
-    Require(!absent, "an image declaring a flag variable that does not exist was opened");
-
-    const auto numeric = open_with_mask(
-        "numeric", NumericArray("[1,3,2,4,5]", mask_dimensions, "float32", R"({"type":"flag"})"));
-    Require(!numeric && numeric.error().code == ErrorCode::unsupported_data_type,
-            "a numeric variable was accepted as a pixel mask");
-
-    const auto unmarked = open_with_mask("unmarked", NumericArray("[1,3,2,4,5]", mask_dimensions, "bool"));
-    Require(!unmarked && unmarked.error().code == ErrorCode::invalid_metadata,
-            "a boolean variable that is not a flag was accepted as a pixel mask");
-
-    const auto reshaped =
-        open_with_mask("reshaped", NumericArray("[1,3,2,4,4]", mask_dimensions, "bool", R"({"type":"flag"})"));
-    Require(!reshaped && reshaped.error().code == ErrorCode::invalid_metadata,
-            "a flag whose shape differs from the image was accepted as a pixel mask");
-
-    const auto transposed = open_with_mask(
-        "transposed", NumericArray("[1,3,2,5,4]", R"(["time","frequency","polarization","m","l"])", "bool",
-                                   R"({"type":"flag"})"));
-    Require(!transposed && transposed.error().code == ErrorCode::invalid_metadata,
-            "a flag whose dimension order differs from the image was accepted as a pixel mask");
-}
-
-// Optional metadata comes from a file, so its shape is whatever was written, not whatever the
-// schema describes. A telescope position holding a string where a number belongs used to throw out
-// of nlohmann and past the Result the caller is holding. It is a value the image can do without:
-// the image opens, and only the position it could not read is missing.
-void TestMalformedObservationMetadata(const std::filesystem::path& root) {
-    CreateValidStore(root);
-    Write(root / "SKY" / "zarr.json",
-          "{\"shape\":[1,3,2,4,5],\"data_type\":\"float32\",\"chunk_grid\":{\"name\":\"regular\","
-          "\"configuration\":{\"chunk_shape\":[1,1,1,2,5]}},"
-          "\"attributes\":{\"units\":\"Jy/beam\",\"object_name\":\"Zarr test source\","
-          "\"telescope\":{\"name\":\"Test scope\",\"direction\":{\"data\":[\"north\",0.0]},"
-          "\"distance\":{\"data\":[6371000.0]}}},"
-          "\"dimension_names\":[\"time\",\"frequency\",\"polarization\",\"l\",\"m\"],"
-          "\"zarr_format\":3,\"node_type\":\"array\"}");
-
-    const auto context = carta::zarr::Context::Create();
-    Require(static_cast<bool>(context), "Context::Create failed for malformed observation metadata");
-    const auto dataset = carta::zarr::Dataset::Open(context.value(), root.string());
-    Require(static_cast<bool>(dataset), "the malformed-observation dataset did not open");
-    const auto image = dataset.value().OpenImage("SKY");
-    Require(static_cast<bool>(image), "a malformed telescope position closed an otherwise readable image");
-
-    const auto& observation = image.value().descriptor().observation;
-    Require(observation.has_value(), "the image reported no observation metadata at all");
-    Require(observation->telescope_name == "Test scope", "the readable telescope metadata was dropped as well");
-    Require(!observation->observatory_position.has_value(),
-            "a telescope position holding a string was converted rather than skipped");
-}
-
 // Coordinates belong to the dataset, not to one image, and discovery lists an image on its
 // dimension names alone. A second image whose own frequency axis is a different length was listed
 // as readable and then described with the dataset's frequency coordinate as though it were its
@@ -666,192 +574,48 @@ void TestImageDisagreeingWithACoordinate(const std::filesystem::path& root) {
             "an image whose frequency axis disagrees with the frequency coordinate was described anyway");
 }
 
-void TestAmbiguousPixelMask(const std::filesystem::path& root) {
-    CreateValidStore(root);
-    Write(root / "MODEL" / "zarr.json", SkyArray());
-    Write(root / "FLAG_1" / "zarr.json",
-          NumericArray("[1,3,2,4,5]", R"(["time","frequency","polarization","l","m"])", "bool", R"({"type":"flag"})"));
-    Write(root / "FLAG_2" / "zarr.json",
-          NumericArray("[1,3,2,4,5]", R"(["time","frequency","polarization","l","m"])", "bool", R"({"type":"flag"})"));
-    const auto context = carta::zarr::Context::Create();
-    Require(static_cast<bool>(context), "Context::Create failed for ambiguous mask");
-    const auto dataset = carta::zarr::Dataset::Open(context.value(), root.string());
-    Require(static_cast<bool>(dataset), "ambiguous-mask dataset did not open");
-    const auto model = dataset.value().OpenImage("MODEL");
-    Require(static_cast<bool>(model), "MODEL image did not open for ambiguous mask");
-    Require(!model.value().descriptor().has_pixel_mask, "ambiguous flags selected a pixel mask");
-    Require(HasDiagnostic(model.value().descriptor().diagnostics, "ambiguous_pixel_mask"),
-            "ambiguous flags did not produce a diagnostic");
-}
-
-// The beam table is a four-dimensional array read through a flat buffer, and until this test the
-// only thing pinning that indexing was "ReadBeams did not fail". The conformance fixture cannot
-// pin it either: every one of its six (frequency, polarization) planes holds the same triple, so
-// transposing two strides would go unnoticed. This store gives every plane and parameter a value
-// that identifies it: major = 100*frequency + 10*polarization, and minor and the position angle
-// one and two above it.
-void TestBeamTableIndexing(const std::filesystem::path& root) {
+// A node name is a relative path, and "./MASK_0" names the same node as "MASK_0". Two rules decide
+// that and they disagree: Store::NormalizeNodeName accepts a "." component, and
+// Transport::ArrayDirectory refuses one. So an image declaring its flag with that spelling describes
+// perfectly -- every metadata read goes through the first rule -- and then fails every masked pixel
+// read, which goes through the second.
+//
+// An image that opens, reports a pixel mask, and cannot be read is precisely the outcome ADR 0004
+// reopened itself to avoid: a store that can be listed and never opened is a worse answer than one
+// that is refused.
+void TestANodeNameSpelledWithADotIsTheSameNode(const std::filesystem::path& root) {
+    const std::string dimensions = R"(["time","frequency","polarization","l","m"])";
     CreateValidStore(root);
     Write(root / "SKY" / "zarr.json",
-          "{\"shape\":[1,3,2,4,5],\"data_type\":\"float32\",\"chunk_grid\":{\"name\":\"regular\","
-          "\"configuration\":{\"chunk_shape\":[1,1,1,2,5]}},"
-          "\"attributes\":{\"units\":\"Jy/beam\",\"beam_fit_params\":\"BEAM\"},"
-          "\"dimension_names\":[\"time\",\"frequency\",\"polarization\",\"l\",\"m\"],"
-          "\"zarr_format\":3,\"node_type\":\"array\"}");
-
-    // (time, frequency, polarization, beam_params_label) = (1, 3, 2, 3), C order.
-    Write(root / "BEAM" / "zarr.json",
-          NumericArray("[1,3,2,3]", R"(["time","frequency","polarization","beam_params_label"])", "float64",
-                       R"({"units":"rad"})"));
-    std::vector<double> beam_values;
-    for (std::uint64_t frequency = 0; frequency < 3; ++frequency) {
-        for (std::uint64_t polarization = 0; polarization < 2; ++polarization) {
-            const double base = (100.0 * static_cast<double>(frequency)) + (10.0 * static_cast<double>(polarization));
-            beam_values.push_back(base);
-            beam_values.push_back(base + 1.0);
-            beam_values.push_back(base + 2.0);
-        }
-    }
-    WriteDoubles(root / "BEAM" / "c" / "0" / "0" / "0" / "0", beam_values);
-
-    // Labels are deliberately not in major/minor/pa order: the reader must locate a parameter by its
-    // label, not by its position.
-    Write(root / "beam_params_label" / "zarr.json",
-          R"({"shape":[3],"data_type":{"name":"fixed_length_utf32","configuration":{"length_bytes":24}},
-              "chunk_grid":{"name":"regular","configuration":{"chunk_shape":[3]}},"attributes":{},
-              "dimension_names":["beam_params_label"],"zarr_format":3,"node_type":"array"})");
-    WriteUtf32(root / "beam_params_label" / "c" / "0", {"minor", "major", "pa"}, 6);
+          NumericArray("[1,3,2,4,5]", dimensions, "float32", R"({"units":"Jy/beam","flag":"./MASK_0"})"));
+    // Written out rather than through NumericArray, which fills with 0: a boolean array's fill
+    // value has to be a boolean, and TensorStore refuses the array outright otherwise.
+    Write(root / "MASK_0" / "zarr.json",
+          "{\"shape\":[1,3,2,4,5],\"data_type\":\"bool\","
+          "\"chunk_grid\":{\"name\":\"regular\",\"configuration\":{\"chunk_shape\":[1,3,2,4,5]}},"
+          "\"chunk_key_encoding\":{\"name\":\"default\",\"configuration\":{\"separator\":\"/\"}},"
+          "\"fill_value\":true,\"codecs\":[{\"name\":\"bytes\"}],"
+          "\"attributes\":{\"type\":\"flag\"},\"dimension_names\":" + dimensions +
+              ",\"zarr_format\":3,\"node_type\":\"array\"}");
 
     const auto context = carta::zarr::Context::Create();
-    Require(static_cast<bool>(context), "Context::Create failed for the beam table");
+    Require(static_cast<bool>(context), "Context::Create failed for the dotted node name");
     const auto dataset = carta::zarr::Dataset::Open(context.value(), root.string());
-    Require(static_cast<bool>(dataset), "Dataset::Open failed for the beam table");
+    Require(static_cast<bool>(dataset), "the dotted-flag dataset did not open");
     const auto image = dataset.value().OpenImage("SKY");
-    Require(static_cast<bool>(image), "OpenImage failed for the beam table");
+    Require(static_cast<bool>(image), "SKY did not open in the dotted-flag dataset");
+    Require(image.value().descriptor().has_pixel_mask,
+            "a flag spelled with a leading ./ was not accepted while describing the image");
 
-    const auto beams = image.value().ReadBeams();
-    Require(static_cast<bool>(beams),
-            "ReadBeams failed on the beam table" + (beams ? std::string{} : ": " + beams.error().message));
-    Require(beams.value().size() == 6, "the beam table did not decode one beam per frequency and polarization");
-
-    for (const auto& beam : beams.value()) {
-        const double base =
-            (100.0 * static_cast<double>(beam.channel)) + (10.0 * static_cast<double>(beam.polarization));
-        // Labels are stored as minor, major, pa, so major sits one past the plane's base value.
-        Require(beam.major == base + 1.0, "beam major was read from the wrong element");
-        Require(beam.minor == base, "beam minor was read from the wrong element");
-        Require(beam.position_angle == base + 2.0, "beam position angle was read from the wrong element");
-        Require(beam.unit == "rad", "beam unit was not read from the beam array attributes");
-    }
-}
-
-// A beam table with more than one time plane used to be read as its first plane only, silently.
-// The library reports the whole time axis and leaves any selection to the consumer, and beams now
-// follow that too. Time varies slowest, so a single-plane table is unaffected.
-void TestBeamTableTimePlanes(const std::filesystem::path& root) {
-    CreateValidStore(root);
-    Write(root / "SKY" / "zarr.json",
-          "{\"shape\":[1,3,2,4,5],\"data_type\":\"float32\",\"chunk_grid\":{\"name\":\"regular\","
-          "\"configuration\":{\"chunk_shape\":[1,1,1,2,5]}},"
-          "\"attributes\":{\"units\":\"Jy/beam\",\"beam_fit_params\":\"BEAM\"},"
-          "\"dimension_names\":[\"time\",\"frequency\",\"polarization\",\"l\",\"m\"],"
-          "\"zarr_format\":3,\"node_type\":\"array\"}");
-
-    // (time, frequency, polarization, beam_params_label) = (2, 3, 2, 3), C order.
-    Write(root / "BEAM" / "zarr.json",
-          NumericArray("[2,3,2,3]", R"(["time","frequency","polarization","beam_params_label"])", "float64",
-                       R"({"units":"rad"})"));
-    std::vector<double> beam_values;
-    for (std::uint64_t time = 0; time < 2; ++time) {
-        for (std::uint64_t frequency = 0; frequency < 3; ++frequency) {
-            for (std::uint64_t polarization = 0; polarization < 2; ++polarization) {
-                const double base = (1000.0 * static_cast<double>(time)) + (100.0 * static_cast<double>(frequency)) +
-                                    (10.0 * static_cast<double>(polarization));
-                beam_values.push_back(base);
-                beam_values.push_back(base + 1.0);
-                beam_values.push_back(base + 2.0);
-            }
-        }
-    }
-    WriteDoubles(root / "BEAM" / "c" / "0" / "0" / "0" / "0", beam_values);
-    Write(root / "beam_params_label" / "zarr.json",
-          R"({"shape":[3],"data_type":{"name":"fixed_length_utf32","configuration":{"length_bytes":24}},
-              "chunk_grid":{"name":"regular","configuration":{"chunk_shape":[3]}},"attributes":{},
-              "dimension_names":["beam_params_label"],"zarr_format":3,"node_type":"array"})");
-    WriteUtf32(root / "beam_params_label" / "c" / "0", {"minor", "major", "pa"}, 6);
-
-    const auto context = carta::zarr::Context::Create();
-    const auto dataset = carta::zarr::Dataset::Open(context.value(), root.string());
-    Require(static_cast<bool>(dataset), "Dataset::Open failed for the multi-plane beam table");
-    const auto image = dataset.value().OpenImage("SKY");
-    Require(static_cast<bool>(image), "OpenImage failed for the multi-plane beam table");
-
-    const auto beams = image.value().ReadBeams();
-    Require(static_cast<bool>(beams), "ReadBeams failed on the multi-plane beam table");
-    Require(beams.value().size() == 12, "the multi-plane beam table did not report every plane");
-
-    for (const auto& beam : beams.value()) {
-        const double base = (1000.0 * static_cast<double>(beam.time)) + (100.0 * static_cast<double>(beam.channel)) +
-                            (10.0 * static_cast<double>(beam.polarization));
-        Require(beam.major == base + 1.0, "beam major was read from the wrong time plane");
-        Require(beam.minor == base, "beam minor was read from the wrong time plane");
-        Require(beam.position_angle == base + 2.0, "beam position angle was read from the wrong time plane");
-    }
-
-    // The first plane still reads back exactly as it did when it was all that was reported.
-    Require(beams.value().front().time == 0 && beams.value().front().channel == 0 &&
-                beams.value().front().polarization == 0,
-            "time did not vary slowest, so single-plane callers would see a different order");
-}
-
-// A beam table need not carry a time dimension; ReadBeams treats an absent one as a single
-// implicit plane. Addressing the array must not insist on naming a dimension the array lacks.
-void TestBeamTableWithoutTimeDimension(const std::filesystem::path& root) {
-    CreateValidStore(root);
-    Write(root / "SKY" / "zarr.json",
-          "{\"shape\":[1,3,2,4,5],\"data_type\":\"float32\",\"chunk_grid\":{\"name\":\"regular\","
-          "\"configuration\":{\"chunk_shape\":[1,1,1,2,5]}},"
-          "\"attributes\":{\"units\":\"Jy/beam\",\"beam_fit_params\":\"BEAM\"},"
-          "\"dimension_names\":[\"time\",\"frequency\",\"polarization\",\"l\",\"m\"],"
-          "\"zarr_format\":3,\"node_type\":\"array\"}");
-
-    // (frequency, polarization, beam_params_label) = (3, 2, 3) -- no time dimension at all.
-    Write(root / "BEAM" / "zarr.json", NumericArray("[3,2,3]", R"(["frequency","polarization","beam_params_label"])",
-                                                    "float64", R"({"units":"rad"})"));
-    std::vector<double> beam_values;
-    for (std::uint64_t frequency = 0; frequency < 3; ++frequency) {
-        for (std::uint64_t polarization = 0; polarization < 2; ++polarization) {
-            const double base = (100.0 * static_cast<double>(frequency)) + (10.0 * static_cast<double>(polarization));
-            beam_values.push_back(base);
-            beam_values.push_back(base + 1.0);
-            beam_values.push_back(base + 2.0);
-        }
-    }
-    WriteDoubles(root / "BEAM" / "c" / "0" / "0" / "0", beam_values);
-    Write(root / "beam_params_label" / "zarr.json",
-          R"({"shape":[3],"data_type":{"name":"fixed_length_utf32","configuration":{"length_bytes":24}},
-              "chunk_grid":{"name":"regular","configuration":{"chunk_shape":[3]}},"attributes":{},
-              "dimension_names":["beam_params_label"],"zarr_format":3,"node_type":"array"})");
-    WriteUtf32(root / "beam_params_label" / "c" / "0", {"minor", "major", "pa"}, 6);
-
-    const auto context = carta::zarr::Context::Create();
-    const auto dataset = carta::zarr::Dataset::Open(context.value(), root.string());
-    Require(static_cast<bool>(dataset), "Dataset::Open failed for the time-less beam table");
-    const auto image = dataset.value().OpenImage("SKY");
-    Require(static_cast<bool>(image), "OpenImage failed for the time-less beam table");
-
-    const auto beams = image.value().ReadBeams();
-    Require(static_cast<bool>(beams), "a beam table without a time dimension was not readable" +
-                                          (beams ? std::string{} : ": " + beams.error().message));
-    Require(beams.value().size() == 6, "the time-less beam table did not report one beam per plane");
-    for (const auto& beam : beams.value()) {
-        const double base =
-            (100.0 * static_cast<double>(beam.channel)) + (10.0 * static_cast<double>(beam.polarization));
-        Require(beam.time == 0, "a beam table without a time dimension reported a nonzero time index");
-        Require(beam.major == base + 1.0, "beam major was misaddressed without a time dimension");
-        Require(beam.minor == base, "beam minor was misaddressed without a time dimension");
-        Require(beam.position_angle == base + 2.0, "beam position angle was misaddressed without a time dimension");
-    }
+    // One pixel on every axis, so this says nothing about order and only asks whether the read
+    // reaches the store at all.
+    carta::zarr::ReadRequest request;
+    request.axes.assign(image.value().descriptor().axes.size(), carta::zarr::Range{0, 1, 1});
+    std::vector<float> destination(1, 0.0F);
+    const auto read = image.value().Read(request, {destination.data(), destination.size()});
+    Require(static_cast<bool>(read),
+            std::string("an image whose flag is spelled ./MASK_0 opened and then could not be read: ") +
+                (read ? "" : read.error().message));
 }
 
 // A sharded array grids its store by shard; the inner chunk shape lives in the sharding codec.
@@ -989,10 +753,7 @@ int main() {
         TestProbingAndOpeningDescribeTheSameDataset(root / "probe-open-agree");
         TestCoordinateCompletion(root / "coordinates");
         TestNonDoubleCoordinates(root / "float32-coordinates");
-        TestAmbiguousPixelMask(root / "ambiguous-mask");
         TestImageDisagreeingWithACoordinate(root / "coordinate-disagreement");
-        TestMalformedObservationMetadata(root / "observation");
-        TestDeclaredPixelMaskIsValidated(root / "declared-mask");
         TestDiscoveryIgnoresNameAllowlist(root / "unlisted-image");
         TestMetadataCache(root / "metadata-cache");
         TestDiscoveryDoesNotDescendIntoArrayChunks(root / "array-chunks");
@@ -1000,10 +761,8 @@ int main() {
         TestImageDatasetMissingTimeCoordinate(root / "image-no-time");
         TestShardedStorageLayout(root / "sharded");
         TestEmptyAndOversizedMetadata(root / "metadata-bytes");
-        TestBeamTableIndexing(root / "beam-table");
-        TestBeamTableTimePlanes(root / "beam-time");
-        TestBeamTableWithoutTimeDimension(root / "beam-notime");
         TestBeamTableWithUnreadableLabels(root / "beam-labels");
+        TestANodeNameSpelledWithADotIsTheSameNode(root / "dotted-node");
         TestReferenceFixture();
         TestCompatibilityFixture();
         std::filesystem::remove_all(root);

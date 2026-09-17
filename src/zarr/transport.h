@@ -17,13 +17,21 @@
 
 namespace carta::zarr::internal {
 
-// The seam between a Zarr hierarchy and where its bytes live. A Transport supplies raw access only:
-// it never parses JSON and it never decides what a node means. Keeping interpretation above the
-// seam is deliberate -- it is what stops a test transport and the filesystem transport from
-// disagreeing about the very metadata the tests exist to pin down.
+// The seam between a Zarr hierarchy and where its bytes live. A Transport supplies raw access: it
+// hands a node's document up verbatim and never decides what a node means. Keeping interpretation
+// above the seam is deliberate -- it is what stops a test transport and the filesystem transport
+// from disagreeing about the very metadata the tests exist to pin down.
 //
-// Node names reaching a Transport have already been validated and normalized by Store, so every
-// Transport is held to the same rule about what a legal node path is.
+// One transport does parse, and it is worth naming rather than denying: FilesystemTransport reads
+// `node_type` out of a node's document while listing, to know whether to descend into it. The
+// alternative is walking the chunk files, of which a real dataset has millions. It parses to decide
+// where to walk and never to decide what anything means, and the document it hands up is the bytes
+// it found; a document it cannot parse is passed on for Store to diagnose.
+//
+// Node names reaching a Transport have already been validated and normalized by Store -- including
+// through Store::ResolveArrayDirectory, which did not always do so -- so every Transport is held to
+// one rule about what a legal node path is. A Transport may check again; it must not have a second
+// opinion.
 class Transport {
 public:
     Transport() = default;

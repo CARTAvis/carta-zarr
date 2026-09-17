@@ -25,19 +25,18 @@ PassPlan PlanPass(const ImageDescriptor& descriptor, const ChunkGeometry& geomet
     plan.v_length = descriptor.axes.at(plan.axis_v).length;
     plan.chunk_u = std::max<std::uint64_t>(1, geometry.chunk_shape.at(plan.axis_u));
     plan.chunk_v = std::max<std::uint64_t>(1, geometry.chunk_shape.at(plan.axis_v));
-    plan.chunk_depth = std::max<std::uint64_t>(1, geometry.chunk_shape.at(map.spectral));
+    plan._chunk_depth = std::max<std::uint64_t>(1, geometry.chunk_shape.at(map.spectral));
     plan.apply_mask = options.apply_pixel_mask && descriptor.has_pixel_mask;
     plan.chunk_bytes = DecodedChunkBytes(descriptor, geometry, plan.apply_mask);
     plan.slab_budget_bytes = options.temporary_memory_limit_bytes != 0 ? options.temporary_memory_limit_bytes
                                                                       : DefaultReadBytes(plan.chunk_bytes);
-    plan.least_channels = ((plan.chunk_depth + spectral.stride - 1) / spectral.stride);
+    plan._least_channels = ((plan._chunk_depth + spectral.stride - 1) / spectral.stride);
+    plan.spectral = spectral;
     const std::uint64_t row_chunks = std::max<std::uint64_t>(1, ((plan.u_length - 1) / plan.chunk_u) + 1);
     const std::uint64_t column_chunks = std::max<std::uint64_t>(1, ((plan.v_length - 1) / plan.chunk_v) + 1);
     plan.layer_chunks = std::max<std::uint64_t>(1, row_chunks * column_chunks);
     // How many chunk rows one read may hold, so that a read is a budget's worth of chunk data.
-    plan.band_rows = std::max<std::uint64_t>(
-        1, plan.slab_budget_bytes / std::max<std::uint64_t>(1, row_chunks * plan.chunk_bytes));
-    plan.spectral = spectral;
+    plan.band_rows = plan.UnitsAffordable(row_chunks);
     plan.polarization = polarization;
     plan.time = time;
     plan.sample = std::max<std::uint64_t>(1, sample);
@@ -45,26 +44,13 @@ PassPlan PlanPass(const ImageDescriptor& descriptor, const ChunkGeometry& geomet
 }
 
 
-Result<void> ValidateSpectralRange(const ImageDescriptor& descriptor, const AxisMap& map,
-                                   const Range& spectral) {
-    const auto channels = descriptor.axes.at(map.spectral).length;
-    if (spectral.stride == 0 || spectral.count == 0 || spectral.start >= channels ||
-        spectral.count - 1 > (channels - 1 - spectral.start) / spectral.stride) {
-        return Error{ErrorCode::invalid_argument, "The spectral range falls outside the image", descriptor.id};
-    }
-    return {};
-}
-
-std::uint64_t PlanEmitChannels(const PassPlan& plan, std::uint64_t layer_chunks,
-                               std::size_t bytes_per_channel, std::uint32_t hint) {
+std::uint64_t PassPlan::EmitChannels(std::uint64_t layer_chunks, std::size_t bytes_per_channel,
+                                     std::uint32_t hint) const {
     const std::uint64_t budget_channels =
         std::max<std::uint64_t>(1, kSpectralEmitBudgetBytes / std::max<std::size_t>(1, bytes_per_channel));
-    const std::uint64_t block_chunks =
-        std::min(plan.spectral.count,
-                 std::max<std::uint64_t>(1, plan.slab_budget_bytes / std::max<std::uint64_t>(
-                                                                         1, layer_chunks * plan.chunk_bytes)));
-    return std::min({hint == 0 ? block_chunks * plan.least_channels : static_cast<std::uint64_t>(hint),
-                     budget_channels, plan.spectral.count});
+    const std::uint64_t block_chunks = std::min(spectral.count, UnitsAffordable(layer_chunks));
+    return std::min({hint == 0 ? block_chunks * _least_channels : static_cast<std::uint64_t>(hint),
+                     budget_channels, spectral.count});
 }
 
 }  // namespace carta::zarr::internal

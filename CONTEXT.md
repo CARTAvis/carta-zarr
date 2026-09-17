@@ -91,6 +91,12 @@ _Avoid_: driver, backend, kvstore, store
 The immutable metadata the library reports for a dataset or an image. It never contains pixels.
 _Avoid_: info, header, metadata (on its own)
 
+**Observation**:
+What an image's own attributes say about the observing run behind it: the object, the observer, the
+telescope and where it stood, and the date the observation carries. Optional throughout — a field
+written in a type the library cannot read is skipped, and never closes the image.
+_Avoid_: provenance, history, header
+
 **Linear description**:
 The reference pixel, reference value, and increment that let a consumer treat a coordinate as an
 evenly spaced axis. A coordinate carries one only when its samples support it; without one the
@@ -106,6 +112,13 @@ _Avoid_: native order, disk order, physical order
 The coordinate order the library reports and reads in, chosen by the schema profile rather than by
 the file.
 _Avoid_: canonical order, CARTA order, display order
+
+**Plane selection**:
+Which planes of an image a reduction is over: a range along the spectral coordinate, one
+polarization, and one time. The three travel together on every reduction request, because a
+reduction is always over whole planes. An ordinary read says the same thing as one range per axis
+instead, which is why it takes no plane selection.
+_Avoid_: slice, cube selection, channel range, plane range
 
 **Pass**:
 One ordered visit to every chunk an image read covers, made once and shared by every reduction that

@@ -14,10 +14,10 @@
 //
 // None of it needs a store, a transport or a fixture, which is the point.
 
-#include "reduce/axis_map.h"
+#include "axis_map.h"
 #include "reduce/pass.h"
 
-#include "support/synthetic_slab_source.h"
+#include "support/synthetic_pixel_source.h"
 
 #include <chrono>
 #include <cmath>
@@ -37,7 +37,7 @@ using carta::zarr::internal::PassPlan;
 using carta::zarr::internal::PlanPass;
 using carta::zarr::internal::RunPass;
 using carta::zarr::internal::Slab;
-using carta::zarr::testing::SyntheticSlabSource;
+using carta::zarr::testing::SyntheticPixelSource;
 
 void Require(bool condition, const std::string& message) {
     if (!condition) {
@@ -152,20 +152,23 @@ void TestTheCallersCeilingWins() {
             "without a limit the budget is the one chunk_blocks measured");
 }
 
-// least_channels is how many selected channels one chunk of the spectral axis holds, which is what
-// keeps a slab from ending inside a chunk and making one decode serve two slabs.
+// How many selected channels one chunk of the spectral axis holds is what keeps a slab from ending
+// inside a chunk and making one decode serve two slabs. Asked as ChunksFor, which is the question a
+// walk actually puts to the plan: n channels is one chunk, and one more than that is two.
 void TestASlabIsCountedInChunksOfTheSpectralAxis() {
     const auto image = MakeImage(512, 520, 64);
     const auto geometry = MakeGeometry(256, 260, 8, AxisRole::spatial_y);
 
-    Require(Plan(image, geometry, Range{0, 64, 1}, ReadOptions{}).least_channels == 8,
-            "eight channels to a chunk, read every one");
-    Require(Plan(image, geometry, Range{0, 32, 2}, ReadOptions{}).least_channels == 4,
-            "eight channels to a chunk, every second one selected, is four");
-    Require(Plan(image, geometry, Range{0, 8, 8}, ReadOptions{}).least_channels == 1,
-            "a stride of a whole chunk selects one channel from each");
-    Require(Plan(image, geometry, Range{0, 4, 16}, ReadOptions{}).least_channels == 1,
-            "a stride wider than a chunk still selects one, never none");
+    const auto holds = [&](const Range& spectral, std::uint64_t channels, const std::string& what) {
+        const auto plan = Plan(image, geometry, spectral, ReadOptions{});
+        Require(plan.ChunksFor(channels) == 1, what + ": that many channels is one chunk");
+        Require(plan.ChunksFor(channels + 1) == 2, what + ": one more than that is two");
+    };
+
+    holds(Range{0, 64, 1}, 8, "eight channels to a chunk, read every one");
+    holds(Range{0, 32, 2}, 4, "eight channels to a chunk, every second one selected, is four");
+    holds(Range{0, 8, 8}, 1, "a stride of a whole chunk selects one channel from each");
+    holds(Range{0, 4, 16}, 1, "a stride wider than a chunk still selects one, never none");
 }
 
 // layer_chunks is the chunks in one spectral layer, and band_rows is how many chunk rows of it one
@@ -191,7 +194,7 @@ void TestABandIsNeverEmpty() {
     tiny.temporary_memory_limit_bytes = 1;
     const auto plan = Plan(image, geometry, Range{0, 32, 1}, tiny);
     Require(plan.band_rows >= 1, "a band holds at least one chunk row however small the budget");
-    Require(plan.least_channels >= 1, "and a slab at least one channel");
+    Require(plan.SlabChannels(plan.layer_chunks) >= 1, "and a slab at least one channel");
 }
 
 // Sampling of zero would select nothing and divide by nothing; the plan floors it at one.
@@ -240,7 +243,7 @@ struct Walked {
     std::uint64_t slabs = 0;
 };
 
-Walked WalkEverything(const SyntheticSlabSource& source, const PassPlan& plan, const ReadOptions& options,
+Walked WalkEverything(const SyntheticPixelSource& source, const PassPlan& plan, const ReadOptions& options,
                       std::uint64_t channels) {
     Walked walked;
     std::uint64_t chunks_done = 0;
@@ -273,7 +276,7 @@ void TestEachChunkIsReadOnce() {
     // Small enough that the pass has to split along the chunk rows and along the spectrum at once.
     options.temporary_memory_limit_bytes = 4 * 128 * 130 * 4 * 4;
     const auto plan = Plan(image, geometry, Range{0, 32, 1}, options);
-    SyntheticSlabSource source(image, geometry, Encoded);
+    SyntheticPixelSource source(image, geometry, Encoded);
 
     const auto walked = WalkEverything(source, plan, options, 32);
     Require(walked.slabs > 1, "this budget should have split the walk; if it did not, raise the image size");
@@ -291,7 +294,7 @@ void TestThePassVisitsEveryPixelOnce() {
     ReadOptions options;
     options.temporary_memory_limit_bytes = 16 * 20 * 2 * 4;
     const auto plan = Plan(image, geometry, Range{0, 8, 1}, options);
-    SyntheticSlabSource source(image, geometry, Encoded);
+    SyntheticPixelSource source(image, geometry, Encoded);
 
     const auto walked = WalkEverything(source, plan, options, 8);
     Require(walked.pixels == 64ULL * 40ULL * 8ULL, "every pixel of the selection, once");
@@ -316,7 +319,7 @@ void TestAFlaggedPixelArrivesAsNaN() {
     const auto plan = Plan(image, geometry, Range{0, 4, 1}, options);
     Require(plan.apply_mask, "an image with a flag applies it by default");
 
-    SyntheticSlabSource source(image, geometry, Encoded);
+    SyntheticPixelSource source(image, geometry, Encoded);
     // Every third pixel along l is bad.
     source.set_flags([](const std::vector<std::uint64_t>& logical) { return (logical.at(0) % 3) != 0; });
 
@@ -353,7 +356,7 @@ void TestCancellationStopsThePass() {
     int reads = 0;
     options.cancellation_requested = [&]() { return reads >= 2; };
     const auto plan = Plan(image, geometry, Range{0, 16, 1}, options);
-    SyntheticSlabSource source(image, geometry, Encoded);
+    SyntheticPixelSource source(image, geometry, Encoded);
 
     std::uint64_t chunks_done = 0;
     const auto outcome = RunPass(
@@ -370,7 +373,7 @@ void TestAnExpiredDeadlineStopsThePass() {
     ReadOptions options;
     options.deadline = std::chrono::steady_clock::now() - std::chrono::seconds(1);
     const auto plan = Plan(image, geometry, Range{0, 8, 1}, options);
-    SyntheticSlabSource source(image, geometry, Encoded);
+    SyntheticPixelSource source(image, geometry, Encoded);
 
     std::uint64_t chunks_done = 0;
     const auto outcome = RunPass(
@@ -388,7 +391,7 @@ void TestAReadFailureStopsThePass() {
     ReadOptions options;
     options.temporary_memory_limit_bytes = 32 * 65 * 2 * 4;
     const auto plan = Plan(image, geometry, Range{0, 8, 1}, options);
-    SyntheticSlabSource source(image, geometry, Encoded);
+    SyntheticPixelSource source(image, geometry, Encoded);
     source.fail_read(2, carta::zarr::ErrorCode::io_error);
 
     int visits = 0;
@@ -410,7 +413,7 @@ void TestALargePlaneSplitsIntoBands() {
     // Eight chunks to a read, which is the floor chunk_blocks measured.
     options.temporary_memory_limit_bytes = 8 * 512 * 512 * 4;
     const auto plan = Plan(image, geometry, Range{0, 4, 1}, options);
-    SyntheticSlabSource source(image, geometry, Encoded);
+    SyntheticPixelSource source(image, geometry, Encoded);
     // This one is about the splitting, not the pixels, so it does not pay for them.
     source.set_constant(1.0F);
 

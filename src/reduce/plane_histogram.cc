@@ -7,7 +7,7 @@
 #include "plane_histogram.h"
 
 #include "chunk_blocks.h"
-#include "reduce/axis_map.h"
+#include "axis_map.h"
 #include "reduce/tuning.h"
 #include "reduce/pass.h"
 
@@ -220,22 +220,21 @@ private:
 
 }  // namespace
 
-Result<void> ComputeHistogram(const SlabSource& source, const ImageDescriptor& descriptor,
-                              const ChunkGeometry& geometry, const HistogramRequest& request,
-                              const HistogramSink& sink, const ReadOptions& options, WorkPool& workers) {
+Result<void> ComputeHistogram(const ReadableImage& image, const HistogramRequest& request,
+                              const HistogramSink& sink, const ReadOptions& options) {
+    const auto& descriptor = image.descriptor();
+    const auto& geometry = image.geometry();
+    const auto& source = image.source();
+    const auto& map = image.map();
+    auto& workers = image.workers();
     const auto& node = descriptor.id;
     if (!sink) {
         return MakeError(ErrorCode::invalid_argument, "A histogram needs a sink", node);
     }
-    auto axes = MapAxes(descriptor);
-    if (!axes) {
-        return axes.error();
-    }
-    const auto& map = axes.value();
     if (auto valid = ValidateRequest(descriptor, map, request); !valid) {
         return valid.error();
     }
-    if (auto valid = ValidateSpectralRange(descriptor, map, request.spectral); !valid) {
+    if (auto valid = image.ValidateSpectral(request.spectral); !valid) {
         return valid.error();
     }
 
@@ -246,7 +245,7 @@ Result<void> ComputeHistogram(const SlabSource& source, const ImageDescriptor& d
     // A whole plane, so the layer the emit budget is spent against is the plan's own.
     const std::size_t bytes_per_channel = static_cast<std::size_t>(request.bins) * sizeof(std::uint64_t);
     const std::uint64_t wanted_channels =
-        PlanEmitChannels(plan, plan.layer_chunks, bytes_per_channel, request.emit_every_channels);
+        plan.EmitChannels(plan.layer_chunks, bytes_per_channel, request.emit_every_channels);
 
     // The caller's own sequence: divide in double, narrow the width, compare against the narrowed
     // bounds. Doing any one of those in the other type moves pixels across bin edges.
@@ -277,15 +276,12 @@ Result<void> ComputeHistogram(const SlabSource& source, const ImageDescriptor& d
     }
 
     for (std::uint64_t block_begin = 0; block_begin < spectral.count;) {
-        const std::uint64_t block_end = AlignedBlockEnd(block_begin, wanted_channels, spectral.count,
-                                                        spectral.start, spectral.stride, plan.chunk_depth);
+        const std::uint64_t block_end = plan.AlignedSlabEnd(block_begin, wanted_channels, spectral.count);
         const auto block_length = static_cast<std::size_t>(block_end - block_begin);
         counts.assign(block_length * bins, 0);
 
-        const std::uint64_t block_spectral_chunks =
-            (block_length + plan.least_channels - 1) / plan.least_channels;
         const std::uint64_t block_chunks_total =
-            std::max<std::uint64_t>(1, plan.layer_chunks * block_spectral_chunks);
+            std::max<std::uint64_t>(1, plan.layer_chunks * plan.ChunksFor(block_length));
         std::uint64_t chunks_done = 0;
 
         const auto hand_over = [&](bool complete) -> Result<void> {
@@ -378,10 +374,14 @@ Result<void> ComputeHistogram(const SlabSource& source, const ImageDescriptor& d
     return {};
 }
 
-Result<CubeHistogramResult> ComputeCubeHistogram(const SlabSource& source, const ImageDescriptor& descriptor,
-                                                 const ChunkGeometry& geometry,
+Result<CubeHistogramResult> ComputeCubeHistogram(const ReadableImage& image,
                                                  const CubeHistogramRequest& request,
-                                                 const ReadOptions& options, WorkPool& workers) {
+                                                 const ReadOptions& options) {
+    const auto& descriptor = image.descriptor();
+    const auto& geometry = image.geometry();
+    const auto& source = image.source();
+    const auto& map = image.map();
+    auto& workers = image.workers();
     const auto& node = descriptor.id;
     if (request.bins == 0 || request.bins > kMaxHistogramBins) {
         return MakeError(ErrorCode::invalid_argument,
@@ -391,11 +391,6 @@ Result<CubeHistogramResult> ComputeCubeHistogram(const SlabSource& source, const
     if (request.spatial_sample == 0) {
         return MakeError(ErrorCode::invalid_argument, "A spatial sample of zero selects nothing", node);
     }
-    auto axes = MapAxes(descriptor);
-    if (!axes) {
-        return axes.error();
-    }
-    const auto& map = axes.value();
     // The polarization and time checks are the same ones a fixed-range histogram makes; the bins and
     // bounds in this stand-in are only there to get past its own checks, and nothing reads them.
     HistogramRequest shape;
@@ -408,7 +403,7 @@ Result<CubeHistogramResult> ComputeCubeHistogram(const SlabSource& source, const
     if (auto valid = ValidateRequest(descriptor, map, shape); !valid) {
         return valid.error();
     }
-    if (auto valid = ValidateSpectralRange(descriptor, map, request.spectral); !valid) {
+    if (auto valid = image.ValidateSpectral(request.spectral); !valid) {
         return valid.error();
     }
 
@@ -428,8 +423,7 @@ Result<CubeHistogramResult> ComputeCubeHistogram(const SlabSource& source, const
     const auto plan = PlanPass(descriptor, geometry, map, request.spectral, request.polarization,
                                request.time, request.spatial_sample, options);
     const std::uint64_t total_chunks =
-        std::max<std::uint64_t>(1, plan.layer_chunks * ((request.spectral.count + plan.least_channels - 1) /
-                                                        plan.least_channels));
+        std::max<std::uint64_t>(1, plan.layer_chunks * plan.ChunksFor(request.spectral.count));
 
     // One accumulator per task, which is safe because the split below never asks for more tasks than
     // there are accumulators, so no two bodies ever hold the same one at once. See the split itself

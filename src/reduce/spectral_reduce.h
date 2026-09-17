@@ -10,8 +10,7 @@
 #include "carta-zarr/reduce.h"
 #include "carta-zarr/result.h"
 
-#include "reduce/pass.h"
-#include "work_pool.h"
+#include "readable_image.h"
 
 namespace carta::zarr::internal {
 
@@ -22,9 +21,8 @@ namespace carta::zarr::internal {
  * translate a request and hand it to the store, while this walks a chunk grid and owns an inner
  * loop whose shape is the entire reason the API takes N regions at once.
  */
-Result<void> ReduceSpectral(const SlabSource& source, const ImageDescriptor& descriptor,
-                            const ChunkGeometry& geometry, const SpectralReduceRequest& request,
-                            const SpectralSink& sink, const ReadOptions& options, WorkPool& workers);
+Result<void> ReduceSpectral(const ReadableImage& image, const SpectralReduceRequest& request,
+                            const SpectralSink& sink, const ReadOptions& options);
 
 }  // namespace carta::zarr::internal
 

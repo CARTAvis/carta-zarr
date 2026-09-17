@@ -10,12 +10,12 @@
 #include "carta-zarr/read.h"
 #include "carta-zarr/result.h"
 
+#include "readable_image.h"
+
 #include <cstddef>
 #include <cstdint>
 
 namespace carta::zarr::internal {
-
-class Store;
 
 /**
  * How one ordinary read is cut into pieces. See CONTEXT.md for what a piece is.
@@ -62,14 +62,17 @@ PiecePlan PlanPieces(const ImageDescriptor& descriptor, const ChunkGeometry& geo
  *
  * Everything an ordinary read does apart from being reached through a handle: it validates the
  * request against the descriptor, plans the pieces, reads each one's flag and pixels in that order,
- * folds the flag in, and reports progress. The caller supplies the store and translates whatever
+ * folds the flag in, and reports progress. The caller supplies the source and translates whatever
  * comes back; it does not need to know that any of this happened.
+ *
+ * The flag is read before the pixels, which is the opposite of what a pass does and is the reason
+ * ADR 0005 gives for this staying outside one: the destination is the caller's, so a mask that
+ * cannot be read must not leave a piece of it updated.
  *
  * Reports buffer_too_small when the destination cannot hold the selection, or when a piece's flag
  * buffer exceeds a ceiling that no further splitting gets under.
  */
-Result<std::size_t> ReadInPieces(const Store& store, const ImageDescriptor& descriptor,
-                                 const ChunkGeometry& geometry, const ReadRequest& request,
+Result<std::size_t> ReadInPieces(const ReadableImage& image, const ReadRequest& request,
                                  BufferView<float> destination, const ReadOptions& options);
 
 }  // namespace carta::zarr::internal

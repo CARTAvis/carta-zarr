@@ -9,10 +9,14 @@
 // in-memory transport, so a case costs a map entry rather than a directory tree, and the build links
 // no TensorStore.
 //
-// Descriptors are deliberately absent: they read coordinate values, which an in-memory transport has
-// none of. Descriptor behaviour is covered in tests/schema_probe_test.cc against fixtures on disk.
+// Whole descriptors are deliberately absent: they read coordinate values, which an in-memory
+// transport has none of. Descriptor behaviour is covered in tests/schema_probe_test.cc against
+// fixtures on disk. The parts of describing an image that read only metadata do belong here, which
+// is why choosing a flag is below: what a flag has to be is checked in tests/flag_test.cc without a
+// store at all, and what happens when the store is consulted is checked here.
 
 #include "schema/profile.h"
+#include "schema/xradio/flag.h"
 #include "store.h"
 #include "support/in_memory_transport.h"
 
@@ -29,6 +33,7 @@ namespace {
 using carta::zarr::ErrorCode;
 using carta::zarr::ProbeKind;
 using carta::zarr::SchemaMatchKind;
+using carta::zarr::internal::xradio::DetermineFlag;
 using carta::zarr::testing::MakeInMemoryTransport;
 
 void Require(bool condition, const std::string& message) {
@@ -398,6 +403,74 @@ void TestFirstFaultIsTheOnlyDiagnostic() {
 }
 
 // Store-level rejections, reported before any profile is consulted.
+// Choosing a flag is the half of it that consults the store: what a flag has to be once it is found
+// takes no store at all and is checked in tests/flag_test.cc.
+//
+// A declared flag is the image's own statement that its pixels need a mask, so an image naming one
+// that cannot be read is closed rather than opened unmasked. Reads apply the mask by default, and an
+// unusable mask reported as no mask would show flagged pixels as valid -- the one failure a consumer
+// has no way to notice.
+void TestADeclaredFlagIsBinding() {
+    const std::string sky_dimensions = R"(["time","frequency","polarization","l","m"])";
+    const auto with_declared_flag = [&](bool write_the_flag) {
+        auto nodes = CompleteStore();
+        nodes["SKY"] = SkyArray("float32", R"({"units":"Jy/beam","flag":"MASK_0"})");
+        if (write_the_flag) {
+            nodes["MASK_0"] = NumericArray("[1,3,2,4,5]", sky_dimensions, "bool", R"({"type":"flag"})");
+        }
+        return nodes;
+    };
+
+    auto present = Open(with_declared_flag(true));
+    Require(static_cast<bool>(present), "the declared-flag store did not open");
+    const auto& present_image = present.value().ReadArrayMetadata("SKY");
+    Require(static_cast<bool>(present_image), "SKY was not readable in the declared-flag store");
+    std::vector<carta::zarr::Diagnostic> diagnostics;
+    auto declared = DetermineFlag(present.value(), present_image.value(), "SKY", diagnostics);
+    Require(static_cast<bool>(declared), "a well-formed declared flag was refused");
+    Require(declared.value() == "MASK_0", "the declared flag was not the one selected");
+    Require(diagnostics.empty(), "selecting a declared flag produced a diagnostic");
+
+    auto absent = Open(with_declared_flag(false));
+    Require(static_cast<bool>(absent), "the missing-flag store did not open");
+    const auto& absent_image = absent.value().ReadArrayMetadata("SKY");
+    Require(static_cast<bool>(absent_image), "SKY was not readable in the missing-flag store");
+    auto missing = DetermineFlag(absent.value(), absent_image.value(), "SKY", diagnostics);
+    Require(!missing, "an image declaring a flag variable that does not exist was opened");
+}
+
+// With nothing declared the store is inspected instead, and a store offering two equally good
+// candidates is refused rather than guessed at. The refusal is a diagnostic on the image: the image
+// is still readable, just unmasked.
+void TestAmbiguousFlagsSelectNone() {
+    const std::string sky_dimensions = R"(["time","frequency","polarization","l","m"])";
+    auto nodes = CompleteStore();
+    nodes["FLAG_1"] = NumericArray("[1,3,2,4,5]", sky_dimensions, "bool", R"({"type":"flag"})");
+    nodes["FLAG_2"] = NumericArray("[1,3,2,4,5]", sky_dimensions, "bool", R"({"type":"flag"})");
+
+    auto store = Open(nodes);
+    Require(static_cast<bool>(store), "the ambiguous-flag store did not open");
+    const auto& image = store.value().ReadArrayMetadata("SKY");
+    Require(static_cast<bool>(image), "SKY was not readable in the ambiguous-flag store");
+
+    std::vector<carta::zarr::Diagnostic> diagnostics;
+    auto chosen = DetermineFlag(store.value(), image.value(), "SKY", diagnostics);
+    Require(static_cast<bool>(chosen), "ambiguous flags reported an error rather than no mask");
+    Require(chosen.value().empty(), "ambiguous flags selected a pixel mask");
+    Require(HasDiagnostic(diagnostics, "ambiguous_pixel_mask"), "ambiguous flags did not produce a diagnostic");
+
+    // One candidate is not ambiguous: the same store with FLAG_2 removed selects FLAG_1.
+    nodes.erase("FLAG_2");
+    auto single = Open(nodes);
+    Require(static_cast<bool>(single), "the single-flag store did not open");
+    const auto& single_image = single.value().ReadArrayMetadata("SKY");
+    Require(static_cast<bool>(single_image), "SKY was not readable in the single-flag store");
+    std::vector<carta::zarr::Diagnostic> single_diagnostics;
+    auto only = DetermineFlag(single.value(), single_image.value(), "SKY", single_diagnostics);
+    Require(static_cast<bool>(only) && only.value() == "FLAG_1", "one matching flag was not selected");
+    Require(single_diagnostics.empty(), "one matching flag produced an ambiguity diagnostic");
+}
+
 void TestStoreRejections() {
     const auto no_root = Open({{"SKY", SkyArray()}});
     Require(!no_root && no_root.error().code == ErrorCode::not_zarr,
@@ -437,6 +510,8 @@ int main() {
         TestOneRuleDecidesWhatIsOpenable();
         TestDefaultImageSkipsUnreadablePreferredImage();
         TestConsolidatedMetadataDiscovery();
+        TestADeclaredFlagIsBinding();
+        TestAmbiguousFlagsSelectNone();
         TestStoreRejections();
         std::cout << "carta-zarr schema profile tests passed\n";
         return 0;

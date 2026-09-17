@@ -7,7 +7,7 @@
 // A whole reduction, over pixels that were never written down.
 //
 // This target links no TensorStore and no Store. That is the point of it as much as the assertions
-// are: until the pass took a SlabSource, a reduction could only be reached through a directory tree,
+// are: until the pass took a PixelSource, a reduction could only be reached through a directory tree,
 // so its arithmetic was pinned against the one committed fixture large enough to reach the parallel
 // paths -- 512x520x4 -- and the oracle had to be written out beside it each time.
 //
@@ -19,7 +19,7 @@
 #include "reduce/spectral_reduce.h"
 #include "work_pool.h"
 
-#include "support/synthetic_slab_source.h"
+#include "support/synthetic_pixel_source.h"
 
 #include <cmath>
 #include <cstdio>
@@ -37,13 +37,21 @@ using carta::zarr::Range;
 using carta::zarr::ReadOptions;
 using carta::zarr::internal::MapAxes;
 using carta::zarr::internal::PlanPass;
+using carta::zarr::internal::ReadableImage;
 using carta::zarr::internal::WorkPool;
-using carta::zarr::testing::SyntheticSlabSource;
+using carta::zarr::testing::SyntheticPixelSource;
 
 void Require(bool condition, const std::string& message) {
     if (!condition) {
         throw std::runtime_error(message);
     }
+}
+
+ReadableImage Readable(const SyntheticPixelSource& source, const ImageDescriptor& image,
+                       const ChunkGeometry& geometry, WorkPool& workers) {
+    auto readable = ReadableImage::Of(source, image, geometry, workers);
+    Require(static_cast<bool>(readable), "the synthetic image's axes could not be mapped");
+    return readable.value();
 }
 
 ImageDescriptor MakeImage(std::uint64_t x, std::uint64_t y, std::uint64_t channels) {
@@ -92,7 +100,7 @@ constexpr std::uint64_t kZ = 8;
 void TestAHistogramCountsEveryPixel() {
     const auto image = MakeImage(kX, kY, kZ);
     const auto geometry = MakeGeometry(64, 65, 2);
-    SyntheticSlabSource source(image, geometry, Value);
+    SyntheticPixelSource source(image, geometry, Value);
 
     carta::zarr::HistogramRequest request;
     request.spectral = {0, kZ, 1};
@@ -106,8 +114,9 @@ void TestAHistogramCountsEveryPixel() {
 
     std::vector<std::uint64_t> counts(request.bins * kZ, 0);
     std::uint64_t blocks = 0;
+    const auto readable = Readable(source, image, geometry, workers);
     const auto outcome = carta::zarr::internal::ComputeHistogram(
-        source, image, geometry, request, [&](const carta::zarr::HistogramBlock& block) {
+        readable, request, [&](const carta::zarr::HistogramBlock& block) {
             if (!block.complete) {
                 return true;
             }
@@ -119,7 +128,7 @@ void TestAHistogramCountsEveryPixel() {
                 }
             }
             return true;
-        }, options, workers);
+        }, options);
     Require(static_cast<bool>(outcome),
             std::string("the histogram failed: ") + (outcome ? "" : outcome.error().message));
     Require(blocks > 1,
@@ -157,7 +166,7 @@ void TestAHistogramCountsEveryPixel() {
 void TestASpectralReductionAgreesWithTheFormula() {
     const auto image = MakeImage(kX, kY, kZ);
     const auto geometry = MakeGeometry(64, 65, 2);
-    SyntheticSlabSource source(image, geometry, Value);
+    SyntheticPixelSource source(image, geometry, Value);
 
     const std::vector<carta::zarr::RegionMask> regions{
         {0, 0, kX, kY, nullptr},
@@ -178,8 +187,9 @@ void TestASpectralReductionAgreesWithTheFormula() {
     std::vector<double> sums(regions.size() * kZ, 0.0);
     std::vector<double> minima(regions.size() * kZ, 0.0);
     std::vector<double> maxima(regions.size() * kZ, 0.0);
+    const auto readable = Readable(source, image, geometry, workers);
     const auto outcome = carta::zarr::internal::ReduceSpectral(
-        source, image, geometry, request, [&](const carta::zarr::SpectralBlock& block) {
+        readable, request, [&](const carta::zarr::SpectralBlock& block) {
             if (!block.complete) {
                 return true;
             }
@@ -197,7 +207,7 @@ void TestASpectralReductionAgreesWithTheFormula() {
                 }
             }
             return true;
-        }, options, workers);
+        }, options);
     Require(static_cast<bool>(outcome),
             std::string("the reduction failed: ") + (outcome ? "" : outcome.error().message));
 

@@ -3,7 +3,7 @@
 日期：2026-09-17 · 範圍：`include/`（1,100 行）、`src/`（8,300 行）、`tests/`（7,900 行）、`CMakeLists.txt`
 方法：逐檔通讀 `src/` 與 `include/` 全文，`tests/` 與 CMake 做結構性掃描。
 
-調查當下未動任何程式碼。其後 Tier 1 全部、2.1、2.2、2.4、3.1、3.2、3.4、3.6、4.1 與測試端的 `check.h` 已在分支 `sweep-up-after-the-moves` 上套用，各項標有狀態；其餘仍是建議。
+調查當下未動任何程式碼。其後 Tier 1 全部、2.1、2.2、2.4、2.6、3.1、3.2、3.4、3.6、4.1 與測試端的 `check.h` 已在分支 `sweep-up-after-the-moves` 上套用，各項標有狀態；其餘仍是建議。
 
 ---
 
@@ -149,6 +149,11 @@ auto Image::WithReadable(Function&& function) const -> decltype(function(std::de
 
 ### 2.3 三份「把 rows 切成 tasks 丟給 WorkPool」的迴圈
 
+> **狀態：常數的部分已套用；`OverRowRanges` 抽取經檢視後判定不該做。**
+>
+> 三處的分割方式其實不同，下面原本的描述把共通面講得太寬了 —— 更正見本節末。
+
+
 - [plane_histogram.cc:161-183](src/reduce/plane_histogram.cc:161)（每個 plane 切 rows，寫進 `partials` 的一列）
 - [plane_histogram.cc:393-408](src/reduce/plane_histogram.cc:393)（跨 plane 切 rows，寫進 `accumulators[task]`）
 - [spectral_reduce.cc:735-758](src/reduce/spectral_reduce.cc:735)（切 units，寫進 `partials` 的一段）
@@ -215,6 +220,8 @@ if (const auto* t = MemberObject(image.attributes, "telescope")) {
 [`ReadStringArray1DUncached`](src/store.cc:399) 與 [`ReadStorageLayout`](src/store.cc:424) 開頭都是「讀 node metadata → 讀 array metadata → 兩個都檢查」。可抽成一個回傳 `Result<std::pair<const json&, const ArrayMetadata&>>` 的私有 helper，或更直接地抽成一個只回傳兩個指標的小 struct。收益中等，順手做即可。
 
 ### 2.6 `WorkPool` 的取 task 迴圈寫了兩次
+
+> **狀態：已套用**，抽成私有的 `DrainTasks`。
 
 [work_pool.cc:68-78](src/work_pool.cc:68)（worker 執行緒）與 [work_pool.cc:119-129](src/work_pool.cc:119)（呼叫端執行緒）是同一個 claim-and-run 迴圈。抽成私有 `void DrainTasks(const Body&, std::size_t worker)` 後兩處各剩一行。這段是並行程式碼，改動要小心，但兩份文字目前完全對稱，抽取是機械的。
 
@@ -375,8 +382,8 @@ tolerance 參數；[spectral_reduce_test.cc:56](tests/spectral_reduce_test.cc:56
 | ~~4~~ | ~~2.2 `Image` 進入點 helper~~ **已完成** | 低 | −12 |
 | ~~5~~ | ~~3.1、3.2 兩處函式內抽取~~ **已完成** | 低 | 實際 **+38**（新增 15 行註解說明抽取理由；可讀性為主，行數本非目標） |
 | ~~6~~ | ~~測試端 `check.h`~~ **已完成** | 低 | −44 淨（原估 −150 假設連 `main()` 一起收；實際不該收） |
-| 7 | 2.3 `OverRowRanges` | **中**（碰並行與熱路徑邊緣） | −50 |
-| 8 | 2.6 `WorkPool::DrainTasks` | **中**（並行） | −15 |
+| ~~7~~ | ~~2.3 `OverRowRanges`~~ **部分完成** | 低 | 只做常數（+1 淨）；抽取判定不該做，見 2.3 更正 |
+| ~~8~~ | ~~2.6 `WorkPool::DrainTasks`~~ **已完成** | 中 | −11；99-repeat 前後對照無差異 |
 | ~~9~~ | ~~4.1 transport listing~~ **已完成** | 中 | 程式 −18；另新增 118 行測試（原本沒有東西 pin 住 listing） |
 
 1–6 合計約減 200 行，且沒有一項會改變任何可觀察行為。7–9 建議各自獨立 commit，並在 `build-release` 上跑一次 `pass_timing` 對照。

@@ -100,8 +100,8 @@ void TestASelectionThatFitsIsReportedBack() {
     Require(checked.value().spectral().start == 2 && checked.value().spectral().count == 5 &&
                 checked.value().spectral().stride == 3,
             "the spectral range should come back unchanged");
-    Require(checked.value().polarization() == 3, "the polarization should come back unchanged");
-    Require(checked.value().time() == 1, "the time should come back unchanged");
+    Require(checked.value().selection().polarization == 3, "the polarization should come back unchanged");
+    Require(checked.value().selection().time == 1, "the time should come back unchanged");
     Require(checked.value().count() == 5, "count() is how many planes were selected");
 }
 

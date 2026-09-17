@@ -75,12 +75,6 @@ public:
     const Range& spectral() const noexcept {
         return _planes.spectral;
     }
-    std::uint64_t polarization() const noexcept {
-        return _planes.polarization;
-    }
-    std::uint64_t time() const noexcept {
-        return _planes.time;
-    }
     // How many planes were selected, which is what every block loop over the selection counts to.
     std::uint64_t count() const noexcept {
         return _planes.spectral.count;

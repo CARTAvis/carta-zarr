@@ -3,7 +3,7 @@
 日期：2026-09-17 · 範圍：`include/`（1,100 行）、`src/`（8,300 行）、`tests/`（7,900 行）、`CMakeLists.txt`
 方法：逐檔通讀 `src/` 與 `include/` 全文，`tests/` 與 CMake 做結構性掃描。
 
-調查當下未動任何程式碼。其後 Tier 1 全部、2.1、2.4、3.4、3.6 已在分支 `sweep-up-after-the-moves` 上套用，各項標有狀態；其餘仍是建議。
+調查當下未動任何程式碼。其後 Tier 1 全部、2.1、2.2、2.4、3.1、3.2、3.4、3.6 已在分支 `sweep-up-after-the-moves` 上套用，各項標有狀態；其餘仍是建議。
 
 ---
 
@@ -118,6 +118,8 @@ struct DataTypeInfo {
 
 ### 2.2 `Image` 五個進入點的樣板完全相同
 
+> **狀態：已套用**。`carta_zarr.cc` 內新增 file-local 的 `WithReadableImage`；`ReadBeams` 維持原樣。
+
 [src/carta_zarr.cc:202, 221, 240, 259, 278](src/carta_zarr.cc:202) — `Read`、`ReadPixelMask`、`ReduceSpectral`、`ComputeHistogram`、`ComputeCubeHistogram` 逐字重複：
 
 ```cpp
@@ -222,11 +224,16 @@ if (const auto* t = MemberObject(image.attributes, "telescope")) {
 
 ### 3.1 `ReadInto` 的中段驗證區塊
 
+> **狀態：已套用**，抽成 `VerifyStoreMatchesSelection`。
+
 [src/zarr/pixel_reader.cc:111-143](src/zarr/pixel_reader.cc:111)：連續五段「TensorStore 說的 rank / shape / dimension names / data type 要和 canonical metadata 一致」的檢查，夾在「開 array」與「建 index transform」之間，把一個本來就長的函式撐到 150 行。
 
 抽成 `Result<void> VerifyStoreMatchesMetadata(const tensorstore::TensorStore<>&, const PixelSelection&, std::string_view expected_data_type, std::string_view node)`，`ReadInto` 的主線就會變成「檢查請求 → 開 array → 驗證 → 切片 → 轉置 → 轉型 → 讀」，七步各一眼。純搬移，無行為變更。
 
 ### 3.2 `BuildChunkBuckets::for_each_cell` 的兩個分支高度重複
+
+> **狀態：已套用**，抽成 `scan_rows`，每個分支只提供 `mark_row`。raster 分支原本「已標記的欄位就跳過像素掃描」
+> 的優化保留了下來（改用 `marked` 述詞），`build-release` 的 `pass_timing` 無退化。
 
 [src/reduce/spectral_reduce.cc:120-197](src/reduce/spectral_reduce.cc:120)：`runs != nullptr` 與 `mask != nullptr` 兩條路徑各寫一次外層骨架：
 
@@ -351,8 +358,8 @@ int RunTests(std::string_view suite, std::initializer_list<std::pair<std::string
 | ~~1~~ | ~~Tier 1 全部（1.1–1.5）~~ **已完成** | 無 | −5 淨（−24/+19，含兩處註解搬移與補充） |
 | ~~2~~ | ~~2.1 data type 表合一~~ **已完成** | 低 | 消費端 −9；新表 +81（含註解），換來「加型別只改一處」 |
 | ~~3~~ | ~~2.4 JSON 取用器 + 3.4、3.6~~ **已完成** | 低 | −8 淨（消費端 −60，取用器 +32） |
-| 4 | 2.2 `Image` 進入點 helper | 低 | −45 |
-| 5 | 3.1、3.2 兩處函式內抽取 | 低 | −45（可讀性為主） |
+| ~~4~~ | ~~2.2 `Image` 進入點 helper~~ **已完成** | 低 | −12 |
+| ~~5~~ | ~~3.1、3.2 兩處函式內抽取~~ **已完成** | 低 | 實際 **+38**（新增 15 行註解說明抽取理由；可讀性為主，行數本非目標） |
 | 6 | 測試端 `check.h` | 低 | −150 |
 | 7 | 2.3 `OverRowRanges` | **中**（碰並行與熱路徑邊緣） | −50 |
 | 8 | 2.6 `WorkPool::DrainTasks` | **中**（並行） | −15 |

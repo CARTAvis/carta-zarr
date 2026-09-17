@@ -380,15 +380,16 @@ Result<double> ReadBeamValue(const zarr_metadata::ArrayView& values, std::uint64
     return values.At(indices);
 }
 
-}  // namespace
-
-Result<::carta::zarr::internal::ImageDiscovery> DiscoverImages(const Store& store) {
+// Which variables of this store are images this profile will open. Only InspectImages calls it:
+// deciding whether the store matches means enumerating it, and the answer to both questions comes
+// back together so that nothing has to enumerate twice or cache the result.
+Result<ImageDiscovery> DiscoverImages(const Store& store) {
     const auto& nodes = store.ListNodes();
     if (!nodes) {
         return nodes.error();
     }
 
-    ::carta::zarr::internal::ImageDiscovery result;
+    ImageDiscovery result;
     for (const auto& node : nodes.value()) {
         const auto& array_result = store.ReadArrayMetadata(node);
         if (!array_result) {
@@ -432,20 +433,32 @@ Result<::carta::zarr::internal::ImageDiscovery> DiscoverImages(const Store& stor
     return result;
 }
 
-Result<SchemaProbeResult> ProbeImage(const Store& store) {
+}  // namespace
+
+Result<SchemaInspection> InspectImages(const Store& store) {
     ProbeReport report(store, "image dataset");
 
     const auto& root_attributes = store.RootAttributes();
-    auto discovery = store.CachedImageDiscovery(kXradioImageSchema, [&] { return DiscoverImages(store); });
+    auto discovery = DiscoverImages(store);
     if (!discovery) {
         return discovery.error();
     }
     report.SetDiagnostics(discovery.value().diagnostics);
+
+    // What was found goes back with what was decided from it, whichever way the decision went.
+    const auto finish = [&](SchemaMatchKind kind) -> Result<SchemaInspection> {
+        auto probe = report.Finish(kind, std::string(kVersion));
+        if (!probe) {
+            return probe.error();
+        }
+        return SchemaInspection{std::move(probe.value()), std::move(discovery.value())};
+    };
+
     if (!discovery.value().default_image_id) {
         // A valid Zarr store without an image that this profile can open is a non-match. The
         // discovery diagnostics still explain why variables such as complex or aperture-plane
         // arrays were not openable.
-        return report.Finish(SchemaMatchKind::no_match, std::string(kVersion));
+        return finish(SchemaMatchKind::no_match);
     }
 
     // Once discovery found an openable image, validate the metadata needed by the image reader.
@@ -457,7 +470,7 @@ Result<SchemaProbeResult> ProbeImage(const Store& store) {
             report.RequireCoordinateSystem(root_attributes);
         }
     }
-    return report.Finish(report.ok() ? SchemaMatchKind::match : SchemaMatchKind::invalid, std::string(kVersion));
+    return finish(report.ok() ? SchemaMatchKind::match : SchemaMatchKind::invalid);
 }
 
 Result<ImageDescriptor> DescribeImage(const Store& store, std::string_view image_id) {

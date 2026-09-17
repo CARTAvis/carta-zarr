@@ -447,15 +447,11 @@ Result<Image> Dataset::OpenImage(std::string_view image_id) const {
         }
         std::scoped_lock const lock(_impl->mutex);
         const std::string image_name(image_id);
-        const auto entry = std::find_if(_impl->descriptor.images.begin(), _impl->descriptor.images.end(),
-                                        [&](const ImageEntry& image) { return image.id == image_name; });
-        if (entry == _impl->descriptor.images.end()) {
-            return MakeError(ErrorCode::not_found, "Image variable was not found", image_name);
-        }
-        if (!entry->readable) {
-            const auto message = entry->diagnostics.empty() ? "Image variable is not openable by this profile"
-                                                            : entry->diagnostics.front().message;
-            return MakeError(ErrorCode::unsupported_data_type, message, image_name);
+        // Asked of the listing this dataset kept, rather than by enumerating the store again. It is
+        // the same question and the same answer the profile would give, which is why it is the
+        // profile's function and not a second copy of the rule here.
+        if (auto openable = internal::RequireOpenable(_impl->descriptor.images, image_name); !openable) {
+            return openable.error();
         }
         const auto make_image = [&](const ImageDescriptor& descriptor) {
             // The descriptor already carries the stored layout; the geometry is that layout permuted

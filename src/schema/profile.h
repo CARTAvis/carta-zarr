@@ -9,10 +9,41 @@
 
 #include "../store.h"
 
+#include <optional>
+#include <string>
 #include <string_view>
 #include <vector>
 
 namespace carta::zarr::internal {
+
+// Which variables of a store a schema profile will open, and what it had to say about the ones it
+// would not. Defined here rather than in store.h because it is a statement about images, and a
+// Store deals in nodes and arrays; it used to sit down there only so that a cache down there could
+// be keyed by profile.
+struct ImageDiscovery {
+    std::vector<ImageEntry> images;
+    std::optional<std::string> default_image_id;
+    std::vector<Diagnostic> diagnostics;
+};
+
+// Everything a profile has to say about a store it is meeting for the first time. The two halves
+// come back together because they are one enumeration: deciding whether a store matches means
+// finding out what is in it, and answering the two questions separately meant enumerating twice or
+// caching the answer somewhere both could reach.
+//
+// `discovery` is what `probe` was decided from, so it is filled whatever the match kind says.
+struct SchemaInspection {
+    SchemaProbeResult probe;
+    ImageDiscovery discovery;
+};
+
+// Whether a profile will open this image, as the error a caller should report when it will not.
+//
+// Shared because the facade asks it of a descriptor it already holds and a profile asks it of a
+// store it has just inspected, and the two must give the same answer. A variable that was listed
+// but will not open is a different answer from one that was never seen, and a caller can act on the
+// difference.
+Result<void> RequireOpenable(const std::vector<ImageEntry>& images, std::string_view image_id);
 
 /**
  * A named, versioned description of how an image dataset is laid out, bound to its identifier.
@@ -32,21 +63,26 @@ public:
 
     const SchemaId& id() const noexcept;
 
+    // One enumeration of the store, answering both of the questions a profile is asked about it.
+    Result<SchemaInspection> Inspect(const Store& store) const;
+    // Halves of an Inspect, for a caller that wants only one of them. Each one inspects: there is
+    // no cache behind them, so a caller wanting both should ask once.
     Result<SchemaProbeResult> Probe(const Store& store) const;
     Result<ImageDiscovery> Discover(const Store& store) const;
 
-    // Both of these first ask whether the profile will open this image at all.
+    // Inspects the store first, to ask whether the profile will open this image at all.
     Result<ImageDescriptor> Describe(const Store& store, std::string_view image_id) const;
-    // The caller has already checked the ImageDiscovery result for this store. This avoids a
-    // second discovery pass when Dataset::OpenImage follows a cached dataset listing.
+    // For a caller that has already established openability against a discovery it kept -- which is
+    // what Dataset does, so that opening an image does not re-enumerate the store.
     Result<ImageDescriptor> DescribeVerified(const Store& store, std::string_view image_id) const;
+    // Verified in the same sense: an Image handle only exists for a variable Dataset::OpenImage
+    // already accepted, so asking again would enumerate the whole store on every call.
     Result<std::vector<Beam>> ReadBeams(const Store& store, std::string_view image_id) const;
 
 private:
     struct Entry {
         SchemaId id;
-        Result<SchemaProbeResult> (*probe)(const Store&);
-        Result<ImageDiscovery> (*discover)(const Store&);
+        Result<SchemaInspection> (*inspect)(const Store&);
         Result<ImageDescriptor> (*describe)(const Store&, std::string_view);
         Result<std::vector<Beam>> (*read_beams)(const Store&, std::string_view);
     };
@@ -54,7 +90,6 @@ private:
     static const std::vector<Entry>& BuiltIn();
 
     explicit SchemaProfile(const Entry& entry) : _entry(&entry) {}
-    Result<void> RequireOpenable(const Store& store, std::string_view image_id) const;
 
     const Entry* _entry;
 

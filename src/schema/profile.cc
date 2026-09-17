@@ -18,18 +18,28 @@ Error MakeError(ErrorCode code, std::string message, std::string node_path = {})
     return Error{code, std::move(message), std::move(node_path)};
 }
 
-const ImageEntry* FindImage(const ImageDiscovery& discovery, std::string_view image_id) {
-    const auto found = std::find_if(discovery.images.begin(), discovery.images.end(),
-                                    [&](const ImageEntry& image) { return image.id == image_id; });
-    return found == discovery.images.end() ? nullptr : &*found;
-}
-
 }  // namespace
+
+Result<void> RequireOpenable(const std::vector<ImageEntry>& images, std::string_view image_id) {
+    const auto found = std::find_if(images.begin(), images.end(),
+                                    [&](const ImageEntry& image) { return image.id == image_id; });
+    if (found == images.end()) {
+        return MakeError(ErrorCode::not_found, "Image variable was not found", std::string(image_id));
+    }
+    if (found->readable) {
+        return {};
+    }
+    // Whatever the profile said about why it would not open this one is more use than a generic
+    // refusal, and it is already in hand.
+    const auto message =
+        found->diagnostics.empty() ? "Image variable is not openable by this profile" : found->diagnostics.front().message;
+    return MakeError(ErrorCode::unsupported_data_type, message, std::string(image_id));
+}
 
 const std::vector<SchemaProfile::Entry>& SchemaProfile::BuiltIn() {
     static const std::vector<SchemaProfile::Entry> profiles{
-        {SchemaProfile::Entry{SchemaId(kXradioImageSchema), &xradio::ProbeImage, &xradio::DiscoverImages,
-                              &xradio::DescribeImage, &xradio::ReadBeams}}};
+        {SchemaProfile::Entry{SchemaId(kXradioImageSchema), &xradio::InspectImages, &xradio::DescribeImage,
+                              &xradio::ReadBeams}}};
     return profiles;
 }
 
@@ -48,35 +58,32 @@ const SchemaId& SchemaProfile::id() const noexcept {
     return _entry->id;
 }
 
+Result<SchemaInspection> SchemaProfile::Inspect(const Store& store) const {
+    return _entry->inspect(store);
+}
+
 Result<SchemaProbeResult> SchemaProfile::Probe(const Store& store) const {
-    return _entry->probe(store);
+    auto inspection = Inspect(store);
+    if (!inspection) {
+        return inspection.error();
+    }
+    return std::move(inspection.value().probe);
 }
 
 Result<ImageDiscovery> SchemaProfile::Discover(const Store& store) const {
-    return store.CachedImageDiscovery(_entry->id, [&] { return _entry->discover(store); });
+    auto inspection = Inspect(store);
+    if (!inspection) {
+        return inspection.error();
+    }
+    return std::move(inspection.value().discovery);
 }
 
-Result<void> SchemaProfile::RequireOpenable(const Store& store, std::string_view image_id) const {
+Result<ImageDescriptor> SchemaProfile::Describe(const Store& store, std::string_view image_id) const {
     auto discovery = Discover(store);
     if (!discovery) {
         return discovery.error();
     }
-    const auto* image = FindImage(discovery.value(), image_id);
-    if (image != nullptr && image->readable) {
-        return {};
-    }
-    // A variable this profile listed but will not open is a different answer from one it never saw,
-    // and the caller can act on the difference.
-    if (image != nullptr) {
-        return MakeError(ErrorCode::unsupported_data_type, "Image variable is not openable by this profile",
-                         std::string(image_id));
-    }
-    return MakeError(ErrorCode::not_found, "Image variable was not found", std::string(image_id));
-}
-
-Result<ImageDescriptor> SchemaProfile::Describe(const Store& store, std::string_view image_id) const {
-    auto openable = RequireOpenable(store, image_id);
-    if (!openable) {
+    if (auto openable = RequireOpenable(discovery.value().images, image_id); !openable) {
         return openable.error();
     }
     return _entry->describe(store, image_id);
@@ -87,31 +94,25 @@ Result<ImageDescriptor> SchemaProfile::DescribeVerified(const Store& store, std:
 }
 
 Result<std::vector<Beam>> SchemaProfile::ReadBeams(const Store& store, std::string_view image_id) const {
-    auto openable = RequireOpenable(store, image_id);
-    if (!openable) {
-        return openable.error();
-    }
     return _entry->read_beams(store, image_id);
 }
 
 Result<ProbeResult> ProbeStore(const Store& store) {
-    struct Match {
-        const SchemaProfile::Entry* entry;
-        SchemaProbeResult result;
-    };
-
     ProbeResult result;
-    std::vector<Match> matches;
+    // Each profile is asked once, and answers with what it found as well as what it decided. The
+    // store used to be enumerated twice for a match -- once to probe and once to discover -- which
+    // is what a cache inside Store was there to hide.
+    std::vector<SchemaInspection> matches;
     std::vector<SchemaProbeResult> invalid;
     for (const auto& entry : SchemaProfile::BuiltIn()) {
-        auto probe = entry.probe(store);
-        if (!probe) {
-            return probe.error();
+        auto inspection = entry.inspect(store);
+        if (!inspection) {
+            return inspection.error();
         }
-        if (probe.value().kind == SchemaMatchKind::match) {
-            matches.push_back(Match{&entry, probe.value()});
-        } else if (probe.value().kind == SchemaMatchKind::invalid) {
-            invalid.push_back(probe.value());
+        if (inspection.value().probe.kind == SchemaMatchKind::match) {
+            matches.push_back(std::move(inspection.value()));
+        } else if (inspection.value().probe.kind == SchemaMatchKind::invalid) {
+            invalid.push_back(std::move(inspection.value().probe));
         }
     }
 
@@ -120,17 +121,13 @@ Result<ProbeResult> ProbeStore(const Store& store) {
         result.diagnostics.push_back(
             Diagnostic{"ambiguous_schema", "More than one built-in schema profile matched the Zarr store", {}});
     } else if (matches.size() == 1) {
-        const auto& match = matches.front();
-        auto discovery = SchemaProfile{*match.entry}.Discover(store);
-        if (!discovery) {
-            return discovery.error();
-        }
+        auto& match = matches.front();
         result.kind = ProbeKind::supported_dataset;
-        result.schema_id = match.result.schema_id;
-        result.schema_version = match.result.schema_version;
-        result.images = std::move(discovery.value().images);
-        result.default_image_id = std::move(discovery.value().default_image_id);
-        result.diagnostics = match.result.diagnostics;
+        result.schema_id = std::move(match.probe.schema_id);
+        result.schema_version = std::move(match.probe.schema_version);
+        result.images = std::move(match.discovery.images);
+        result.default_image_id = std::move(match.discovery.default_image_id);
+        result.diagnostics = std::move(match.probe.diagnostics);
     } else if (!invalid.empty()) {
         const auto& invalid_result = invalid.front();
         result.kind = ProbeKind::invalid_dataset;

@@ -16,6 +16,7 @@
 #include "store.h"
 #include "support/in_memory_transport.h"
 
+#include <algorithm>
 #include <iostream>
 #include <map>
 #include <set>
@@ -287,6 +288,42 @@ void TestOpenableGate() {
     Require(!absent && absent.error().code == ErrorCode::not_found, "an absent variable was not reported as missing");
 }
 
+// One rule decides what is openable, and both sides of the library ask it. Dataset::OpenImage asks
+// it of the listing the dataset kept from opening; SchemaProfile::Describe asks it of a store it
+// has just inspected. They used to be two copies, and they disagreed about the message -- the
+// facade passed the variable's own diagnostic through and the profile answered generically -- so a
+// consumer got a worse explanation depending on which way it had arrived.
+void TestOneRuleDecidesWhatIsOpenable() {
+    auto nodes = CompleteStore();
+    nodes["COMPLEX"] = SkyArray("complex64");
+
+    auto store = Open(nodes);
+    Require(static_cast<bool>(store), "the openable-rule store failed to open");
+    const auto discovery = XradioProfile().Discover(store.value());
+    Require(static_cast<bool>(discovery), "discovery failed on the openable-rule store");
+    const auto& images = discovery.value().images;
+
+    Require(static_cast<bool>(carta::zarr::internal::RequireOpenable(images, "SKY")),
+            "a readable image was refused");
+
+    const auto complex = carta::zarr::internal::RequireOpenable(images, "COMPLEX");
+    Require(!complex && complex.error().code == ErrorCode::unsupported_data_type,
+            "a listed but unopenable variable should be refused as an unsupported data type");
+
+    // What the profile said about this variable, rather than a generic refusal. This is the half
+    // the two copies used to differ on.
+    const auto listed = std::find_if(images.begin(), images.end(),
+                                     [](const auto& image) { return image.id == "COMPLEX"; });
+    Require(listed != images.end() && !listed->diagnostics.empty(),
+            "the complex variable was not listed with a diagnostic to pass on");
+    Require(complex.error().message == listed->diagnostics.front().message,
+            "the refusal did not carry the variable's own diagnostic");
+
+    const auto absent = carta::zarr::internal::RequireOpenable(images, "NOPE");
+    Require(!absent && absent.error().code == ErrorCode::not_found,
+            "a variable that was never listed should be reported as missing, not as unopenable");
+}
+
 void TestDefaultImageSkipsUnreadablePreferredImage() {
     auto nodes = CompleteStore();
     nodes["SKY"] = SkyArray("complex64");
@@ -397,6 +434,7 @@ int main() {
         TestIncompleteImageIsNotMatch();
         TestDiscoveryClassifiesVariables();
         TestOpenableGate();
+        TestOneRuleDecidesWhatIsOpenable();
         TestDefaultImageSkipsUnreadablePreferredImage();
         TestConsolidatedMetadataDiscovery();
         TestStoreRejections();

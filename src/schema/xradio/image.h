@@ -11,8 +11,8 @@
 
 namespace carta::zarr::internal::xradio {
 
-Result<SchemaProbeResult> ProbeImage(const Store& store);
-Result<::carta::zarr::internal::ImageDiscovery> DiscoverImages(const Store& store);
+// One enumeration of the store, answering both what it is and what is in it. See SchemaInspection.
+Result<SchemaInspection> InspectImages(const Store& store);
 Result<ImageDescriptor> DescribeImage(const Store& store, std::string_view image_id);
 Result<std::vector<Beam>> ReadBeams(const Store& store, std::string_view image_id);
 

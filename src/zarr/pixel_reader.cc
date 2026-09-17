@@ -72,6 +72,51 @@ bool SelectionIsWellFormed(const PixelSelection& selection) {
                        [](std::uint64_t value) { return value > 0; });
 }
 
+// What the array on disk has to agree with the store's canonical metadata about before a single
+// pixel of it is read: its rank, its extent, what its dimensions are called, and what it holds.
+//
+// Its own function because it is the one stretch of ReadInto that decides nothing about the read.
+// What is left reads as the seven steps it is: check the request, open the array, verify it, slice,
+// transpose, convert, read.
+Result<void> VerifyStoreMatchesSelection(const tensorstore::TensorStore<>& store, const PixelSelection& selection,
+                                         std::string_view expected_data_type, std::string_view node) {
+    const auto rank = selection.start.size();
+    if (static_cast<std::size_t>(store.rank()) != rank) {
+        return Error{ErrorCode::invalid_argument, "Selection rank does not match the array rank",
+                     std::string(node)};
+    }
+    const auto actual_shape = store.domain().shape();
+    if (actual_shape.size() != rank) {
+        return Error{ErrorCode::invalid_metadata, "Array rank differs between metadata sources",
+                     std::string(node)};
+    }
+    for (std::size_t axis = 0; axis < rank; ++axis) {
+        if (actual_shape[axis] != static_cast<tensorstore::Index>(selection.shape.at(axis))) {
+            return Error{ErrorCode::invalid_metadata,
+                         "Array shape differs between canonical metadata and the array store",
+                         std::string(node)};
+        }
+    }
+    const auto actual_dimension_names = store.domain().labels();
+    if (actual_dimension_names.size() != rank) {
+        return Error{ErrorCode::invalid_metadata, "Array dimension names differ between metadata sources",
+                     std::string(node)};
+    }
+    for (std::size_t axis = 0; axis < rank; ++axis) {
+        if (actual_dimension_names[axis] != selection.dimension_names.at(axis)) {
+            return Error{ErrorCode::invalid_metadata,
+                         "Array dimension names differ between canonical metadata and the array store",
+                         std::string(node)};
+        }
+    }
+    if (!MatchesDataType(expected_data_type, store.dtype())) {
+        return Error{ErrorCode::invalid_metadata,
+                     "Array data type differs between canonical metadata and the array store",
+                     std::string(node)};
+    }
+    return {};
+}
+
 template <typename Element>
 Result<void> ReadInto(const std::filesystem::path& array_path, const StoreContextPtr& context,
                       std::string_view node, std::string_view expected_data_type, const PixelSelection& selection,
@@ -117,40 +162,10 @@ Result<void> ReadInto(const std::filesystem::path& array_path, const StoreContex
             return control.error();
         }
         auto const store = std::move(opened).value();
+        if (auto agreed = VerifyStoreMatchesSelection(store, selection, expected_data_type, node); !agreed) {
+            return agreed.error();
+        }
         const auto rank = selection.start.size();
-        if (static_cast<std::size_t>(store.rank()) != rank) {
-            return Error{ErrorCode::invalid_argument, "Selection rank does not match the array rank",
-                         std::string(node)};
-        }
-        const auto actual_shape = store.domain().shape();
-        if (actual_shape.size() != rank) {
-            return Error{ErrorCode::invalid_metadata, "Array rank differs between metadata sources",
-                         std::string(node)};
-        }
-        for (std::size_t axis = 0; axis < rank; ++axis) {
-            if (actual_shape[axis] != static_cast<tensorstore::Index>(selection.shape.at(axis))) {
-                return Error{ErrorCode::invalid_metadata,
-                             "Array shape differs between canonical metadata and the array store",
-                             std::string(node)};
-            }
-        }
-        const auto actual_dimension_names = store.domain().labels();
-        if (actual_dimension_names.size() != rank) {
-            return Error{ErrorCode::invalid_metadata, "Array dimension names differ between metadata sources",
-                         std::string(node)};
-        }
-        for (std::size_t axis = 0; axis < rank; ++axis) {
-            if (actual_dimension_names[axis] != selection.dimension_names.at(axis)) {
-                return Error{ErrorCode::invalid_metadata,
-                             "Array dimension names differ between canonical metadata and the array store",
-                             std::string(node)};
-            }
-        }
-        if (!MatchesDataType(expected_data_type, store.dtype())) {
-            return Error{ErrorCode::invalid_metadata,
-                         "Array data type differs between canonical metadata and the array store",
-                         std::string(node)};
-        }
         std::vector<tensorstore::Index> start(rank);
         std::vector<tensorstore::Index> count(rank);
         std::vector<tensorstore::Index> stride(rank);

@@ -91,6 +91,12 @@ _Avoid_: driver, backend, kvstore, store
 The immutable metadata the library reports for a dataset or an image. It never contains pixels.
 _Avoid_: info, header, metadata (on its own)
 
+**Observation**:
+What an image's own attributes say about the observing run behind it: the object, the observer, the
+telescope and where it stood, and the date the observation carries. Optional throughout — a field
+written in a type the library cannot read is skipped, and never closes the image.
+_Avoid_: provenance, history, header
+
 **Linear description**:
 The reference pixel, reference value, and increment that let a consumer treat a coordinate as an
 evenly spaced axis. A coordinate carries one only when its samples support it; without one the

@@ -284,6 +284,33 @@ if(CARTA_ZARR_BUILD_TESTS AND BUILD_TESTING)
         TEST_NAME carta-zarr-linear-axis
         SOURCES tests/linear_axis_test.cc src/schema/xradio/linear_axis.cc)
 
+    # What an image's own attributes say about the observation. A pure JSON-to-struct function, so
+    # this links nothing: the geodetic conversion and the obsdate split used to be reachable only by
+    # opening a store, and the conversion was asserted nowhere at all.
+    carta_zarr_add_test(carta_zarr_observation_tests INTERNAL
+        TEST_NAME carta-zarr-observation
+        SOURCES tests/observation_test.cc src/schema/xradio/observation.cc
+        LIBRARIES nlohmann_json::nlohmann_json)
+
+    # What a variable has to be before it can mask an image. RequireUsableFlag is inline, so this
+    # target compiles one file and links nothing -- choosing a flag when none is declared needs a
+    # store and is covered in the profile tests instead.
+    carta_zarr_add_test(carta_zarr_flag_tests INTERNAL
+        TEST_NAME carta-zarr-flag
+        SOURCES tests/flag_test.cc
+        LIBRARIES nlohmann_json::nlohmann_json)
+
+    # The beam table's indexing, against the arrays already read rather than a store. It needs
+    # ArrayView, which is what addresses the flat buffer by dimension name.
+    carta_zarr_add_test(carta_zarr_beam_table_tests INTERNAL
+        TEST_NAME carta-zarr-beam-table
+        SOURCES
+            tests/beam_table_test.cc
+            src/schema/xradio/beam_table.cc
+            src/zarr/array_view.cc
+            ${CARTA_ZARR_METADATA_SOURCES}
+        LIBRARIES nlohmann_json::nlohmann_json)
+
     # What an ordinary read decides before it reads anything. Compiled against pieces.cc alone:
     # PlanPieces touches no store and no transport, so where a read is cut and how big a piece is --
     # which is where the progress callback and the memory ceiling meet -- is checkable without a

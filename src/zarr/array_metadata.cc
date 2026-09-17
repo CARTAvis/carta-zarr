@@ -6,10 +6,10 @@
 
 #include "array_metadata.h"
 
+#include "data_type.h"
+
 #include <algorithm>
-#include <array>
 #include <iterator>
-#include <map>
 #include <set>
 #include <utility>
 
@@ -45,20 +45,13 @@ bool IsNumericMatrix(const nlohmann::json& value, std::size_t rows, std::size_t 
 }
 
 bool IsRealDataType(std::string_view data_type) {
-    static constexpr std::array<std::string_view, 11> types{"int8",  "uint8",  "int16",   "uint16",  "int32",  "uint32",
-                                                            "int64", "uint64", "float16", "float32", "float64"};
-    return std::find(types.begin(), types.end(), data_type) != types.end();
+    const auto* const info = FindDataType(data_type);
+    return info != nullptr && info->real;
 }
 
 DataType ParseDataType(std::string_view data_type) {
-    static const std::map<std::string_view, DataType> types{
-        {"int8", DataType::int8},       {"uint8", DataType::uint8},     {"int16", DataType::int16},
-        {"uint16", DataType::uint16},   {"int32", DataType::int32},     {"uint32", DataType::uint32},
-        {"int64", DataType::int64},     {"uint64", DataType::uint64},   {"float16", DataType::float16},
-        {"float32", DataType::float32}, {"float64", DataType::float64}, {"bool", DataType::boolean},
-    };
-    const auto found = types.find(data_type);
-    return found == types.end() ? DataType::unknown : found->second;
+    const auto* const info = FindDataType(data_type);
+    return info == nullptr ? DataType::unknown : info->kind;
 }
 
 bool IsFixedLengthUtf32(const ArrayMetadata& metadata) {

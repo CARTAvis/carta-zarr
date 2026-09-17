@@ -28,20 +28,30 @@
 namespace carta::zarr::internal::zarr {
 namespace {
 
+// The one thing about a data type that cannot go in the table beside the others: a
+// tensorstore::dtype_v is a template, so the mapping has to be written as code. It goes through the
+// shared table for the half that can be shared -- what the name means -- and spells out only the
+// half that cannot.
+//
+// A type this does not answer for is a type a pixel read refuses, which is why complex is absent:
+// nothing reaches here holding one, because an image is required to be real long before a pixel of
+// it is asked for.
 bool MatchesDataType(std::string_view expected, tensorstore::DataType actual) {
-    if (expected == "bool") return actual == tensorstore::dtype_v<bool>;
-    if (expected == "int8") return actual == tensorstore::dtype_v<std::int8_t>;
-    if (expected == "uint8") return actual == tensorstore::dtype_v<std::uint8_t>;
-    if (expected == "int16") return actual == tensorstore::dtype_v<std::int16_t>;
-    if (expected == "uint16") return actual == tensorstore::dtype_v<std::uint16_t>;
-    if (expected == "int32") return actual == tensorstore::dtype_v<std::int32_t>;
-    if (expected == "uint32") return actual == tensorstore::dtype_v<std::uint32_t>;
-    if (expected == "int64") return actual == tensorstore::dtype_v<std::int64_t>;
-    if (expected == "uint64") return actual == tensorstore::dtype_v<std::uint64_t>;
-    if (expected == "float16") return actual == tensorstore::dtype_v<tensorstore::dtypes::float16_t>;
-    if (expected == "float32") return actual == tensorstore::dtype_v<float>;
-    if (expected == "float64") return actual == tensorstore::dtype_v<double>;
-    return false;
+    switch (ParseDataType(expected)) {
+        case DataType::boolean: return actual == tensorstore::dtype_v<bool>;
+        case DataType::int8: return actual == tensorstore::dtype_v<std::int8_t>;
+        case DataType::uint8: return actual == tensorstore::dtype_v<std::uint8_t>;
+        case DataType::int16: return actual == tensorstore::dtype_v<std::int16_t>;
+        case DataType::uint16: return actual == tensorstore::dtype_v<std::uint16_t>;
+        case DataType::int32: return actual == tensorstore::dtype_v<std::int32_t>;
+        case DataType::uint32: return actual == tensorstore::dtype_v<std::uint32_t>;
+        case DataType::int64: return actual == tensorstore::dtype_v<std::int64_t>;
+        case DataType::uint64: return actual == tensorstore::dtype_v<std::uint64_t>;
+        case DataType::float16: return actual == tensorstore::dtype_v<tensorstore::dtypes::float16_t>;
+        case DataType::float32: return actual == tensorstore::dtype_v<float>;
+        case DataType::float64: return actual == tensorstore::dtype_v<double>;
+        default: return false;
+    }
 }
 
 bool SelectionIsWellFormed(const PixelSelection& selection) {

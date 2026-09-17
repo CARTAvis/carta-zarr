@@ -10,8 +10,9 @@
 
 #include "store.h"
 
+#include "zarr/data_type.h"
+
 #include <limits>
-#include <map>
 #include <string>
 #include <string_view>
 
@@ -19,14 +20,8 @@ namespace carta::zarr::internal {
 namespace {
 
 Result<std::uint64_t> ElementSizeBytes(const zarr::ArrayMetadata& metadata, std::string_view node) {
-    static const std::map<std::string_view, std::uint64_t> element_sizes{
-        {"bool", 1},      {"int8", 1},       {"uint8", 1},      {"int16", 2},
-        {"uint16", 2},    {"int32", 4},      {"uint32", 4},     {"int64", 8},
-        {"uint64", 8},    {"float16", 2},    {"float32", 4},    {"float64", 8},
-        {"complex64", 8}, {"complex128", 16},
-    };
-    if (const auto found = element_sizes.find(metadata.data_type); found != element_sizes.end()) {
-        return found->second;
+    if (const auto* const info = zarr::FindDataType(metadata.data_type); info != nullptr) {
+        return info->element_bytes;
     }
 
     // XRADIO coordinate labels use the fixed_length_utf32 extension data type. Other fixed-length

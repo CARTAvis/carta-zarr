@@ -9,6 +9,8 @@
 
 #include "carta-zarr/reduce.h"
 
+#include "zarr/data_type.h"
+
 #include <algorithm>
 #include <cstdint>
 
@@ -68,23 +70,14 @@ inline std::uint64_t ChunkElements(const ChunkGeometry& geometry) {
 }
 
 // Bytes one chunk of this image decompresses to.
+//
+// A type the table does not name is counted as four bytes rather than refused. This is a read
+// budget: getting it wrong makes a read the wrong size, which costs time, while refusing here would
+// close an image over a question nobody asked.
 inline std::uint64_t DecodedChunkBytes(const ImageDescriptor& descriptor, const ChunkGeometry& geometry) {
     const std::uint64_t elements = ChunkElements(geometry);
-    std::uint64_t element_bytes = 4;
-    switch (descriptor.stored_type) {
-        case DataType::boolean:
-        case DataType::int8:
-        case DataType::uint8: element_bytes = 1; break;
-        case DataType::int16:
-        case DataType::uint16:
-        case DataType::float16: element_bytes = 2; break;
-        case DataType::int64:
-        case DataType::uint64:
-        case DataType::float64:
-        case DataType::complex64: element_bytes = 8; break;
-        case DataType::complex128: element_bytes = 16; break;
-        default: element_bytes = 4; break;
-    }
+    const auto* const info = zarr::FindDataType(descriptor.stored_type);
+    const std::uint64_t element_bytes = info != nullptr ? info->element_bytes : 4;
     return std::max<std::uint64_t>(1, elements * element_bytes);
 }
 

@@ -4,8 +4,8 @@
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
 
-#ifndef CARTA_ZARR_SRC_REDUCE_AXIS_MAP_H_
-#define CARTA_ZARR_SRC_REDUCE_AXIS_MAP_H_
+#ifndef CARTA_ZARR_SRC_AXIS_MAP_H_
+#define CARTA_ZARR_SRC_AXIS_MAP_H_
 
 #include "carta-zarr/reduce.h"
 #include "carta-zarr/result.h"
@@ -60,4 +60,4 @@ inline Result<AxisMap> MapAxes(const ImageDescriptor& descriptor) {
 
 }  // namespace carta::zarr::internal
 
-#endif  // CARTA_ZARR_SRC_REDUCE_AXIS_MAP_H_
+#endif  // CARTA_ZARR_SRC_AXIS_MAP_H_

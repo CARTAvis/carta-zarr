@@ -4,8 +4,8 @@
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
 
-#ifndef CARTA_ZARR_SRC_REDUCE_STORE_SLAB_SOURCE_H_
-#define CARTA_ZARR_SRC_REDUCE_STORE_SLAB_SOURCE_H_
+#ifndef CARTA_ZARR_SRC_STORE_PIXEL_SOURCE_H_
+#define CARTA_ZARR_SRC_STORE_PIXEL_SOURCE_H_
 
 // The pass's production adapter, kept apart from the pass itself so that pass.h names no Store.
 // Everything under src/reduce/ then compiles without one, which is what lets a reduction be run and
@@ -39,4 +39,4 @@ private:
 
 }  // namespace carta::zarr::internal
 
-#endif  // CARTA_ZARR_SRC_REDUCE_STORE_SLAB_SOURCE_H_
+#endif  // CARTA_ZARR_SRC_STORE_PIXEL_SOURCE_H_

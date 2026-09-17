@@ -478,10 +478,10 @@ Result<bool> IsXradioImage(std::string_view location) {
         return true;
     }
     if (result.value().kind == SchemaMatchKind::invalid) {
-        return Error{
-        ErrorCode::invalid_metadata,
-        internal::RejectionMessage(result.value().diagnostics, "The requested schema did not match"),
-        std::string(location)};
+        return Error{ErrorCode::invalid_metadata,
+                     internal::RejectionMessage(result.value().diagnostics,
+                                                "The requested schema did not match"),
+                     std::string(location)};
     }
     return false;
 }

@@ -1,7 +1,9 @@
 # carta-zarr 全庫簡化報告
 
 日期：2026-09-17 · 範圍：`include/`（1,100 行）、`src/`（8,300 行）、`tests/`（7,900 行）、`CMakeLists.txt`
-方法：逐檔通讀 `src/` 與 `include/` 全文，`tests/` 與 CMake 做結構性掃描。**本報告未修改任何程式碼，也未編譯或執行測試。**
+方法：逐檔通讀 `src/` 與 `include/` 全文，`tests/` 與 CMake 做結構性掃描。
+
+調查當下未動任何程式碼。其後 Tier 1 全部與 2.1 已在分支 `sweep-up-after-the-moves` 上套用，各項標有狀態；其餘仍是建議。
 
 ---
 
@@ -21,8 +23,7 @@
 
 ## Tier 1 — 確定項目（低風險，可直接改）
 
-> **狀態：已全部套用**（2026-09-17，尚未 commit）。`cmake --build build` 通過，`ctest` 25/25 通過。
-> 底下保留原始描述作為紀錄。
+> **狀態：已全部套用**（2026-09-17，五個 commit）。底下保留原始描述作為紀錄。
 
 ### 1.1 兩個 include guard 與檔案路徑不符
 
@@ -86,6 +87,10 @@ inline std::optional<double> AttributeNumber(const json& value);   // ← 簽章
 這是本庫目前最值得處理的一類。每一項都是「加一個新型別／新欄位時要記得改 N 個地方」。
 
 ### 2.1 Zarr data type 表存在四份，各自涵蓋不同子集 ★最高優先
+
+> **狀態：已套用**。新增 [src/zarr/data_type.h](src/zarr/data_type.h)（header-only，不含 JSON 相依），
+> 五處改為查同一張表。唯一的行為差異：`ParseDataType` 現在對 complex 回報 `complex64`／`complex128`
+> 而非 `unknown`，`DescribeImage` 在此之前就已拒絕非實數型別，故實際不可達。
 
 | 位置 | 形式 | 涵蓋 |
 |---|---|---|
@@ -337,7 +342,7 @@ int RunTests(std::string_view suite, std::initializer_list<std::pair<std::string
 | 順位 | 項目 | 風險 | 行數變化 |
 |---|---|---|---|
 | ~~1~~ | ~~Tier 1 全部（1.1–1.5）~~ **已完成** | 無 | −5 淨（−24/+19，含兩處註解搬移與補充） |
-| 2 | 2.1 data type 表合一 | 低 | −40，且移除四處漂移風險 |
+| ~~2~~ | ~~2.1 data type 表合一~~ **已完成** | 低 | 消費端 −9；新表 +81（含註解），換來「加型別只改一處」 |
 | 3 | 2.4 JSON 取用器 + 3.4、3.6 | 低 | −60 |
 | 4 | 2.2 `Image` 進入點 helper | 低 | −45 |
 | 5 | 3.1、3.2 兩處函式內抽取 | 低 | −45（可讀性為主） |

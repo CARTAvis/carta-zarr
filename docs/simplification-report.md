@@ -3,7 +3,7 @@
 日期：2026-09-17 · 範圍：`include/`（1,100 行）、`src/`（8,300 行）、`tests/`（7,900 行）、`CMakeLists.txt`
 方法：逐檔通讀 `src/` 與 `include/` 全文，`tests/` 與 CMake 做結構性掃描。
 
-調查當下未動任何程式碼。其後 Tier 1 全部與 2.1 已在分支 `sweep-up-after-the-moves` 上套用，各項標有狀態；其餘仍是建議。
+調查當下未動任何程式碼。其後 Tier 1 全部、2.1、2.4、3.4、3.6 已在分支 `sweep-up-after-the-moves` 上套用，各項標有狀態；其餘仍是建議。
 
 ---
 
@@ -177,6 +177,9 @@ void OverRowRanges(WorkPool& workers, std::uint64_t row_pixels, std::uint64_t ro
 
 ### 2.4 `nlohmann::json` 的成員探測樣板
 
+> **狀態：已套用**。`ObjectMember` 更名為 `Member`，新增 `MemberObject`／`MemberArray`／`MemberNumber`；
+> `src/` 中 `!= nullptr && ->is_X()` 的兩段式寫法歸零。另有四處改用既有的 `AttributeString`。
+
 全庫有 21 處 `ObjectMember(x, "n") != nullptr && ptr->is_object()` 這種兩段式寫法（[image.cc](src/schema/xradio/image.cc) 10 處、[observation.cc](src/schema/xradio/observation.cc) 11 處、[direction.cc](src/schema/xradio/direction.cc) 10 處），另有 16 處 `contains(...) && at(...).is_X()` 的鏈式判斷。
 
 現有的 [`ObjectMember`](src/schema/xradio/attributes.h:47) 只檢查**父物件**是不是 object，不檢查取出來的成員，所以每個呼叫端都得補一次。
@@ -259,6 +262,8 @@ if (!l) { return l.error(); }
 
 ### 3.4 `DescribeSpectralCoordinate` 重複取出同一個成員
 
+> **狀態：已套用**（與 2.4 同一個 commit）。
+
 [src/schema/xradio/image.cc:163-180](src/schema/xradio/image.cc:163)：`ObjectMember(frequency_attributes, "reference_frequency")` 被取了兩次（一次為了 `attrs`，一次為了 `data`），中間只隔了 `spectral.unit` 的賦值。提到區塊開頭取一次即可。
 
 ### 3.5 `store_context.cc` 的五個 `NOLINTNEXTLINE`
@@ -268,6 +273,8 @@ if (!l) { return l.error(); }
 順帶一提，`WithoutCache()`（[:84](src/zarr/store_context.cc:84)）與 `MakeStoreContext()` 的 `disable_cache` 分支（[:103](src/zarr/store_context.cc:103)）建的是同一段 `{"cache_pool": {"total_bytes_limit": 0}}`，可共用一個小函式。
 
 ### 3.6 `IsNumeric` 是一層沒有內容的包裝
+
+> **狀態：已套用**。
 
 [src/zarr/array_metadata.cc:19](src/zarr/array_metadata.cc:19)：`bool IsNumeric(const json& v) { return v.is_number(); }`，唯一用途是餵給 `std::all_of`。直接寫 `[](const auto& v) { return v.is_number(); }` 即可省掉一個 anonymous namespace。
 
@@ -343,7 +350,7 @@ int RunTests(std::string_view suite, std::initializer_list<std::pair<std::string
 |---|---|---|---|
 | ~~1~~ | ~~Tier 1 全部（1.1–1.5）~~ **已完成** | 無 | −5 淨（−24/+19，含兩處註解搬移與補充） |
 | ~~2~~ | ~~2.1 data type 表合一~~ **已完成** | 低 | 消費端 −9；新表 +81（含註解），換來「加型別只改一處」 |
-| 3 | 2.4 JSON 取用器 + 3.4、3.6 | 低 | −60 |
+| ~~3~~ | ~~2.4 JSON 取用器 + 3.4、3.6~~ **已完成** | 低 | −8 淨（消費端 −60，取用器 +32） |
 | 4 | 2.2 `Image` 進入點 helper | 低 | −45 |
 | 5 | 3.1、3.2 兩處函式內抽取 | 低 | −45（可讀性為主） |
 | 6 | 測試端 `check.h` | 低 | −150 |

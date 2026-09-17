@@ -115,10 +115,60 @@ Result<ChunkBuckets> BuildChunkBuckets(const WalkRegion* regions, std::size_t re
     //
     // A null mask means the whole bounding box, so there is nothing to narrow and nothing to scan.
     std::vector<std::uint8_t> occupied;
-    const auto for_each_cell = [&](const WalkRegion& region, auto&& visit) {
-        std::uint64_t cx0 = 0, cx1 = 0, cy0 = 0, cy1 = 0;
+
+    // Walk one region's chunk rows, marking the columns each row occupies and handing the marked
+    // cells over. The two ways a region can describe itself -- as runs, or as a raster -- differ in
+    // how a row is marked and in nothing else, so `mark_row` is the only part either of them
+    // supplies.
+    //
+    // `found` stops a row scan once every column of the band is accounted for, and the raster
+    // scanner reads `occupied` directly to skip a column already marked: without that it rescans
+    // pixels whose answer is settled, which on a region whose box is the image is tens of megabytes
+    // of them.
+    const auto scan_rows = [&](const WalkRegion& region, auto&& mark_row, auto&& visit) {
+        std::uint64_t cx0 = 0;
+        std::uint64_t cx1 = 0;
+        std::uint64_t cy0 = 0;
+        std::uint64_t cy1 = 0;
         span(region, cx0, cx1, cy0, cy1);
+
+        const std::uint64_t columns = cx1 - cx0 + 1;
+        occupied.assign(static_cast<std::size_t>(columns), 0);
+        for (auto cy = cy0; cy <= cy1; ++cy) {
+            std::fill(occupied.begin(), occupied.end(), std::uint8_t{0});
+            std::uint64_t found = 0;
+            const auto mark = [&](std::uint64_t column) {
+                auto& seen = occupied.at(static_cast<std::size_t>(column - cx0));
+                if (seen == 0) {
+                    seen = 1;
+                    ++found;
+                }
+            };
+            const auto marked = [&](std::uint64_t column) {
+                return occupied.at(static_cast<std::size_t>(column - cx0)) != 0;
+            };
+
+            const std::uint64_t y_first = std::max(region.v_start, cy * chunk_v);
+            const std::uint64_t y_last = std::min(region.v_start + region.v_size, (cy + 1) * chunk_v);
+            for (std::uint64_t y = y_first; y < y_last && found < columns; ++y) {
+                mark_row(y, mark, marked);
+            }
+
+            for (auto cx = cx0; cx <= cx1; ++cx) {
+                if (marked(cx)) {
+                    visit(cx, cy);
+                }
+            }
+        }
+    };
+
+    const auto for_each_cell = [&](const WalkRegion& region, auto&& visit) {
         if (region.runs == nullptr && region.mask == nullptr) {
+            std::uint64_t cx0 = 0;
+            std::uint64_t cx1 = 0;
+            std::uint64_t cy0 = 0;
+            std::uint64_t cy1 = 0;
+            span(region, cx0, cx1, cy0, cy1);
             for (auto cy = cy0; cy <= cy1; ++cy) {
                 for (auto cx = cx0; cx <= cx1; ++cx) {
                     visit(cx, cy);
@@ -127,23 +177,10 @@ Result<ChunkBuckets> BuildChunkBuckets(const WalkRegion* regions, std::size_t re
             return;
         }
 
-        const auto flush = [&](std::uint64_t cy, const std::vector<std::uint8_t>& marks) {
-            for (auto cx = cx0; cx <= cx1; ++cx) {
-                if (marks.at(static_cast<std::size_t>(cx - cx0)) != 0) {
-                    visit(cx, cy);
-                }
-            }
-        };
-
         if (region.runs != nullptr) {
-            const std::uint64_t columns = cx1 - cx0 + 1;
-            occupied.assign(static_cast<std::size_t>(columns), 0);
-            for (auto cy = cy0; cy <= cy1; ++cy) {
-                std::fill(occupied.begin(), occupied.end(), std::uint8_t{0});
-                std::uint64_t found = 0;
-                const std::uint64_t y_first = std::max(region.v_start, cy * chunk_v);
-                const std::uint64_t y_last = std::min(region.v_start + region.v_size, (cy + 1) * chunk_v);
-                for (std::uint64_t y = y_first; y < y_last && found < columns; ++y) {
+            scan_rows(
+                region,
+                [&](std::uint64_t y, auto&& mark, auto&&) {
                     const auto r = static_cast<std::size_t>(y - region.v_start);
                     for (auto k = region.run_offsets[r]; k < region.run_offsets[r + 1]; ++k) {
                         const std::uint64_t run_begin = region.u_start + region.runs[2 * k];
@@ -151,50 +188,36 @@ Result<ChunkBuckets> BuildChunkBuckets(const WalkRegion* regions, std::size_t re
                         if (run_begin >= run_end) {
                             continue;
                         }
-                        for (auto column = run_begin / chunk_u; column <= (run_end - 1) / chunk_u;
-                             ++column) {
-                            auto& seen = occupied.at(static_cast<std::size_t>(column - cx0));
-                            if (seen == 0) {
-                                seen = 1;
-                                ++found;
-                            }
+                        for (auto column = run_begin / chunk_u; column <= (run_end - 1) / chunk_u; ++column) {
+                            mark(column);
                         }
                     }
-                }
-                flush(cy, occupied);
-            }
+                },
+                visit);
             return;
         }
 
-        const std::uint64_t columns = cx1 - cx0 + 1;
         const std::uint64_t u_end = region.u_start + region.u_size;
-        occupied.assign(static_cast<std::size_t>(columns), 0);
-        for (auto cy = cy0; cy <= cy1; ++cy) {
-            std::fill(occupied.begin(), occupied.end(), std::uint8_t{0});
-            std::uint64_t found = 0;
-            const std::uint64_t y_first = std::max(region.v_start, cy * chunk_v);
-            const std::uint64_t y_last = std::min(region.v_start + region.v_size, (cy + 1) * chunk_v);
-            for (std::uint64_t y = y_first; y < y_last && found < columns; ++y) {
+        scan_rows(
+            region,
+            [&](std::uint64_t y, auto&& mark, auto&& marked) {
                 const std::uint8_t* row = region.mask + ((y - region.v_start) * region.mask_v_stride);
                 std::uint64_t x = region.u_start;
                 while (x < u_end) {
                     const std::uint64_t column = x / chunk_u;
                     const std::uint64_t boundary = std::min(u_end, (column + 1) * chunk_u);
-                    auto& seen = occupied.at(static_cast<std::size_t>(column - cx0));
-                    if (seen == 0) {
+                    if (!marked(column)) {
                         for (std::uint64_t k = x; k < boundary; ++k) {
                             if (row[(k - region.u_start) * region.mask_u_stride] != 0) {
-                                seen = 1;
-                                ++found;
+                                mark(column);
                                 break;
                             }
                         }
                     }
                     x = boundary;
                 }
-            }
-            flush(cy, occupied);
-        }
+            },
+            visit);
     };
 
     // Counting sort needs the counts before it can place anything, but the mask is the most

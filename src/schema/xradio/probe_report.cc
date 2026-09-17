@@ -30,10 +30,6 @@ void ProbeReport::SetDiagnostics(std::vector<Diagnostic> diagnostics) {
     _diagnostics = std::move(diagnostics);
 }
 
-void ProbeReport::ClearDiagnostics() {
-    _diagnostics.clear();
-}
-
 const std::vector<Diagnostic>& ProbeReport::diagnostics() const noexcept {
     return _diagnostics;
 }

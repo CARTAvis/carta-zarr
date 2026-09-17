@@ -57,7 +57,6 @@ public:
 
     // Findings that are not failures: what discovery observed while listing a store's variables.
     void SetDiagnostics(std::vector<Diagnostic> diagnostics);
-    void ClearDiagnostics();
 
     const std::vector<Diagnostic>& diagnostics() const noexcept;
 

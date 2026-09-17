@@ -3,7 +3,7 @@
 日期：2026-09-17 · 範圍：`include/`（1,100 行）、`src/`（8,300 行）、`tests/`（7,900 行）、`CMakeLists.txt`
 方法：逐檔通讀 `src/` 與 `include/` 全文，`tests/` 與 CMake 做結構性掃描。
 
-調查當下未動任何程式碼。其後 Tier 1 全部、2.1、2.2、2.4、3.1、3.2、3.4、3.6 已在分支 `sweep-up-after-the-moves` 上套用，各項標有狀態；其餘仍是建議。
+調查當下未動任何程式碼。其後 Tier 1 全部、2.1、2.2、2.4、3.1、3.2、3.4、3.6 與測試端的 `check.h` 已在分支 `sweep-up-after-the-moves` 上套用，各項標有狀態；其餘仍是建議。
 
 ---
 
@@ -329,27 +329,37 @@ if (!l) { return l.error(); }
 
 ## 測試端
 
+> **狀態：`Require` 已集中**（`tests/support/check.h`）。**共用 `main()` 沒有做，而且不該做** —— 理由見下。
+
 `tests/` 沒有逐檔通讀，但結構掃描出一項明確的重複：
 
-**24 個測試檔各自定義一份完全相同的 `Require`**：
+**24 個測試檔各自定義一份完全相同的 `Require`** —— 已確認 24 份 byte-for-byte 相同，現已移到
+[tests/support/check.h](tests/support/check.h)，與既有的 `in_memory_transport.h`、`synthetic_pixel_source.h`
+同一個位置與同一個 namespace（`carta::zarr::testing`），各檔以一行 `using` 取用。
 
-```cpp
-void Require(bool condition, const std::string& message) {
-    if (!condition) { throw std::runtime_error(message); }
-}
-```
+連帶：`tests/` 原本只掛在 INTERNAL target 的 include path 上，所以連結 `CARTA::zarr` 的 PUBLIC 測試
+根本搆不到 `tests/support`。現在 `carta_zarr_add_test` 對兩種 target 都加上 `tests/`，但 PUBLIC target
+仍然拿不到 `include/` 與 `src/` —— 「只看得到 consumer 看得到的東西」正是那些 target 的用意。
 
-此外 `RequireClose` 有兩份不同簽章（[conformance_test.cc:38](tests/conformance_test.cc:38) 帶 tolerance 參數，[spectral_reduce_test.cc:56](tests/spectral_reduce_test.cc:56) 不帶），而 `main()` 的 harness 也是 24 份手寫，且分成兩種風格 — 有的用 `std::cout` 並在成功時印訊息，有的用 `std::fprintf` 且成功時不印。
+### 原本的建議有一半是錯的
 
-**建議**：新增 `tests/support/check.h`（header-only，與現有的 `in_memory_transport.h`、`synthetic_pixel_source.h` 同一個位置），放 `Require`、`RequireClose`，以及一個接受 `{name, fn}` 清單的小 runner：
+報告最初提議連 `main()` 一起用一個 `RunTests(suite, {...})` 收掉。**實際讀過 24 個 `main()` 之後，
+這件事不該做**：它們的形狀是真的不一樣，不是隨意的不一致。
 
-```cpp
-int RunTests(std::string_view suite, std::initializer_list<std::pair<std::string_view, void(*)()>>);
-```
+- `histogram_test`、`pixel_read_test`、`spectral_reduce_test` 會 loop 過多個 fixture，並在失敗訊息裡
+  指名是哪個 fixture 掛的；之後還各有一段獨立的 wide-fixture 階段。
+- `schema_probe_test` 的 `main()` 要負責建立與清掉一個 temp 目錄，成功與失敗路徑都要清。
+- `pass_timing` 根本不是測試，是 benchmark，讀 argv、回傳 2 表示環境問題。
 
-省下約 150 行，並且讓失敗輸出格式一致。**注意**：這會讓每個測試 target 的 SOURCES 多一個 header 依賴（header-only 的話不必改 CMake），且要確認那些刻意不連結任何東西的 target（如 `carta_zarr_linear_axis_tests`）不會因此被迫連結新東西。
+能被統一的只有那 19 個「單純依序呼叫」的，而統一它們的收益是輸出格式一致（`std::cout` 對
+`std::fprintf`、成功時印不印），不是行數。用一個 runner 去涵蓋全部，等於要讓 runner 知道自己在處理哪一種
+—— 那比現在的重複更難讀。所以 `check.h` 停在 assertion。
 
----
+### 沒有合併的東西
+
+兩個 `RequireClose` **語意不同**，不是重複：[conformance_test.cc:38](tests/conformance_test.cc:38) 收一個明確的
+tolerance 參數；[spectral_reduce_test.cc:56](tests/spectral_reduce_test.cc:56) 用固定的相對容差並且另外處理 NaN。
+各自只有一個呼叫者，合併只會讓兩邊都得多帶一個參數。
 
 ## 建議的執行順序
 
@@ -360,7 +370,7 @@ int RunTests(std::string_view suite, std::initializer_list<std::pair<std::string
 | ~~3~~ | ~~2.4 JSON 取用器 + 3.4、3.6~~ **已完成** | 低 | −8 淨（消費端 −60，取用器 +32） |
 | ~~4~~ | ~~2.2 `Image` 進入點 helper~~ **已完成** | 低 | −12 |
 | ~~5~~ | ~~3.1、3.2 兩處函式內抽取~~ **已完成** | 低 | 實際 **+38**（新增 15 行註解說明抽取理由；可讀性為主，行數本非目標） |
-| 6 | 測試端 `check.h` | 低 | −150 |
+| ~~6~~ | ~~測試端 `check.h`~~ **已完成** | 低 | −44 淨（原估 −150 假設連 `main()` 一起收；實際不該收） |
 | 7 | 2.3 `OverRowRanges` | **中**（碰並行與熱路徑邊緣） | −50 |
 | 8 | 2.6 `WorkPool::DrainTasks` | **中**（並行） | −15 |
 | 9 | 4.1 transport listing | **中**（需先加測試） | −25 |

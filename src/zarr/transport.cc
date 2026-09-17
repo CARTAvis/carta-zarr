@@ -116,11 +116,11 @@ public:
             }
 
             const auto metadata_path = iterator->is_directory() ? path / "zarr.json" : path;
+            // A directory carrying no readable zarr.json is not a node. Whether the answer was no
+            // or the question could not be asked makes no difference here: neither is a node, and
+            // a directory that could not be inspected is left for a later read to diagnose.
             std::error_code metadata_error;
             if (iterator->is_directory() && !std::filesystem::is_regular_file(metadata_path, metadata_error)) {
-                if (metadata_error) {
-                    continue;
-                }
                 continue;
             }
 

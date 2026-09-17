@@ -86,11 +86,17 @@ void TestEveryNodeIsListedExactlyOnce(const std::filesystem::path& root) {
 
 // An array's chunks are its descendants and are not nodes. A real dataset has millions of them, so
 // this is the difference between a listing and a full tree walk.
+//
+// The chunk files alone would not pin that. A chunk is neither a directory nor a zarr.json, so a
+// walk that descended into the array would pass over it anyway and still answer {SKY}. What makes
+// the pruning observable is a directory below the array that would otherwise qualify as a node:
+// listing it is the only difference between stopping at the array and walking through it.
 void TestChunksAreNotWalked(const std::filesystem::path& root) {
     WriteNode(root, "group");
     WriteNode(root / "SKY", "array");
     WriteFile(root / "SKY" / "c" / "0" / "0", "chunk bytes");
     WriteFile(root / "SKY" / "c" / "0" / "1", "chunk bytes");
+    WriteNode(root / "SKY" / "BELOW", "group");
     RequireListing(root, {"SKY"}, "an array with chunks below it");
 }
 

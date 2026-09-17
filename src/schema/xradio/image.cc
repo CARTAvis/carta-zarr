@@ -70,8 +70,8 @@ bool HasAllAxes(const zarr_metadata::ArrayMetadata& metadata, const std::array<s
 
 std::vector<std::string> FindDataGroups(const nlohmann::json& root_attributes, std::string_view image_id) {
     std::vector<std::string> data_groups;
-    const auto* groups = ObjectMember(root_attributes, "data_groups");
-    if (groups == nullptr || !groups->is_object()) {
+    const auto* const groups = MemberObject(root_attributes, "data_groups");
+    if (groups == nullptr) {
         return data_groups;
     }
 
@@ -158,38 +158,29 @@ std::optional<SpectralCoordinate> DescribeSpectralCoordinate(const Store& store,
     spectral.channel_frequencies = frequency_values;
     nlohmann::json frequency_attributes = nlohmann::json::object();
     if (const auto& frequency_metadata = store.ReadNodeMetadata("frequency"); frequency_metadata) {
-        if (const auto* attributes = ObjectMember(frequency_metadata.value(), "attributes");
-            attributes != nullptr && attributes->is_object()) {
+        if (const auto* const attributes = MemberObject(frequency_metadata.value(), "attributes")) {
             frequency_attributes = *attributes;
         }
     }
 
     spectral.unit = AttributeString(frequency_attributes, "units");
-    if (const auto* reference_frequency = ObjectMember(frequency_attributes, "reference_frequency");
-        reference_frequency != nullptr && reference_frequency->is_object()) {
-        if (const auto* attributes = ObjectMember(*reference_frequency, "attrs");
-            attributes != nullptr && attributes->is_object()) {
+    // The channel a linear description is measured from, which is the first one unless the
+    // reference frequency names another. Both of what that measure carries -- its units and frame
+    // under `attrs`, its value under `data` -- are read from the one lookup.
+    double reference_value = spectral.channel_frequencies.front();
+    if (const auto* const reference_frequency = MemberObject(frequency_attributes, "reference_frequency")) {
+        if (const auto* const attributes = MemberObject(*reference_frequency, "attrs")) {
             if (spectral.unit.empty()) {
                 spectral.unit = AttributeString(*attributes, "units");
             }
             spectral.system = Upper(AttributeString(*attributes, "observer"));
         }
-    }
-
-    double reference_value = spectral.channel_frequencies.front();
-    if (const auto* reference_frequency = ObjectMember(frequency_attributes, "reference_frequency");
-        reference_frequency != nullptr && reference_frequency->is_object()) {
-        if (const auto* data = ObjectMember(*reference_frequency, "data"); data != nullptr) {
-            if (const auto value = AsNumber(*data)) {
-                reference_value = *value;
-            }
+        if (const auto value = MemberNumber(*reference_frequency, "data")) {
+            reference_value = *value;
         }
     }
-    if (const auto* rest_frequency = ObjectMember(frequency_attributes, "rest_frequency");
-        rest_frequency != nullptr && rest_frequency->is_object()) {
-        if (const auto* data = ObjectMember(*rest_frequency, "data"); data != nullptr && data->is_number()) {
-            spectral.rest_frequency = data->get<double>();
-        }
+    if (const auto* const rest_frequency = MemberObject(frequency_attributes, "rest_frequency")) {
+        spectral.rest_frequency = MemberNumber(*rest_frequency, "data");
     }
 
     auto fit = FitSpectralAxis(spectral.channel_frequencies, reference_value, "frequency");
@@ -208,8 +199,7 @@ std::optional<TemporalCoordinate> DescribeTemporalCoordinate(const Store& store,
     TemporalCoordinate temporal;
     temporal.values = std::move(values);
     if (const auto& metadata = store.ReadNodeMetadata("time"); metadata) {
-        if (const auto* attributes = ObjectMember(metadata.value(), "attributes");
-            attributes != nullptr && attributes->is_object()) {
+        if (const auto* const attributes = MemberObject(metadata.value(), "attributes")) {
             temporal.unit = AttributeString(*attributes, "units");
             temporal.scale = Upper(AttributeString(*attributes, "scale"));
             temporal.format = Upper(AttributeString(*attributes, "format"));
@@ -419,7 +409,7 @@ Result<std::vector<Beam>> ReadBeams(const Store& store, std::string_view image_i
         return sky_meta.error();
     }
     std::string beam_array_name;
-    if (const auto* attributes = ObjectMember(sky_meta.value(), "attributes"); attributes != nullptr) {
+    if (const auto* const attributes = MemberObject(sky_meta.value(), "attributes")) {
         beam_array_name = AttributeString(*attributes, "beam_fit_params");
     }
     if (beam_array_name.empty()) {

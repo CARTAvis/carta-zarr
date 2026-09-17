@@ -11,6 +11,7 @@
 
 #include "../../zarr/array_metadata.h"
 
+#include <array>
 #include <iterator>
 #include <string>
 #include <utility>
@@ -23,30 +24,32 @@ std::optional<DirectionCoordinate> DescribeDirection(const nlohmann::json& root_
                                                      const std::vector<double>& l_values,
                                                      const std::vector<double>& m_values,
                                                      std::vector<Diagnostic>& diagnostics) {
-    const auto* coordinate_system = ObjectMember(root_attributes, "coordinate_system_info");
-    const bool has_coordinate_system = coordinate_system != nullptr && coordinate_system->is_object();
-    if (!has_coordinate_system && (l_values.empty() || m_values.empty())) {
+    const auto* const coordinate_system = MemberObject(root_attributes, "coordinate_system_info");
+    if (coordinate_system == nullptr && (l_values.empty() || m_values.empty())) {
         return std::nullopt;
     }
 
     DirectionCoordinate direction;
-    if (has_coordinate_system) {
+    if (coordinate_system != nullptr) {
         const auto& cs_info = *coordinate_system;
-        if (const auto* projection = ObjectMember(cs_info, "projection");
-            projection != nullptr && projection->is_string()) {
-            direction.projection = Upper(projection->get<std::string>());
-        }
-        if (const auto* reference_direction = ObjectMember(cs_info, "reference_direction");
-            reference_direction != nullptr && reference_direction->is_object()) {
-            if (const auto* data = ObjectMember(*reference_direction, "data");
-                data != nullptr && zarr_metadata::IsNumericVector(*data, 2)) {
-                direction.reference_value.at(0) = data->at(0).get<double>() * kRadToDeg;
-                direction.reference_value.at(1) = data->at(1).get<double>() * kRadToDeg;
+        direction.projection = Upper(AttributeString(cs_info, "projection"));
+
+        // An XRADIO measure keeps its two angles under `data`, in radians; a descriptor reports
+        // degrees. Said once because the reference direction and the native pole are the same
+        // shape, and were the same six lines twice.
+        const auto read_angle_pair = [](const nlohmann::json& measure, std::array<double, 2>& into) {
+            const auto* const data = Member(measure, "data");
+            if (data != nullptr && zarr_metadata::IsNumericVector(*data, 2)) {
+                into.at(0) = data->at(0).get<double>() * kRadToDeg;
+                into.at(1) = data->at(1).get<double>() * kRadToDeg;
             }
-            if (const auto* attributes = ObjectMember(*reference_direction, "attrs");
-                attributes != nullptr && attributes->is_object()) {
+        };
+
+        if (const auto* const reference_direction = MemberObject(cs_info, "reference_direction")) {
+            read_angle_pair(*reference_direction, direction.reference_value);
+            if (const auto* const attributes = MemberObject(*reference_direction, "attrs")) {
                 direction.reference_frame = Upper(AttributeString(*attributes, "frame"));
-                if (const auto* equinox = ObjectMember(*attributes, "equinox"); equinox != nullptr) {
+                if (const auto* const equinox = Member(*attributes, "equinox"); equinox != nullptr) {
                     if (equinox->is_number()) {
                         direction.equinox = equinox->get<double>();
                     } else if (equinox->is_string()) {
@@ -63,23 +66,17 @@ std::optional<DirectionCoordinate> DescribeDirection(const nlohmann::json& root_
                 }
             }
         }
-        if (const auto* parameters = ObjectMember(cs_info, "projection_parameters");
-            parameters != nullptr && parameters->is_array()) {
+        if (const auto* const parameters = MemberArray(cs_info, "projection_parameters")) {
             for (const auto& value : *parameters) {
                 if (value.is_number()) {
                     direction.projection_parameters.push_back(value.get<double>());
                 }
             }
         }
-        if (const auto* native_pole = ObjectMember(cs_info, "native_pole_direction");
-            native_pole != nullptr && native_pole->is_object()) {
-            const auto* data = ObjectMember(*native_pole, "data");
-            if (data != nullptr && zarr_metadata::IsNumericVector(*data, 2)) {
-                direction.native_pole_direction.at(0) = data->at(0).get<double>() * kRadToDeg;
-                direction.native_pole_direction.at(1) = data->at(1).get<double>() * kRadToDeg;
-            }
+        if (const auto* const native_pole = MemberObject(cs_info, "native_pole_direction")) {
+            read_angle_pair(*native_pole, direction.native_pole_direction);
         }
-        if (const auto* matrix = ObjectMember(cs_info, "pixel_coordinate_transformation_matrix");
+        if (const auto* const matrix = Member(cs_info, "pixel_coordinate_transformation_matrix");
             matrix != nullptr && zarr_metadata::IsNumericMatrix(*matrix, 2, 2)) {
             direction.transformation_matrix.at(0).at(0) = matrix->at(0).at(0).get<double>();
             direction.transformation_matrix.at(0).at(1) = matrix->at(0).at(1).get<double>();

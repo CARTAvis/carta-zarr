@@ -274,13 +274,15 @@ const Result<nlohmann::json>& Store::ReadNodeMetadata(std::string_view node) con
 
 const Result<zarr::ArrayMetadata>& Store::ReadArrayMetadata(std::string_view node) const {
     // Keyed by the normalized name, as the node metadata below it is: two spellings of one node are
-    // one node, and keying by what the caller typed would read and parse it twice.
+    // one node, and keying by what the caller typed would read and parse it twice. A name that
+    // cannot be normalized has no such key, so it is filed under what the caller typed -- the one
+    // case where two spellings do not share an entry, and both of them are refusals anyway.
     auto key = NormalizeNodeName(node);
-    if (!key) {
-        return _caches->array_metadata.GetOrCompute(
-            std::string(node), [&]() -> Result<zarr::ArrayMetadata> { return key.error(); });
-    }
-    return _caches->array_metadata.GetOrCompute(key.value(), [&]() -> Result<zarr::ArrayMetadata> {
+    const std::string cache_key = key ? key.value() : std::string(node);
+    return _caches->array_metadata.GetOrCompute(cache_key, [&]() -> Result<zarr::ArrayMetadata> {
+        if (!key) {
+            return key.error();
+        }
         const auto& metadata_result = ReadNodeMetadata(node);
         if (!metadata_result) {
             return metadata_result.error();

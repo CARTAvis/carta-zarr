@@ -241,6 +241,11 @@ Result<std::size_t> Image::Read(const ReadRequest& request, BufferView<float> de
 }
 
 Result<std::size_t> Image::ReadPixelMask(const ReadRequest& request, BufferView<std::uint8_t> destination) const {
+    return ReadPixelMask(request, destination, ReadOptions{});
+}
+
+Result<std::size_t> Image::ReadPixelMask(const ReadRequest& request, BufferView<std::uint8_t> destination,
+                                         const ReadOptions& options) const {
     const std::string node = _impl ? _impl->descriptor.id : std::string{};
     return Guarded(ErrorCode::io_error, node, [&]() -> Result<std::size_t> {
         if (!_impl) {
@@ -260,9 +265,16 @@ Result<std::size_t> Image::ReadPixelMask(const ReadRequest& request, BufferView<
                              _impl->descriptor.id);
         }
 
+        // Checked before any storage work, as an ordinary read does. There is nothing to allocate
+        // here -- the destination is the caller's -- but opening an array is work too, and a
+        // request that has already been cancelled should not cause it.
+        auto control = internal::zarr::CheckReadControl(options, _impl->descriptor.id);
+        if (!control) {
+            return control.error();
+        }
+
         auto read = _impl->store->ReadPixelMaskBytes(_impl->descriptor.pixel_mask_id, selection.value(),
-                                                     destination.data, static_cast<std::size_t>(elements),
-                                                     ReadOptions{});
+                                                     destination.data, static_cast<std::size_t>(elements), options);
         if (!read) {
             return read.error();
         }

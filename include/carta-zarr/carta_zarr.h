@@ -65,7 +65,14 @@ public:
 
     // Reads this image's pixel mask over the same region, one byte per pixel, true meaning a good
     // pixel. Reports not_found when the image has no mask.
+    //
+    // Of ReadOptions it honours cancellation, the deadline and the cache policy. The rest do not
+    // apply and are ignored: apply_pixel_mask, because this is the mask; progress and
+    // temporary_memory_limit_bytes, because the read is issued in one piece -- the destination is
+    // the caller's, so there is no temporary of ours for a ceiling to bound.
     Result<std::size_t> ReadPixelMask(const ReadRequest& request, BufferView<std::uint8_t> destination) const;
+    Result<std::size_t> ReadPixelMask(const ReadRequest& request, BufferView<std::uint8_t> destination,
+                                      const ReadOptions& options) const;
 
     // Reduces every region over the same channels in one pass over the pixels, handing results to
     // the sink block by block.

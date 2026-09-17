@@ -68,6 +68,10 @@ struct ReadOptions {
     // It is not the only thing that splits a read; temporary_memory_limit_bytes does too. A read
     // with neither is issued in one piece.
     //
+    // Image::Read is the only operation that reads this field. A reduction reports through its sink
+    // and, for a cube histogram, through its own request's callback; ReadPixelMask is one piece and
+    // has nothing to report from.
+    //
     // A read that nothing interrupts is not made slower by this: the pieces are sized to hold
     // enough chunks to decode in parallel, and at that size a split read measures the same as an
     // unsplit one.

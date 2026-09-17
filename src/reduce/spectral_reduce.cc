@@ -495,7 +495,7 @@ Result<void> ReduceSpectral(const SlabSource& source, const ImageDescriptor& des
     // channels of it is a minute of work with no partial answer and nowhere to cancel.
     const std::size_t bytes_per_channel = request.region_count * statistic_count * sizeof(double);
     const std::uint64_t wanted_channels =
-        PlanEmitChannels(plan, layer_chunks, bytes_per_channel, request.emit_every_channels);
+        plan.EmitChannels(layer_chunks, bytes_per_channel, request.emit_every_channels);
 
     // Below this a unit is not worth its share of a dispatch, so the reduction runs in place. A
     // unit is one chunk cell of one channel, so this is a statement about chunk size: an image
@@ -510,8 +510,7 @@ Result<void> ReduceSpectral(const SlabSource& source, const ImageDescriptor& des
     std::vector<ColumnRun> segments;
 
     for (std::uint64_t block_begin = 0; block_begin < spectral.count;) {
-        const std::uint64_t block_end = AlignedBlockEnd(block_begin, wanted_channels, spectral.count,
-                                                        spectral.start, spectral.stride, plan.chunk_depth);
+        const std::uint64_t block_end = plan.AlignedSlabEnd(block_begin, wanted_channels, spectral.count);
         const auto block_length = static_cast<std::size_t>(block_end - block_begin);
         const std::size_t statistic_stride = block_length;
         const std::size_t region_stride = statistic_count * statistic_stride;
@@ -530,7 +529,7 @@ Result<void> ReduceSpectral(const SlabSource& source, const ImageDescriptor& des
             }
         }
 
-        const std::uint64_t block_spectral_chunks = (block_length + plan.least_channels - 1) / plan.least_channels;
+        const std::uint64_t block_spectral_chunks = plan.ChunksFor(block_length);
         const std::uint64_t block_chunks_total =
             std::max<std::uint64_t>(1, std::max<std::uint64_t>(1, layer_chunks) * block_spectral_chunks);
         std::uint64_t block_chunks_done = 0;
@@ -601,8 +600,7 @@ Result<void> ReduceSpectral(const SlabSource& source, const ImageDescriptor& des
             for (const auto& run : runs) {
                 widest = std::max(widest, run.last - run.first + 1);
             }
-            const std::uint64_t row_bytes = std::max<std::uint64_t>(1, widest * plan.chunk_bytes);
-            const std::uint64_t band_limit = std::max<std::uint64_t>(1, plan.slab_budget_bytes / row_bytes);
+            const std::uint64_t band_limit = plan.UnitsAffordable(widest);
             std::uint64_t band_end = row + 1;
             while (band_end < buckets.rows && (band_end - row) < band_limit &&
                    runs_per_row.at(static_cast<std::size_t>(band_end)) == runs) {
@@ -619,8 +617,7 @@ Result<void> ReduceSpectral(const SlabSource& source, const ImageDescriptor& des
             // region is 628 MiB, ten times the budget it was supposed to respect, and nothing to
             // report or cancel from until all of it lands.
             const std::uint64_t band_rows = std::max<std::uint64_t>(1, band_end - row);
-            const std::uint64_t segment_limit =
-                std::max<std::uint64_t>(1, plan.slab_budget_bytes / (band_rows * plan.chunk_bytes));
+            const std::uint64_t segment_limit = plan.UnitsAffordable(band_rows);
             segments.clear();
             for (const auto& whole : runs) {
                 for (std::uint64_t first = whole.first; first <= whole.last;) {
@@ -637,14 +634,11 @@ Result<void> ReduceSpectral(const SlabSource& source, const ImageDescriptor& des
                 const std::uint64_t u_end = std::min(buckets.u1, chunk_cu_end * plan.chunk_u);
                 const std::uint64_t run_chunks =
                     std::max<std::uint64_t>(1, (run.last - run.first + 1) * (band_end - row));
-                const std::uint64_t spectral_chunks =
-                    std::max<std::uint64_t>(1, plan.slab_budget_bytes / (run_chunks * plan.chunk_bytes));
-                const std::uint64_t slab_channels = std::max<std::uint64_t>(1, spectral_chunks * plan.least_channels);
+                const std::uint64_t slab_channels = plan.SlabChannels(run_chunks);
 
                 for (std::uint64_t slab_begin = block_begin; slab_begin < block_end;) {
                     const std::uint64_t slab_end =
-                        AlignedBlockEnd(slab_begin, std::min(slab_channels, block_end - slab_begin), block_end,
-                                        spectral.start, spectral.stride, plan.chunk_depth);
+                        plan.AlignedSlabEnd(slab_begin, std::min(slab_channels, block_end - slab_begin), block_end);
                     const std::uint64_t slab_length = slab_end - slab_begin;
 
                     // What is in hand before spending another budget on this block. A block that
@@ -877,7 +871,7 @@ Result<void> ReduceSpectral(const SlabSource& source, const ImageDescriptor& des
                         }
                     }
                     block_chunks_done +=
-                        run_chunks * ((slab_length + plan.least_channels - 1) / plan.least_channels);
+                        run_chunks * plan.ChunksFor(slab_length);
                     slab_begin = slab_end;
                 }
             }

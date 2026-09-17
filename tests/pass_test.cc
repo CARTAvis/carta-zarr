@@ -152,20 +152,23 @@ void TestTheCallersCeilingWins() {
             "without a limit the budget is the one chunk_blocks measured");
 }
 
-// least_channels is how many selected channels one chunk of the spectral axis holds, which is what
-// keeps a slab from ending inside a chunk and making one decode serve two slabs.
+// How many selected channels one chunk of the spectral axis holds is what keeps a slab from ending
+// inside a chunk and making one decode serve two slabs. Asked as ChunksFor, which is the question a
+// walk actually puts to the plan: n channels is one chunk, and one more than that is two.
 void TestASlabIsCountedInChunksOfTheSpectralAxis() {
     const auto image = MakeImage(512, 520, 64);
     const auto geometry = MakeGeometry(256, 260, 8, AxisRole::spatial_y);
 
-    Require(Plan(image, geometry, Range{0, 64, 1}, ReadOptions{}).least_channels == 8,
-            "eight channels to a chunk, read every one");
-    Require(Plan(image, geometry, Range{0, 32, 2}, ReadOptions{}).least_channels == 4,
-            "eight channels to a chunk, every second one selected, is four");
-    Require(Plan(image, geometry, Range{0, 8, 8}, ReadOptions{}).least_channels == 1,
-            "a stride of a whole chunk selects one channel from each");
-    Require(Plan(image, geometry, Range{0, 4, 16}, ReadOptions{}).least_channels == 1,
-            "a stride wider than a chunk still selects one, never none");
+    const auto holds = [&](const Range& spectral, std::uint64_t channels, const std::string& what) {
+        const auto plan = Plan(image, geometry, spectral, ReadOptions{});
+        Require(plan.ChunksFor(channels) == 1, what + ": that many channels is one chunk");
+        Require(plan.ChunksFor(channels + 1) == 2, what + ": one more than that is two");
+    };
+
+    holds(Range{0, 64, 1}, 8, "eight channels to a chunk, read every one");
+    holds(Range{0, 32, 2}, 4, "eight channels to a chunk, every second one selected, is four");
+    holds(Range{0, 8, 8}, 1, "a stride of a whole chunk selects one channel from each");
+    holds(Range{0, 4, 16}, 1, "a stride wider than a chunk still selects one, never none");
 }
 
 // layer_chunks is the chunks in one spectral layer, and band_rows is how many chunk rows of it one
@@ -191,7 +194,7 @@ void TestABandIsNeverEmpty() {
     tiny.temporary_memory_limit_bytes = 1;
     const auto plan = Plan(image, geometry, Range{0, 32, 1}, tiny);
     Require(plan.band_rows >= 1, "a band holds at least one chunk row however small the budget");
-    Require(plan.least_channels >= 1, "and a slab at least one channel");
+    Require(plan.SlabChannels(plan.layer_chunks) >= 1, "and a slab at least one channel");
 }
 
 // Sampling of zero would select nothing and divide by nothing; the plan floors it at one.

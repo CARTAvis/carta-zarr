@@ -82,7 +82,14 @@ struct Slab {
  * fixture. The read strategy has moved more than once, and every time it moved it moved in three
  * places at once.
  */
-struct PassPlan {
+class PassPlan;
+
+PassPlan PlanPass(const ImageDescriptor& descriptor, const ChunkGeometry& geometry, const AxisMap& map,
+                  const Range& spectral, std::uint64_t polarization, std::uint64_t time,
+                  std::uint64_t sample, const ReadOptions& options);
+
+class PassPlan {
+public:
     const ImageDescriptor* descriptor = nullptr;
     AxisMap map;
     // u is the spatial axis the store varies fastest; v is the other one.
@@ -92,8 +99,9 @@ struct PassPlan {
     std::uint64_t v_length = 0;
     std::uint64_t chunk_u = 1;
     std::uint64_t chunk_v = 1;
-    std::uint64_t chunk_depth = 1;
-    std::uint64_t least_channels = 1;
+    // What one chunk costs to decode, counting the flag beside it when this read applies the mask,
+    // and how much of that a single read may hold. Both are answers rather than steps towards one:
+    // ADR 0005 turns on the first, and the second is the caller's own ceiling when it stated one.
     std::uint64_t chunk_bytes = 1;
     std::size_t slab_budget_bytes = 0;
     std::uint64_t band_rows = 1;
@@ -106,33 +114,69 @@ struct PassPlan {
     // steps over chunks entirely.
     std::uint64_t sample = 1;
     bool apply_mask = false;
-};
 
-PassPlan PlanPass(const ImageDescriptor& descriptor, const ChunkGeometry& geometry, const AxisMap& map,
-                  const Range& spectral, std::uint64_t polarization, std::uint64_t time,
-                  std::uint64_t sample, const ReadOptions& options);
+    // How many chunks along the spectrum a run of `channels` selected channels covers.
+    //
+    // A walk counts its progress in chunks, and the spectral axis is the one where a selection's
+    // stride makes that not simply a division. Six call sites wrote this out; they disagreed about
+    // nothing, which is the argument for saying it once rather than the argument for leaving it.
+    std::uint64_t ChunksFor(std::uint64_t channels) const {
+        return (channels + _least_channels - 1) / _least_channels;
+    }
+
+
+    // How many units of `chunks_per_unit` chunks one read's budget affords. Never zero: a budget
+    // smaller than a single unit still reads one, because a chunk is the smallest thing that can be
+    // decoded and refusing to read is the worse answer.
+    std::uint64_t UnitsAffordable(std::uint64_t chunks_per_unit) const {
+        return std::max<std::uint64_t>(
+            1, slab_budget_bytes / std::max<std::uint64_t>(1, chunks_per_unit * chunk_bytes));
+    }
+
+    // How many channels one slab may hold when its spatial footprint occupies `footprint_chunks`
+    // chunks of each spectral chunk it touches.
+    std::uint64_t SlabChannels(std::uint64_t footprint_chunks) const {
+        return std::max<std::uint64_t>(1, UnitsAffordable(footprint_chunks) * _least_channels);
+    }
+
+    // The end of a slab that begins at `begin` and would like to be `desired` channels long, moved
+    // onto a chunk boundary so that no decode serves two slabs.
+    std::uint64_t AlignedSlabEnd(std::uint64_t begin, std::uint64_t desired, std::uint64_t end) const {
+        return AlignedBlockEnd(begin, desired, end, spectral.start, spectral.stride, _chunk_depth);
+    }
+
+    // How many channels one emitted block may hold.
+    //
+    // The hint is the caller's, the budgets are the library's, and the chunk alignment is the
+    // plan's; the smallest wins and the block reports what it used. Without a hint a block costs one
+    // budget of decoded bytes -- the same invariant a piece of Read carries -- so it is free: the
+    // block spends whatever the spatial walk left over. A small region leaves almost all of it and
+    // the block spans many chunks along the spectrum; a region covering the image spends the budget
+    // spatially and the block becomes the single chunk layer the walk is already reading.
+    //
+    // `layer_chunks` is the chunks one spectral layer of whatever the caller is walking occupies,
+    // which is the plan's own for a whole plane and the region set's for a reduction.
+    std::uint64_t EmitChannels(std::uint64_t layer_chunks, std::size_t bytes_per_channel,
+                               std::uint32_t hint) const;
+
+private:
+    friend PassPlan PlanPass(const ImageDescriptor& descriptor, const ChunkGeometry& geometry, const AxisMap& map,
+                             const Range& spectral, std::uint64_t polarization, std::uint64_t time,
+                             std::uint64_t sample, const ReadOptions& options);
+
+    // Steps towards the answers above rather than answers themselves, and the two a caller used to
+    // divide by itself: the chunk-count rule was written out in six places and the slab-sizing rule
+    // in two. Nothing asserts either directly -- what a test has to say about _least_channels it
+    // says through ChunksFor, which is the question a caller actually asks.
+    std::uint64_t _chunk_depth = 1;
+    std::uint64_t _least_channels = 1;
+};
 
 // The spectral range a pass was asked for has to fall inside the image. Compared by dividing the
 // room that is left rather than by multiplying out the span: (count - 1) * stride wraps, and a
 // wrapped span passes a check it should fail.
 Result<void> ValidateSpectralRange(const ImageDescriptor& descriptor, const AxisMap& map,
                                    const Range& spectral);
-
-/**
- * How many channels one emitted block may hold.
- *
- * The hint is the caller's, the budgets are the library's, and the chunk alignment is the pass's;
- * the smallest wins and the block reports what it used. Without a hint a block costs one budget of
- * decoded bytes -- the same invariant a piece of Read carries -- so it is free: the block spends
- * whatever the spatial walk left over. A small region leaves almost all of it and the block spans
- * many chunks along the spectrum; a region covering the image spends the budget spatially and the
- * block becomes the single chunk layer the pass is already reading.
- *
- * `layer_chunks` is the chunks one spectral layer of whatever the caller is walking occupies, which
- * is the plan's for a whole plane and the region set's own for a reduction.
- */
-std::uint64_t PlanEmitChannels(const PassPlan& plan, std::uint64_t layer_chunks,
-                               std::size_t bytes_per_channel, std::uint32_t hint);
 
 // One slab to read, in the pass's own axes.
 struct SlabRequest {
@@ -194,7 +238,6 @@ Result<void> RunPass(const SlabSource& source, const PassPlan& plan, const ReadO
                      std::uint64_t begin, std::uint64_t end, std::uint64_t& chunks_done,
                      BeforeRead&& before_read, Visit&& visit) {
     const auto& node = plan.descriptor->id;
-    const Range spectral = plan.spectral;
     SlabBuffers buffers;
     std::uint64_t reads_done = 0;
 
@@ -206,17 +249,15 @@ Result<void> RunPass(const SlabSource& source, const PassPlan& plan, const ReadO
         const std::uint64_t band_chunks = std::max<std::uint64_t>(
             1, (((plan.u_length - 1) / plan.chunk_u) + 1) * ((((v_end - v_begin) - 1) / plan.chunk_v) + 1));
         if (v_count == 0) {
-            chunks_done += band_chunks * ((end - begin + plan.least_channels - 1) / plan.least_channels);
+            chunks_done += band_chunks * plan.ChunksFor(end - begin);
             v_begin = v_end;
             continue;
         }
-        const std::uint64_t spectral_chunks =
-            std::max<std::uint64_t>(1, plan.slab_budget_bytes / (band_chunks * plan.chunk_bytes));
-        const std::uint64_t slab_channels = std::max<std::uint64_t>(1, spectral_chunks * plan.least_channels);
+        const std::uint64_t slab_channels = plan.SlabChannels(band_chunks);
 
         for (std::uint64_t slab_begin = begin; slab_begin < end;) {
-            const std::uint64_t slab_end = AlignedBlockEnd(slab_begin, std::min(slab_channels, end - slab_begin),
-                                                           end, spectral.start, spectral.stride, plan.chunk_depth);
+            const std::uint64_t slab_end =
+                plan.AlignedSlabEnd(slab_begin, std::min(slab_channels, end - slab_begin), end);
             const std::uint64_t slab_length = slab_end - slab_begin;
 
             if (reads_done > 0) {
@@ -253,7 +294,7 @@ Result<void> RunPass(const SlabSource& source, const PassPlan& plan, const ReadO
 
             visit(slab.value());
 
-            chunks_done += band_chunks * ((slab_length + plan.least_channels - 1) / plan.least_channels);
+            chunks_done += band_chunks * plan.ChunksFor(slab_length);
             slab_begin = slab_end;
         }
         v_begin = v_end;

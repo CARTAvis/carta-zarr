@@ -14,13 +14,6 @@
 #include <utility>
 
 namespace carta::zarr::internal::zarr {
-namespace {
-
-bool IsNumeric(const nlohmann::json& value) {
-    return value.is_number();
-}
-
-} // namespace
 
 bool IsNonNegativeInteger(const nlohmann::json& value) {
     return value.is_number_unsigned() || (value.is_number_integer() && value.get<std::int64_t>() >= 0);
@@ -34,7 +27,7 @@ bool IsNumericVector(const nlohmann::json& value, std::size_t length) {
     if (!value.is_array() || value.size() != length) {
         return false;
     }
-    return std::all_of(value.begin(), value.end(), IsNumeric);
+    return std::all_of(value.begin(), value.end(), [](const auto& element) { return element.is_number(); });
 }
 
 bool IsNumericMatrix(const nlohmann::json& value, std::size_t rows, std::size_t columns) {

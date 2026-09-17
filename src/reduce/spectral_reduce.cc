@@ -32,8 +32,6 @@ constexpr double kInfinity = std::numeric_limits<double>::infinity();
 // rather than an allocation nothing can serve.
 constexpr std::size_t kMaxChunkIncidences = 1u << 26;
 
-// Where each axis role sits in the logical axis order.
-
 // One region as the walk sees it: u is the spatial axis the store varies fastest and v is the other,
 // so that a plane arrives with u contiguous and never has to be transposed on the way in. A caller's
 // x and y are mapped onto these once, at the top of the reduction.
@@ -347,12 +345,6 @@ struct ColumnRun {
     }
 };
 
-// The occupied runs of each chunk row.
-//
-// Reading the bounding box would be correct and still wrong: the box of a diagonal cut is the whole
-// image, while the cut touches one chunk per row. On a 4096^2 image that is 256 chunks decoded to
-// use 16. The runs are what the walk reads instead, so the cost follows the regions rather than the
-// rectangle that happens to contain them.
 // The chunk cells and pixel bounds of one spatial footprint.
 //
 // Everything else the accumulation needs belongs to the reduction, so this is the whole of what
@@ -369,6 +361,12 @@ struct FootprintBounds {
     std::uint64_t v_end = 0;
 };
 
+// The occupied runs of each chunk row.
+//
+// Reading the bounding box would be correct and still wrong: the box of a diagonal cut is the whole
+// image, while the cut touches one chunk per row. On a 4096^2 image that is 256 chunks decoded to
+// use 16. The runs are what the walk reads instead, so the cost follows the regions rather than the
+// rectangle that happens to contain them.
 std::vector<std::vector<ColumnRun>> BuildColumnRuns(const ChunkBuckets& buckets) {
     std::vector<std::vector<ColumnRun>> rows(static_cast<std::size_t>(buckets.rows));
     for (std::uint64_t row = 0; row < buckets.rows; ++row) {

@@ -353,6 +353,22 @@ struct ColumnRun {
 // image, while the cut touches one chunk per row. On a 4096^2 image that is 256 chunks decoded to
 // use 16. The runs are what the walk reads instead, so the cost follows the regions rather than the
 // rectangle that happens to contain them.
+// The chunk cells and pixel bounds of one spatial footprint.
+//
+// Everything else the accumulation needs belongs to the reduction, so this is the whole of what
+// changes from one footprint to the next -- and the whole reason the accumulation had to be written
+// inside the loop that cuts them.
+struct FootprintBounds {
+    std::uint64_t chunk_cv_begin = 0;
+    std::uint64_t chunk_cv_end = 0;
+    std::uint64_t chunk_cu_begin = 0;
+    std::uint64_t chunk_cu_end = 0;
+    std::uint64_t u_begin = 0;
+    std::uint64_t u_end = 0;
+    std::uint64_t v_begin = 0;
+    std::uint64_t v_end = 0;
+};
+
 std::vector<std::vector<ColumnRun>> BuildColumnRuns(const ChunkBuckets& buckets) {
     std::vector<std::vector<ColumnRun>> rows(static_cast<std::size_t>(buckets.rows));
     for (std::uint64_t row = 0; row < buckets.rows; ++row) {
@@ -548,6 +564,232 @@ Result<void> ReduceSpectral(const ReadableImage& image, const SpectralReduceRequ
         }
     };
 
+    // One read's worth of pixels, accumulated into the block's own totals.
+    //
+    // Named rather than written into the call below, for the reason plane_histogram.cc gives for
+    // bin_slab: a visitor nested inside the walk inside the emitter is three lambdas deep before the
+    // first loop, and this one carries a fourth inside it.
+    //
+    // The footprint's bounds arrive as an argument and are unpacked into the names the body already
+    // used, so that the accumulation is the same text it has been since it stopped doing its own
+    // reading. It stays a lambda passed as a template parameter, never a std::function: the
+    // per-pixel loop inlines through it. ADR 0005.
+    const auto accumulate_slab = [&](const FootprintBounds& footprint_bounds, const Slab& slab) {
+        const std::uint64_t chunk_cv_begin = footprint_bounds.chunk_cv_begin;
+        const std::uint64_t chunk_cv_end = footprint_bounds.chunk_cv_end;
+        const std::uint64_t chunk_cu_begin = footprint_bounds.chunk_cu_begin;
+        const std::uint64_t chunk_cu_end = footprint_bounds.chunk_cu_end;
+        const std::uint64_t u_begin = footprint_bounds.u_begin;
+        const std::uint64_t u_end = footprint_bounds.u_end;
+        const std::uint64_t v_begin = footprint_bounds.v_begin;
+        const std::uint64_t v_end = footprint_bounds.v_end;
+
+        // Into locals so that the accumulation below is the text it was when this
+        // function did its own reading.
+        const float* const slab_pixels = slab.pixels;
+        const std::uint64_t stride_u = slab.stride_u;
+        const std::uint64_t stride_v = slab.stride_v;
+        const std::uint64_t stride_z = slab.stride_z;
+        const std::uint64_t slab_length = slab.channel_count;
+
+        const std::uint64_t cv_span = chunk_cv_end - chunk_cv_begin;
+        const std::uint64_t cu_span = chunk_cu_end - chunk_cu_begin;
+        const std::uint64_t cells = std::max<std::uint64_t>(1, cv_span * cu_span);
+        const std::uint64_t units = slab_length * cells;
+        const std::size_t partial_region_stride =
+            statistic_count * static_cast<std::size_t>(slab_length);
+        const std::size_t partial_stride =
+            std::max<std::size_t>(1, request.region_count * partial_region_stride);
+
+        // One (channel, chunk cell) unit of the accumulation, into a private partial
+        // laid out [region][statistic][channel within this slab]. Private because two
+        // units of the same channel can touch the same region -- a region wider than a
+        // chunk spans several cells -- so they would otherwise be adding to one double.
+        const auto accumulate_unit = [&](std::uint64_t channel, std::uint64_t cell_cv,
+                                         std::uint64_t cell_cu, double* partial) {
+            const float* plane = slab_pixels + (channel * stride_z);
+
+            const std::uint64_t chunk_cv = cell_cv;
+            const std::uint64_t cell_v0 = std::max(v_begin, chunk_cv * plan.chunk_v);
+            const std::uint64_t cell_v1 = std::min(v_end, (chunk_cv + 1) * plan.chunk_v);
+            if (cell_v0 >= cell_v1) {
+                return;
+            }
+            const std::uint64_t chunk_cu = cell_cu;
+            const std::uint64_t cell_u0 = std::max(u_begin, chunk_cu * plan.chunk_u);
+            const std::uint64_t cell_u1 = std::min(u_end, (chunk_cu + 1) * plan.chunk_u);
+            if (cell_u0 >= cell_u1) {
+                return;
+            }
+
+            const auto cell = buckets.Cell(chunk_cu, chunk_cv);
+            const auto entry_end = buckets.offsets.at(cell + 1);
+            for (auto entry = buckets.offsets.at(cell); entry < entry_end; ++entry) {
+                const std::size_t r = buckets.entries.at(static_cast<std::size_t>(entry));
+                const auto& region = regions.at(r);
+
+                const std::uint64_t ru0 = std::max(cell_u0, region.u_start);
+                const std::uint64_t ru1 = std::min(cell_u1, region.u_start + region.u_size);
+                const std::uint64_t rv0 = std::max(cell_v0, region.v_start);
+                const std::uint64_t rv1 = std::min(cell_v1, region.v_start + region.v_size);
+                if (ru0 >= ru1 || rv0 >= rv1) {
+                    continue;
+                }
+
+                double* out = partial + (r * partial_region_stride);
+                for (std::uint64_t y = rv0; y < rv1; ++y) {
+                    RowTotals totals;
+                    if (region.runs != nullptr) {
+                        // Every pixel of a run is selected, so each one goes
+                        // through the same loop an unmasked region uses and the
+                        // per-pixel test never happens.
+                        const auto r = static_cast<std::size_t>(y - region.v_start);
+                        for (auto k = region.run_offsets[r];
+                             k < region.run_offsets[r + 1]; ++k) {
+                            const std::uint64_t run_begin =
+                                region.u_start + region.runs[2 * k];
+                            if (run_begin >= ru1) {
+                                break;  // runs ascend, so the rest are past the cell
+                            }
+                            const std::uint64_t run_end =
+                                region.u_start + region.runs[(2 * k) + 1];
+                            const std::uint64_t first = std::max(ru0, run_begin);
+                            const std::uint64_t last = std::min(ru1, run_end);
+                            if (first >= last) {
+                                continue;
+                            }
+                            const float* span = plane + ((y - v_begin) * stride_v) +
+                                                ((first - u_begin) * stride_u);
+                            if (stride_u == 1) {
+                                AccumulateRow<true, false>(span, 1, last - first, nullptr, 1,
+                                                           totals);
+                            } else {
+                                AccumulateRow<false, false>(span, stride_u, last - first,
+                                                            nullptr, 1, totals);
+                            }
+                        }
+                    } else {
+                        const float* pixel_row =
+                            plane + ((y - v_begin) * stride_v) + ((ru0 - u_begin) * stride_u);
+                        const std::uint8_t* selected =
+                            region.mask == nullptr
+                                ? nullptr
+                                : region.mask +
+                                      ((y - region.v_start) * region.mask_v_stride) +
+                                      ((ru0 - region.u_start) * region.mask_u_stride);
+                        const std::uint64_t run = ru1 - ru0;
+                        const std::uint64_t mask_step = region.mask_u_stride;
+                        if (stride_u == 1) {
+                            if (selected == nullptr) {
+                                AccumulateRow<true, false>(pixel_row, 1, run, nullptr, 1, totals);
+                            } else {
+                                AccumulateRow<true, true>(pixel_row, 1, run, selected, mask_step,
+                                                          totals);
+                            }
+                        } else if (selected == nullptr) {
+                            AccumulateRow<false, false>(pixel_row, stride_u, run, nullptr, 1,
+                                                        totals);
+                        } else {
+                            AccumulateRow<false, true>(pixel_row, stride_u, run, selected,
+                                                       mask_step, totals);
+                        }
+                    }
+
+                    if (slot_num_pixels >= 0) {
+                        out[(static_cast<std::size_t>(slot_num_pixels) * slab_length) + channel] += static_cast<double>(totals.good);
+                    }
+                    if (slot_nan_count >= 0) {
+                        out[(static_cast<std::size_t>(slot_nan_count) * slab_length) + channel] += static_cast<double>(totals.bad);
+                    }
+                    if (slot_sum >= 0) {
+                        out[(static_cast<std::size_t>(slot_sum) * slab_length) + channel] += totals.sum;
+                    }
+                    if (slot_sum_sq >= 0) {
+                        out[(static_cast<std::size_t>(slot_sum_sq) * slab_length) + channel] += totals.sum_sq;
+                    }
+                    if (slot_min >= 0) {
+                        double& current =
+                            out[(static_cast<std::size_t>(slot_min) * slab_length) + channel];
+                        current = std::min(current, totals.smallest);
+                    }
+                    if (slot_max >= 0) {
+                        double& current =
+                            out[(static_cast<std::size_t>(slot_max) * slab_length) + channel];
+                        current = std::max(current, totals.largest);
+                    }
+                }
+            }
+        };
+
+        // The unit order is the order the nested loops used to run in -- channel, then
+        // chunk row, then chunk column -- so a single task reproduces the old sums bit
+        // for bit. Several tasks do not: each one sums its own units and the partials
+        // are added in task order, which is deterministic but a different association.
+        // The statistics are doubles over as many as 5x10^11 values, and partial sums
+        // are if anything the more accurate arrangement; the tests compare to 1e-9
+        // relative for exactly this reason, and the counts and extrema are unaffected
+        // because integers and min/max do not care what order they arrive in.
+        // One per task, so the split is also an allocation and a memset of this size
+        // once per slab. Capped so that a reduction over thousands of regions does not
+        // spend more on the split than on the pixels.
+        constexpr std::size_t kPartialBudgetBytes = 16U << 20U;
+        const std::size_t tasks_by_memory =
+            std::max<std::size_t>(1, kPartialBudgetBytes / (partial_stride * sizeof(double)));
+        const std::size_t max_tasks = std::min(workers.size(), tasks_by_memory);
+        const std::size_t tasks =
+            PlanRowTasks(plan.chunk_u * plan.chunk_v, units, max_tasks, kLeastPixelsPerUnit);
+
+        partials.assign(tasks * partial_stride, 0.0);
+        for (std::size_t task = 0; task < tasks; ++task) {
+            for (std::size_t r = 0; r < request.region_count; ++r) {
+                double* base =
+                    partials.data() + (task * partial_stride) + (r * partial_region_stride);
+                if (slot_min >= 0) {
+                    auto* from = base + (static_cast<std::size_t>(slot_min) * slab_length);
+                    std::fill(from, from + slab_length, kInfinity);
+                }
+                if (slot_max >= 0) {
+                    auto* from = base + (static_cast<std::size_t>(slot_max) * slab_length);
+                    std::fill(from, from + slab_length, -kInfinity);
+                }
+            }
+        }
+
+        workers.Run(tasks, [&](std::size_t task, std::size_t) {
+            double* partial = partials.data() + (task * partial_stride);
+            for (std::uint64_t unit = task; unit < units; unit += tasks) {
+                const std::uint64_t channel = unit / cells;
+                const std::uint64_t cell = unit % cells;
+                accumulate_unit(channel, chunk_cv_begin + (cell / cu_span),
+                                chunk_cu_begin + (cell % cu_span), partial);
+            }
+        });
+
+        for (std::size_t task = 0; task < tasks; ++task) {
+            const double* partial = partials.data() + (task * partial_stride);
+            for (std::size_t r = 0; r < request.region_count; ++r) {
+                for (std::size_t slot = 0; slot < statistic_count; ++slot) {
+                    const double* from =
+                        partial + (r * partial_region_stride) + (slot * slab_length);
+                    double* to = accumulator.data() + (r * region_stride) +
+                                 (slot * statistic_stride) +
+                                 static_cast<std::size_t>(slab.first_channel);
+                    const bool is_min = slot_min >= 0 && slot == static_cast<std::size_t>(slot_min);
+                    const bool is_max = slot_max >= 0 && slot == static_cast<std::size_t>(slot_max);
+                    for (std::uint64_t channel = 0; channel < slab_length; ++channel) {
+                        if (is_min) {
+                            to[channel] = std::min(to[channel], from[channel]);
+                        } else if (is_max) {
+                            to[channel] = std::max(to[channel], from[channel]);
+                        } else {
+                            to[channel] += from[channel];
+                        }
+                    }
+                }
+            }
+        }
+    };
+
     // Which chunk runs this block's regions occupy, cut into bands of identical rows and then into
     // segments a budget wide. Two footprints of the same block share `reads_done`, so a block taken
     // in a single read still reports once -- at the end, through the emitter.
@@ -606,214 +848,19 @@ Result<void> ReduceSpectral(const ReadableImage& image, const SpectralReduceRequ
                 footprint.v_count = v_end - v_begin;
                 footprint.chunks = run_chunks;
 
-                const auto walked = walk.Over(
-                    footprint, block.begin, block.end, block.reads_done, block.chunks_done, report,
-                    [&](const Slab& slab) {
-                        // Into locals so that the accumulation below is the text it was when this
-                        // function did its own reading.
-                        const float* const slab_pixels = slab.pixels;
-                        const std::uint64_t stride_u = slab.stride_u;
-                        const std::uint64_t stride_v = slab.stride_v;
-                        const std::uint64_t stride_z = slab.stride_z;
-                        const std::uint64_t slab_length = slab.channel_count;
+                FootprintBounds bounds;
+                bounds.chunk_cv_begin = chunk_cv_begin;
+                bounds.chunk_cv_end = chunk_cv_end;
+                bounds.chunk_cu_begin = chunk_cu_begin;
+                bounds.chunk_cu_end = chunk_cu_end;
+                bounds.u_begin = u_begin;
+                bounds.u_end = u_end;
+                bounds.v_begin = v_begin;
+                bounds.v_end = v_end;
 
-                        const std::uint64_t cv_span = chunk_cv_end - chunk_cv_begin;
-                        const std::uint64_t cu_span = chunk_cu_end - chunk_cu_begin;
-                        const std::uint64_t cells = std::max<std::uint64_t>(1, cv_span * cu_span);
-                        const std::uint64_t units = slab_length * cells;
-                        const std::size_t partial_region_stride =
-                            statistic_count * static_cast<std::size_t>(slab_length);
-                        const std::size_t partial_stride =
-                            std::max<std::size_t>(1, request.region_count * partial_region_stride);
-
-                        // One (channel, chunk cell) unit of the accumulation, into a private partial
-                        // laid out [region][statistic][channel within this slab]. Private because two
-                        // units of the same channel can touch the same region -- a region wider than a
-                        // chunk spans several cells -- so they would otherwise be adding to one double.
-                        const auto accumulate_unit = [&](std::uint64_t channel, std::uint64_t cell_cv,
-                                                         std::uint64_t cell_cu, double* partial) {
-                            const float* plane = slab_pixels + (channel * stride_z);
-
-                            const std::uint64_t chunk_cv = cell_cv;
-                            const std::uint64_t cell_v0 = std::max(v_begin, chunk_cv * plan.chunk_v);
-                            const std::uint64_t cell_v1 = std::min(v_end, (chunk_cv + 1) * plan.chunk_v);
-                            if (cell_v0 >= cell_v1) {
-                                return;
-                            }
-                            const std::uint64_t chunk_cu = cell_cu;
-                            const std::uint64_t cell_u0 = std::max(u_begin, chunk_cu * plan.chunk_u);
-                            const std::uint64_t cell_u1 = std::min(u_end, (chunk_cu + 1) * plan.chunk_u);
-                            if (cell_u0 >= cell_u1) {
-                                return;
-                            }
-
-                            const auto cell = buckets.Cell(chunk_cu, chunk_cv);
-                            const auto entry_end = buckets.offsets.at(cell + 1);
-                            for (auto entry = buckets.offsets.at(cell); entry < entry_end; ++entry) {
-                                const std::size_t r = buckets.entries.at(static_cast<std::size_t>(entry));
-                                const auto& region = regions.at(r);
-
-                                const std::uint64_t ru0 = std::max(cell_u0, region.u_start);
-                                const std::uint64_t ru1 = std::min(cell_u1, region.u_start + region.u_size);
-                                const std::uint64_t rv0 = std::max(cell_v0, region.v_start);
-                                const std::uint64_t rv1 = std::min(cell_v1, region.v_start + region.v_size);
-                                if (ru0 >= ru1 || rv0 >= rv1) {
-                                    continue;
-                                }
-
-                                double* out = partial + (r * partial_region_stride);
-                                for (std::uint64_t y = rv0; y < rv1; ++y) {
-                                    RowTotals totals;
-                                    if (region.runs != nullptr) {
-                                        // Every pixel of a run is selected, so each one goes
-                                        // through the same loop an unmasked region uses and the
-                                        // per-pixel test never happens.
-                                        const auto r = static_cast<std::size_t>(y - region.v_start);
-                                        for (auto k = region.run_offsets[r];
-                                             k < region.run_offsets[r + 1]; ++k) {
-                                            const std::uint64_t run_begin =
-                                                region.u_start + region.runs[2 * k];
-                                            if (run_begin >= ru1) {
-                                                break;  // runs ascend, so the rest are past the cell
-                                            }
-                                            const std::uint64_t run_end =
-                                                region.u_start + region.runs[(2 * k) + 1];
-                                            const std::uint64_t first = std::max(ru0, run_begin);
-                                            const std::uint64_t last = std::min(ru1, run_end);
-                                            if (first >= last) {
-                                                continue;
-                                            }
-                                            const float* span = plane + ((y - v_begin) * stride_v) +
-                                                                ((first - u_begin) * stride_u);
-                                            if (stride_u == 1) {
-                                                AccumulateRow<true, false>(span, 1, last - first, nullptr, 1,
-                                                                           totals);
-                                            } else {
-                                                AccumulateRow<false, false>(span, stride_u, last - first,
-                                                                            nullptr, 1, totals);
-                                            }
-                                        }
-                                    } else {
-                                        const float* pixel_row =
-                                            plane + ((y - v_begin) * stride_v) + ((ru0 - u_begin) * stride_u);
-                                        const std::uint8_t* selected =
-                                            region.mask == nullptr
-                                                ? nullptr
-                                                : region.mask +
-                                                      ((y - region.v_start) * region.mask_v_stride) +
-                                                      ((ru0 - region.u_start) * region.mask_u_stride);
-                                        const std::uint64_t run = ru1 - ru0;
-                                        const std::uint64_t mask_step = region.mask_u_stride;
-                                        if (stride_u == 1) {
-                                            if (selected == nullptr) {
-                                                AccumulateRow<true, false>(pixel_row, 1, run, nullptr, 1, totals);
-                                            } else {
-                                                AccumulateRow<true, true>(pixel_row, 1, run, selected, mask_step,
-                                                                          totals);
-                                            }
-                                        } else if (selected == nullptr) {
-                                            AccumulateRow<false, false>(pixel_row, stride_u, run, nullptr, 1,
-                                                                        totals);
-                                        } else {
-                                            AccumulateRow<false, true>(pixel_row, stride_u, run, selected,
-                                                                       mask_step, totals);
-                                        }
-                                    }
-
-                                    if (slot_num_pixels >= 0) {
-                                        out[(static_cast<std::size_t>(slot_num_pixels) * slab_length) + channel] += static_cast<double>(totals.good);
-                                    }
-                                    if (slot_nan_count >= 0) {
-                                        out[(static_cast<std::size_t>(slot_nan_count) * slab_length) + channel] += static_cast<double>(totals.bad);
-                                    }
-                                    if (slot_sum >= 0) {
-                                        out[(static_cast<std::size_t>(slot_sum) * slab_length) + channel] += totals.sum;
-                                    }
-                                    if (slot_sum_sq >= 0) {
-                                        out[(static_cast<std::size_t>(slot_sum_sq) * slab_length) + channel] += totals.sum_sq;
-                                    }
-                                    if (slot_min >= 0) {
-                                        double& current =
-                                            out[(static_cast<std::size_t>(slot_min) * slab_length) + channel];
-                                        current = std::min(current, totals.smallest);
-                                    }
-                                    if (slot_max >= 0) {
-                                        double& current =
-                                            out[(static_cast<std::size_t>(slot_max) * slab_length) + channel];
-                                        current = std::max(current, totals.largest);
-                                    }
-                                }
-                            }
-                        };
-
-                        // The unit order is the order the nested loops used to run in -- channel, then
-                        // chunk row, then chunk column -- so a single task reproduces the old sums bit
-                        // for bit. Several tasks do not: each one sums its own units and the partials
-                        // are added in task order, which is deterministic but a different association.
-                        // The statistics are doubles over as many as 5x10^11 values, and partial sums
-                        // are if anything the more accurate arrangement; the tests compare to 1e-9
-                        // relative for exactly this reason, and the counts and extrema are unaffected
-                        // because integers and min/max do not care what order they arrive in.
-                        // One per task, so the split is also an allocation and a memset of this size
-                        // once per slab. Capped so that a reduction over thousands of regions does not
-                        // spend more on the split than on the pixels.
-                        constexpr std::size_t kPartialBudgetBytes = 16U << 20U;
-                        const std::size_t tasks_by_memory =
-                            std::max<std::size_t>(1, kPartialBudgetBytes / (partial_stride * sizeof(double)));
-                        const std::size_t max_tasks = std::min(workers.size(), tasks_by_memory);
-                        const std::size_t tasks =
-                            PlanRowTasks(plan.chunk_u * plan.chunk_v, units, max_tasks, kLeastPixelsPerUnit);
-
-                        partials.assign(tasks * partial_stride, 0.0);
-                        for (std::size_t task = 0; task < tasks; ++task) {
-                            for (std::size_t r = 0; r < request.region_count; ++r) {
-                                double* base =
-                                    partials.data() + (task * partial_stride) + (r * partial_region_stride);
-                                if (slot_min >= 0) {
-                                    auto* from = base + (static_cast<std::size_t>(slot_min) * slab_length);
-                                    std::fill(from, from + slab_length, kInfinity);
-                                }
-                                if (slot_max >= 0) {
-                                    auto* from = base + (static_cast<std::size_t>(slot_max) * slab_length);
-                                    std::fill(from, from + slab_length, -kInfinity);
-                                }
-                            }
-                        }
-
-                        workers.Run(tasks, [&](std::size_t task, std::size_t) {
-                            double* partial = partials.data() + (task * partial_stride);
-                            for (std::uint64_t unit = task; unit < units; unit += tasks) {
-                                const std::uint64_t channel = unit / cells;
-                                const std::uint64_t cell = unit % cells;
-                                accumulate_unit(channel, chunk_cv_begin + (cell / cu_span),
-                                                chunk_cu_begin + (cell % cu_span), partial);
-                            }
-                        });
-
-                        for (std::size_t task = 0; task < tasks; ++task) {
-                            const double* partial = partials.data() + (task * partial_stride);
-                            for (std::size_t r = 0; r < request.region_count; ++r) {
-                                for (std::size_t slot = 0; slot < statistic_count; ++slot) {
-                                    const double* from =
-                                        partial + (r * partial_region_stride) + (slot * slab_length);
-                                    double* to = accumulator.data() + (r * region_stride) +
-                                                 (slot * statistic_stride) +
-                                                 static_cast<std::size_t>(slab.first_channel);
-                                    const bool is_min = slot_min >= 0 && slot == static_cast<std::size_t>(slot_min);
-                                    const bool is_max = slot_max >= 0 && slot == static_cast<std::size_t>(slot_max);
-                                    for (std::uint64_t channel = 0; channel < slab_length; ++channel) {
-                                        if (is_min) {
-                                            to[channel] = std::min(to[channel], from[channel]);
-                                        } else if (is_max) {
-                                            to[channel] = std::max(to[channel], from[channel]);
-                                        } else {
-                                            to[channel] += from[channel];
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    });
+                const auto walked =
+                    walk.Over(footprint, block.begin, block.end, block.reads_done, block.chunks_done, report,
+                              [&](const Slab& slab) { accumulate_slab(bounds, slab); });
                 if (!walked) {
                     return walked.error();
                 }

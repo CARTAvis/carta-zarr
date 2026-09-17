@@ -46,6 +46,7 @@ endif()
 
 add_library(carta_zarr SHARED
     src/carta_zarr.cc
+    src/dataset_size.cc
     src/read/pieces.cc
     src/read/pieces_read.cc
     src/reduce/pass.cc

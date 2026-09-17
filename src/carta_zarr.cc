@@ -289,8 +289,8 @@ Result<std::size_t> Image::ReadPixelMask(const ReadRequest& request, BufferView<
             return control.error();
         }
 
-        auto read = _impl->store->ReadPixelMaskBytes(_impl->descriptor.pixel_mask_id, selection.value(),
-                                                     destination.data, static_cast<std::size_t>(elements), options);
+        auto read = _impl->source.ReadMask(selection.value(), destination.data,
+                                           static_cast<std::size_t>(elements), options);
         if (!read) {
             return read.error();
         }
@@ -453,7 +453,7 @@ Result<DatasetSize> Dataset::Size(std::chrono::milliseconds directory_size_timeo
             return DatasetSize{physical_size, false};
         }
 
-        auto logical_size = _impl->store->ComputeTotalArraySizeBytes();
+        auto logical_size = internal::TotalArraySizeBytes(*_impl->store);
         if (!logical_size) {
             return logical_size.error();
         }

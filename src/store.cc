@@ -18,6 +18,7 @@
 #include <map>
 #include <optional>
 #include <string>
+#include <type_traits>
 #include <utility>
 #include <vector>
 
@@ -46,17 +47,31 @@ Result<nlohmann::json> ParseNodeMetadata(const std::string& bytes, std::string_v
 
 // A node name is a relative path carrying no ".." component. Validating it here rather than in a
 // Transport holds every Transport to the same rule, and yields the key the caches are stored under.
+//
+// A "." component is dropped rather than refused, because "./SKY" names the node "SKY" and a store
+// is entitled to spell it that way. This used to be the one place the two rules disagreed: a
+// metadata read went through here and was served, and the pixel read that followed went through
+// Transport::ArrayDirectory, which refused the same name -- so an image declaring `flag: "./MASK_0"`
+// described perfectly, reported a pixel mask, and then failed every masked read.
 Result<std::string> NormalizeNodeName(std::string_view node) {
     const std::filesystem::path relative(node);
     if (relative.empty() || relative.is_absolute() || relative.has_root_path()) {
         return MakeError(ErrorCode::invalid_argument, "Invalid Zarr node path", std::string(node));
     }
+    std::filesystem::path normalized;
     for (const auto& part : relative) {
         if (part == "..") {
             return MakeError(ErrorCode::invalid_argument, "Invalid Zarr node path", std::string(node));
         }
+        if (part == "." || part.empty()) {
+            continue;
+        }
+        normalized /= part;
     }
-    return relative.generic_string();
+    if (normalized.empty()) {
+        return MakeError(ErrorCode::invalid_argument, "Invalid Zarr node path", std::string(node));
+    }
+    return normalized.generic_string();
 }
 
 // Return the named codec from a Zarr v3 codec chain, or nullptr when it is absent.
@@ -148,32 +163,6 @@ Result<void> ApplyShardingLayout(const nlohmann::json& sharding, StorageLayout& 
                          std::string(node));
     }
     return {};
-}
-
-Result<std::uint64_t> ElementSizeBytes(const zarr::ArrayMetadata& metadata, std::string_view node) {
-    static const std::map<std::string_view, std::uint64_t> element_sizes{
-        {"bool", 1},      {"int8", 1},       {"uint8", 1},      {"int16", 2},
-        {"uint16", 2},    {"int32", 4},      {"uint32", 4},     {"int64", 8},
-        {"uint64", 8},    {"float16", 2},    {"float32", 4},    {"float64", 8},
-        {"complex64", 8}, {"complex128", 16},
-    };
-    if (const auto found = element_sizes.find(metadata.data_type); found != element_sizes.end()) {
-        return found->second;
-    }
-
-    // XRADIO coordinate labels use the fixed_length_utf32 extension data type. Other fixed-length
-    // extension types can be sized the same way when they declare length_bytes.
-    if (metadata.data_type_configuration.is_object() &&
-        metadata.data_type_configuration.contains("length_bytes")) {
-        const auto& length_bytes = metadata.data_type_configuration.at("length_bytes");
-        if (zarr::IsPositiveInteger(length_bytes)) {
-            return length_bytes.get<std::uint64_t>();
-        }
-    }
-
-    return MakeError(ErrorCode::unsupported_data_type,
-                     "Array " + std::string(node) + " has unsupported data_type " + metadata.data_type,
-                     std::string(node));
 }
 
 }  // namespace
@@ -288,7 +277,14 @@ const Result<nlohmann::json>& Store::ReadNodeMetadata(std::string_view node) con
 }
 
 const Result<zarr::ArrayMetadata>& Store::ReadArrayMetadata(std::string_view node) const {
-    return _caches->array_metadata.GetOrCompute(std::string(node), [&]() -> Result<zarr::ArrayMetadata> {
+    // Keyed by the normalized name, as the node metadata below it is: two spellings of one node are
+    // one node, and keying by what the caller typed would read and parse it twice.
+    auto key = NormalizeNodeName(node);
+    if (!key) {
+        return _caches->array_metadata.GetOrCompute(
+            std::string(node), [&]() -> Result<zarr::ArrayMetadata> { return key.error(); });
+    }
+    return _caches->array_metadata.GetOrCompute(key.value(), [&]() -> Result<zarr::ArrayMetadata> {
         const auto& metadata_result = ReadNodeMetadata(node);
         if (!metadata_result) {
             return metadata_result.error();
@@ -333,57 +329,12 @@ const Result<std::vector<std::string>>& Store::ListNodes() const {
     });
 }
 
-Result<std::uint64_t> Store::ComputeTotalArraySizeBytes() const {
-    const auto& nodes_result = ListNodes();
-    if (!nodes_result) {
-        return nodes_result.error();
-    }
-
-    std::uint64_t total_bytes = 0;
-    std::size_t array_count = 0;
-    for (const auto& node : nodes_result.value()) {
-        const auto& metadata = ReadNodeMetadata(node);
-        if (!metadata || !metadata.value().is_object() || metadata.value().value("node_type", "") != "array") {
-            continue;
-        }
-        ++array_count;
-
-        const auto& array_metadata_result = ReadArrayMetadata(node);
-        if (!array_metadata_result) {
-            return array_metadata_result.error();
-        }
-        const auto& array_metadata = array_metadata_result.value();
-        auto element_size_result = ElementSizeBytes(array_metadata, node);
-        if (!element_size_result) {
-            return element_size_result.error();
-        }
-
-        std::uint64_t array_bytes = element_size_result.value();
-        for (const auto dimension : array_metadata.shape) {
-            if (dimension == 0) {
-                array_bytes = 0;
-                break;
-            }
-            if (array_bytes > std::numeric_limits<std::uint64_t>::max() / dimension) {
-                return MakeError(ErrorCode::invalid_metadata,
-                                 "Array " + node + " byte size overflows uint64_t", node);
-            }
-            array_bytes *= dimension;
-        }
-        if (total_bytes > std::numeric_limits<std::uint64_t>::max() - array_bytes) {
-            return MakeError(ErrorCode::invalid_metadata, "Total Zarr array byte size overflows uint64_t");
-        }
-        total_bytes += array_bytes;
-    }
-
-    if (array_count == 0) {
-        return MakeError(ErrorCode::invalid_metadata, "Zarr store contains no arrays");
-    }
-    return total_bytes;
-}
-
 Result<std::vector<double>> Store::ReadNumericArray(std::string_view node) const {
-    return _caches->double_arrays.GetOrCompute(std::string(node), [&] { return ReadNumericArrayUncached(node); });
+    auto key = NormalizeNodeName(node);
+    if (!key) {
+        return key.error();
+    }
+    return _caches->double_arrays.GetOrCompute(key.value(), [&] { return ReadNumericArrayUncached(node); });
 }
 
 Result<std::vector<double>> Store::ReadNumericArrayUncached(std::string_view node) const {
@@ -403,12 +354,16 @@ Result<std::vector<double>> Store::ReadNumericArrayUncached(std::string_view nod
 // weakly_canonical on every pixel read, and what it was protecting against belongs at the root,
 // which is resolved once when the transport opens.
 Result<std::filesystem::path> Store::ResolveArrayDirectory(std::string_view node) const {
-    return _transport->ArrayDirectory(node);
+    auto name = NormalizeNodeName(node);
+    if (!name) {
+        return name.error();
+    }
+    return _transport->ArrayDirectory(name.value());
 }
 
-Result<void> Store::ReadPixelsFloat32(std::string_view node, const zarr::PixelSelection& selection,
-                                      float* destination, std::size_t destination_elements,
-                                      const ReadOptions& options) const {
+template <typename T>
+Result<void> Store::ReadPixelsInto(std::string_view node, const zarr::PixelSelection& selection, T* destination,
+                                   std::size_t destination_elements, const ReadOptions& options) const {
     try {
         const auto& metadata = ReadArrayMetadata(node);
         if (!metadata) {
@@ -418,34 +373,29 @@ Result<void> Store::ReadPixelsFloat32(std::string_view node, const zarr::PixelSe
         if (!target_path) {
             return target_path.error();
         }
-        return zarr_metadata::ReadFloat32(target_path.value(), _context, node, metadata.value().data_type, selection, destination,
-                                           destination_elements, options);
+        if constexpr (std::is_same_v<T, float>) {
+            return zarr_metadata::ReadFloat32(target_path.value(), _context, node, metadata.value().data_type,
+                                              selection, destination, destination_elements, options);
+        } else {
+            return zarr_metadata::ReadMaskBytes(target_path.value(), _context, node, metadata.value().data_type,
+                                                selection, destination, destination_elements, options);
+        }
     } catch (const std::exception& e) {
         return MakeError(ErrorCode::io_error, e.what(), std::string(node));
     }
 }
 
-Result<void> Store::ReadPixelMaskBytes(std::string_view node, const zarr::PixelSelection& selection,
-                                       std::uint8_t* destination, std::size_t destination_elements,
-                                       const ReadOptions& options) const {
-    try {
-        const auto& metadata = ReadArrayMetadata(node);
-        if (!metadata) {
-            return metadata.error();
-        }
-        auto target_path = ResolveArrayDirectory(node);
-        if (!target_path) {
-            return target_path.error();
-        }
-        return zarr_metadata::ReadMaskBytes(target_path.value(), _context, node, metadata.value().data_type, selection, destination,
-                                            destination_elements, options);
-    } catch (const std::exception& e) {
-        return MakeError(ErrorCode::io_error, e.what(), std::string(node));
-    }
-}
+template Result<void> Store::ReadPixelsInto<float>(std::string_view, const zarr::PixelSelection&, float*,
+                                                   std::size_t, const ReadOptions&) const;
+template Result<void> Store::ReadPixelsInto<std::uint8_t>(std::string_view, const zarr::PixelSelection&,
+                                                          std::uint8_t*, std::size_t, const ReadOptions&) const;
 
 Result<std::vector<std::string>> Store::ReadStringArray1D(std::string_view node) const {
-    return _caches->string_arrays.GetOrCompute(std::string(node), [&] { return ReadStringArray1DUncached(node); });
+    auto key = NormalizeNodeName(node);
+    if (!key) {
+        return key.error();
+    }
+    return _caches->string_arrays.GetOrCompute(key.value(), [&] { return ReadStringArray1DUncached(node); });
 }
 
 Result<std::vector<std::string>> Store::ReadStringArray1DUncached(std::string_view node) const {

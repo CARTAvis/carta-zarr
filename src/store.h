@@ -81,7 +81,6 @@ public:
     // Every node in the hierarchy, sorted, each one's metadata read and parsed. The names are what a
     // caller walks; what a node holds it asks for by name, which is already in hand by then.
     const Result<std::vector<std::string>>& ListNodes() const;
-    Result<std::uint64_t> ComputeTotalArraySizeBytes() const;
     // Values in C order, flattened. The rank is in the node's ArrayMetadata; ArrayView addresses
     // them by dimension name rather than by offset.
     Result<std::vector<double>> ReadNumericArray(std::string_view node) const;
@@ -91,12 +90,15 @@ public:
     // Pixel reads are deliberately uncached here: a slab is requested once and is far larger than
     // anything the metadata tables hold. Reuse belongs in TensorStore's chunk cache, which already
     // works at chunk granularity and is sized by the consumer's Context.
-    Result<void> ReadPixelsFloat32(std::string_view node, const zarr::PixelSelection& selection,
-                                   float* destination, std::size_t destination_elements,
-                                   const ReadOptions& options) const;
-    Result<void> ReadPixelMaskBytes(std::string_view node, const zarr::PixelSelection& selection,
-                                    std::uint8_t* destination, std::size_t destination_elements,
-                                    const ReadOptions& options) const;
+    //
+    // One function rather than two, because reading an image's pixels and reading its flag differed
+    // only in the element type: both find the array's metadata, ask the transport where its bytes
+    // are, and hand both to the reader. `float` is pixels, converted from whatever the array holds;
+    // `std::uint8_t` is a flag, one byte an element, true meaning a good pixel. Instantiated for
+    // those two in store.cc and for nothing else.
+    template <typename T>
+    Result<void> ReadPixelsInto(std::string_view node, const zarr::PixelSelection& selection, T* destination,
+                                std::size_t destination_elements, const ReadOptions& options) const;
 
 private:
     Result<std::filesystem::path> ResolveArrayDirectory(std::string_view node) const;
@@ -119,6 +121,13 @@ Result<Store> OpenStore(std::string_view location, StoreContextPtr context = {})
 
 // Open a store over an already-built transport. This is the seam tests enter through.
 Result<Store> OpenStore(TransportPtr transport, StoreContextPtr context = {});
+
+// Every array in the hierarchy, at its uncompressed size. A report about a dataset rather than
+// something a node reader does, so it asks Store the same three questions any other caller would
+// and holds no state of its own.
+//
+// Reports invalid_metadata for a store with no arrays at all, and for a size that overflows.
+Result<std::uint64_t> TotalArraySizeBytes(const Store& store);
 
 }  // namespace carta::zarr::internal
 

@@ -574,6 +574,50 @@ void TestImageDisagreeingWithACoordinate(const std::filesystem::path& root) {
             "an image whose frequency axis disagrees with the frequency coordinate was described anyway");
 }
 
+// A node name is a relative path, and "./MASK_0" names the same node as "MASK_0". Two rules decide
+// that and they disagree: Store::NormalizeNodeName accepts a "." component, and
+// Transport::ArrayDirectory refuses one. So an image declaring its flag with that spelling describes
+// perfectly -- every metadata read goes through the first rule -- and then fails every masked pixel
+// read, which goes through the second.
+//
+// An image that opens, reports a pixel mask, and cannot be read is precisely the outcome ADR 0004
+// reopened itself to avoid: a store that can be listed and never opened is a worse answer than one
+// that is refused.
+void TestANodeNameSpelledWithADotIsTheSameNode(const std::filesystem::path& root) {
+    const std::string dimensions = R"(["time","frequency","polarization","l","m"])";
+    CreateValidStore(root);
+    Write(root / "SKY" / "zarr.json",
+          NumericArray("[1,3,2,4,5]", dimensions, "float32", R"({"units":"Jy/beam","flag":"./MASK_0"})"));
+    // Written out rather than through NumericArray, which fills with 0: a boolean array's fill
+    // value has to be a boolean, and TensorStore refuses the array outright otherwise.
+    Write(root / "MASK_0" / "zarr.json",
+          "{\"shape\":[1,3,2,4,5],\"data_type\":\"bool\","
+          "\"chunk_grid\":{\"name\":\"regular\",\"configuration\":{\"chunk_shape\":[1,3,2,4,5]}},"
+          "\"chunk_key_encoding\":{\"name\":\"default\",\"configuration\":{\"separator\":\"/\"}},"
+          "\"fill_value\":true,\"codecs\":[{\"name\":\"bytes\"}],"
+          "\"attributes\":{\"type\":\"flag\"},\"dimension_names\":" + dimensions +
+              ",\"zarr_format\":3,\"node_type\":\"array\"}");
+
+    const auto context = carta::zarr::Context::Create();
+    Require(static_cast<bool>(context), "Context::Create failed for the dotted node name");
+    const auto dataset = carta::zarr::Dataset::Open(context.value(), root.string());
+    Require(static_cast<bool>(dataset), "the dotted-flag dataset did not open");
+    const auto image = dataset.value().OpenImage("SKY");
+    Require(static_cast<bool>(image), "SKY did not open in the dotted-flag dataset");
+    Require(image.value().descriptor().has_pixel_mask,
+            "a flag spelled with a leading ./ was not accepted while describing the image");
+
+    // One pixel on every axis, so this says nothing about order and only asks whether the read
+    // reaches the store at all.
+    carta::zarr::ReadRequest request;
+    request.axes.assign(image.value().descriptor().axes.size(), carta::zarr::Range{0, 1, 1});
+    std::vector<float> destination(1, 0.0F);
+    const auto read = image.value().Read(request, {destination.data(), destination.size()});
+    Require(static_cast<bool>(read),
+            std::string("an image whose flag is spelled ./MASK_0 opened and then could not be read: ") +
+                (read ? "" : read.error().message));
+}
+
 // A sharded array grids its store by shard; the inner chunk shape lives in the sharding codec.
 // An image dataset without SKY is valid: discovery identifies the dataset from its image variables.
 // An image that names a beam table is an image with a beam. When the labels that say which
@@ -718,6 +762,7 @@ int main() {
         TestShardedStorageLayout(root / "sharded");
         TestEmptyAndOversizedMetadata(root / "metadata-bytes");
         TestBeamTableWithUnreadableLabels(root / "beam-labels");
+        TestANodeNameSpelledWithADotIsTheSameNode(root / "dotted-node");
         TestReferenceFixture();
         TestCompatibilityFixture();
         std::filesystem::remove_all(root);

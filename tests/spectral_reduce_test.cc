@@ -20,6 +20,8 @@
 #include <string>
 #include <vector>
 
+#include "support/check.h"
+
 namespace {
 
 // The same image written both ways round: XRADIO puts m last, so a plane is contiguous along m,
@@ -47,11 +49,7 @@ bool ExpectedFlag(std::uint64_t l, std::uint64_t m) {
     return ((l + m) % 3) != 0;
 }
 
-void Require(bool condition, const std::string& message) {
-    if (!condition) {
-        throw std::runtime_error(message);
-    }
-}
+using carta::zarr::testing::Require;
 
 void RequireClose(double actual, double expected, const std::string& message) {
     if (std::isnan(expected)) {

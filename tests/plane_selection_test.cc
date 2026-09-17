@@ -16,9 +16,11 @@
 
 #include <cstdint>
 #include <cstdio>
-#include <stdexcept>
+#include <exception>
 #include <string>
 #include <vector>
+
+#include "support/check.h"
 
 namespace {
 
@@ -31,11 +33,7 @@ using carta::zarr::internal::AxisMap;
 using carta::zarr::internal::CheckedPlanes;
 using carta::zarr::internal::MapAxes;
 
-void Require(bool condition, const std::string& message) {
-    if (!condition) {
-        throw std::runtime_error(message);
-    }
-}
+using carta::zarr::testing::Require;
 
 // An image in the logical order XRADIO reports. A length of zero leaves the axis out entirely,
 // which is the case that separates "the image has no such axis" from "index 0 of an axis of one".

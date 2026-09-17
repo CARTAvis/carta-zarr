@@ -18,17 +18,15 @@
 
 #include <carta-zarr/carta_zarr.h>
 
+#include "support/check.h"
+
 namespace {
 
 using carta::zarr::ErrorCode;
 using carta::zarr::ProbeKind;
 using carta::zarr::SchemaMatchKind;
 
-void Require(bool condition, const std::string& message) {
-    if (!condition) {
-        throw std::runtime_error(message);
-    }
-}
+using carta::zarr::testing::Require;
 
 void Write(const std::filesystem::path& path, const std::string& contents) {
     std::filesystem::create_directories(path.parent_path());

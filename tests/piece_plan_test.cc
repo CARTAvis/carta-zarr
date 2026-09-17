@@ -14,10 +14,12 @@
 #include "read/pieces.h"
 
 #include <cstdint>
+#include <exception>
 #include <iostream>
-#include <stdexcept>
 #include <string>
 #include <vector>
+
+#include "support/check.h"
 
 namespace {
 
@@ -30,11 +32,7 @@ using carta::zarr::ReadRequest;
 using carta::zarr::internal::PiecePlan;
 using carta::zarr::internal::PlanPieces;
 
-void Require(bool condition, const std::string& message) {
-    if (!condition) {
-        throw std::runtime_error(message);
-    }
-}
+using carta::zarr::testing::Require;
 
 // An image in the logical order XRADIO reports: x, y, spectral, polarization, time.
 ImageDescriptor MakeImage(std::uint64_t x, std::uint64_t y, std::uint64_t channels, bool has_mask = false) {

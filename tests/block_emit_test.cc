@@ -16,9 +16,11 @@
 
 #include <cstdint>
 #include <cstdio>
-#include <stdexcept>
+#include <exception>
 #include <string>
 #include <vector>
+
+#include "support/check.h"
 
 namespace {
 
@@ -36,11 +38,7 @@ using carta::zarr::internal::MapAxes;
 using carta::zarr::internal::PassPlan;
 using carta::zarr::internal::PlanPass;
 
-void Require(bool condition, const std::string& message) {
-    if (!condition) {
-        throw std::runtime_error(message);
-    }
-}
+using carta::zarr::testing::Require;
 
 ImageDescriptor MakeImage(std::uint64_t channels) {
     ImageDescriptor descriptor;

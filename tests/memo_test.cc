@@ -17,22 +17,20 @@
 
 #include <atomic>
 #include <chrono>
+#include <exception>
 #include <iostream>
-#include <stdexcept>
 #include <string>
 #include <thread>
 #include <vector>
+
+#include "support/check.h"
 
 namespace {
 
 using carta::zarr::internal::Lazy;
 using carta::zarr::internal::Memo;
 
-void Require(bool condition, const std::string& message) {
-    if (!condition) {
-        throw std::runtime_error(message);
-    }
-}
+using carta::zarr::testing::Require;
 
 void TestComputesOncePerKey() {
     Memo<std::string, int> memo;

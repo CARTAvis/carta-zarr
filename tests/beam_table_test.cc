@@ -18,10 +18,12 @@
 #include "schema/xradio/beam_table.h"
 
 #include <cstdint>
+#include <exception>
 #include <iostream>
-#include <stdexcept>
 #include <string>
 #include <vector>
+
+#include "support/check.h"
 
 namespace {
 
@@ -30,11 +32,7 @@ using carta::zarr::ErrorCode;
 using carta::zarr::internal::xradio::DescribeBeams;
 using ArrayMetadata = carta::zarr::internal::zarr::ArrayMetadata;
 
-void Require(bool condition, const std::string& message) {
-    if (!condition) {
-        throw std::runtime_error(message);
-    }
-}
+using carta::zarr::testing::Require;
 
 ArrayMetadata Table(std::vector<std::uint64_t> shape, std::vector<std::string> dimensions,
                     const std::string& unit = "rad") {

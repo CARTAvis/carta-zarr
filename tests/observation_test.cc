@@ -17,9 +17,11 @@
 #include "schema/xradio/observation.h"
 
 #include <cmath>
+#include <exception>
 #include <iostream>
-#include <stdexcept>
 #include <string>
+
+#include "support/check.h"
 
 namespace {
 
@@ -27,11 +29,7 @@ using carta::zarr::ObservationInfo;
 using carta::zarr::internal::xradio::DescribeObservation;
 using ArrayMetadata = carta::zarr::internal::zarr::ArrayMetadata;
 
-void Require(bool condition, const std::string& message) {
-    if (!condition) {
-        throw std::runtime_error(message);
-    }
-}
+using carta::zarr::testing::Require;
 
 bool Near(double left, double right) {
     return std::abs(left - right) <= 1.0e-6 * std::max({1.0, std::abs(left), std::abs(right)});

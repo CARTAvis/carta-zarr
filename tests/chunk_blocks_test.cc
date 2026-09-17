@@ -12,8 +12,10 @@
 #include "chunk_blocks.h"
 
 #include <cstdio>
-#include <stdexcept>
+#include <exception>
 #include <string>
+
+#include "support/check.h"
 
 namespace {
 
@@ -23,11 +25,7 @@ using carta::zarr::internal::kMinChunksPerRead;
 
 constexpr std::uint64_t kMiB = 1u << 20;
 
-void Require(bool condition, const std::string& message) {
-    if (!condition) {
-        throw std::runtime_error(message);
-    }
-}
+using carta::zarr::testing::Require;
 
 std::uint64_t ChunksPerRead(std::uint64_t chunk_bytes) {
     return DefaultReadBytes(chunk_bytes) / chunk_bytes;

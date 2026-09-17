@@ -15,11 +15,13 @@
 
 #include "read/pieces.h"
 
+#include "support/check.h"
+
 #include "support/synthetic_pixel_source.h"
 
 #include <cstdint>
+#include <exception>
 #include <iostream>
-#include <stdexcept>
 #include <string>
 #include <vector>
 
@@ -39,11 +41,7 @@ using carta::zarr::internal::ReadPixelMask;
 using carta::zarr::internal::WorkPool;
 using carta::zarr::testing::SyntheticPixelSource;
 
-void Require(bool condition, const std::string& message) {
-    if (!condition) {
-        throw std::runtime_error(message);
-    }
-}
+using carta::zarr::testing::Require;
 
 // A ReadableImage names a pool because a reduction runs its arithmetic on one. An ordinary read
 // never touches it, and a pool of one starts no threads at all, so this costs nothing here.

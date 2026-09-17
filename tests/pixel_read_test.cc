@@ -16,12 +16,14 @@
 #include <chrono>
 #include <cmath>
 #include <cstdint>
+#include <exception>
 #include <filesystem>
 #include <iostream>
-#include <stdexcept>
 #include <string>
 #include <thread>
 #include <vector>
+
+#include "support/check.h"
 
 namespace {
 
@@ -52,11 +54,7 @@ bool ExpectedFlag(std::uint64_t l, std::uint64_t m) {
     return ((l + m) % 3) != 0;
 }
 
-void Require(bool condition, const std::string& message) {
-    if (!condition) {
-        throw std::runtime_error(message);
-    }
-}
+using carta::zarr::testing::Require;
 
 carta::zarr::Image OpenSky(const char* kFixture) {
     Require(std::filesystem::exists(kFixture),

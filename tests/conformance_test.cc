@@ -14,14 +14,16 @@
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
+#include <exception>
 #include <filesystem>
 #include <iostream>
-#include <stdexcept>
 #include <string>
 #include <vector>
 
 #include <carta-zarr/carta_zarr.h>
 #include <carta-zarr/descriptor.h>
+
+#include "support/check.h"
 
 namespace {
 
@@ -29,11 +31,7 @@ using carta::zarr::AxisRole;
 
 const std::filesystem::path kFixture{CARTA_ZARR_CONFORMANCE_FIXTURE};
 
-void Require(bool condition, const std::string& message) {
-    if (!condition) {
-        throw std::runtime_error(message);
-    }
-}
+using carta::zarr::testing::Require;
 
 void RequireClose(double actual, double expected, double tolerance, const std::string& message) {
     Require(std::abs(actual - expected) <= tolerance,

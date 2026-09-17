@@ -15,10 +15,12 @@
 
 #include "schema/xradio/flag.h"
 
+#include <exception>
 #include <iostream>
-#include <stdexcept>
 #include <string>
 #include <vector>
+
+#include "support/check.h"
 
 namespace {
 
@@ -27,11 +29,7 @@ using carta::zarr::internal::xradio::IsFlag;
 using carta::zarr::internal::xradio::RequireUsableFlag;
 using ArrayMetadata = carta::zarr::internal::zarr::ArrayMetadata;
 
-void Require(bool condition, const std::string& message) {
-    if (!condition) {
-        throw std::runtime_error(message);
-    }
-}
+using carta::zarr::testing::Require;
 
 const std::vector<std::string> kSkyDimensions{"time", "frequency", "polarization", "l", "m"};
 const std::vector<std::uint64_t> kSkyShape{1, 3, 2, 4, 5};

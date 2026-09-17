@@ -17,12 +17,14 @@
 #include "axis_map.h"
 #include "reduce/pass.h"
 
+#include "support/check.h"
+
 #include "support/synthetic_pixel_source.h"
 
 #include <chrono>
 #include <cmath>
 #include <cstdio>
-#include <stdexcept>
+#include <exception>
 #include <string>
 
 namespace {
@@ -40,11 +42,7 @@ using carta::zarr::internal::RunPass;
 using carta::zarr::internal::Slab;
 using carta::zarr::testing::SyntheticPixelSource;
 
-void Require(bool condition, const std::string& message) {
-    if (!condition) {
-        throw std::runtime_error(message);
-    }
-}
+using carta::zarr::testing::Require;
 
 // An image in the logical order XRADIO reports: x, y, spectral, polarization, time.
 ImageDescriptor MakeImage(std::uint64_t x, std::uint64_t y, std::uint64_t channels, bool has_mask = false) {

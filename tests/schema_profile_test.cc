@@ -18,13 +18,16 @@
 #include "schema/profile.h"
 #include "schema/xradio/flag.h"
 #include "store.h"
+
+#include "support/check.h"
+
 #include "support/in_memory_transport.h"
 
 #include <algorithm>
+#include <exception>
 #include <iostream>
 #include <map>
 #include <set>
-#include <stdexcept>
 #include <string>
 #include <vector>
 
@@ -36,11 +39,7 @@ using carta::zarr::SchemaMatchKind;
 using carta::zarr::internal::xradio::DetermineFlag;
 using carta::zarr::testing::MakeInMemoryTransport;
 
-void Require(bool condition, const std::string& message) {
-    if (!condition) {
-        throw std::runtime_error(message);
-    }
-}
+using carta::zarr::testing::Require;
 
 bool HasDiagnostic(const carta::zarr::SchemaProbeResult& probe, const std::string& code);
 

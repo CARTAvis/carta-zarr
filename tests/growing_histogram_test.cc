@@ -18,19 +18,17 @@
 
 #include <cstdint>
 #include <cstdio>
-#include <stdexcept>
+#include <exception>
 #include <string>
 #include <vector>
+
+#include "support/check.h"
 
 namespace {
 
 using carta::zarr::internal::GrowingHistogram;
 
-void Require(bool condition, const std::string& message) {
-    if (!condition) {
-        throw std::runtime_error(message);
-    }
-}
+using carta::zarr::testing::Require;
 
 std::string Show(const std::vector<std::uint64_t>& counts) {
     std::string text = "{";

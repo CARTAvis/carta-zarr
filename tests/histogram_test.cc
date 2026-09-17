@@ -11,12 +11,14 @@
 
 #include <cmath>
 #include <cstdint>
-#include <limits>
+#include <exception>
 #include <filesystem>
 #include <iostream>
-#include <stdexcept>
+#include <limits>
 #include <string>
 #include <vector>
+
+#include "support/check.h"
 
 namespace {
 
@@ -26,11 +28,7 @@ constexpr std::uint64_t kL = 4;
 constexpr std::uint64_t kM = 5;
 constexpr std::uint64_t kFrequency = 2;
 
-void Require(bool condition, const std::string& message) {
-    if (!condition) {
-        throw std::runtime_error(message);
-    }
-}
+using carta::zarr::testing::Require;
 
 // The chunk the generator deletes covers frequency 1, polarization 2 and l in [2, 4).
 bool InMissingChunk(std::uint64_t l, std::uint64_t frequency, std::uint64_t polarization) {

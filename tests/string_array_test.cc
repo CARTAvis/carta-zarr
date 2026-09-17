@@ -8,12 +8,14 @@
 
 #include "zarr/array_metadata.h"
 
+#include <exception>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
-#include <stdexcept>
 #include <string>
 #include <vector>
+
+#include "support/check.h"
 
 namespace {
 
@@ -22,11 +24,7 @@ namespace zarr_metadata = carta::zarr::internal::zarr;
 
 const std::filesystem::path kFixtureDir{CARTA_ZARR_STRING_FIXTURE_DIR};
 
-void Require(bool condition, const std::string& message) {
-    if (!condition) {
-        throw std::runtime_error(message);
-    }
-}
+using carta::zarr::testing::Require;
 
 carta::zarr::Result<std::vector<std::string>> ReadFixture(const std::string& name) {
     const std::filesystem::path array_dir = kFixtureDir / name;

@@ -10,10 +10,12 @@
 
 #include "zarr/array_view.h"
 
+#include <exception>
 #include <iostream>
-#include <stdexcept>
 #include <string>
 #include <vector>
+
+#include "support/check.h"
 
 namespace {
 
@@ -21,11 +23,7 @@ using carta::zarr::ErrorCode;
 using carta::zarr::internal::zarr::ArrayMetadata;
 using carta::zarr::internal::zarr::ArrayView;
 
-void Require(bool condition, const std::string& message) {
-    if (!condition) {
-        throw std::runtime_error(message);
-    }
-}
+using carta::zarr::testing::Require;
 
 // (time, frequency, polarization) = (2, 3, 2), values numbered in C order.
 ArrayMetadata BeamShapedMetadata() {

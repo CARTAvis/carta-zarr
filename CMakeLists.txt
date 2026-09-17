@@ -183,13 +183,16 @@ if(CARTA_ZARR_BUILD_TESTS AND BUILD_TESTING)
 
         add_executable(${name} ${ARG_SOURCES})
         target_compile_features(${name} PRIVATE cxx_std_17)
+        # Every test reaches tests/support, whichever way it reaches the library: that is where the
+        # assertion they are all written with lives. A PUBLIC test gets nothing else of the tree --
+        # the point of it is that it sees only what a consumer sees.
+        target_include_directories(${name} PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/tests)
         if(ARG_PUBLIC)
             target_link_libraries(${name} PRIVATE CARTA::zarr)
         else()
             target_include_directories(${name} PRIVATE
                 ${CMAKE_CURRENT_SOURCE_DIR}/include
-                ${CMAKE_CURRENT_SOURCE_DIR}/src
-                ${CMAKE_CURRENT_SOURCE_DIR}/tests)
+                ${CMAKE_CURRENT_SOURCE_DIR}/src)
         endif()
         if(ARG_LIBRARIES)
             target_link_libraries(${name} PRIVATE ${ARG_LIBRARIES})

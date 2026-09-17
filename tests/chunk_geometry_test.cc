@@ -15,9 +15,11 @@
 
 #include <cstdint>
 #include <cstdio>
-#include <stdexcept>
+#include <exception>
 #include <string>
 #include <vector>
+
+#include "support/check.h"
 
 namespace {
 
@@ -26,11 +28,7 @@ using carta::zarr::ImageDescriptor;
 using carta::zarr::StorageLayout;
 using carta::zarr::internal::BuildChunkGeometry;
 
-void Require(bool condition, const std::string& message) {
-    if (!condition) {
-        throw std::runtime_error(message);
-    }
-}
+using carta::zarr::testing::Require;
 
 // Five axes in logical order, with the stored index of each one given: that permutation is the
 // whole question this answers.

@@ -12,27 +12,25 @@
 
 #include "work_pool.h"
 
+#include <algorithm>
 #include <atomic>
 #include <chrono>
 #include <cstdint>
 #include <cstdlib>
 #include <iostream>
-#include <algorithm>
 #include <stdexcept>
-#include <thread>
 #include <string>
+#include <thread>
 #include <vector>
+
+#include "support/check.h"
 
 namespace {
 
 using carta::zarr::internal::PlanRowTasks;
 using carta::zarr::internal::WorkPool;
 
-void Require(bool condition, const std::string& message) {
-    if (!condition) {
-        throw std::runtime_error(message);
-    }
-}
+using carta::zarr::testing::Require;
 
 void EveryTaskRunsExactlyOnce() {
     for (const std::size_t threads : {std::size_t{1}, std::size_t{2}, std::size_t{8}}) {

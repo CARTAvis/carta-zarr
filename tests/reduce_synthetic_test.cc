@@ -19,6 +19,8 @@
 #include "reduce/spectral_reduce.h"
 #include "work_pool.h"
 
+#include "support/check.h"
+
 #include "support/synthetic_pixel_source.h"
 
 #include <algorithm>
@@ -26,8 +28,8 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstdio>
+#include <exception>
 #include <limits>
-#include <stdexcept>
 #include <string>
 #include <vector>
 
@@ -45,11 +47,7 @@ using carta::zarr::internal::ReadableImage;
 using carta::zarr::internal::WorkPool;
 using carta::zarr::testing::SyntheticPixelSource;
 
-void Require(bool condition, const std::string& message) {
-    if (!condition) {
-        throw std::runtime_error(message);
-    }
-}
+using carta::zarr::testing::Require;
 
 ReadableImage Readable(const SyntheticPixelSource& source, const ImageDescriptor& image,
                        const ChunkGeometry& geometry, WorkPool& workers) {

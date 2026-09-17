@@ -518,12 +518,6 @@ Result<void> ReduceSpectral(const ReadableImage& image, const SpectralReduceRequ
     // channels of it is a minute of work with no partial answer and nowhere to cancel.
     const std::size_t bytes_per_channel = request.region_count * statistic_count * sizeof(double);
 
-    // Below this a unit is not worth its share of a dispatch, so the reduction runs in place. A
-    // unit is one chunk cell of one channel, so this is a statement about chunk size: an image
-    // whose chunks are smaller than this bins on the calling thread, which is the right answer for
-    // the fixtures and for a cursor-sized region.
-    constexpr std::uint64_t kLeastPixelsPerUnit = 1U << 16U;
-
     const BlockEmitter emitter(plan, layer_chunks, bytes_per_channel, request.emit_every_channels,
                                "The spectral reduction was cancelled by its sink");
 
@@ -753,12 +747,12 @@ Result<void> ReduceSpectral(const ReadableImage& image, const SpectralReduceRequ
         // One per task, so the split is also an allocation and a memset of this size
         // once per slab. Capped so that a reduction over thousands of regions does not
         // spend more on the split than on the pixels.
-        constexpr std::size_t kPartialBudgetBytes = 16U << 20U;
+        constexpr std::size_t kSpectralPartialBudgetBytes = 16U << 20U;
         const std::size_t tasks_by_memory =
-            std::max<std::size_t>(1, kPartialBudgetBytes / (partial_stride * sizeof(double)));
+            std::max<std::size_t>(1, kSpectralPartialBudgetBytes / (partial_stride * sizeof(double)));
         const std::size_t max_tasks = std::min(workers.size(), tasks_by_memory);
         const std::size_t tasks =
-            PlanRowTasks(plan.chunk_u * plan.chunk_v, units, max_tasks, kLeastPixelsPerUnit);
+            PlanRowTasks(plan.chunk_u * plan.chunk_v, units, max_tasks, kLeastPixelsPerTask);
 
         partials.assign(tasks * partial_stride, 0.0);
         for (std::size_t task = 0; task < tasks; ++task) {

@@ -47,6 +47,17 @@ inline constexpr std::uint32_t kMostProvisionalBins = 1u << 16;
 // SpectralReduceRequest::emit_every_channels.
 inline constexpr std::size_t kSpectralEmitBudgetBytes = 64u << 20;
 
+// Below this a task is not worth its share of a dispatch, so the work is done on the calling thread
+// instead. It is what every reduction hands PlanRowTasks as its floor, and all three of them had
+// their own copy of the number -- two under one name and one under another, which is why the two
+// looked like different rules rather than the same one written three times.
+//
+// A statement about pixels, whatever the thing being split is counted in: a plane histogram splits
+// rows of a plane, a cube histogram splits rows across the planes of a read, and a spectral
+// reduction splits chunk cells. PlanRowTasks multiplies out to pixels before it divides, so all
+// three are asking the same question of the same number.
+inline constexpr std::uint64_t kLeastPixelsPerTask = 1u << 16;
+
 }  // namespace carta::zarr::internal
 
 #endif  // CARTA_ZARR_SRC_REDUCE_TUNING_H_

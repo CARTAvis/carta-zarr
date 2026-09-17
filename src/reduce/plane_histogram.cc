@@ -111,11 +111,9 @@ Result<void> ComputeHistogram(const ReadableImage& image, const HistogramRequest
     // The memory cap is what keeps a large bin count from turning a split into an allocation: a
     // caller may ask for as many as kMaxHistogramBins, and a private copy of that for every worker
     // is hundreds of megabytes for a pass that is supposed to stream.
-    constexpr std::size_t kPartialBudgetBytes = 64U << 20U;
-    // Below this a task is not worth its share of a dispatch, so the plane is binned in place.
-    constexpr std::uint64_t kLeastPixelsPerTask = 1U << 16U;
+    constexpr std::size_t kHistogramPartialBudgetBytes = 64U << 20U;
     const std::size_t partials_by_memory =
-        std::max<std::size_t>(1, kPartialBudgetBytes / std::max<std::size_t>(1, bins * sizeof(std::uint64_t)));
+        std::max<std::size_t>(1, kHistogramPartialBudgetBytes / std::max<std::size_t>(1, bins * sizeof(std::uint64_t)));
     const std::size_t max_tasks = std::min(workers.size(), partials_by_memory);
     // One allocation for the whole plan. Each task owns one row of it, so no two of them ever touch
     // the same bin and the sum at the end is the only place they meet.
@@ -274,8 +272,6 @@ Result<CubeHistogramResult> ComputeCubeHistogram(const ReadableImage& image,
     // workers 4.9 s, eight 8.7 s, twenty-eight 16.5 s. So the cap is the budget divided by what one
     // accumulator costs, which at the default resolution comes out at four.
     constexpr std::size_t kAccumulatorCacheBytes = 2U << 20U;
-    // Below this a task is not worth its share of a dispatch, so the read is binned in place.
-    constexpr std::uint64_t kLeastPixelsPerTask = 1U << 16U;
     const std::size_t accumulator_bytes = provisional * sizeof(std::uint64_t);
     const std::size_t by_cache =
         std::max<std::size_t>(1, kAccumulatorCacheBytes / std::max<std::size_t>(1, accumulator_bytes));

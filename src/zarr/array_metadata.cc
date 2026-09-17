@@ -16,10 +16,6 @@
 namespace carta::zarr::internal::zarr {
 namespace {
 
-Error MakeError(ErrorCode code, std::string message, std::string node_path = {}) {
-    return Error{code, std::move(message), std::move(node_path)};
-}
-
 bool IsNumeric(const nlohmann::json& value) {
     return value.is_number();
 }
@@ -108,27 +104,27 @@ const char* ErrorCodeName(ErrorCode code) noexcept {
 Result<ArrayMetadata> ParseArrayMetadata(const nlohmann::json& metadata, std::string_view node) {
     const std::string node_path(node);
     if (!metadata.is_object()) {
-        return MakeError(ErrorCode::invalid_metadata, "Zarr array metadata must be a JSON object", node_path);
+        return Error{ErrorCode::invalid_metadata, "Zarr array metadata must be a JSON object", node_path};
     }
     if (!metadata.contains("node_type") || !metadata.at("node_type").is_string() ||
         metadata.at("node_type").get<std::string>() != "array") {
-        return MakeError(ErrorCode::invalid_metadata, "Zarr node is not an array", node_path);
+        return Error{ErrorCode::invalid_metadata, "Zarr node is not an array", node_path};
     }
     if (!metadata.contains("zarr_format") || !IsNonNegativeInteger(metadata.at("zarr_format"))) {
-        return MakeError(ErrorCode::invalid_metadata, "Zarr array metadata has no valid zarr_format", node_path);
+        return Error{ErrorCode::invalid_metadata, "Zarr array metadata has no valid zarr_format", node_path};
     }
     if (metadata.at("zarr_format").get<std::uint64_t>() != 3) {
-        return MakeError(ErrorCode::unsupported_zarr_version, "Only Zarr format 3 arrays are supported", node_path);
+        return Error{ErrorCode::unsupported_zarr_version, "Only Zarr format 3 arrays are supported", node_path};
     }
     if (!metadata.contains("shape") || !metadata.at("shape").is_array()) {
-        return MakeError(ErrorCode::invalid_metadata, "Zarr array metadata requires a shape", node_path);
+        return Error{ErrorCode::invalid_metadata, "Zarr array metadata requires a shape", node_path};
     }
 
     ArrayMetadata result;
     for (const auto& dimension : metadata.at("shape")) {
         if (!IsNonNegativeInteger(dimension)) {
-            return MakeError(ErrorCode::invalid_metadata, "Zarr array shape must contain non-negative integers",
-                             node_path);
+            return Error{ErrorCode::invalid_metadata, "Zarr array shape must contain non-negative integers",
+                         node_path};
         }
         result.shape.push_back(dimension.get<std::uint64_t>());
     }
@@ -143,22 +139,22 @@ Result<ArrayMetadata> ParseArrayMetadata(const nlohmann::json& metadata, std::st
     }
     if (dimensions != nullptr) {
         if (!dimensions->is_array() || dimensions->size() != result.shape.size()) {
-            return MakeError(ErrorCode::invalid_metadata, "Array dimension_names must match shape rank", node_path);
+            return Error{ErrorCode::invalid_metadata, "Array dimension_names must match shape rank", node_path};
         }
         for (const auto& dimension : *dimensions) {
             if (!dimension.is_string()) {
-                return MakeError(ErrorCode::invalid_metadata, "Array dimension names must be strings", node_path);
+                return Error{ErrorCode::invalid_metadata, "Array dimension names must be strings", node_path};
             }
             result.dimension_names.push_back(dimension.get<std::string>());
         }
         std::set<std::string> const unique_dimensions(result.dimension_names.begin(), result.dimension_names.end());
         if (unique_dimensions.size() != result.dimension_names.size()) {
-            return MakeError(ErrorCode::invalid_metadata, "Array dimension names must be unique", node_path);
+            return Error{ErrorCode::invalid_metadata, "Array dimension names must be unique", node_path};
         }
     }
 
     if (!metadata.contains("data_type")) {
-        return MakeError(ErrorCode::invalid_metadata, "Zarr array metadata requires data_type", node_path);
+        return Error{ErrorCode::invalid_metadata, "Zarr array metadata requires data_type", node_path};
     }
     const auto& data_type = metadata.at("data_type");
     if (data_type.is_string()) {
@@ -167,18 +163,18 @@ Result<ArrayMetadata> ParseArrayMetadata(const nlohmann::json& metadata, std::st
         result.data_type = data_type.at("name").get<std::string>();
         if (data_type.contains("configuration")) {
             if (!data_type.at("configuration").is_object()) {
-                return MakeError(ErrorCode::invalid_metadata, "Zarr data_type configuration must be an object",
-                                 node_path);
+                return Error{ErrorCode::invalid_metadata, "Zarr data_type configuration must be an object",
+                             node_path};
             }
             result.data_type_configuration = data_type.at("configuration");
         }
     } else {
-        return MakeError(ErrorCode::unsupported_data_type, "Zarr array data_type is not recognized", node_path);
+        return Error{ErrorCode::unsupported_data_type, "Zarr array data_type is not recognized", node_path};
     }
 
     if (metadata.contains("attributes")) {
         if (!metadata.at("attributes").is_object()) {
-            return MakeError(ErrorCode::invalid_metadata, "Zarr array attributes must be an object", node_path);
+            return Error{ErrorCode::invalid_metadata, "Zarr array attributes must be an object", node_path};
         }
         result.attributes = metadata.at("attributes");
     } else {
@@ -191,13 +187,13 @@ Result<ArrayMetadata> ParseArrayMetadata(const nlohmann::json& metadata, std::st
         !metadata.at("chunk_grid").contains("configuration") ||
         !metadata.at("chunk_grid").at("configuration").is_object() ||
         !metadata.at("chunk_grid").at("configuration").contains("chunk_shape")) {
-        return MakeError(ErrorCode::unsupported_codec, "Only regular Zarr chunk grids are supported", node_path);
+        return Error{ErrorCode::unsupported_codec, "Only regular Zarr chunk grids are supported", node_path};
     }
     const auto& chunks = metadata.at("chunk_grid").at("configuration").at("chunk_shape");
     if (!chunks.is_array() || chunks.size() != result.shape.size() ||
         !std::all_of(chunks.begin(), chunks.end(), IsPositiveInteger)) {
-        return MakeError(ErrorCode::invalid_metadata, "Zarr chunk_shape must be positive and match shape rank",
-                         node_path);
+        return Error{ErrorCode::invalid_metadata, "Zarr chunk_shape must be positive and match shape rank",
+                     node_path};
     }
     for (const auto& chunk : chunks) {
         result.chunk_shape.push_back(chunk.get<std::uint64_t>());

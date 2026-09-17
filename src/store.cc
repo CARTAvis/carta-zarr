@@ -27,21 +27,17 @@ namespace {
 
 namespace zarr_metadata = ::carta::zarr::internal::zarr;
 
-Error MakeError(ErrorCode code, std::string message, std::string node_path = {}) {
-    return Error{code, std::move(message), std::move(node_path)};
-}
-
 // Parse metadata bytes handed up by a Transport. Parsing lives above the seam so that every
 // Transport reports a malformed node the same way.
 Result<nlohmann::json> ParseNodeMetadata(const std::string& bytes, std::string_view node_path) {
     try {
         return nlohmann::json::parse(bytes);
     } catch (const nlohmann::json::parse_error& error) {
-        return MakeError(ErrorCode::invalid_metadata, "Invalid JSON in Zarr metadata: " + std::string(error.what()),
-                         std::string(node_path));
+        return Error{ErrorCode::invalid_metadata, "Invalid JSON in Zarr metadata: " + std::string(error.what()),
+                     std::string(node_path)};
     } catch (const std::exception& error) {
-        return MakeError(ErrorCode::io_error, "Unable to read Zarr metadata: " + std::string(error.what()),
-                         std::string(node_path));
+        return Error{ErrorCode::io_error, "Unable to read Zarr metadata: " + std::string(error.what()),
+                     std::string(node_path)};
     }
 }
 
@@ -56,12 +52,12 @@ Result<nlohmann::json> ParseNodeMetadata(const std::string& bytes, std::string_v
 Result<std::string> NormalizeNodeName(std::string_view node) {
     const std::filesystem::path relative(node);
     if (relative.empty() || relative.is_absolute() || relative.has_root_path()) {
-        return MakeError(ErrorCode::invalid_argument, "Invalid Zarr node path", std::string(node));
+        return Error{ErrorCode::invalid_argument, "Invalid Zarr node path", std::string(node)};
     }
     std::filesystem::path normalized;
     for (const auto& part : relative) {
         if (part == "..") {
-            return MakeError(ErrorCode::invalid_argument, "Invalid Zarr node path", std::string(node));
+            return Error{ErrorCode::invalid_argument, "Invalid Zarr node path", std::string(node)};
         }
         if (part == "." || part.empty()) {
             continue;
@@ -69,7 +65,7 @@ Result<std::string> NormalizeNodeName(std::string_view node) {
         normalized /= part;
     }
     if (normalized.empty()) {
-        return MakeError(ErrorCode::invalid_argument, "Invalid Zarr node path", std::string(node));
+        return Error{ErrorCode::invalid_argument, "Invalid Zarr node path", std::string(node)};
     }
     return normalized.generic_string();
 }
@@ -146,8 +142,8 @@ Result<void> ApplyShardingLayout(const nlohmann::json& sharding, StorageLayout& 
         if (configuration.contains("chunk_shape") && configuration.at("chunk_shape").is_array()) {
             for (const auto& dimension : configuration.at("chunk_shape")) {
                 if (!zarr_metadata::IsPositiveInteger(dimension)) {
-                    return MakeError(ErrorCode::invalid_metadata,
-                                     "Sharding codec chunk_shape must be positive integers", std::string(node));
+                    return Error{ErrorCode::invalid_metadata,
+                                 "Sharding codec chunk_shape must be positive integers", std::string(node)};
                 }
                 layout.chunk_shape.push_back(dimension.get<std::uint64_t>());
             }
@@ -159,8 +155,8 @@ Result<void> ApplyShardingLayout(const nlohmann::json& sharding, StorageLayout& 
     }
 
     if (layout.chunk_shape.size() != layout.shard_shape.size()) {
-        return MakeError(ErrorCode::invalid_metadata, "Sharding codec chunk_shape must match the shard rank",
-                         std::string(node));
+        return Error{ErrorCode::invalid_metadata, "Sharding codec chunk_shape must match the shard rank",
+                     std::string(node)};
     }
     return {};
 }
@@ -195,14 +191,14 @@ Result<Store> OpenStore(std::string_view location, StoreContextPtr context) {
 
 Result<Store> OpenStore(TransportPtr transport, StoreContextPtr context) {
     if (!transport) {
-        return MakeError(ErrorCode::invalid_argument, "Zarr transport must not be null");
+        return Error{ErrorCode::invalid_argument, "Zarr transport must not be null"};
     }
 
     auto bytes = transport->ReadNodeBytes({});
     if (!bytes) {
         // A transport with no root node is not a Zarr store at all, whatever else it holds.
         if (bytes.error().code == ErrorCode::not_found) {
-            return MakeError(ErrorCode::not_zarr, "Zarr store is missing zarr.json", bytes.error().node_path);
+            return Error{ErrorCode::not_zarr, "Zarr store is missing zarr.json", bytes.error().node_path};
         }
         return bytes.error();
     }
@@ -213,17 +209,17 @@ Result<Store> OpenStore(TransportPtr transport, StoreContextPtr context) {
     }
     nlohmann::json& metadata = metadata_result.value();
     if (!metadata.is_object()) {
-        return MakeError(ErrorCode::invalid_metadata, "Root Zarr metadata must be a JSON object", "zarr.json");
+        return Error{ErrorCode::invalid_metadata, "Root Zarr metadata must be a JSON object", "zarr.json"};
     }
     if (!metadata.contains("zarr_format") ||
         !::carta::zarr::internal::zarr::IsNonNegativeInteger(metadata.at("zarr_format"))) {
-        return MakeError(ErrorCode::invalid_metadata, "Root Zarr metadata has no valid zarr_format", "zarr.json");
+        return Error{ErrorCode::invalid_metadata, "Root Zarr metadata has no valid zarr_format", "zarr.json"};
     }
     if (metadata.at("zarr_format").get<std::uint64_t>() != 3) {
-        return MakeError(ErrorCode::unsupported_zarr_version, "Only Zarr format 3 is supported", "zarr.json");
+        return Error{ErrorCode::unsupported_zarr_version, "Only Zarr format 3 is supported", "zarr.json"};
     }
     if (metadata.value("node_type", "") != "group") {
-        return MakeError(ErrorCode::not_zarr, "The Zarr root must be a group", "zarr.json");
+        return Error{ErrorCode::not_zarr, "The Zarr root must be a group", "zarr.json"};
     }
 
     // Taken before the children are moved out from under it, so that what the root says about itself
@@ -235,8 +231,8 @@ Result<Store> OpenStore(TransportPtr transport, StoreContextPtr context) {
     if (metadata.contains("consolidated_metadata")) {
         auto& block = metadata.at("consolidated_metadata");
         if (!block.is_object() || !block.contains("metadata") || !block.at("metadata").is_object()) {
-            return MakeError(ErrorCode::invalid_metadata,
-                             "Zarr consolidated_metadata must contain an object metadata member", "zarr.json");
+            return Error{ErrorCode::invalid_metadata,
+                         "Zarr consolidated_metadata must contain an object metadata member", "zarr.json"};
         }
         has_consolidated = true;
         CollectConsolidatedMetadata(block.at("metadata"), {}, consolidated);
@@ -345,7 +341,7 @@ Result<std::vector<double>> Store::ReadNumericArrayUncached(std::string_view nod
     try {
         return zarr_metadata::ReadNumericValues(array_path.value(), _context, node);
     } catch (const std::exception& e) {
-        return MakeError(ErrorCode::io_error, e.what(), std::string(node));
+        return Error{ErrorCode::io_error, e.what(), std::string(node)};
     }
 }
 
@@ -381,7 +377,7 @@ Result<void> Store::ReadPixelsInto(std::string_view node, const zarr::PixelSelec
                                                 selection, destination, destination_elements, options);
         }
     } catch (const std::exception& e) {
-        return MakeError(ErrorCode::io_error, e.what(), std::string(node));
+        return Error{ErrorCode::io_error, e.what(), std::string(node)};
     }
 }
 
@@ -416,7 +412,7 @@ Result<std::vector<std::string>> Store::ReadStringArray1DUncached(std::string_vi
         return zarr_metadata::ReadFixedLengthUtf32StringArray(array_path.value(), array_meta_res.value(), metadata,
                                                               node);
     } catch (const std::exception& e) {
-        return MakeError(ErrorCode::invalid_argument, e.what(), std::string(node));
+        return Error{ErrorCode::invalid_argument, e.what(), std::string(node)};
     }
 }
 

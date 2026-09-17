@@ -24,18 +24,14 @@
 namespace carta::zarr::internal {
 namespace {
 
-Error MakeError(ErrorCode code, std::string message, std::string node_path = {}) {
-    return Error{code, std::move(message), std::move(node_path)};
-}
-
 // The one check both histograms make. It takes the count rather than a request because their two
 // requests are different types -- and because a cube histogram used to reach this by building a
 // stand-in HistogramRequest with bins = 1 over [0, 1], bounds that nothing ever read.
 Result<void> ValidateBins(const std::string& node, std::uint32_t bins) {
     if (bins == 0 || bins > kMaxHistogramBins) {
-        return MakeError(ErrorCode::invalid_argument,
-                         "A histogram needs between 1 and " + std::to_string(kMaxHistogramBins) + " bins",
-                         node);
+        return Error{ErrorCode::invalid_argument,
+                     "A histogram needs between 1 and " + std::to_string(kMaxHistogramBins) + " bins",
+                     node};
     }
     return {};
 }
@@ -47,8 +43,8 @@ Result<void> ValidateRange(const std::string& node, const HistogramRequest& requ
     // no finite pixel should look like -- there is more than one defensible answer -- so this says
     // no rather than inventing one.
     if (!(request.lower < request.upper) || !std::isfinite(request.lower) || !std::isfinite(request.upper)) {
-        return MakeError(ErrorCode::invalid_argument,
-                         "A histogram needs a finite range with a lower bound below its upper bound", node);
+        return Error{ErrorCode::invalid_argument,
+                     "A histogram needs a finite range with a lower bound below its upper bound", node};
     }
     // Pixels are float, so the range is narrowed once and every pixel is binned against the
     // narrowed copy. A range that is finite and non-empty in double need not still be either: two
@@ -59,10 +55,10 @@ Result<void> ValidateRange(const std::string& node, const HistogramRequest& requ
         width = static_cast<float>((request.upper - request.lower) / request.bins);
         !std::isfinite(lower) || !std::isfinite(upper) || !(lower < upper) || !std::isfinite(width) ||
         !(width > 0.0F)) {
-        return MakeError(ErrorCode::invalid_argument,
-                         "A histogram needs a range that stays finite and non-empty, and bins that stay wider "
-                         "than nothing, in the precision its pixels are counted in",
-                         node);
+        return Error{ErrorCode::invalid_argument,
+                     "A histogram needs a range that stays finite and non-empty, and bins that stay wider "
+                     "than nothing, in the precision its pixels are counted in",
+                     node};
     }
     return {};
 }
@@ -78,7 +74,7 @@ Result<void> ComputeHistogram(const ReadableImage& image, const HistogramRequest
     auto& workers = image.workers();
     const auto& node = descriptor.id;
     if (!sink) {
-        return MakeError(ErrorCode::invalid_argument, "A histogram needs a sink", node);
+        return Error{ErrorCode::invalid_argument, "A histogram needs a sink", node};
     }
     if (auto valid = ValidateBins(node, request.bins); !valid) {
         return valid.error();
@@ -219,7 +215,7 @@ Result<CubeHistogramResult> ComputeCubeHistogram(const ReadableImage& image,
         return valid.error();
     }
     if (request.spatial_sample == 0) {
-        return MakeError(ErrorCode::invalid_argument, "A spatial sample of zero selects nothing", node);
+        return Error{ErrorCode::invalid_argument, "A spatial sample of zero selects nothing", node};
     }
     const auto checked = CheckedPlanes::Of(descriptor, map, request.planes);
     if (!checked) {
@@ -339,8 +335,8 @@ Result<CubeHistogramResult> ComputeCubeHistogram(const ReadableImage& image,
                 // never asks.
                 update.snapshot = collect;
                 if (!request.progress(update)) {
-                    return MakeError(ErrorCode::cancelled, "The histogram was cancelled by its caller",
-                                     node);
+                    return Error{ErrorCode::cancelled, "The histogram was cancelled by its caller",
+                                 node};
                 }
             }
             return {};

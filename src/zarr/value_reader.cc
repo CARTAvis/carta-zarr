@@ -19,13 +19,6 @@
 #include <string>
 
 namespace carta::zarr::internal::zarr {
-namespace {
-
-Error MakeError(ErrorCode code, std::string message, std::string node_path = {}) {
-    return Error{code, std::move(message), std::move(node_path)};
-}
-
-}  // namespace
 
 Result<std::vector<double>> ReadNumericValues(const std::filesystem::path& array_directory,
                                               const StoreContextPtr& context,
@@ -42,14 +35,14 @@ Result<std::vector<double>> ReadNumericValues(const std::filesystem::path& array
         // Conversion rides the read's own copy, as it does for pixels.
         auto converted = tensorstore::Cast(opened.value(), tensorstore::dtype_v<double>);
         if (!converted.ok()) {
-            return MakeError(ErrorCode::unsupported_data_type,
-                             "Array is not readable as double: " + converted.status().ToString(), std::string(node));
+            return Error{ErrorCode::unsupported_data_type,
+                         "Array is not readable as double: " + converted.status().ToString(), std::string(node)};
         }
 
         auto read_result = tensorstore::Read(converted.value()).result();
         if (!read_result.ok()) {
-            return MakeError(ErrorCode::io_error, "TensorStore read failed: " + read_result.status().ToString(),
-                             std::string(node));
+            return Error{ErrorCode::io_error, "TensorStore read failed: " + read_result.status().ToString(),
+                         std::string(node)};
         }
 
         const auto& array = read_result.value();
@@ -59,7 +52,7 @@ Result<std::vector<double>> ReadNumericValues(const std::filesystem::path& array
                                        array);
         return result;
     } catch (const std::exception& e) {
-        return MakeError(ErrorCode::io_error, e.what(), std::string(node));
+        return Error{ErrorCode::io_error, e.what(), std::string(node)};
     }
 }
 

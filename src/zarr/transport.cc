@@ -15,13 +15,9 @@
 namespace carta::zarr::internal {
 namespace {
 
-Error MakeError(ErrorCode code, std::string message, std::string node_path = {}) {
-    return Error{code, std::move(message), std::move(node_path)};
-}
-
 Result<std::filesystem::path> NormalizeLocation(std::string_view location) {
     if (location.empty()) {
-        return MakeError(ErrorCode::invalid_argument, "Zarr location must not be empty");
+        return Error{ErrorCode::invalid_argument, "Zarr location must not be empty"};
     }
 
     std::string const location_string(location);
@@ -29,14 +25,14 @@ Result<std::filesystem::path> NormalizeLocation(std::string_view location) {
     if (location_string.rfind("file://", 0) == 0) {
         path = std::filesystem::path(location_string.substr(7));
     } else if (location_string.find("://") != std::string::npos) {
-        return MakeError(ErrorCode::unsupported_transport,
-                         "Only local filesystem and file:// Zarr stores are supported");
+        return Error{ErrorCode::unsupported_transport,
+                     "Only local filesystem and file:// Zarr stores are supported"};
     } else {
         path = std::filesystem::path(location_string);
     }
 
     if (path.empty()) {
-        return MakeError(ErrorCode::invalid_argument, "Zarr location must not be empty");
+        return Error{ErrorCode::invalid_argument, "Zarr location must not be empty"};
     }
     // Resolved against the working directory here and nowhere else. A store keeps its root for as
     // long as the images opened from it live, so a root left relative makes every later read depend
@@ -46,7 +42,7 @@ Result<std::filesystem::path> NormalizeLocation(std::string_view location) {
     std::error_code error;
     auto resolved = std::filesystem::weakly_canonical(std::filesystem::absolute(path, error), error);
     if (error) {
-        return MakeError(ErrorCode::io_error, "Unable to resolve Zarr location: " + error.message(), path.string());
+        return Error{ErrorCode::io_error, "Unable to resolve Zarr location: " + error.message(), path.string()};
     }
     return resolved;
 }
@@ -60,10 +56,10 @@ public:
         std::error_code error;
         if (!std::filesystem::exists(metadata_path, error)) {
             if (error) {
-                return MakeError(ErrorCode::io_error, "Unable to inspect Zarr node metadata: " + error.message(),
-                                 metadata_path.string());
+                return Error{ErrorCode::io_error, "Unable to inspect Zarr node metadata: " + error.message(),
+                             metadata_path.string()};
             }
-            return MakeError(ErrorCode::not_found, "Zarr node is missing zarr.json", metadata_path.string());
+            return Error{ErrorCode::not_found, "Zarr node is missing zarr.json", metadata_path.string()};
         }
 
         // Opened at the end so that the document can be sized, then read in one go. Streaming
@@ -72,11 +68,11 @@ public:
         // consolidated store -- more than the read it was there to perform.
         std::ifstream input(metadata_path, std::ios::binary | std::ios::ate);
         if (!input.is_open()) {
-            return MakeError(ErrorCode::io_error, "Unable to read Zarr metadata", metadata_path.string());
+            return Error{ErrorCode::io_error, "Unable to read Zarr metadata", metadata_path.string()};
         }
         const auto size = input.tellg();
         if (size < 0) {
-            return MakeError(ErrorCode::io_error, "Unable to read Zarr metadata", metadata_path.string());
+            return Error{ErrorCode::io_error, "Unable to read Zarr metadata", metadata_path.string()};
         }
         input.seekg(0);
 
@@ -87,7 +83,7 @@ public:
         if (!bytes.empty()) {
             input.read(bytes.data(), static_cast<std::streamsize>(bytes.size()));
             if (input.bad()) {
-                return MakeError(ErrorCode::io_error, "Unable to read Zarr metadata", metadata_path.string());
+                return Error{ErrorCode::io_error, "Unable to read Zarr metadata", metadata_path.string()};
             }
             // A file that shrank between being sized and being read hands back what was there.
             bytes.resize(static_cast<std::size_t>(input.gcount()));
@@ -103,8 +99,8 @@ public:
         const std::filesystem::recursive_directory_iterator end;
         for (; iterator != end; iterator.increment(error)) {
             if (error) {
-                return MakeError(ErrorCode::io_error, "Unable to enumerate Zarr metadata: " + error.message(),
-                                 _root.string());
+                return Error{ErrorCode::io_error, "Unable to enumerate Zarr metadata: " + error.message(),
+                             _root.string()};
             }
 
             const auto path = iterator->path();
@@ -131,8 +127,8 @@ public:
             const auto relative_parent = std::filesystem::relative(
                 iterator->is_directory() ? path : path.parent_path(), _root, error);
             if (error) {
-                return MakeError(ErrorCode::io_error, "Unable to enumerate Zarr metadata: " + error.message(),
-                                 path.string());
+                return Error{ErrorCode::io_error, "Unable to enumerate Zarr metadata: " + error.message(),
+                             path.string()};
             }
             if (relative_parent.empty() || relative_parent == ".") {
                 if (iterator->is_directory()) {
@@ -161,8 +157,8 @@ public:
             }
         }
         if (error) {
-            return MakeError(ErrorCode::io_error, "Unable to enumerate Zarr metadata: " + error.message(),
-                             _root.string());
+            return Error{ErrorCode::io_error, "Unable to enumerate Zarr metadata: " + error.message(),
+                         _root.string()};
         }
         return nodes;
     }
@@ -171,13 +167,13 @@ public:
         const std::filesystem::path relative(node);
         if (relative.empty() || relative.is_absolute() || relative.has_root_name() ||
             node.find('\\') != std::string_view::npos) {
-            return MakeError(ErrorCode::invalid_argument, "Invalid Zarr array path " + std::string(node),
-                             std::string(node));
+            return Error{ErrorCode::invalid_argument, "Invalid Zarr array path " + std::string(node),
+                         std::string(node)};
         }
         for (const auto& component : relative) {
             if (component == "." || component == "..") {
-                return MakeError(ErrorCode::invalid_argument, "Invalid Zarr array path " + std::string(node),
-                                 std::string(node));
+                return Error{ErrorCode::invalid_argument, "Invalid Zarr array path " + std::string(node),
+                             std::string(node)};
             }
         }
         return _root / relative;
@@ -199,12 +195,12 @@ Result<TransportPtr> OpenFilesystemTransport(std::string_view location) {
     std::error_code error;
     if (!std::filesystem::exists(path, error)) {
         if (error) {
-            return MakeError(ErrorCode::io_error, "Unable to inspect Zarr location: " + error.message());
+            return Error{ErrorCode::io_error, "Unable to inspect Zarr location: " + error.message()};
         }
-        return MakeError(ErrorCode::not_found, "Zarr location does not exist", path.string());
+        return Error{ErrorCode::not_found, "Zarr location does not exist", path.string()};
     }
     if (error || !std::filesystem::is_directory(path, error)) {
-        return MakeError(ErrorCode::not_zarr, "Zarr location is not a directory", path.string());
+        return Error{ErrorCode::not_zarr, "Zarr location is not a directory", path.string()};
     }
 
     return TransportPtr(std::make_shared<const FilesystemTransport>(path));

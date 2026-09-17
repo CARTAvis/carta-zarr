@@ -32,10 +32,6 @@ constexpr double kInfinity = std::numeric_limits<double>::infinity();
 // rather than an allocation nothing can serve.
 constexpr std::size_t kMaxChunkIncidences = 1u << 26;
 
-Error MakeError(ErrorCode code, std::string message, std::string node_path = {}) {
-    return Error{code, std::move(message), std::move(node_path)};
-}
-
 // Where each axis role sits in the logical axis order.
 
 // One region as the walk sees it: u is the spatial axis the store varies fastest and v is the other,
@@ -99,8 +95,8 @@ Result<ChunkBuckets> BuildChunkBuckets(const WalkRegion* regions, std::size_t re
 
     const auto cells = static_cast<std::size_t>(buckets.columns * buckets.rows);
     if (cells > std::numeric_limits<std::uint32_t>::max()) {
-        return MakeError(ErrorCode::invalid_argument,
-                         "The regions span more chunks than one reduction can index", node);
+        return Error{ErrorCode::invalid_argument,
+                     "The regions span more chunks than one reduction can index", node};
     }
     buckets.offsets.assign(cells + 1, 0);
 
@@ -213,8 +209,8 @@ Result<ChunkBuckets> BuildChunkBuckets(const WalkRegion* regions, std::size_t re
             incidence_cells.push_back(static_cast<std::uint32_t>(buckets.Cell(cx, cy)));
         });
         if (incidence_cells.size() > kMaxChunkIncidences) {
-            return MakeError(ErrorCode::invalid_argument,
-                             "The regions together touch more chunks than one reduction can index", node);
+            return Error{ErrorCode::invalid_argument,
+                         "The regions together touch more chunks than one reduction can index", node};
         }
         region_first.at(i + 1) = incidence_cells.size();
     }
@@ -241,16 +237,16 @@ Result<void> ValidateRequest(const ImageDescriptor& descriptor, const AxisMap& a
                              const SpectralReduceRequest& request, AxisRole fastest_spatial_axis) {
     const auto& node = descriptor.id;
     if (request.region_count == 0 || request.regions == nullptr) {
-        return MakeError(ErrorCode::invalid_argument, "A spectral reduction needs at least one region", node);
+        return Error{ErrorCode::invalid_argument, "A spectral reduction needs at least one region", node};
     }
     if (request.region_count > kMaxSpectralRegions) {
-        return MakeError(ErrorCode::invalid_argument,
-                         "A spectral reduction accepts at most " + std::to_string(kMaxSpectralRegions) +
-                             " regions, not " + std::to_string(request.region_count),
-                         node);
+        return Error{ErrorCode::invalid_argument,
+                     "A spectral reduction accepts at most " + std::to_string(kMaxSpectralRegions) +
+                         " regions, not " + std::to_string(request.region_count),
+                     node};
     }
     if (request.statistics == 0) {
-        return MakeError(ErrorCode::invalid_argument, "A spectral reduction needs at least one statistic", node);
+        return Error{ErrorCode::invalid_argument, "A spectral reduction needs at least one statistic", node};
     }
 
     const auto width = descriptor.axes.at(axes.x).length;
@@ -258,26 +254,26 @@ Result<void> ValidateRequest(const ImageDescriptor& descriptor, const AxisMap& a
     for (std::size_t i = 0; i < request.region_count; ++i) {
         const auto& region = request.regions[i];
         if (region.width == 0 || region.height == 0) {
-            return MakeError(ErrorCode::invalid_argument, "Region " + std::to_string(i) + " is empty", node);
+            return Error{ErrorCode::invalid_argument, "Region " + std::to_string(i) + " is empty", node};
         }
         if (region.x_start >= width || region.width > width - region.x_start || region.y_start >= height ||
             region.height > height - region.y_start) {
-            return MakeError(ErrorCode::invalid_argument,
-                             "Region " + std::to_string(i) + " falls outside the image", node);
+            return Error{ErrorCode::invalid_argument,
+                         "Region " + std::to_string(i) + " falls outside the image", node};
         }
         // Runs are worth taking because their pixels are contiguous in the destination, and they
         // are contiguous only along the axis the store varies fastest. Reading them with a stride
         // would be slower than the raster they replaced, so this is refused rather than absorbed.
         if (region.row_runs != nullptr && region.run_axis != fastest_spatial_axis) {
-            return MakeError(ErrorCode::invalid_argument,
-                             "Region " + std::to_string(i) +
-                                 " supplies runs along the axis this image does not vary fastest; see "
-                                 "ChunkGeometry::fastest_spatial_axis",
-                             node);
+            return Error{ErrorCode::invalid_argument,
+                         "Region " + std::to_string(i) +
+                             " supplies runs along the axis this image does not vary fastest; see "
+                             "ChunkGeometry::fastest_spatial_axis",
+                         node};
         }
         if ((region.row_runs == nullptr) != (region.row_run_offsets == nullptr)) {
-            return MakeError(ErrorCode::invalid_argument,
-                             "Region " + std::to_string(i) + " supplies one run array without the other", node);
+            return Error{ErrorCode::invalid_argument,
+                         "Region " + std::to_string(i) + " supplies one run array without the other", node};
         }
     }
 
@@ -387,7 +383,7 @@ Result<void> ReduceSpectral(const ReadableImage& image, const SpectralReduceRequ
     auto& workers = image.workers();
     const auto& node = descriptor.id;
     if (!sink) {
-        return MakeError(ErrorCode::invalid_argument, "A spectral reduction needs a sink", node);
+        return Error{ErrorCode::invalid_argument, "A spectral reduction needs a sink", node};
     }
 
     // The walk follows the store. Of the two spatial axes the one written last varies fastest, so

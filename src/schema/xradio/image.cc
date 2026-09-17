@@ -29,10 +29,6 @@ namespace {
 
 namespace zarr_metadata = ::carta::zarr::internal::zarr;
 
-Error MakeError(ErrorCode code, std::string message, std::string node_path = {}) {
-    return Error{code, std::move(message), std::move(node_path)};
-}
-
 constexpr std::string_view kVersion = "1.2";
 constexpr std::array<std::string_view, 5> kSkyAxes{"time", "frequency", "polarization", "l", "m"};
 
@@ -132,9 +128,9 @@ Result<void> RequireMatchingCoordinates(const Store& store, const zarr_metadata:
             continue;
         }
         if (coordinate.value().shape.size() != 1 || coordinate.value().shape.front() != image.shape.at(axis)) {
-            return MakeError(ErrorCode::invalid_metadata,
-                             "Image dimension '" + name + "' is not the length of the coordinate of that name",
-                             std::string(image_id));
+            return Error{ErrorCode::invalid_metadata,
+                         "Image dimension '" + name + "' is not the length of the coordinate of that name",
+                         std::string(image_id)};
         }
     }
     return {};
@@ -323,8 +319,8 @@ Result<ImageDescriptor> DescribeImage(const Store& store, std::string_view image
     const auto& image = array_result.value();
     if (IsFlag(image) || !zarr_metadata::FindDimensionIndex(image, "l") ||
         !zarr_metadata::FindDimensionIndex(image, "m") || !zarr_metadata::IsRealDataType(image.data_type)) {
-        return MakeError(ErrorCode::unsupported_data_type, "Image variable is not an openable sky-plane image",
-                         std::string(image_id));
+        return Error{ErrorCode::unsupported_data_type, "Image variable is not an openable sky-plane image",
+                     std::string(image_id)};
     }
 
     if (auto matching = RequireMatchingCoordinates(store, image, image_id); !matching) {

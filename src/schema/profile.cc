@@ -14,19 +14,12 @@
 #include <utility>
 
 namespace carta::zarr::internal {
-namespace {
-
-Error MakeError(ErrorCode code, std::string message, std::string node_path = {}) {
-    return Error{code, std::move(message), std::move(node_path)};
-}
-
-}  // namespace
 
 Result<void> RequireOpenable(const std::vector<ImageEntry>& images, std::string_view image_id) {
     const auto found = std::find_if(images.begin(), images.end(),
                                     [&](const ImageEntry& image) { return image.id == image_id; });
     if (found == images.end()) {
-        return MakeError(ErrorCode::not_found, "Image variable was not found", std::string(image_id));
+        return Error{ErrorCode::not_found, "Image variable was not found", std::string(image_id)};
     }
     if (found->readable) {
         return {};
@@ -35,7 +28,7 @@ Result<void> RequireOpenable(const std::vector<ImageEntry>& images, std::string_
     // refusal, and it is already in hand.
     const auto message =
         found->diagnostics.empty() ? "Image variable is not openable by this profile" : found->diagnostics.front().message;
-    return MakeError(ErrorCode::unsupported_data_type, message, std::string(image_id));
+    return Error{ErrorCode::unsupported_data_type, message, std::string(image_id)};
 }
 
 std::string RejectionMessage(const std::vector<Diagnostic>& diagnostics, std::string_view fallback) {
@@ -48,15 +41,15 @@ Result<void> RequireOpenableDataset(const ProbeResult& probe, std::string_view l
         // one is a file to complain about, the other is a file this library is not for.
         const ErrorCode code = probe.kind == ProbeKind::invalid_dataset ? ErrorCode::invalid_metadata
                                                                        : ErrorCode::unsupported_schema;
-        return MakeError(code, RejectionMessage(probe.diagnostics, "No built-in schema profile matched the Zarr store"),
-                         std::string(location));
+        return Error{code, RejectionMessage(probe.diagnostics, "No built-in schema profile matched the Zarr store"),
+                     std::string(location)};
     }
     // A store the profile recognised and found nothing openable in. Not a rejection -- the profile
     // matched -- so there are no diagnostics to report, and a consumer opening this would get a
     // dataset it can do nothing with.
     if (probe.images.empty()) {
-        return MakeError(ErrorCode::invalid_metadata, "Supported schema has no image variables",
-                         std::string(location));
+        return Error{ErrorCode::invalid_metadata, "Supported schema has no image variables",
+                     std::string(location)};
     }
     return {};
 }
@@ -73,8 +66,8 @@ Result<SchemaProfile> SchemaProfile::For(std::string_view schema_id) {
     const auto found = std::find_if(profiles.begin(), profiles.end(),
                                     [&](const Entry& candidate) { return candidate.id == schema_id; });
     if (found == profiles.end()) {
-        return MakeError(ErrorCode::unsupported_schema,
-                         "No built-in profile exists for schema " + std::string(schema_id));
+        return Error{ErrorCode::unsupported_schema,
+                     "No built-in profile exists for schema " + std::string(schema_id)};
     }
     return SchemaProfile{*found};
 }

@@ -17,10 +17,6 @@
 namespace carta::zarr::internal::xradio {
 namespace {
 
-Error MakeError(ErrorCode code, std::string message, std::string node_path = {}) {
-    return Error{code, std::move(message), std::move(node_path)};
-}
-
 struct BeamParameterIndices {
     std::optional<std::size_t> major;
     std::optional<std::size_t> minor;
@@ -66,14 +62,14 @@ Result<std::vector<Beam>> DescribeBeams(const zarr::ArrayMetadata& beam_metadata
     const auto time_dim = zarr::FindDimensionIndex(beam_metadata, "time");
 
     if (!freq_dim || !pol_dim || !param_dim) {
-        return MakeError(ErrorCode::invalid_metadata,
-                         "Beam table does not carry the frequency, polarization and parameter dimensions",
-                         std::string(beam_node));
+        return Error{ErrorCode::invalid_metadata,
+                     "Beam table does not carry the frequency, polarization and parameter dimensions",
+                     std::string(beam_node)};
     }
     if (!parameter_indices.major || !parameter_indices.minor || !parameter_indices.position_angle) {
-        return MakeError(ErrorCode::invalid_metadata,
-                         "Beam parameter labels do not name a major axis, a minor axis and a position angle",
-                         "beam_params_label");
+        return Error{ErrorCode::invalid_metadata,
+                     "Beam parameter labels do not name a major axis, a minor axis and a position angle",
+                     "beam_params_label"};
     }
 
     const std::uint64_t n_time = time_dim ? beam_metadata.shape.at(*time_dim) : 1;

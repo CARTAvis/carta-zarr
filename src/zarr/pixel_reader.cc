@@ -28,10 +28,6 @@
 namespace carta::zarr::internal::zarr {
 namespace {
 
-Error MakeError(ErrorCode code, std::string message, std::string node_path = {}) {
-    return Error{code, std::move(message), std::move(node_path)};
-}
-
 bool MatchesDataType(std::string_view expected, tensorstore::DataType actual) {
     if (expected == "bool") return actual == tensorstore::dtype_v<bool>;
     if (expected == "int8") return actual == tensorstore::dtype_v<std::int8_t>;
@@ -72,21 +68,21 @@ Result<void> ReadInto(const std::filesystem::path& array_path, const StoreContex
                       tensorstore::DataType target_dtype,
                       Element* destination, std::size_t destination_elements, const ReadOptions& options) {
     if (destination == nullptr) {
-        return MakeError(ErrorCode::invalid_argument, "Destination buffer is null", std::string(node));
+        return Error{ErrorCode::invalid_argument, "Destination buffer is null", std::string(node)};
     }
     if (!SelectionIsWellFormed(selection)) {
-        return MakeError(ErrorCode::invalid_argument, "Malformed pixel selection", std::string(node));
+        return Error{ErrorCode::invalid_argument, "Malformed pixel selection", std::string(node)};
     }
     const auto elements = SelectionElementCount(selection);
     if (elements == 0) {
-        return MakeError(ErrorCode::invalid_argument, "Pixel selection is empty", std::string(node));
+        return Error{ErrorCode::invalid_argument, "Pixel selection is empty", std::string(node)};
     }
     if (elements > destination_elements) {
-        return MakeError(ErrorCode::invalid_argument, "Destination buffer is too small", std::string(node));
+        return Error{ErrorCode::invalid_argument, "Destination buffer is too small", std::string(node)};
     }
 
     if (!context) {
-        return MakeError(ErrorCode::invalid_argument, "Pixel reads require a context", std::string(node));
+        return Error{ErrorCode::invalid_argument, "Pixel reads require a context", std::string(node)};
     }
 
     auto control = CheckReadControl(options, node);
@@ -113,37 +109,37 @@ Result<void> ReadInto(const std::filesystem::path& array_path, const StoreContex
         auto const store = std::move(opened).value();
         const auto rank = selection.start.size();
         if (static_cast<std::size_t>(store.rank()) != rank) {
-            return MakeError(ErrorCode::invalid_argument, "Selection rank does not match the array rank",
-                             std::string(node));
+            return Error{ErrorCode::invalid_argument, "Selection rank does not match the array rank",
+                         std::string(node)};
         }
         const auto actual_shape = store.domain().shape();
         if (actual_shape.size() != rank) {
-            return MakeError(ErrorCode::invalid_metadata, "Array rank differs between metadata sources",
-                             std::string(node));
+            return Error{ErrorCode::invalid_metadata, "Array rank differs between metadata sources",
+                         std::string(node)};
         }
         for (std::size_t axis = 0; axis < rank; ++axis) {
             if (actual_shape[axis] != static_cast<tensorstore::Index>(selection.shape.at(axis))) {
-                return MakeError(ErrorCode::invalid_metadata,
-                                 "Array shape differs between canonical metadata and the array store",
-                                 std::string(node));
+                return Error{ErrorCode::invalid_metadata,
+                             "Array shape differs between canonical metadata and the array store",
+                             std::string(node)};
             }
         }
         const auto actual_dimension_names = store.domain().labels();
         if (actual_dimension_names.size() != rank) {
-            return MakeError(ErrorCode::invalid_metadata, "Array dimension names differ between metadata sources",
-                             std::string(node));
+            return Error{ErrorCode::invalid_metadata, "Array dimension names differ between metadata sources",
+                         std::string(node)};
         }
         for (std::size_t axis = 0; axis < rank; ++axis) {
             if (actual_dimension_names[axis] != selection.dimension_names.at(axis)) {
-                return MakeError(ErrorCode::invalid_metadata,
-                                 "Array dimension names differ between canonical metadata and the array store",
-                                 std::string(node));
+                return Error{ErrorCode::invalid_metadata,
+                             "Array dimension names differ between canonical metadata and the array store",
+                             std::string(node)};
             }
         }
         if (!MatchesDataType(expected_data_type, store.dtype())) {
-            return MakeError(ErrorCode::invalid_metadata,
-                             "Array data type differs between canonical metadata and the array store",
-                             std::string(node));
+            return Error{ErrorCode::invalid_metadata,
+                         "Array data type differs between canonical metadata and the array store",
+                         std::string(node)};
         }
         std::vector<tensorstore::Index> start(rank);
         std::vector<tensorstore::Index> count(rank);
@@ -160,24 +156,24 @@ Result<void> ReadInto(const std::filesystem::path& array_path, const StoreContex
         // transforms, so TensorStore composes them into the one copy the read already performs.
         auto sliced = store | tensorstore::AllDims().TranslateSizedInterval(start, count, stride);
         if (!sliced.ok()) {
-            return MakeError(ErrorCode::invalid_argument,
-                             "Requested region is outside the array: " + sliced.status().ToString(),
-                             std::string(node));
+            return Error{ErrorCode::invalid_argument,
+                         "Requested region is outside the array: " + sliced.status().ToString(),
+                         std::string(node)};
         }
         auto transposed = std::move(sliced).value() | tensorstore::Dims(order).Transpose();
         if (!transposed.ok()) {
-            return MakeError(ErrorCode::invalid_argument,
-                             "Failed to reorder axes: " + transposed.status().ToString(), std::string(node));
+            return Error{ErrorCode::invalid_argument,
+                         "Failed to reorder axes: " + transposed.status().ToString(), std::string(node)};
         }
 
         // Conversion rides the same copy, so a float64 or integer array is never materialized in
         // its stored type first.
         auto converted = tensorstore::Cast(std::move(transposed).value(), target_dtype);
         if (!converted.ok()) {
-            return MakeError(ErrorCode::unsupported_data_type,
-                             "Array cannot be converted to the requested output type: " +
-                                 converted.status().ToString(),
-                             std::string(node));
+            return Error{ErrorCode::unsupported_data_type,
+                         "Array cannot be converted to the requested output type: " +
+                             converted.status().ToString(),
+                         std::string(node)};
         }
 
         std::vector<tensorstore::Index> shape(rank);
@@ -193,12 +189,12 @@ Result<void> ReadInto(const std::filesystem::path& array_path, const StoreContex
 
         auto const read_result = tensorstore::Read(std::move(converted).value(), target).result();
         if (!read_result.ok()) {
-            return MakeError(ErrorCode::io_error, "TensorStore read failed: " + read_result.status().ToString(),
-                             std::string(node));
+            return Error{ErrorCode::io_error, "TensorStore read failed: " + read_result.status().ToString(),
+                         std::string(node)};
         }
         return CheckReadControl(options, node);
     } catch (const std::exception& error) {
-        return MakeError(ErrorCode::io_error, error.what(), std::string(node));
+        return Error{ErrorCode::io_error, error.what(), std::string(node)};
     }
 }
 

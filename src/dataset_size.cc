@@ -18,10 +18,6 @@
 namespace carta::zarr::internal {
 namespace {
 
-Error MakeError(ErrorCode code, std::string message, std::string node_path = {}) {
-    return Error{code, std::move(message), std::move(node_path)};
-}
-
 Result<std::uint64_t> ElementSizeBytes(const zarr::ArrayMetadata& metadata, std::string_view node) {
     static const std::map<std::string_view, std::uint64_t> element_sizes{
         {"bool", 1},      {"int8", 1},       {"uint8", 1},      {"int16", 2},
@@ -43,9 +39,9 @@ Result<std::uint64_t> ElementSizeBytes(const zarr::ArrayMetadata& metadata, std:
         }
     }
 
-    return MakeError(ErrorCode::unsupported_data_type,
-                     "Array " + std::string(node) + " has unsupported data_type " + metadata.data_type,
-                     std::string(node));
+    return Error{ErrorCode::unsupported_data_type,
+                 "Array " + std::string(node) + " has unsupported data_type " + metadata.data_type,
+                 std::string(node)};
 }
 
 }  // namespace
@@ -82,19 +78,19 @@ Result<std::uint64_t> TotalArraySizeBytes(const Store& store) {
                 break;
             }
             if (array_bytes > std::numeric_limits<std::uint64_t>::max() / dimension) {
-                return MakeError(ErrorCode::invalid_metadata,
-                                 "Array " + node + " byte size overflows uint64_t", node);
+                return Error{ErrorCode::invalid_metadata,
+                             "Array " + node + " byte size overflows uint64_t", node};
             }
             array_bytes *= dimension;
         }
         if (total_bytes > std::numeric_limits<std::uint64_t>::max() - array_bytes) {
-            return MakeError(ErrorCode::invalid_metadata, "Total Zarr array byte size overflows uint64_t");
+            return Error{ErrorCode::invalid_metadata, "Total Zarr array byte size overflows uint64_t"};
         }
         total_bytes += array_bytes;
     }
 
     if (array_count == 0) {
-        return MakeError(ErrorCode::invalid_metadata, "Zarr store contains no arrays");
+        return Error{ErrorCode::invalid_metadata, "Zarr store contains no arrays"};
     }
     return total_bytes;
 }

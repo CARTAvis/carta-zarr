@@ -23,10 +23,6 @@
 namespace carta::zarr::internal {
 namespace {
 
-Error MakeError(ErrorCode code, std::string message, std::string node_path = {}) {
-    return Error{code, std::move(message), std::move(node_path)};
-}
-
 // What a checked request comes to: where the pixels are, and how many of them there are.
 struct CheckedRequest {
     zarr::PixelSelection selection;
@@ -47,8 +43,8 @@ Result<CheckedRequest> CheckRead(const ImageDescriptor& descriptor, const ReadRe
     }
     const auto elements = zarr::SelectionElementCount(selection.value());
     if (elements == 0 || elements > destination_size) {
-        return MakeError(ErrorCode::invalid_argument, "Destination buffer is too small for the request",
-                         descriptor.id);
+        return Error{ErrorCode::invalid_argument, "Destination buffer is too small for the request",
+                     descriptor.id};
     }
 
     // Before allocating a mask or starting any storage work. A cancelled request must not consume
@@ -103,9 +99,9 @@ Result<std::size_t> ReadInPieces(const ReadableImage& image, const ReadRequest& 
             // cannot be cut any further still has to say so rather than allocate.
             if (options.temporary_memory_limit_bytes != 0 &&
                 piece_elements > options.temporary_memory_limit_bytes) {
-                return MakeError(ErrorCode::buffer_too_small,
-                                 "Pixel mask temporary buffer exceeds the configured memory limit",
-                                 descriptor.id);
+                return Error{ErrorCode::buffer_too_small,
+                             "Pixel mask temporary buffer exceeds the configured memory limit",
+                             descriptor.id};
             }
             mask.assign(piece_elements, 0);
             // The mask is read first so that an unavailable or cancelled mask cannot leave this
@@ -128,8 +124,8 @@ Result<std::size_t> ReadInPieces(const ReadableImage& image, const ReadRequest& 
         begin = end;
         if (options.progress && !options.progress(static_cast<std::size_t>(begin * plan.elements_per_unit),
                                                   static_cast<std::size_t>(elements))) {
-            return MakeError(ErrorCode::cancelled, "The read was cancelled by its progress callback",
-                             descriptor.id);
+            return Error{ErrorCode::cancelled, "The read was cancelled by its progress callback",
+                         descriptor.id};
         }
     }
     return static_cast<std::size_t>(elements);
@@ -139,7 +135,7 @@ Result<std::size_t> ReadPixelMask(const ReadableImage& image, const ReadRequest&
                                   BufferView<std::uint8_t> destination, const ReadOptions& options) {
     const auto& descriptor = image.descriptor();
     if (!descriptor.has_pixel_mask) {
-        return MakeError(ErrorCode::not_found, "This image has no pixel mask", descriptor.id);
+        return Error{ErrorCode::not_found, "This image has no pixel mask", descriptor.id};
     }
 
     const auto checked = CheckRead(descriptor, request, destination.size, options);

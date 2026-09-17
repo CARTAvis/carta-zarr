@@ -20,21 +20,14 @@
 #include <utility>
 
 namespace carta::zarr::internal::zarr {
-namespace {
-
-Error MakeError(ErrorCode code, std::string message, std::string node_path = {}) {
-    return Error{code, std::move(message), std::move(node_path)};
-}
-
-}  // namespace
 
 Result<PixelSelection> BuildSelection(const ImageDescriptor& descriptor, const ReadRequest& request) {
     const auto rank = descriptor.axes.size();
     if (request.axes.size() != rank) {
-        return MakeError(ErrorCode::invalid_argument,
-                         "Request has " + std::to_string(request.axes.size()) + " axes but the image has " +
-                             std::to_string(rank),
-                         descriptor.id);
+        return Error{ErrorCode::invalid_argument,
+                     "Request has " + std::to_string(request.axes.size()) + " axes but the image has " +
+                         std::to_string(rank),
+                     descriptor.id};
     }
 
     PixelSelection selection;
@@ -49,27 +42,27 @@ Result<PixelSelection> BuildSelection(const ImageDescriptor& descriptor, const R
         const auto& axis = descriptor.axes.at(logical);
         const auto& range = request.axes.at(logical);
         if (range.stride == 0) {
-            return MakeError(ErrorCode::invalid_argument, "Axis '" + axis.name + "' has a zero stride",
-                             descriptor.id);
+            return Error{ErrorCode::invalid_argument, "Axis '" + axis.name + "' has a zero stride",
+                         descriptor.id};
         }
         if (range.count == 0) {
-            return MakeError(ErrorCode::invalid_argument, "Axis '" + axis.name + "' selects no elements",
-                             descriptor.id);
+            return Error{ErrorCode::invalid_argument, "Axis '" + axis.name + "' selects no elements",
+                         descriptor.id};
         }
         // The last selected index is what has to fall inside the axis. It is compared by dividing
         // the room that is left rather than by multiplying out the span, because the span
         // overflows: a count and a stride of about 2^32 each multiply to a small number, which
         // passed this check and went on to size a buffer and drive the loops.
         if (range.start >= axis.length || range.count - 1 > (axis.length - 1 - range.start) / range.stride) {
-            return MakeError(ErrorCode::invalid_argument,
-                             "Axis '" + axis.name + "' request exceeds its length of " +
-                                 std::to_string(axis.length),
-                             descriptor.id);
+            return Error{ErrorCode::invalid_argument,
+                         "Axis '" + axis.name + "' request exceeds its length of " +
+                             std::to_string(axis.length),
+                         descriptor.id};
         }
         const auto stored = axis.storage_index;
         if (stored >= rank) {
-            return MakeError(ErrorCode::invalid_metadata, "Axis '" + axis.name + "' has an out-of-range storage index",
-                             descriptor.id);
+            return Error{ErrorCode::invalid_metadata, "Axis '" + axis.name + "' has an out-of-range storage index",
+                         descriptor.id};
         }
         selection.start.at(stored) = range.start;
         selection.count.at(stored) = range.count;
@@ -83,10 +76,10 @@ Result<PixelSelection> BuildSelection(const ImageDescriptor& descriptor, const R
 
 Result<void> CheckReadControl(const ReadOptions& options, std::string_view node) {
     if (options.cancellation_requested && options.cancellation_requested()) {
-        return MakeError(ErrorCode::cancelled, "Pixel read was cancelled", std::string(node));
+        return Error{ErrorCode::cancelled, "Pixel read was cancelled", std::string(node)};
     }
     if (std::chrono::steady_clock::now() >= options.deadline) {
-        return MakeError(ErrorCode::cancelled, "Pixel read deadline expired", std::string(node));
+        return Error{ErrorCode::cancelled, "Pixel read deadline expired", std::string(node)};
     }
     return {};
 }

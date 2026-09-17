@@ -33,10 +33,6 @@
 namespace carta::zarr {
 namespace {
 
-Error MakeError(ErrorCode code, std::string message, std::string node_path = {}) {
-    return Error{code, std::move(message), std::move(node_path)};
-}
-
 // Every public entry point reports its failures as a Result, and a consumer that checks one should
 // never have to catch as well. Underneath, though, metadata comes from a file and buffers are sized
 // from what it says: nlohmann throws on a value that is not the type it is read as, and the standard
@@ -57,7 +53,7 @@ auto GuardedWith(Function&& function, OnThrow&& on_throw) -> decltype(function()
 template <typename Function>
 auto Guarded(ErrorCode code, std::string node, Function&& function) -> decltype(function()) {
     return GuardedWith(std::forward<Function>(function), [&](const std::exception& error) {
-        return MakeError(code, error.what(), std::move(node));
+        return Error{code, error.what(), std::move(node)};
     });
 }
 
@@ -184,7 +180,6 @@ public:
     }
 };
 
-
 Image::Image(std::shared_ptr<Impl> impl) : _impl(std::move(impl)) {}
 Image::~Image() = default;
 
@@ -207,7 +202,7 @@ Result<std::size_t> Image::Read(const ReadRequest& request, BufferView<float> de
     const std::string node = _impl ? _impl->descriptor.id : std::string{};
     return Guarded(ErrorCode::io_error, node, [&]() -> Result<std::size_t> {
         if (!_impl) {
-            return MakeError(ErrorCode::invalid_argument, "Image handle is empty");
+            return Error{ErrorCode::invalid_argument, "Image handle is empty"};
         }
         auto image = _impl->Readable();
         if (!image) {
@@ -226,7 +221,7 @@ Result<std::size_t> Image::ReadPixelMask(const ReadRequest& request, BufferView<
     const std::string node = _impl ? _impl->descriptor.id : std::string{};
     return Guarded(ErrorCode::io_error, node, [&]() -> Result<std::size_t> {
         if (!_impl) {
-            return MakeError(ErrorCode::invalid_argument, "Image handle is empty");
+            return Error{ErrorCode::invalid_argument, "Image handle is empty"};
         }
         auto image = _impl->Readable();
         if (!image) {
@@ -245,7 +240,7 @@ Result<void> Image::ReduceSpectral(const SpectralReduceRequest& request, const S
     const std::string node = _impl ? _impl->descriptor.id : std::string{};
     return Guarded(ErrorCode::io_error, node, [&]() -> Result<void> {
         if (!_impl || !_impl->store) {
-            return MakeError(ErrorCode::invalid_argument, "Image handle is empty");
+            return Error{ErrorCode::invalid_argument, "Image handle is empty"};
         }
         auto image = _impl->Readable();
         if (!image) {
@@ -264,7 +259,7 @@ Result<void> Image::ComputeHistogram(const HistogramRequest& request, const Hist
     const std::string node = _impl ? _impl->descriptor.id : std::string{};
     return Guarded(ErrorCode::io_error, node, [&]() -> Result<void> {
         if (!_impl || !_impl->store) {
-            return MakeError(ErrorCode::invalid_argument, "Image handle is empty");
+            return Error{ErrorCode::invalid_argument, "Image handle is empty"};
         }
         auto image = _impl->Readable();
         if (!image) {
@@ -283,7 +278,7 @@ Result<CubeHistogramResult> Image::ComputeCubeHistogram(const CubeHistogramReque
     const std::string node = _impl ? _impl->descriptor.id : std::string{};
     return Guarded(ErrorCode::io_error, node, [&]() -> Result<CubeHistogramResult> {
         if (!_impl || !_impl->store) {
-            return MakeError(ErrorCode::invalid_argument, "Image handle is empty");
+            return Error{ErrorCode::invalid_argument, "Image handle is empty"};
         }
         auto image = _impl->Readable();
         if (!image) {
@@ -297,10 +292,10 @@ Result<std::vector<Beam>> Image::ReadBeams() const {
     const std::string node = _impl ? _impl->descriptor.id : std::string{};
     return Guarded(ErrorCode::invalid_metadata, node, [&]() -> Result<std::vector<Beam>> {
         if (!_impl) {
-            return MakeError(ErrorCode::invalid_argument, "Image handle is empty");
+            return Error{ErrorCode::invalid_argument, "Image handle is empty"};
         }
         if (!_impl->store) {
-            return MakeError(ErrorCode::invalid_argument, "Image store is unavailable");
+            return Error{ErrorCode::invalid_argument, "Image store is unavailable"};
         }
         return _impl->profile.ReadBeams(*_impl->store, _impl->descriptor.id);
     });
@@ -333,7 +328,7 @@ Dataset::~Dataset() = default;
 Result<Dataset> Dataset::Open(const Context& context, std::string_view location) {
     return Guarded(ErrorCode::invalid_metadata, std::string(location), [&]() -> Result<Dataset> {
         if (!context._impl) {
-            return MakeError(ErrorCode::invalid_argument, "Context handle is empty");
+            return Error{ErrorCode::invalid_argument, "Context handle is empty"};
         }
 
         // TensorStore resources are shared by Context, while array handles are scoped to this
@@ -372,7 +367,7 @@ Result<DatasetSize> Dataset::Size(std::chrono::milliseconds directory_size_timeo
     const std::string node = _impl ? _impl->location : std::string{};
     return Guarded(ErrorCode::io_error, node, [&]() -> Result<DatasetSize> {
         if (!_impl) {
-            return MakeError(ErrorCode::invalid_argument, "Dataset handle is empty");
+            return Error{ErrorCode::invalid_argument, "Dataset handle is empty"};
         }
 
         std::uint64_t physical_size = 0;
@@ -392,7 +387,7 @@ Result<Image> Dataset::OpenImage(std::string_view image_id) const {
     const std::string node(image_id);
     return Guarded(ErrorCode::invalid_metadata, node, [&]() -> Result<Image> {
         if (!_impl) {
-            return MakeError(ErrorCode::invalid_argument, "Dataset handle is empty");
+            return Error{ErrorCode::invalid_argument, "Dataset handle is empty"};
         }
         std::scoped_lock const lock(_impl->mutex);
         const std::string image_name(image_id);
@@ -483,10 +478,10 @@ Result<bool> IsXradioImage(std::string_view location) {
         return true;
     }
     if (result.value().kind == SchemaMatchKind::invalid) {
-        return MakeError(
-            ErrorCode::invalid_metadata,
-            internal::RejectionMessage(result.value().diagnostics, "The requested schema did not match"),
-            std::string(location));
+        return Error{
+        ErrorCode::invalid_metadata,
+        internal::RejectionMessage(result.value().diagnostics, "The requested schema did not match"),
+        std::string(location)};
     }
     return false;
 }

@@ -35,6 +35,7 @@ using carta::zarr::ReadOptions;
 using carta::zarr::ReadRequest;
 using carta::zarr::internal::ReadableImage;
 using carta::zarr::internal::ReadInPieces;
+using carta::zarr::internal::ReadPixelMask;
 using carta::zarr::internal::WorkPool;
 using carta::zarr::testing::SyntheticPixelSource;
 
@@ -297,6 +298,102 @@ void TestDecliningTheMaskReadsNoFlag() {
     RequireCubeMatchesTheFormula(destination, "a read that declined the mask");
 }
 
+// The mask read is the other entry this module has, and until it came here it was written inline in
+// the facade and reached the pixel seam directly -- so the only way to its refusals was a fixture on
+// disk, and to its cancellation branch there was no way at all.
+void TestTheMaskReadIsRefusedForAnImageWithNoFlag() {
+    const auto image = MakeImage(false);
+    const auto geometry = MakeGeometry();
+    SyntheticPixelSource source(image, geometry, Value);
+
+    std::vector<std::uint8_t> destination(kElements, 7);
+    const auto read = ReadPixelMask(Readable(source, image, geometry), WholeCube(),
+                                    BufferView<std::uint8_t>{destination.data(), destination.size()},
+                                    ReadOptions{});
+    Require(!read, "an image with no flag has no pixel mask to read");
+    Require(read.error().code == ErrorCode::not_found, "and it should say so as not_found");
+    Require(source.mask_reads() == 0, "without asking the source for one");
+}
+
+// The preamble the two entries share, asked of the one that used to have its own copy: a destination
+// too small is refused before any storage work, and so is a request that is already cancelled.
+void TestTheMaskReadChecksBeforeItReads() {
+    const auto image = MakeImage(true);
+    const auto geometry = MakeGeometry();
+    SyntheticPixelSource source(image, geometry, Value);
+    const auto readable = Readable(source, image, geometry);
+
+    {
+        std::vector<std::uint8_t> too_small(kElements - 1, 0);
+        const auto read = ReadPixelMask(readable, WholeCube(),
+                                        BufferView<std::uint8_t>{too_small.data(), too_small.size()},
+                                        ReadOptions{});
+        Require(!read && read.error().code == ErrorCode::invalid_argument,
+                "a destination one element short should be refused");
+        Require(source.mask_reads() == 0, "before the source is asked for anything");
+    }
+
+    {
+        std::vector<std::uint8_t> destination(kElements, 0);
+        ReadOptions options;
+        options.cancellation_requested = []() { return true; };
+        const auto read = ReadPixelMask(readable, WholeCube(),
+                                        BufferView<std::uint8_t>{destination.data(), destination.size()},
+                                        options);
+        Require(!read && read.error().code == ErrorCode::cancelled,
+                "a request that is already cancelled should not open an array");
+        Require(source.mask_reads() == 0, "and should not reach the source");
+    }
+}
+
+// What it reads, where it puts it, and what it reports. The flag's own formula is the oracle, and
+// the destination is dense in logical order exactly as an ordinary read's is.
+void TestTheMaskReadFillsTheDestinationInLogicalOrder() {
+    const auto image = MakeImage(true);
+    const auto geometry = MakeGeometry();
+    SyntheticPixelSource source(image, geometry, Value);
+    // A stripe pattern that depends on all three varying axes, so a transposed read disagrees.
+    source.set_flags([](const std::vector<std::uint64_t>& logical) {
+        return ((logical.at(0) + (2 * logical.at(1)) + (3 * logical.at(2))) % 5) != 0;
+    });
+
+    std::vector<std::uint8_t> destination(kElements, 9);
+    const auto read = ReadPixelMask(Readable(source, image, geometry), WholeCube(),
+                                    BufferView<std::uint8_t>{destination.data(), destination.size()},
+                                    ReadOptions{});
+    Require(static_cast<bool>(read), "the mask read should succeed");
+    Require(read.value() == kElements, "and report every selected element");
+    Require(source.mask_reads() == 1, "in a single read, because a mask allocates nothing to bound");
+    Require(source.pixel_reads() == 0, "and it should not read the pixels beside it");
+
+    for (std::uint64_t z = 0; z < kZ; ++z) {
+        for (std::uint64_t y = 0; y < kY; ++y) {
+            for (std::uint64_t x = 0; x < kX; ++x) {
+                const auto at = static_cast<std::size_t>((z * kX * kY) + (y * kX) + x);
+                const std::uint8_t expected = ((x + (2 * y) + (3 * z)) % 5) != 0 ? 1 : 0;
+                Require(destination.at(at) == expected,
+                        "the flag at (" + std::to_string(x) + ", " + std::to_string(y) + ", " +
+                            std::to_string(z) + ") should be " + std::to_string(expected));
+            }
+        }
+    }
+}
+
+// A source that fails the read reports that failure rather than a count, which is the branch the
+// facade's copy could only reach by breaking a file underneath it.
+void TestAFailedMaskReadIsReported() {
+    const auto image = MakeImage(true);
+    const auto geometry = MakeGeometry();
+    SyntheticPixelSource source(image, geometry, Value);
+    source.fail_mask_read(1, ErrorCode::io_error);
+
+    std::vector<std::uint8_t> destination(kElements, 0);
+    const auto read = ReadPixelMask(Readable(source, image, geometry), WholeCube(),
+                                    BufferView<std::uint8_t>{destination.data(), destination.size()},
+                                    ReadOptions{});
+    Require(!read && read.error().code == ErrorCode::io_error, "a failed flag read should be reported");
+}
+
 }  // namespace
 
 int main() {
@@ -308,6 +405,10 @@ int main() {
         TestASplitReadAgreesWithAnUnsplitOne();
         TestAFlaggedPixelArrivesAsNaN();
         TestDecliningTheMaskReadsNoFlag();
+        TestTheMaskReadIsRefusedForAnImageWithNoFlag();
+        TestTheMaskReadChecksBeforeItReads();
+        TestTheMaskReadFillsTheDestinationInLogicalOrder();
+        TestAFailedMaskReadIsReported();
         std::cout << "carta-zarr read synthetic tests passed\n";
         return 0;
     } catch (const std::exception& error) {

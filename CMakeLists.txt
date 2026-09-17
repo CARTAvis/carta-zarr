@@ -312,6 +312,13 @@ if(CARTA_ZARR_BUILD_TESTS AND BUILD_TESTING)
             ${CARTA_ZARR_METADATA_SOURCES}
         LIBRARIES nlohmann_json::nlohmann_json)
 
+    # The stored layout permuted into the order the library reads. Links nothing: it takes a
+    # descriptor and a layout, so the sharded and permuted cases stop depending on which committed
+    # fixture happens to have them.
+    carta_zarr_add_test(carta_zarr_chunk_geometry_tests INTERNAL
+        TEST_NAME carta-zarr-chunk-geometry
+        SOURCES tests/chunk_geometry_test.cc)
+
     # What an ordinary read decides before it reads anything. Compiled against pieces.cc alone:
     # PlanPieces touches no store and no transport, so where a read is cut and how big a piece is --
     # which is where the progress callback and the memory ceiling meet -- is checkable without a

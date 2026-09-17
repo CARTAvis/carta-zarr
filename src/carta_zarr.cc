@@ -6,11 +6,11 @@
 
 #include "carta-zarr/carta_zarr.h"
 
-#include "chunk_blocks.h"
 #include "read/pieces.h"
 #include "readable_image.h"
 #include "reduce/plane_histogram.h"
 #include "reduce/spectral_reduce.h"
+#include "schema/chunk_geometry.h"
 #include "schema/profile.h"
 #include "store.h"
 #include "store_pixel_source.h"
@@ -40,14 +40,25 @@ Error MakeError(ErrorCode code, std::string message, std::string node_path = {})
 // Every public entry point reports its failures as a Result, and a consumer that checks one should
 // never have to catch as well. Underneath, though, metadata comes from a file and buffers are sized
 // from what it says: nlohmann throws on a value that is not the type it is read as, and the standard
-// library throws on a length it cannot allocate. This is where that becomes an Error.
-template <typename Function>
-auto Guarded(ErrorCode code, std::string node, Function&& function) -> decltype(function()) {
+// library throws on a length it cannot allocate. This is where that becomes a report.
+//
+// It is the only try in this file. Three entry points used to write their own beside the twelve
+// that went through here, with fallback codes of their own, so whether one caught was a question you
+// answered by reading to the end of it.
+template <typename Function, typename OnThrow>
+auto GuardedWith(Function&& function, OnThrow&& on_throw) -> decltype(function()) {
     try {
         return function();
     } catch (const std::exception& error) {
-        return MakeError(code, error.what(), std::move(node));
+        return on_throw(error);
     }
+}
+
+template <typename Function>
+auto Guarded(ErrorCode code, std::string node, Function&& function) -> decltype(function()) {
+    return GuardedWith(std::forward<Function>(function), [&](const std::exception& error) {
+        return MakeError(code, error.what(), std::move(node));
+    });
 }
 
 // A probe that rejects a store has already worked out why, often down to the attribute, and a
@@ -181,48 +192,6 @@ public:
     }
 };
 
-namespace {
-
-ChunkGeometry BuildChunkGeometry(const ImageDescriptor& descriptor, const StorageLayout& layout) {
-    ChunkGeometry geometry;
-    geometry.sharded = layout.sharded;
-    geometry.compressor = layout.compressor;
-
-    const auto rank = descriptor.axes.size();
-    geometry.chunk_shape.resize(rank);
-    geometry.shard_shape.resize(rank);
-    geometry.grid_shape.resize(rank);
-    for (std::size_t logical = 0; logical < rank; ++logical) {
-        const auto& axis = descriptor.axes.at(logical);
-        const auto stored = axis.storage_index;
-        const auto chunk =
-            stored < layout.chunk_shape.size() ? layout.chunk_shape.at(stored) : axis.length;
-        const auto shard =
-            stored < layout.shard_shape.size() ? layout.shard_shape.at(stored) : chunk;
-        geometry.chunk_shape.at(logical) = chunk;
-        geometry.shard_shape.at(logical) = shard == 0 ? chunk : shard;
-        geometry.grid_shape.at(logical) = chunk == 0 ? 0 : (axis.length + chunk - 1) / chunk;
-        if (stored != logical) {
-            geometry.transpose_required = true;
-        }
-    }
-
-    // The last stored dimension varies fastest, so of the two spatial axes the one with the larger
-    // storage index is the one a plane is contiguous along.
-    std::size_t x_stored = 0;
-    std::size_t y_stored = 0;
-    for (const auto& axis : descriptor.axes) {
-        if (axis.role == AxisRole::spatial_x) {
-            x_stored = axis.storage_index;
-        } else if (axis.role == AxisRole::spatial_y) {
-            y_stored = axis.storage_index;
-        }
-    }
-    geometry.fastest_spatial_axis = y_stored > x_stored ? AxisRole::spatial_y : AxisRole::spatial_x;
-    return geometry;
-}
-
-}  // namespace
 
 Image::Image(std::shared_ptr<Impl> impl) : _impl(std::move(impl)) {}
 Image::~Image() = default;
@@ -267,34 +236,11 @@ Result<std::size_t> Image::ReadPixelMask(const ReadRequest& request, BufferView<
         if (!_impl) {
             return MakeError(ErrorCode::invalid_argument, "Image handle is empty");
         }
-        if (!_impl->descriptor.has_pixel_mask) {
-            return MakeError(ErrorCode::not_found, "This image has no pixel mask", _impl->descriptor.id);
+        auto image = _impl->Readable();
+        if (!image) {
+            return image.error();
         }
-
-        auto selection = internal::zarr::BuildSelection(_impl->descriptor, request);
-        if (!selection) {
-            return selection.error();
-        }
-        const auto elements = internal::zarr::SelectionElementCount(selection.value());
-        if (elements == 0 || elements > destination.size) {
-            return MakeError(ErrorCode::invalid_argument, "Destination buffer is too small for the request",
-                             _impl->descriptor.id);
-        }
-
-        // Checked before any storage work, as an ordinary read does. There is nothing to allocate
-        // here -- the destination is the caller's -- but opening an array is work too, and a
-        // request that has already been cancelled should not cause it.
-        auto control = internal::zarr::CheckReadControl(options, _impl->descriptor.id);
-        if (!control) {
-            return control.error();
-        }
-
-        auto read = _impl->source.ReadMask(selection.value(), destination.data,
-                                           static_cast<std::size_t>(elements), options);
-        if (!read) {
-            return read.error();
-        }
-        return static_cast<std::size_t>(elements);
+        return internal::ReadPixelMask(image.value(), request, destination, options);
     });
 }
 
@@ -393,7 +339,7 @@ Dataset::Dataset(std::shared_ptr<Impl> impl) : _impl(std::move(impl)) {}
 Dataset::~Dataset() = default;
 
 Result<Dataset> Dataset::Open(const Context& context, std::string_view location) {
-    try {
+    return Guarded(ErrorCode::invalid_metadata, std::string(location), [&]() -> Result<Dataset> {
         if (!context._impl) {
             return MakeError(ErrorCode::invalid_argument, "Context handle is empty");
         }
@@ -411,8 +357,9 @@ Result<Dataset> Dataset::Open(const Context& context, std::string_view location)
         }
         const auto& probe = probe_result.value();
         if (probe.kind != ProbeKind::supported_dataset) {
-            const ErrorCode code =
-                probe.kind == ProbeKind::invalid_dataset ? ErrorCode::invalid_metadata : ErrorCode::unsupported_schema;
+            const ErrorCode code = probe.kind == ProbeKind::invalid_dataset
+                                       ? ErrorCode::invalid_metadata
+                                       : ErrorCode::unsupported_schema;
             return MakeError(
                 code, RejectionMessage(probe.diagnostics, "No built-in schema profile matched the Zarr store"),
                 std::string(location));
@@ -431,9 +378,7 @@ Result<Dataset> Dataset::Open(const Context& context, std::string_view location)
         DatasetDescriptor descriptor = std::move(static_cast<DatasetDescriptor&>(probe_result.value()));
         return Dataset{std::make_shared<Impl>(context._impl, std::string(location), std::move(descriptor),
                                               profile.value(), std::move(store_result.value()))};
-    } catch (const std::exception& error) {
-        return MakeError(ErrorCode::invalid_metadata, error.what(), std::string(location));
-    }
+    });
 }
 
 const DatasetDescriptor& Dataset::descriptor() const noexcept {
@@ -480,7 +425,7 @@ Result<Image> Dataset::OpenImage(std::string_view image_id) const {
             // into logical order, so it is derived here rather than read again.
             const StorageLayout layout = descriptor.storage ? *descriptor.storage : StorageLayout{};
             return Image{std::make_shared<Image::Impl>(_impl->context, _impl->location, _impl->profile, _impl->store,
-                                                       descriptor, BuildChunkGeometry(descriptor, layout))};
+                                                       descriptor, internal::BuildChunkGeometry(descriptor, layout))};
         };
         const auto cached = _impl->image_descriptors.find(image_name);
         if (cached != _impl->image_descriptors.end()) {
@@ -496,38 +441,43 @@ Result<Image> Dataset::OpenImage(std::string_view image_id) const {
 }
 
 ProbeResult Probe(std::string_view location, const ProbeOptions&) {
-    try {
-        auto store_result = internal::OpenStore(location);
-        if (!store_result) {
-            ProbeResult result;
-            result.kind = ProbeKind::not_zarr;
-            if (store_result.error().code == ErrorCode::invalid_metadata ||
-                store_result.error().code == ErrorCode::io_error) {
-                result.kind = ProbeKind::invalid_dataset;
+    // The guard that does not report an Error, because a probe answers with a ProbeResult whatever
+    // happens: "not a Zarr store" is an answer rather than a failure. A throw becomes a diagnostic,
+    // and that is the only way this differs from every other entry point here.
+    const auto as_diagnostic = [](const auto& failure) {
+        return Diagnostic{internal::zarr::ErrorCodeName(failure.code), failure.message, failure.node_path};
+    };
+    return GuardedWith(
+        [&]() -> ProbeResult {
+            auto store_result = internal::OpenStore(location);
+            if (!store_result) {
+                const auto& failure = store_result.error();
+                ProbeResult result;
+                result.kind = failure.code == ErrorCode::invalid_metadata || failure.code == ErrorCode::io_error
+                                  ? ProbeKind::invalid_dataset
+                                  : ProbeKind::not_zarr;
+                result.diagnostics.push_back(as_diagnostic(failure));
+                return result;
             }
-            result.diagnostics.push_back(Diagnostic{internal::zarr::ErrorCodeName(store_result.error().code),
-                                                    store_result.error().message, store_result.error().node_path});
-            return result;
-        }
-        auto probe_result = internal::ProbeStore(store_result.value());
-        if (!probe_result) {
+            auto probe_result = internal::ProbeStore(store_result.value());
+            if (!probe_result) {
+                ProbeResult result;
+                result.kind = ProbeKind::invalid_dataset;
+                result.diagnostics.push_back(as_diagnostic(probe_result.error()));
+                return result;
+            }
+            return probe_result.value();
+        },
+        [&](const std::exception& error) {
             ProbeResult result;
             result.kind = ProbeKind::invalid_dataset;
-            result.diagnostics.push_back(Diagnostic{internal::zarr::ErrorCodeName(probe_result.error().code),
-                                                    probe_result.error().message, probe_result.error().node_path});
+            result.diagnostics.push_back(Diagnostic{"exception", error.what(), std::string(location)});
             return result;
-        }
-        return probe_result.value();
-    } catch (const std::exception& error) {
-        ProbeResult result;
-        result.kind = ProbeKind::invalid_dataset;
-        result.diagnostics.push_back(Diagnostic{"exception", error.what(), std::string(location)});
-        return result;
-    }
+        });
 }
 
 Result<SchemaProbeResult> ProbeSchema(std::string_view location, std::string_view schema_id) {
-    try {
+    return Guarded(ErrorCode::invalid_metadata, std::string(location), [&]() -> Result<SchemaProbeResult> {
         // Resolve the profile before touching the store, so an unknown schema reports itself rather
         // than whatever happens to be wrong with the path.
         auto profile = internal::SchemaProfile::For(schema_id);
@@ -539,9 +489,7 @@ Result<SchemaProbeResult> ProbeSchema(std::string_view location, std::string_vie
             return store_result.error();
         }
         return profile.value().Probe(store_result.value());
-    } catch (const std::exception& error) {
-        return MakeError(ErrorCode::invalid_metadata, error.what(), std::string(location));
-    }
+    });
 }
 
 Result<bool> IsXradioImage(std::string_view location) {

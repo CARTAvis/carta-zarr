@@ -75,6 +75,27 @@ PiecePlan PlanPieces(const ImageDescriptor& descriptor, const ChunkGeometry& geo
 Result<std::size_t> ReadInPieces(const ReadableImage& image, const ReadRequest& request,
                                  BufferView<float> destination, const ReadOptions& options);
 
+/**
+ * Read an image's pixel mask, as a byte per selected pixel.
+ *
+ * The other half of what this module is for. 6a05196 moved the ordinary read out of the facade;
+ * efa17d5 then gave the mask read the same controls an ordinary read has and implemented them in
+ * the facade, so the preamble every pixel read shares -- the request is a selection of this image,
+ * the destination can hold it, the caller has not already given up -- existed twice, and the facade
+ * reached the PixelSource seam without passing through here. It is stated once, here, and the two
+ * entry points differ only in what they do after it.
+ *
+ * Reports not_found for an image with no flag, which is a question about the image rather than
+ * about the request and is therefore answered before the request is looked at.
+ *
+ * Not cut into pieces, and that is the honest difference rather than an omission: a piece exists to
+ * bound what a read holds at once and to have somewhere to report from, and this allocates nothing
+ * -- the destination is the caller's and it is one byte per element. A caller that wants a mask in
+ * bounded pieces asks for it in pieces.
+ */
+Result<std::size_t> ReadPixelMask(const ReadableImage& image, const ReadRequest& request,
+                                  BufferView<std::uint8_t> destination, const ReadOptions& options);
+
 }  // namespace carta::zarr::internal
 
 #endif  // CARTA_ZARR_SRC_READ_PIECES_H_

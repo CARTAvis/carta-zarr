@@ -27,6 +27,38 @@ Error MakeError(ErrorCode code, std::string message, std::string node_path = {})
     return Error{code, std::move(message), std::move(node_path)};
 }
 
+// What a checked request comes to: where the pixels are, and how many of them there are.
+struct CheckedRequest {
+    zarr::PixelSelection selection;
+    std::uint64_t elements = 0;
+};
+
+// What every pixel read of an image asks before it touches storage.
+//
+// Written out twice until this: once here and once in the facade, where the mask read built its own
+// selection, sized its own buffer check and made its own control check on the way to the pixel seam.
+// The three are one question -- can this image serve this request into this buffer, now -- and a
+// read that answered two of them would be a read that had not checked.
+Result<CheckedRequest> CheckRead(const ImageDescriptor& descriptor, const ReadRequest& request,
+                                 std::size_t destination_size, const ReadOptions& options) {
+    auto selection = zarr::BuildSelection(descriptor, request);
+    if (!selection) {
+        return selection.error();
+    }
+    const auto elements = zarr::SelectionElementCount(selection.value());
+    if (elements == 0 || elements > destination_size) {
+        return MakeError(ErrorCode::invalid_argument, "Destination buffer is too small for the request",
+                         descriptor.id);
+    }
+
+    // Before allocating a mask or starting any storage work. A cancelled request must not consume
+    // temporary memory, or open an array, just to discover that it cannot proceed.
+    if (auto control = zarr::CheckReadControl(options, descriptor.id); !control) {
+        return control.error();
+    }
+    return CheckedRequest{std::move(selection.value()), elements};
+}
+
 }  // namespace
 
 Result<std::size_t> ReadInPieces(const ReadableImage& image, const ReadRequest& request,
@@ -34,22 +66,13 @@ Result<std::size_t> ReadInPieces(const ReadableImage& image, const ReadRequest& 
     const auto& descriptor = image.descriptor();
     const auto& geometry = image.geometry();
     const auto& source = image.source();
-    auto selection = zarr::BuildSelection(descriptor, request);
-    if (!selection) {
-        return selection.error();
+    const auto checked = CheckRead(descriptor, request, destination.size, options);
+    if (!checked) {
+        return checked.error();
     }
-    const auto elements = zarr::SelectionElementCount(selection.value());
-    if (elements == 0 || elements > destination.size) {
-        return MakeError(ErrorCode::invalid_argument, "Destination buffer is too small for the request",
-                         descriptor.id);
-    }
-
-    // Do this before allocating a mask or starting any storage work. A cancelled request must not
-    // consume temporary memory just to discover that it cannot proceed.
-    auto control = zarr::CheckReadControl(options, descriptor.id);
-    if (!control) {
-        return control.error();
-    }
+    // The whole read's element count is what a piece's share is measured against; the selection each
+    // piece is actually read through is built per piece below.
+    const auto elements = checked.value().elements;
 
     const bool apply_mask = options.apply_pixel_mask && descriptor.has_pixel_mask;
     const PiecePlan plan = PlanPieces(descriptor, geometry, request, options, elements, apply_mask);
@@ -108,6 +131,26 @@ Result<std::size_t> ReadInPieces(const ReadableImage& image, const ReadRequest& 
             return MakeError(ErrorCode::cancelled, "The read was cancelled by its progress callback",
                              descriptor.id);
         }
+    }
+    return static_cast<std::size_t>(elements);
+}
+
+Result<std::size_t> ReadPixelMask(const ReadableImage& image, const ReadRequest& request,
+                                  BufferView<std::uint8_t> destination, const ReadOptions& options) {
+    const auto& descriptor = image.descriptor();
+    if (!descriptor.has_pixel_mask) {
+        return MakeError(ErrorCode::not_found, "This image has no pixel mask", descriptor.id);
+    }
+
+    const auto checked = CheckRead(descriptor, request, destination.size, options);
+    if (!checked) {
+        return checked.error();
+    }
+    const auto elements = checked.value().elements;
+    if (auto read = image.source().ReadMask(checked.value().selection, destination.data,
+                                            static_cast<std::size_t>(elements), options);
+        !read) {
+        return read.error();
     }
     return static_cast<std::size_t>(elements);
 }

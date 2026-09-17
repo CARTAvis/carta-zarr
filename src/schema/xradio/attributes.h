@@ -52,12 +52,6 @@ inline std::string AttributeString(const nlohmann::json& attributes, std::string
     return {};
 }
 
-// Takes the value rather than an object and a name, because what it reads is usually already in
-// hand: an XRADIO measure keeps its number under `data`, which the caller has reached for anyway.
-inline std::optional<double> AsNumber(const nlohmann::json& value) {
-    return value.is_number() ? std::optional<double>(value.get<double>()) : std::nullopt;
-}
-
 inline const nlohmann::json* Member(const nlohmann::json& object, std::string_view name) {
     if (!object.is_object() || !object.contains(name)) {
         return nullptr;
@@ -77,7 +71,7 @@ inline const nlohmann::json* MemberArray(const nlohmann::json& object, std::stri
 
 inline std::optional<double> MemberNumber(const nlohmann::json& object, std::string_view name) {
     const auto* const member = Member(object, name);
-    return member == nullptr ? std::nullopt : AsNumber(*member);
+    return member != nullptr && member->is_number() ? std::optional<double>(member->get<double>()) : std::nullopt;
 }
 
 }  // namespace carta::zarr::internal::xradio

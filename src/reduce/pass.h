@@ -13,6 +13,7 @@
 #include "chunk_blocks.h"
 #include "pixel_source.h"
 #include "axis_map.h"
+#include "reduce/plane_selection.h"
 #include "zarr/pixel_selection.h"
 
 #include <algorithm>
@@ -58,8 +59,7 @@ struct Slab {
 class PassPlan;
 
 PassPlan PlanPass(const ImageDescriptor& descriptor, const ChunkGeometry& geometry, const AxisMap& map,
-                  const Range& spectral, std::uint64_t polarization, std::uint64_t time,
-                  std::uint64_t sample, const ReadOptions& options);
+                  const CheckedPlanes& planes, std::uint64_t sample, const ReadOptions& options);
 
 class PassPlan {
 public:
@@ -79,9 +79,8 @@ public:
     std::size_t slab_budget_bytes = 0;
     std::uint64_t band_rows = 1;
     std::uint64_t layer_chunks = 1;
-    Range spectral;
-    std::uint64_t polarization = 0;
-    std::uint64_t time = 0;
+    // The planes this pass is over, already checked against the descriptor above.
+    PlaneSelection planes;
     // Take every nth pixel along both spatial axes. This does not reduce the chunks a read decodes
     // -- a chunk comes back whole however few of its pixels are wanted -- so it pays only when it
     // steps over chunks entirely.
@@ -115,7 +114,8 @@ public:
     // The end of a slab that begins at `begin` and would like to be `desired` channels long, moved
     // onto a chunk boundary so that no decode serves two slabs.
     std::uint64_t AlignedSlabEnd(std::uint64_t begin, std::uint64_t desired, std::uint64_t end) const {
-        return AlignedBlockEnd(begin, desired, end, spectral.start, spectral.stride, _chunk_depth);
+        return AlignedBlockEnd(begin, desired, end, planes.spectral.start, planes.spectral.stride,
+                               _chunk_depth);
     }
 
     // How many channels one emitted block may hold.
@@ -133,9 +133,9 @@ public:
                                std::uint32_t hint) const;
 
 private:
-    friend PassPlan PlanPass(const ImageDescriptor& descriptor, const ChunkGeometry& geometry, const AxisMap& map,
-                             const Range& spectral, std::uint64_t polarization, std::uint64_t time,
-                             std::uint64_t sample, const ReadOptions& options);
+    friend PassPlan PlanPass(const ImageDescriptor& descriptor, const ChunkGeometry& geometry,
+                             const AxisMap& map, const CheckedPlanes& planes, std::uint64_t sample,
+                             const ReadOptions& options);
 
     // Steps towards the answers above rather than answers themselves, and the two a caller used to
     // divide by itself: the chunk-count rule was written out in six places and the slab-sizing rule

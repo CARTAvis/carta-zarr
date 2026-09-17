@@ -334,6 +334,13 @@ if(CARTA_ZARR_BUILD_TESTS AND BUILD_TESTING)
             src/zarr/pixel_selection.cc
         LIBRARIES nlohmann_json::nlohmann_json Threads::Threads)
 
+    # What a reduction may ask for, asked of nothing but a descriptor. This target compiles no
+    # implementation source at all: a plane selection is checked from the image's axes and the
+    # request, so every way one can be refused is reachable with no store, no pool and no pixel.
+    carta_zarr_add_test(carta_zarr_plane_selection_tests INTERNAL
+        TEST_NAME carta-zarr-plane-selection
+        SOURCES tests/plane_selection_test.cc)
+
     # What a pass decides before it reads anything. Compiled against pass.cc alone: PlanPass touches
     # no store and no transport, so the read strategy -- which has moved more than once, and moved
     # in three places each time -- is checkable without a directory tree.

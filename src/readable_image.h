@@ -27,9 +27,11 @@ namespace carta::zarr::internal {
  *
  * It is not only the bundle, because a bundle would just move those arguments rather than absorb
  * them: it also answers what each entry point used to work out again for itself. Where the roles
- * sit among the axes is derived once here rather than four times, and a spectral range is checked
- * against the image through this rather than against a descriptor and a map the caller had to have
- * in hand.
+ * sit among the axes is derived once here rather than four times.
+ *
+ * Checking a plane selection used to live here too, as `ValidateSpectral`. That was one third of
+ * the question in the one place the other two thirds were not; `CheckedPlanes::Of` asks all of it,
+ * from the descriptor and the map this already holds.
  *
  * Holds references and an AxisMap by value, so it is cheap to build per call and owns nothing. It
  * must not outlive the source, the descriptor, the geometry or the pool it was built from.
@@ -62,19 +64,6 @@ public:
     }
     const AxisMap& map() const noexcept {
         return _map;
-    }
-
-    // The spectral range an operation was asked for has to fall inside this image. Compared by
-    // dividing the room that is left rather than by multiplying out the span: (count - 1) * stride
-    // wraps, and a wrapped span passes a check it should fail.
-    Result<void> ValidateSpectral(const Range& spectral) const {
-        const auto channels = _descriptor->axes.at(_map.spectral).length;
-        if (spectral.stride == 0 || spectral.count == 0 || spectral.start >= channels ||
-            spectral.count - 1 > (channels - 1 - spectral.start) / spectral.stride) {
-            return Error{ErrorCode::invalid_argument, "The spectral range falls outside the image",
-                         _descriptor->id};
-        }
-        return {};
     }
 
 private:

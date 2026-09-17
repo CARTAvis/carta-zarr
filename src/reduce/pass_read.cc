@@ -21,7 +21,7 @@ Result<Slab> ReadSlab(const PixelSource& source, const PassPlan& plan, const Rea
                       const SlabRequest& request, SlabBuffers& buffers) {
     const auto& descriptor = *plan.descriptor;
     const auto rank = descriptor.axes.size();
-    const Range spectral = plan.spectral;
+    const Range spectral = plan.planes.spectral;
 
     ReadRequest read_request;
     read_request.axes.assign(rank, Range{0, 1, 1});
@@ -30,10 +30,10 @@ Result<Slab> ReadSlab(const PixelSource& source, const PassPlan& plan, const Rea
     read_request.axes.at(plan.map.spectral) = Range{
         spectral.start + (request.channel_index * spectral.stride), request.channel_count, spectral.stride};
     if (plan.map.has_polarization) {
-        read_request.axes.at(plan.map.polarization) = Range{plan.polarization, 1, 1};
+        read_request.axes.at(plan.map.polarization) = Range{plan.planes.polarization, 1, 1};
     }
     if (plan.map.has_time) {
-        read_request.axes.at(plan.map.time) = Range{plan.time, 1, 1};
+        read_request.axes.at(plan.map.time) = Range{plan.planes.time, 1, 1};
     }
 
     auto selection = zarr::BuildSelection(descriptor, read_request);

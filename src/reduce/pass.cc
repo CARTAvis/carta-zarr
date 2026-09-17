@@ -11,8 +11,8 @@
 namespace carta::zarr::internal {
 
 PassPlan PlanPass(const ImageDescriptor& descriptor, const ChunkGeometry& geometry, const AxisMap& map,
-                  const Range& spectral, std::uint64_t polarization, std::uint64_t time,
-                  std::uint64_t sample, const ReadOptions& options) {
+                  const CheckedPlanes& planes, std::uint64_t sample, const ReadOptions& options) {
+    const Range spectral = planes.spectral();
     PassPlan plan;
     plan.descriptor = &descriptor;
     plan.map = map;
@@ -31,14 +31,12 @@ PassPlan PlanPass(const ImageDescriptor& descriptor, const ChunkGeometry& geomet
     plan.slab_budget_bytes = options.temporary_memory_limit_bytes != 0 ? options.temporary_memory_limit_bytes
                                                                       : DefaultReadBytes(plan.chunk_bytes);
     plan._least_channels = ((plan._chunk_depth + spectral.stride - 1) / spectral.stride);
-    plan.spectral = spectral;
+    plan.planes = planes.selection();
     const std::uint64_t row_chunks = std::max<std::uint64_t>(1, ((plan.u_length - 1) / plan.chunk_u) + 1);
     const std::uint64_t column_chunks = std::max<std::uint64_t>(1, ((plan.v_length - 1) / plan.chunk_v) + 1);
     plan.layer_chunks = std::max<std::uint64_t>(1, row_chunks * column_chunks);
     // How many chunk rows one read may hold, so that a read is a budget's worth of chunk data.
     plan.band_rows = plan.UnitsAffordable(row_chunks);
-    plan.polarization = polarization;
-    plan.time = time;
     plan.sample = std::max<std::uint64_t>(1, sample);
     return plan;
 }
@@ -48,9 +46,9 @@ std::uint64_t PassPlan::EmitChannels(std::uint64_t layer_chunks, std::size_t byt
                                      std::uint32_t hint) const {
     const std::uint64_t budget_channels =
         std::max<std::uint64_t>(1, kSpectralEmitBudgetBytes / std::max<std::size_t>(1, bytes_per_channel));
-    const std::uint64_t block_chunks = std::min(spectral.count, UnitsAffordable(layer_chunks));
+    const std::uint64_t block_chunks = std::min(planes.spectral.count, UnitsAffordable(layer_chunks));
     return std::min({hint == 0 ? block_chunks * _least_channels : static_cast<std::uint64_t>(hint),
-                     budget_channels, spectral.count});
+                     budget_channels, planes.spectral.count});
 }
 
 }  // namespace carta::zarr::internal

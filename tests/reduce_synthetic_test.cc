@@ -103,7 +103,7 @@ void TestAHistogramCountsEveryPixel() {
     SyntheticPixelSource source(image, geometry, Value);
 
     carta::zarr::HistogramRequest request;
-    request.spectral = {0, kZ, 1};
+    request.planes.spectral = {0, kZ, 1};
     request.bins = 50;
     request.lower = 0.0;
     request.upper = 1000.0;
@@ -173,7 +173,7 @@ void TestASpectralReductionAgreesWithTheFormula() {
         {40, 50, 100, 120, nullptr},
     };
     carta::zarr::SpectralReduceRequest request;
-    request.spectral = {0, kZ, 1};
+    request.planes.spectral = {0, kZ, 1};
     request.regions = regions.data();
     request.region_count = regions.size();
     request.statistics = carta::zarr::Statistic::num_pixels | carta::zarr::Statistic::sum |

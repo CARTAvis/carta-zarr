@@ -87,7 +87,7 @@ struct Collected {
 Collected Collect(const carta::zarr::Image& sky, const carta::zarr::HistogramRequest& request,
                   const carta::zarr::ReadOptions& options) {
     Collected collected;
-    collected.per_channel.assign(static_cast<std::size_t>(request.spectral.count), {});
+    collected.per_channel.assign(static_cast<std::size_t>(request.planes.spectral.count), {});
     std::uint64_t next_channel = 0;
     const auto result = sky.ComputeHistogram(request, [&](const carta::zarr::HistogramBlock& block) {
         Require(block.first_channel == next_channel, "blocks should tile the spectral selection in order");
@@ -108,15 +108,15 @@ Collected Collect(const carta::zarr::Image& sky, const carta::zarr::HistogramReq
     }, options);
     Require(static_cast<bool>(result),
             std::string("the histogram failed: ") + (result.has_value() ? "" : result.error().message));
-    Require(next_channel == request.spectral.count, "the blocks should cover the whole spectral selection");
+    Require(next_channel == request.planes.spectral.count, "the blocks should cover the whole spectral selection");
     return collected;
 }
 
 carta::zarr::HistogramRequest WholeSpectrum(std::uint64_t polarization, double lower, double upper,
                                             std::uint32_t bins) {
     carta::zarr::HistogramRequest request;
-    request.spectral = {0, kFrequency, 1};
-    request.polarization = polarization;
+    request.planes.spectral = {0, kFrequency, 1};
+    request.planes.polarization = polarization;
     request.lower = lower;
     request.upper = upper;
     request.bins = bins;
@@ -251,8 +251,8 @@ void TestAnUnfinishedBlockIsHandedOver(const carta::zarr::Image& sky) {
 void TestEachBlockCountsItsOwnChannels(const carta::zarr::Image& sky) {
     const std::uint64_t polarization = 0;
     carta::zarr::HistogramRequest request;
-    request.spectral = {0, kFrequency, 1};
-    request.polarization = polarization;
+    request.planes.spectral = {0, kFrequency, 1};
+    request.planes.polarization = polarization;
     request.bins = 16;
     request.lower = 0.0;
     request.upper = 2000.0;
@@ -304,13 +304,13 @@ void TestRejectedRequests(const carta::zarr::Image& sky) {
     rejects(WholeSpectrum(0, 5.0F, 5.0F, 8), "an empty range should be rejected rather than divided by");
     rejects(WholeSpectrum(0, 10.0F, 1.0F, 8), "an inverted range should be rejected");
     auto outside = WholeSpectrum(0, 0.0F, 10.0F, 8);
-    outside.spectral = {0, kFrequency + 1, 1};
+    outside.planes.spectral = {0, kFrequency + 1, 1};
     rejects(outside, "a spectral range outside the image should be rejected");
     // As in a pixel read: (count - 1) * stride wraps to zero here, so a selection running far past
     // the spectral axis looks like it ends at its first channel. It is refused either way -- by the
     // slab read, once it gets there -- and this asks for it to be refused by the axis it names.
     auto overflowing = WholeSpectrum(0, 0.0F, 10.0F, 8);
-    overflowing.spectral = {0, (std::uint64_t{1} << 32U) + 1, std::uint64_t{1} << 32U};
+    overflowing.planes.spectral = {0, (std::uint64_t{1} << 32U) + 1, std::uint64_t{1} << 32U};
     rejects(overflowing, "a spectral count and stride whose span overflows should be rejected");
 
     // Pixels are binned in float. Each of these ranges is finite and non-empty in the double the
@@ -328,8 +328,8 @@ void TestRejectedRequests(const carta::zarr::Image& sky) {
 void TestOnePassMatchesTheTwoPassAnswer(const carta::zarr::Image& sky) {
     const std::uint64_t polarization = 1;
     carta::zarr::CubeHistogramRequest request;
-    request.spectral = {0, kFrequency, 1};
-    request.polarization = polarization;
+    request.planes.spectral = {0, kFrequency, 1};
+    request.planes.polarization = polarization;
     request.bins = 12;
     const auto one_pass = sky.ComputeCubeHistogram(request);
     Require(static_cast<bool>(one_pass),
@@ -394,8 +394,8 @@ void TestOnePassMatchesTheTwoPassAnswer(const carta::zarr::Image& sky) {
 // whose values span far more than that first guess is the case that exercises it.
 void TestTheProvisionalRangeGrowsToFit(const carta::zarr::Image& sky) {
     carta::zarr::CubeHistogramRequest request;
-    request.spectral = {0, kFrequency, 1};
-    request.polarization = 0;
+    request.planes.spectral = {0, kFrequency, 1};
+    request.planes.polarization = 0;
     request.bins = 4;
     // Few enough bins that the merging on every doubling is visible rather than hidden in noise.
     request.provisional_bins = 8;
@@ -412,8 +412,8 @@ void TestTheProvisionalRangeGrowsToFit(const carta::zarr::Image& sky) {
 // Sampling reads fewer pixels, and says so.
 void TestSamplingTakesFewerPixels(const carta::zarr::Image& sky) {
     carta::zarr::CubeHistogramRequest request;
-    request.spectral = {0, kFrequency, 1};
-    request.polarization = 0;
+    request.planes.spectral = {0, kFrequency, 1};
+    request.planes.polarization = 0;
     request.bins = 8;
     const auto every = sky.ComputeCubeHistogram(request);
     Require(static_cast<bool>(every), "the unsampled pass should work");
@@ -432,7 +432,7 @@ void TestSamplingTakesFewerPixels(const carta::zarr::Image& sky) {
 
 void TestOnePassRejectsAndCancels(const carta::zarr::Image& sky) {
     carta::zarr::CubeHistogramRequest request;
-    request.spectral = {0, kFrequency, 1};
+    request.planes.spectral = {0, kFrequency, 1};
     request.bins = 0;
     Require(!sky.ComputeCubeHistogram(request), "zero bins should be rejected");
     request.bins = 8;
@@ -488,8 +488,8 @@ void TestAWidePlaneSplitsAndStillCounts(const char* fixture) {
 
         std::vector<std::uint64_t> totals(bins, 0);
         carta::zarr::HistogramRequest request;
-        request.spectral = {0, kFrequency, 1};
-        request.polarization = 1;
+        request.planes.spectral = {0, kFrequency, 1};
+        request.planes.polarization = 1;
         request.bins = bins;
         request.lower = lower;
         request.upper = upper;
@@ -538,8 +538,8 @@ void TestAWideCubeSplitsAndStillAddsUp(const char* fixture) {
         options.decode_threads = threads;
         const auto sky = OpenSky(fixture, options);
         carta::zarr::CubeHistogramRequest request;
-        request.spectral = {0, kFrequency, 1};
-        request.polarization = 0;
+        request.planes.spectral = {0, kFrequency, 1};
+        request.planes.polarization = 0;
         request.bins = 128;
         const auto result = sky.ComputeCubeHistogram(request);
         Require(static_cast<bool>(result), "the wide one-pass histogram failed");
@@ -570,8 +570,8 @@ void TestAWideCubeReportsWhileItSplits(const char* fixture) {
     read_options.temporary_memory_limit_bytes = 1U << 20U;
 
     carta::zarr::CubeHistogramRequest request;
-    request.spectral = {0, kFrequency, 1};
-    request.polarization = 0;
+    request.planes.spectral = {0, kFrequency, 1};
+    request.planes.polarization = 0;
     request.bins = 64;
 
     std::size_t updates = 0;
@@ -609,8 +609,8 @@ void TestOnePassReportsWhatItHasSoFar(const carta::zarr::Image& sky) {
     options.temporary_memory_limit_bytes = 1;
 
     carta::zarr::CubeHistogramRequest request;
-    request.spectral = {0, kFrequency, 1};
-    request.polarization = 1;
+    request.planes.spectral = {0, kFrequency, 1};
+    request.planes.polarization = 1;
     request.bins = 12;
 
     std::size_t updates = 0;
@@ -673,8 +673,8 @@ void TestOnePassKeepsItsContractAtAnyThreadCount(const char* fixture) {
         options.decode_threads = threads;
         const auto sky = OpenSky(fixture, options);
         carta::zarr::CubeHistogramRequest request;
-        request.spectral = {0, kFrequency, 1};
-        request.polarization = 1;
+        request.planes.spectral = {0, kFrequency, 1};
+        request.planes.polarization = 1;
         request.bins = 12;
         auto result = sky.ComputeCubeHistogram(request);
         Require(static_cast<bool>(result), "the one-pass histogram failed");

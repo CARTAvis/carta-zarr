@@ -10,6 +10,7 @@
 #include "axis_map.h"
 #include "reduce/tuning.h"
 #include "reduce/pass.h"
+#include "reduce/plane_selection.h"
 #include "zarr/pixel_selection.h"
 
 #include <algorithm>
@@ -279,18 +280,6 @@ Result<void> ValidateRequest(const ImageDescriptor& descriptor, const AxisMap& a
         }
     }
 
-    if (!axes.has_polarization && request.polarization != 0) {
-        return MakeError(ErrorCode::invalid_argument, "The image has no polarization axis", node);
-    }
-    if (axes.has_polarization && request.polarization >= descriptor.axes.at(axes.polarization).length) {
-        return MakeError(ErrorCode::invalid_argument, "The requested polarization is outside the image", node);
-    }
-    if (!axes.has_time && request.time != 0) {
-        return MakeError(ErrorCode::invalid_argument, "The image has no time axis", node);
-    }
-    if (axes.has_time && request.time >= descriptor.axes.at(axes.time).length) {
-        return MakeError(ErrorCode::invalid_argument, "The requested time step is outside the image", node);
-    }
     return {};
 }
 
@@ -430,10 +419,11 @@ Result<void> ReduceSpectral(const ReadableImage& image, const SpectralReduceRequ
 
     // Checked here as well as inside each slab request, so that a bad range is one error naming the
     // axis rather than a partial reduction that fails on some later slab.
-    const Range spectral = request.spectral;
-    if (auto valid = image.ValidateSpectral(spectral); !valid) {
-        return valid.error();
+    const auto checked = CheckedPlanes::Of(descriptor, map, request.planes);
+    if (!checked) {
+        return checked.error();
     }
+    const auto& planes = checked.value();
 
     // The requested statistics, in the one order a block reports them.
     std::vector<Statistic> statistics;
@@ -453,8 +443,7 @@ Result<void> ReduceSpectral(const ReadableImage& image, const SpectralReduceRequ
     const int slot_min = slot_of.at(4);
     const int slot_max = slot_of.at(5);
 
-    const auto plan = PlanPass(descriptor, geometry, map, spectral, request.polarization, request.time, 1,
-                               options);
+    const auto plan = PlanPass(descriptor, geometry, map, planes, 1, options);
 
     auto buckets_result =
         BuildChunkBuckets(regions.data(), regions.size(), plan.chunk_u, plan.chunk_v, node);
@@ -508,8 +497,8 @@ Result<void> ReduceSpectral(const ReadableImage& image, const SpectralReduceRequ
     SlabWalk walk(source, plan, options);
     std::vector<ColumnRun> segments;
 
-    for (std::uint64_t block_begin = 0; block_begin < spectral.count;) {
-        const std::uint64_t block_end = plan.AlignedSlabEnd(block_begin, wanted_channels, spectral.count);
+    for (std::uint64_t block_begin = 0; block_begin < planes.count();) {
+        const std::uint64_t block_end = plan.AlignedSlabEnd(block_begin, wanted_channels, planes.count());
         const auto block_length = static_cast<std::size_t>(block_end - block_begin);
         const std::size_t statistic_stride = block_length;
         const std::size_t region_stride = statistic_count * statistic_stride;

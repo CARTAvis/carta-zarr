@@ -146,7 +146,7 @@ Collected Collect(const carta::zarr::Image& sky, const carta::zarr::SpectralRedu
                   const carta::zarr::ReadOptions& options) {
     Collected collected;
     collected.region_count = request.region_count;
-    collected.channel_count = static_cast<std::size_t>(request.spectral.count);
+    collected.channel_count = static_cast<std::size_t>(request.planes.spectral.count);
     std::uint64_t next_channel = 0;
     const auto result = sky.ReduceSpectral(request, [&](const carta::zarr::SpectralBlock& block) {
         Require(block.first_channel == next_channel, "blocks should tile the spectral selection in order");
@@ -186,7 +186,7 @@ Collected Collect(const carta::zarr::Image& sky, const carta::zarr::SpectralRedu
     }, options);
     Require(static_cast<bool>(result),
             std::string("the reduction failed: ") + (result.has_value() ? "" : result.error().message));
-    Require(next_channel == request.spectral.count, "the blocks should cover the whole spectral selection");
+    Require(next_channel == request.planes.spectral.count, "the blocks should cover the whole spectral selection");
     return collected;
 }
 
@@ -216,8 +216,8 @@ void CheckAgainstOracle(const Collected& collected, const std::vector<carta::zar
 carta::zarr::SpectralReduceRequest WholeSpectrum(const std::vector<carta::zarr::RegionMask>& regions,
                                                  std::uint64_t polarization) {
     carta::zarr::SpectralReduceRequest request;
-    request.spectral = {0, kFrequency, 1};
-    request.polarization = polarization;
+    request.planes.spectral = {0, kFrequency, 1};
+    request.planes.polarization = polarization;
     request.regions = regions.data();
     request.region_count = regions.size();
     request.statistics = AllStatistics();
@@ -298,7 +298,7 @@ void TestOnlyRequestedStatisticsAreReported(const carta::zarr::Image& sky) {
 void TestStrideSelectsChannels(const carta::zarr::Image& sky) {
     const std::vector<carta::zarr::RegionMask> regions{{0, 0, kL, kM, nullptr}};
     auto request = WholeSpectrum(regions, 0);
-    request.spectral = {1, 1, 2};
+    request.planes.spectral = {1, 1, 2};
     const auto collected = Collect(sky, request);
     Require(collected.channel_count == 1, "a stride of two over two channels selects one");
     RequireClose(collected.At(0, carta::zarr::Statistic::sum, 0), Expected(regions.at(0), 1, 0).sum,
@@ -567,7 +567,7 @@ void TestRejectedRequests(const carta::zarr::Image& sky) {
     rejects(WholeSpectrum(empty, 0), "a region with no width");
 
     auto past_the_last_channel = WholeSpectrum(regions, 0);
-    past_the_last_channel.spectral = {0, kFrequency + 1, 1};
+    past_the_last_channel.planes.spectral = {0, kFrequency + 1, 1};
     rejects(past_the_last_channel, "a spectral range past the last channel");
 
     auto past_the_last_polarization = WholeSpectrum(regions, kPolarization);
@@ -633,8 +633,8 @@ void TestAWideRegionSplitsAndStillAgrees(const char* fixture) {
         const auto sky = OpenSky(fixture, options);
 
         carta::zarr::SpectralReduceRequest request;
-        request.spectral = {0, kFrequency, 1};
-        request.polarization = polarization;
+        request.planes.spectral = {0, kFrequency, 1};
+        request.planes.polarization = polarization;
         request.regions = regions.data();
         request.region_count = regions.size();
         request.statistics = AllStatistics();

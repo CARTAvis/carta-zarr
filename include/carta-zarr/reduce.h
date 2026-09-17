@@ -59,6 +59,25 @@ inline constexpr bool Contains(StatisticSet set, Statistic statistic) noexcept {
 }
 
 
+// Which planes of an image a reduction is over: a range along the spectral coordinate, one
+// polarization, and one time.
+//
+// The three travel together because a reduction is always over whole planes, and they are one type
+// rather than three fields because they are answered together: whether an image can serve this is
+// one question about that image's axes. An ordinary read says the same thing as one range per axis
+// instead, which is why ReadRequest carries no plane selection.
+//
+// polarization and time are indices into their own axes. An image that has no such axis accepts
+// zero and nothing else: index 0 of an axis an image does not have is the image itself, and any
+// other index names a plane that does not exist.
+struct PlaneSelection {
+    // The channels the reduction is over, along the image's spectral axis. Strides are honoured.
+    Range spectral;
+    std::uint64_t polarization = 0;
+    std::uint64_t time = 0;
+};
+
+
 // A 2D (x, y) mask in logical image coordinates, addressed row-major with x fastest.
 //
 // This is a borrowed view: the pointer must stay valid until ReduceSpectral returns, and the
@@ -118,9 +137,7 @@ struct RegionMask {
 // A pixel outside [lower, upper] is not counted, and neither is one that is not finite, which is
 // the same rule: NaN fails both comparisons.
 struct HistogramRequest {
-    Range spectral;
-    std::uint64_t polarization = 0;
-    std::uint64_t time = 0;
+    PlaneSelection planes;
     std::uint32_t bins = 0;
     double lower = 0.0;
     double upper = 0.0;
@@ -199,9 +216,7 @@ struct CubeHistogramProgress {
 // settled until the last pixel has been read, and holding a provisional histogram for every plane
 // of a deep cube is gigabytes. A caller that adds its planes together loses nothing by it.
 struct CubeHistogramRequest {
-    Range spectral;
-    std::uint64_t polarization = 0;
-    std::uint64_t time = 0;
+    PlaneSelection planes;
     // The bins the caller wants back.
     std::uint32_t bins = 0;
     // The resolution the walk bins at. Zero takes the library's default, which is sixteen times the
@@ -236,10 +251,7 @@ inline constexpr std::size_t kMaxSpectralRegions = 1u << 20;
 
 
 struct SpectralReduceRequest {
-    // The channels to reduce, over the image's spectral axis. Strides are honoured.
-    Range spectral;
-    std::uint64_t polarization = 0;
-    std::uint64_t time = 0;
+    PlaneSelection planes;
     // The regions, all reduced in a single pass over the pixels.
     const RegionMask* regions = nullptr;
     std::size_t region_count = 0;
@@ -252,7 +264,7 @@ struct SpectralReduceRequest {
     // The library lowers a hint to fit a 64 MiB block budget and then to a whole number of
     // spectral chunks, because a block boundary inside a chunk would split one decode's results
     // across two blocks. A caller that wants the whole reduction in one block asks for
-    // SpectralReduceRequest::spectral.count. The value actually used is reported as
+    // SpectralReduceRequest::planes.spectral.count. The value actually used is reported as
     // SpectralBlock::channel_count, which a caller has to read anyway.
     std::uint32_t emit_every_channels = 0;
 };
@@ -269,7 +281,7 @@ struct SpectralReduceRequest {
 // division it must not perform.
 struct SpectralBlock {
     // Index into the request's spectral selection, not an image channel: the image channel is
-    // spectral.start + (first_channel + i) * spectral.stride.
+    // planes.spectral.start + (first_channel + i) * planes.spectral.stride.
     std::uint64_t first_channel = 0;
     std::uint64_t channel_count = 0;
     const double* values = nullptr;

@@ -150,7 +150,7 @@ int main(int argc, char** argv) {
     };
     const auto reduce = TimeIt(repeats, [&]() -> std::string {
         carta::zarr::SpectralReduceRequest request;
-        request.spectral = {0, channels, 1};
+        request.planes.spectral = {0, channels, 1};
         request.regions = regions.data();
         request.region_count = regions.size();
         request.statistics = carta::zarr::Statistic::num_pixels | carta::zarr::Statistic::nan_count |
@@ -162,7 +162,7 @@ int main(int argc, char** argv) {
 
     const auto histogram = TimeIt(repeats, [&]() -> std::string {
         carta::zarr::HistogramRequest request;
-        request.spectral = {0, channels, 1};
+        request.planes.spectral = {0, channels, 1};
         request.bins = 1024;
         request.lower = -1.0e9;
         request.upper = 1.0e9;
@@ -172,7 +172,7 @@ int main(int argc, char** argv) {
 
     const auto cube = TimeIt(repeats, [&]() -> std::string {
         carta::zarr::CubeHistogramRequest request;
-        request.spectral = {0, channels, 1};
+        request.planes.spectral = {0, channels, 1};
         request.bins = 1024;
         const auto outcome = sky.ComputeCubeHistogram(request);
         return outcome ? std::string{} : outcome.error().message;

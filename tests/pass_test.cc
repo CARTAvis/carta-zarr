@@ -32,6 +32,7 @@ using carta::zarr::ChunkGeometry;
 using carta::zarr::ImageDescriptor;
 using carta::zarr::Range;
 using carta::zarr::ReadOptions;
+using carta::zarr::internal::CheckedPlanes;
 using carta::zarr::internal::MapAxes;
 using carta::zarr::internal::PassPlan;
 using carta::zarr::internal::PlanPass;
@@ -86,7 +87,9 @@ PassPlan Plan(const ImageDescriptor& descriptor, const ChunkGeometry& geometry, 
               const ReadOptions& options, std::uint64_t sample = 1) {
     const auto map = MapAxes(descriptor);
     Require(static_cast<bool>(map), "MapAxes failed on a well-formed image");
-    return PlanPass(descriptor, geometry, map.value(), spectral, 0, 0, sample, options);
+    const auto planes = CheckedPlanes::Of(descriptor, map.value(), {spectral, 0, 0});
+    Require(static_cast<bool>(planes), "the spectral range does not fit this image");
+    return PlanPass(descriptor, geometry, map.value(), planes.value(), sample, options);
 }
 
 // Which spatial axis the pass walks along is the store's decision, not the image's. Reading a plane

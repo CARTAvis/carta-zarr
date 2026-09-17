@@ -10,6 +10,7 @@
 #include "axis_map.h"
 #include "reduce/tuning.h"
 #include "reduce/pass.h"
+#include "reduce/plane_selection.h"
 
 #include <algorithm>
 #include <cmath>
@@ -25,14 +26,21 @@ Error MakeError(ErrorCode code, std::string message, std::string node_path = {})
     return Error{code, std::move(message), std::move(node_path)};
 }
 
-Result<void> ValidateRequest(const ImageDescriptor& descriptor, const AxisMap& axes,
-                             const HistogramRequest& request) {
-    const auto& node = descriptor.id;
-    if (request.bins == 0 || request.bins > kMaxHistogramBins) {
+// The one check both histograms make. It takes the count rather than a request because their two
+// requests are different types -- and because a cube histogram used to reach this by building a
+// stand-in HistogramRequest with bins = 1 over [0, 1], bounds that nothing ever read.
+Result<void> ValidateBins(const std::string& node, std::uint32_t bins) {
+    if (bins == 0 || bins > kMaxHistogramBins) {
         return MakeError(ErrorCode::invalid_argument,
                          "A histogram needs between 1 and " + std::to_string(kMaxHistogramBins) + " bins",
                          node);
     }
+    return {};
+}
+
+// The bounds a fixed-range histogram bins against. A cube histogram has none: its range comes from
+// the data's own extremes, so there is nothing here for it to be checked against.
+Result<void> ValidateRange(const std::string& node, const HistogramRequest& request) {
     // A zero-width range would divide by zero on every pixel. The caller decides what an image with
     // no finite pixel should look like -- there is more than one defensible answer -- so this says
     // no rather than inventing one.
@@ -54,21 +62,8 @@ Result<void> ValidateRequest(const ImageDescriptor& descriptor, const AxisMap& a
                          "than nothing, in the precision its pixels are counted in",
                          node);
     }
-    if (!axes.has_polarization && request.polarization != 0) {
-        return MakeError(ErrorCode::invalid_argument, "The image has no polarization axis to select", node);
-    }
-    if (axes.has_polarization && request.polarization >= descriptor.axes.at(axes.polarization).length) {
-        return MakeError(ErrorCode::invalid_argument, "The polarization index is outside the image", node);
-    }
-    if (!axes.has_time && request.time != 0) {
-        return MakeError(ErrorCode::invalid_argument, "The image has no time axis to select", node);
-    }
-    if (axes.has_time && request.time >= descriptor.axes.at(axes.time).length) {
-        return MakeError(ErrorCode::invalid_argument, "The time index is outside the image", node);
-    }
     return {};
 }
-
 
 // A histogram whose range grows to fit whatever arrives.
 //
@@ -231,16 +226,19 @@ Result<void> ComputeHistogram(const ReadableImage& image, const HistogramRequest
     if (!sink) {
         return MakeError(ErrorCode::invalid_argument, "A histogram needs a sink", node);
     }
-    if (auto valid = ValidateRequest(descriptor, map, request); !valid) {
+    if (auto valid = ValidateBins(node, request.bins); !valid) {
         return valid.error();
     }
-    if (auto valid = image.ValidateSpectral(request.spectral); !valid) {
+    if (auto valid = ValidateRange(node, request); !valid) {
         return valid.error();
     }
+    const auto checked = CheckedPlanes::Of(descriptor, map, request.planes);
+    if (!checked) {
+        return checked.error();
+    }
+    const auto& planes = checked.value();
 
-    const Range spectral = request.spectral;
-    const auto plan = PlanPass(descriptor, geometry, map, spectral, request.polarization, request.time, 1,
-                               options);
+    const auto plan = PlanPass(descriptor, geometry, map, planes, 1, options);
 
     // A whole plane, so the layer the emit budget is spent against is the plan's own.
     const std::size_t bytes_per_channel = static_cast<std::size_t>(request.bins) * sizeof(std::uint64_t);
@@ -275,8 +273,8 @@ Result<void> ComputeHistogram(const ReadableImage& image, const HistogramRequest
         partials.resize(max_tasks * bins);
     }
 
-    for (std::uint64_t block_begin = 0; block_begin < spectral.count;) {
-        const std::uint64_t block_end = plan.AlignedSlabEnd(block_begin, wanted_channels, spectral.count);
+    for (std::uint64_t block_begin = 0; block_begin < planes.count();) {
+        const std::uint64_t block_end = plan.AlignedSlabEnd(block_begin, wanted_channels, planes.count());
         const auto block_length = static_cast<std::size_t>(block_end - block_begin);
         counts.assign(block_length * bins, 0);
 
@@ -383,29 +381,17 @@ Result<CubeHistogramResult> ComputeCubeHistogram(const ReadableImage& image,
     const auto& map = image.map();
     auto& workers = image.workers();
     const auto& node = descriptor.id;
-    if (request.bins == 0 || request.bins > kMaxHistogramBins) {
-        return MakeError(ErrorCode::invalid_argument,
-                         "A histogram needs between 1 and " + std::to_string(kMaxHistogramBins) + " bins",
-                         node);
+    if (auto valid = ValidateBins(node, request.bins); !valid) {
+        return valid.error();
     }
     if (request.spatial_sample == 0) {
         return MakeError(ErrorCode::invalid_argument, "A spatial sample of zero selects nothing", node);
     }
-    // The polarization and time checks are the same ones a fixed-range histogram makes; the bins and
-    // bounds in this stand-in are only there to get past its own checks, and nothing reads them.
-    HistogramRequest shape;
-    shape.spectral = request.spectral;
-    shape.polarization = request.polarization;
-    shape.time = request.time;
-    shape.bins = 1;
-    shape.lower = 0.0;
-    shape.upper = 1.0;
-    if (auto valid = ValidateRequest(descriptor, map, shape); !valid) {
-        return valid.error();
+    const auto checked = CheckedPlanes::Of(descriptor, map, request.planes);
+    if (!checked) {
+        return checked.error();
     }
-    if (auto valid = image.ValidateSpectral(request.spectral); !valid) {
-        return valid.error();
-    }
+    const auto& planes = checked.value();
 
     std::size_t provisional = request.provisional_bins;
     if (provisional == 0) {
@@ -420,10 +406,9 @@ Result<CubeHistogramResult> ComputeCubeHistogram(const ReadableImage& image,
     }
     provisional = rounded;
 
-    const auto plan = PlanPass(descriptor, geometry, map, request.spectral, request.polarization,
-                               request.time, request.spatial_sample, options);
+    const auto plan = PlanPass(descriptor, geometry, map, planes, request.spatial_sample, options);
     const std::uint64_t total_chunks =
-        std::max<std::uint64_t>(1, plan.layer_chunks * plan.ChunksFor(request.spectral.count));
+        std::max<std::uint64_t>(1, plan.layer_chunks * plan.ChunksFor(planes.count()));
 
     // One accumulator per task, which is safe because the split below never asks for more tasks than
     // there are accumulators, so no two bodies ever hold the same one at once. See the split itself
@@ -510,7 +495,7 @@ Result<CubeHistogramResult> ComputeCubeHistogram(const ReadableImage& image,
 
     std::uint64_t chunks_done = 0;
     const auto walked = RunPass(
-        source, plan, options, 0, request.spectral.count, chunks_done,
+        source, plan, options, 0, planes.count(), chunks_done,
         [&](std::uint64_t done) -> Result<void> {
             if (request.progress) {
                 CubeHistogramProgress update;

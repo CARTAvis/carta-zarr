@@ -341,6 +341,13 @@ if(CARTA_ZARR_BUILD_TESTS AND BUILD_TESTING)
         TEST_NAME carta-zarr-plane-selection
         SOURCES tests/plane_selection_test.cc)
 
+    # The one-pass histogram's arithmetic, against chosen values and exact counts. Links nothing:
+    # the class takes floats and gives back counts, and its three past fixes were each a defect in
+    # one of these four behaviours that could only be seen as a tolerance over a fixture.
+    carta_zarr_add_test(carta_zarr_growing_histogram_tests INTERNAL
+        TEST_NAME carta-zarr-growing-histogram
+        SOURCES tests/growing_histogram_test.cc)
+
     # What a pass decides before it reads anything. Compiled against pass.cc alone: PlanPass touches
     # no store and no transport, so the read strategy -- which has moved more than once, and moved
     # in three places each time -- is checkable without a directory tree.

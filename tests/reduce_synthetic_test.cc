@@ -21,7 +21,10 @@
 
 #include "support/synthetic_pixel_source.h"
 
+#include <algorithm>
 #include <cmath>
+#include <cstddef>
+#include <cstdint>
 #include <cstdio>
 #include <limits>
 #include <stdexcept>
@@ -37,6 +40,7 @@ using carta::zarr::Range;
 using carta::zarr::ReadOptions;
 using carta::zarr::internal::MapAxes;
 using carta::zarr::internal::PlanPass;
+using carta::zarr::internal::PlanRowTasks;
 using carta::zarr::internal::ReadableImage;
 using carta::zarr::internal::WorkPool;
 using carta::zarr::testing::SyntheticPixelSource;
@@ -94,6 +98,20 @@ float Value(const std::vector<std::uint64_t>& logical) {
 constexpr std::uint64_t kX = 256;
 constexpr std::uint64_t kY = 260;
 constexpr std::uint64_t kZ = 8;
+
+// A plane large enough for the binning to be worth splitting across workers.
+//
+// Both histograms hand a plane to PlanRowTasks and bin it in place when it comes back with one
+// task, and the split is where a private accumulator per task is merged -- 9c21397 and 6ba0ce2 were
+// both in that neighbourhood. kX by kY is 66,560 pixels, one under the 65,536 a task has to be
+// worth, so every reduction in this file until now took the serial branch. The committed 512x520
+// fixture was the only thing in the repository that reached the other one.
+constexpr std::uint64_t kSplitX = 384;
+constexpr std::uint64_t kSplitY = 390;
+constexpr std::uint64_t kSplitZ = 4;
+// Enough that one band covers the plane and one slab covers the channels, so what varies between
+// the two runs below is the split and nothing else.
+constexpr std::size_t kRoomyBudget = 16U << 20U;
 
 // Every pixel of every plane binned, at a size no fixture reaches, against the formula rather than
 // against a recorded answer.
@@ -238,12 +256,134 @@ void TestASpectralReductionAgreesWithTheFormula() {
     Require(source.most_hits_on_one_chunk() == 1, "and it decoded each chunk once getting there");
 }
 
+// The same counts whether the plane is binned in place or in four pieces that are added up.
+//
+// Integer counts, so this is exact rather than close: a split that divided the rows wrongly, or a
+// merge that dropped or double-counted a worker's partial, cannot agree with the serial answer to
+// any tolerance at all.
+void TestAPlaneHistogramSplitAcrossWorkers() {
+    Require(PlanRowTasks(kSplitY, kSplitX, 4, 1U << 16U) > 1,
+            "this plane is meant to be large enough to split; if it is not, this test proves nothing");
+
+    const auto image = MakeImage(kSplitX, kSplitY, kSplitZ);
+    const auto geometry = MakeGeometry(64, 65, 2);
+    SyntheticPixelSource source(image, geometry, Value);
+
+    carta::zarr::HistogramRequest request;
+    request.planes.spectral = {0, kSplitZ, 1};
+    request.bins = 37;
+    request.lower = 0.0;
+    request.upper = 1000.0;
+
+    ReadOptions options;
+    options.temporary_memory_limit_bytes = kRoomyBudget;
+
+    const auto counts_from = [&](std::size_t worker_count) {
+        WorkPool workers(worker_count);
+        const auto readable = Readable(source, image, geometry, workers);
+        std::vector<std::uint64_t> counts(request.bins * kSplitZ, 0);
+        const auto outcome = carta::zarr::internal::ComputeHistogram(
+            readable, request, [&](const carta::zarr::HistogramBlock& block) {
+                if (!block.complete) {
+                    return true;
+                }
+                for (std::uint64_t c = 0; c < block.channel_count; ++c) {
+                    for (std::size_t bin = 0; bin < block.bin_count; ++bin) {
+                        counts.at(((block.first_channel + c) * request.bins) + bin) =
+                            block.counts[(c * block.bin_count) + bin];
+                    }
+                }
+                return true;
+            }, options);
+        Require(static_cast<bool>(outcome),
+                std::string("the histogram failed: ") + (outcome ? "" : outcome.error().message));
+        return counts;
+    };
+
+    // One worker cannot split -- PlanRowTasks refuses before the plane is even measured -- so this
+    // is the serial branch, and the oracle the other one has to match.
+    const auto in_place = counts_from(1);
+    const auto split = counts_from(4);
+    for (std::size_t i = 0; i < in_place.size(); ++i) {
+        Require(in_place.at(i) == split.at(i),
+                "bin " + std::to_string(i) + ": binning in place gave " + std::to_string(in_place.at(i)) +
+                    ", four workers gave " + std::to_string(split.at(i)));
+    }
+
+    std::uint64_t total = 0;
+    for (const auto count : split) {
+        total += count;
+    }
+    Require(total == kSplitX * kSplitY * kSplitZ, "every pixel is inside the range, so every one is counted");
+}
+
+// The cube histogram's own split, which is over rows of a whole read rather than of one plane, and
+// which merges four provisional histograms of its own rather than four rows of counts.
+//
+// The counts depend on the thread count by design -- each accumulator re-aggregates its own
+// provisional range onto the target grid -- so what is exact here is everything around them: the
+// pixel count, the extremes, and that the bins still hold every pixel that was binned.
+void TestACubeHistogramSplitAcrossWorkers() {
+    // The budget below leaves one read holding every plane, so the rows this one splits are the
+    // rows of the whole selection rather than of a plane.
+    Require(PlanRowTasks(kSplitY, kSplitZ * kSplitX, 4, 1U << 16U) > 1,
+            "this selection is meant to be large enough to split; if it is not, this test proves nothing");
+
+    const auto image = MakeImage(kSplitX, kSplitY, kSplitZ);
+    const auto geometry = MakeGeometry(64, 65, 2);
+    SyntheticPixelSource source(image, geometry, Value);
+
+    carta::zarr::CubeHistogramRequest request;
+    request.planes.spectral = {0, kSplitZ, 1};
+    request.bins = 64;
+
+    ReadOptions options;
+    options.temporary_memory_limit_bytes = kRoomyBudget;
+    WorkPool workers(4);
+
+    const auto readable = Readable(source, image, geometry, workers);
+    const auto outcome = carta::zarr::internal::ComputeCubeHistogram(readable, request, options);
+    Require(static_cast<bool>(outcome),
+            std::string("the cube histogram failed: ") + (outcome ? "" : outcome.error().message));
+    const auto& result = outcome.value();
+
+    double sum = 0.0;
+    double smallest = std::numeric_limits<double>::infinity();
+    double largest = -std::numeric_limits<double>::infinity();
+    for (std::uint64_t z = 0; z < kSplitZ; ++z) {
+        for (std::uint64_t l = 0; l < kSplitX; ++l) {
+            for (std::uint64_t m = 0; m < kSplitY; ++m) {
+                const double value = Value({l, m, z, 0, 0});
+                sum += value;
+                smallest = std::min(smallest, value);
+                largest = std::max(largest, value);
+            }
+        }
+    }
+
+    const auto pixels = static_cast<double>(kSplitX * kSplitY * kSplitZ);
+    Require(result.num_pixels == pixels, "every pixel is finite, so every one counts");
+    Require(result.nan_count == 0.0, "and none of them is a NaN");
+    Require(result.minimum == smallest && result.maximum == largest,
+            "the extremes are tracked exactly, whatever the split");
+    Require(std::abs(result.sum - sum) <= 1e-9 * (1.0 + std::abs(sum)), "the sum over four accumulators");
+
+    std::uint64_t binned = 0;
+    for (const auto count : result.counts) {
+        binned += count;
+    }
+    Require(static_cast<double>(binned) == pixels,
+            "four provisional histograms re-aggregated onto one grid still hold every pixel");
+}
+
 }  // namespace
 
 int main() {
     try {
         TestAHistogramCountsEveryPixel();
         TestASpectralReductionAgreesWithTheFormula();
+        TestAPlaneHistogramSplitAcrossWorkers();
+        TestACubeHistogramSplitAcrossWorkers();
     } catch (const std::exception& error) {
         std::fprintf(stderr, "reduce synthetic test failed: %s\n", error.what());
         return 1;

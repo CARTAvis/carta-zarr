@@ -225,6 +225,107 @@ inline void SampledRange(std::uint64_t begin, std::uint64_t end, std::uint64_t s
 }
 
 /**
+ * One spatial footprint a run of slabs is read over, in the pass's own axes.
+ *
+ * `chunks` is what that footprint occupies in one chunk of the spectral axis, and it is doing two
+ * jobs: it sizes the slab, because the budget is over chunk data rather than over the pixels kept,
+ * and it is the unit progress is counted in. A caller that gets it wrong reads the right pixels and
+ * reports a bar that lies.
+ */
+struct SlabFootprint {
+    std::uint64_t u_start = 0;
+    std::uint64_t u_count = 0;
+    std::uint64_t u_stride = 1;
+    std::uint64_t v_start = 0;
+    std::uint64_t v_count = 0;
+    std::uint64_t v_stride = 1;
+    std::uint64_t chunks = 1;
+};
+
+/**
+ * Walks one spatial footprint along the spectrum, a slab at a time.
+ *
+ * Which footprints to visit is the caller's: a whole-plane pass bands the plane, and a reduction
+ * cuts the chunk runs its regions occupy. Those two are genuinely different walks and stay that
+ * way. What they had in common was everything inside one footprint -- how deep a slab goes, where
+ * it is cut so that no decode serves two slabs, when the caller is told what it has, where
+ * cancellation is checked, and how progress is counted -- and that was written out twice, in full,
+ * with the subtlety intact in both copies: `reads_done` guards the report so that a footprint taken
+ * in a single read still reports once at the end rather than before it starts.
+ *
+ * `reads_done` and `chunks_done` are the caller's because their spans are: a reduction resets them
+ * per emitted block, a whole-plane pass keeps them for the call.
+ *
+ * `visit` is a template parameter and must not become a `std::function`: the per-pixel loop inlines
+ * through it, and 54731c1 measured a quarter of a reduction riding on that. ADR 0005. `report` is
+ * one call per slab, which is the same footing `SlabSource` stands on.
+ *
+ * Holds the buffers, so a walk allocates once rather than once per footprint.
+ */
+class SlabWalk {
+public:
+    SlabWalk(const SlabSource& source, const PassPlan& plan, const ReadOptions& options)
+        : _source(source), _plan(plan), _options(options) {}
+
+    SlabWalk(const SlabWalk&) = delete;
+    SlabWalk& operator=(const SlabWalk&) = delete;
+
+    template <typename Report, typename Visit>
+    Result<void> Over(const SlabFootprint& footprint, std::uint64_t begin, std::uint64_t end,
+                      std::uint64_t& reads_done, std::uint64_t& chunks_done, Report&& report, Visit&& visit) {
+        const std::uint64_t slab_channels = _plan.SlabChannels(footprint.chunks);
+
+        for (std::uint64_t slab_begin = begin; slab_begin < end;) {
+            const std::uint64_t slab_end =
+                _plan.AlignedSlabEnd(slab_begin, std::min(slab_channels, end - slab_begin), end);
+            const std::uint64_t slab_length = slab_end - slab_begin;
+
+            // What is in hand before spending another budget. A footprint that takes one read never
+            // gets here, so a small one still reports once -- at the end, through its caller.
+            if (reads_done > 0) {
+                if (auto ready = report(chunks_done); !ready) {
+                    return ready.error();
+                }
+            }
+            ++reads_done;
+
+            if (auto control = zarr::CheckReadControl(_options, _plan.descriptor->id); !control) {
+                return control.error();
+            }
+
+            SlabRequest slab_request;
+            slab_request.u_start = footprint.u_start;
+            slab_request.u_count = footprint.u_count;
+            slab_request.u_stride = footprint.u_stride;
+            slab_request.v_start = footprint.v_start;
+            slab_request.v_count = footprint.v_count;
+            slab_request.v_stride = footprint.v_stride;
+            slab_request.channel_index = slab_begin;
+            slab_request.channel_count = slab_length;
+
+            auto slab = ReadSlab(_source, _plan, _options, slab_request, _buffers);
+            if (!slab) {
+                return slab.error();
+            }
+            // What was read is absolute; what the visitor indexes by is relative to this walk.
+            slab.value().first_channel = slab_begin - begin;
+
+            visit(slab.value());
+
+            chunks_done += footprint.chunks * _plan.ChunksFor(slab_length);
+            slab_begin = slab_end;
+        }
+        return {};
+    }
+
+private:
+    const SlabSource& _source;
+    const PassPlan& _plan;
+    const ReadOptions& _options;
+    SlabBuffers _buffers;
+};
+
+/**
  * Visit every plane of one channel range, a band of chunk rows at a time.
  *
  * `before_read` runs before each read after the first of the range, which is where a caller reports
@@ -237,71 +338,31 @@ template <typename BeforeRead, typename Visit>
 Result<void> RunPass(const SlabSource& source, const PassPlan& plan, const ReadOptions& options,
                      std::uint64_t begin, std::uint64_t end, std::uint64_t& chunks_done,
                      BeforeRead&& before_read, Visit&& visit) {
-    const auto& node = plan.descriptor->id;
-    SlabBuffers buffers;
+    SlabWalk walk(source, plan, options);
     std::uint64_t reads_done = 0;
 
     for (std::uint64_t v_begin = 0; v_begin < plan.v_length;) {
         const std::uint64_t v_end = std::min(plan.v_length, v_begin + (plan.band_rows * plan.chunk_v));
-        std::uint64_t v_start = 0;
-        std::uint64_t v_count = 0;
-        SampledRange(v_begin, v_end, plan.sample, v_start, v_count);
-        const std::uint64_t band_chunks = std::max<std::uint64_t>(
+        SlabFootprint band;
+        SampledRange(v_begin, v_end, plan.sample, band.v_start, band.v_count);
+        band.chunks = std::max<std::uint64_t>(
             1, (((plan.u_length - 1) / plan.chunk_u) + 1) * ((((v_end - v_begin) - 1) / plan.chunk_v) + 1));
-        if (v_count == 0) {
-            chunks_done += band_chunks * plan.ChunksFor(end - begin);
+        if (band.v_count == 0) {
+            chunks_done += band.chunks * plan.ChunksFor(end - begin);
             v_begin = v_end;
             continue;
         }
-        const std::uint64_t slab_channels = plan.SlabChannels(band_chunks);
+        SampledRange(0, plan.u_length, plan.sample, band.u_start, band.u_count);
+        band.u_stride = plan.sample;
+        band.v_stride = plan.sample;
 
-        for (std::uint64_t slab_begin = begin; slab_begin < end;) {
-            const std::uint64_t slab_end =
-                plan.AlignedSlabEnd(slab_begin, std::min(slab_channels, end - slab_begin), end);
-            const std::uint64_t slab_length = slab_end - slab_begin;
-
-            if (reads_done > 0) {
-                if (auto ready = before_read(chunks_done); !ready) {
-                    return ready.error();
-                }
-            }
-            ++reads_done;
-
-            if (auto control = zarr::CheckReadControl(options, node); !control) {
-                return control.error();
-            }
-
-            std::uint64_t u_start = 0;
-            std::uint64_t u_count = 0;
-            SampledRange(0, plan.u_length, plan.sample, u_start, u_count);
-
-            SlabRequest slab_request;
-            slab_request.u_start = u_start;
-            slab_request.u_count = u_count;
-            slab_request.u_stride = plan.sample;
-            slab_request.v_start = v_start;
-            slab_request.v_count = v_count;
-            slab_request.v_stride = plan.sample;
-            slab_request.channel_index = slab_begin;
-            slab_request.channel_count = slab_length;
-
-            auto slab = ReadSlab(source, plan, options, slab_request, buffers);
-            if (!slab) {
-                return slab.error();
-            }
-            // What was read is absolute; what the visitor indexes by is relative to this call.
-            slab.value().first_channel = slab_begin - begin;
-
-            visit(slab.value());
-
-            chunks_done += band_chunks * plan.ChunksFor(slab_length);
-            slab_begin = slab_end;
+        if (auto walked = walk.Over(band, begin, end, reads_done, chunks_done, before_read, visit); !walked) {
+            return walked.error();
         }
         v_begin = v_end;
     }
     return {};
 }
-
 }  // namespace carta::zarr::internal
 
 #endif  // CARTA_ZARR_SRC_REDUCE_PASS_H_

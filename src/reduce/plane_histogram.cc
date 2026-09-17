@@ -220,7 +220,7 @@ private:
 
 }  // namespace
 
-Result<void> ComputeHistogram(const SlabSource& source, const ImageDescriptor& descriptor,
+Result<void> ComputeHistogram(const PixelSource& source, const ImageDescriptor& descriptor,
                               const ChunkGeometry& geometry, const HistogramRequest& request,
                               const HistogramSink& sink, const ReadOptions& options, WorkPool& workers) {
     const auto& node = descriptor.id;
@@ -375,7 +375,7 @@ Result<void> ComputeHistogram(const SlabSource& source, const ImageDescriptor& d
     return {};
 }
 
-Result<CubeHistogramResult> ComputeCubeHistogram(const SlabSource& source, const ImageDescriptor& descriptor,
+Result<CubeHistogramResult> ComputeCubeHistogram(const PixelSource& source, const ImageDescriptor& descriptor,
                                                  const ChunkGeometry& geometry,
                                                  const CubeHistogramRequest& request,
                                                  const ReadOptions& options, WorkPool& workers) {

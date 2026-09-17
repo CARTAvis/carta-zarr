@@ -17,9 +17,9 @@
 namespace carta::zarr::internal {
 
 // The adapter that serves production: the image's own data variable, and the flag that masks it.
-class StoreSlabSource final : public SlabSource {
+class StorePixelSource final : public PixelSource {
 public:
-    StoreSlabSource(const Store& store, const ImageDescriptor& descriptor)
+    StorePixelSource(const Store& store, const ImageDescriptor& descriptor)
         : _store(&store), _descriptor(&descriptor) {}
 
     Result<void> ReadPixels(const zarr::PixelSelection& selection, float* destination, std::size_t elements,

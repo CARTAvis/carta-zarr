@@ -17,7 +17,7 @@
 
 namespace carta::zarr::internal {
 
-Result<Slab> ReadSlab(const SlabSource& source, const PassPlan& plan, const ReadOptions& options,
+Result<Slab> ReadSlab(const PixelSource& source, const PassPlan& plan, const ReadOptions& options,
                       const SlabRequest& request, SlabBuffers& buffers) {
     const auto& descriptor = *plan.descriptor;
     const auto rank = descriptor.axes.size();

@@ -31,14 +31,14 @@ namespace carta::zarr::testing {
  *
  * This one states a cube of any size in a line, and counts what was asked of it.
  */
-class SyntheticSlabSource final : public carta::zarr::internal::SlabSource {
+class SyntheticPixelSource final : public carta::zarr::internal::PixelSource {
 public:
     // The value at one set of logical coordinates, indexed the way ImageDescriptor::axes is.
     using Formula = std::function<float(const std::vector<std::uint64_t>& logical)>;
     // Whether the pixel at those coordinates is good. Only consulted when the read applies a mask.
     using FlagFormula = std::function<bool(const std::vector<std::uint64_t>& logical)>;
 
-    SyntheticSlabSource(const carta::zarr::ImageDescriptor& descriptor,
+    SyntheticPixelSource(const carta::zarr::ImageDescriptor& descriptor,
                         const carta::zarr::ChunkGeometry& geometry, Formula formula)
         : _descriptor(&descriptor), _geometry(&geometry), _formula(std::move(formula)) {}
 
@@ -58,6 +58,14 @@ public:
     void fail_read(std::uint64_t nth, carta::zarr::ErrorCode code) {
         _fail_at = nth;
         _fail_code = code;
+    }
+
+    // The same for the flag. Separate because the order the two are read in is a contract: an
+    // ordinary read reads the flag first so that a mask it cannot get leaves the caller's
+    // destination alone, and only a source that can fail one without the other can show it.
+    void fail_mask_read(std::uint64_t nth, carta::zarr::ErrorCode code) {
+        _mask_fail_at = nth;
+        _mask_fail_code = code;
     }
 
     carta::zarr::Result<void> ReadPixels(const carta::zarr::internal::zarr::PixelSelection& selection,
@@ -90,6 +98,10 @@ public:
                                        std::uint8_t* destination, std::size_t elements,
                                        const carta::zarr::ReadOptions&) const override {
         ++_mask_reads;
+        if (_mask_fail_at != 0 && _mask_reads == _mask_fail_at) {
+            return carta::zarr::Error{_mask_fail_code, "The synthetic source was told to fail this flag read",
+                                      "FLAG"};
+        }
         return Fill(selection, elements, [&](const std::vector<std::uint64_t>& logical, std::size_t at) {
             destination[at] = _flags && !_flags(logical) ? 0 : 1;
         });
@@ -221,6 +233,8 @@ private:
     FlagFormula _flags;
     float _constant = 0.0F;
     bool _has_constant = false;
+    std::uint64_t _mask_fail_at = 0;
+    carta::zarr::ErrorCode _mask_fail_code = carta::zarr::ErrorCode::io_error;
     std::uint64_t _fail_at = 0;
     carta::zarr::ErrorCode _fail_code = carta::zarr::ErrorCode::io_error;
 

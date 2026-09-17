@@ -319,6 +319,19 @@ if(CARTA_ZARR_BUILD_TESTS AND BUILD_TESTING)
         TEST_NAME carta-zarr-piece-plan
         SOURCES tests/piece_plan_test.cc src/read/pieces.cc)
 
+    # What an ordinary read does once it starts, against pixels that were never written down. The
+    # read takes a PixelSource like the pass does, so this links no Store and no TensorStore -- and
+    # the flag-before-pixels contract, which a fixture on disk cannot show because it cannot be told
+    # to fail one read and not another, is checkable here.
+    carta_zarr_add_test(carta_zarr_read_synthetic_tests INTERNAL
+        TEST_NAME carta-zarr-read-synthetic
+        SOURCES
+            tests/read_synthetic_test.cc
+            src/read/pieces.cc
+            src/read/pieces_read.cc
+            src/zarr/pixel_selection.cc
+        LIBRARIES nlohmann_json::nlohmann_json)
+
     # What a pass decides before it reads anything. Compiled against pass.cc alone: PlanPass touches
     # no store and no transport, so the read strategy -- which has moved more than once, and moved
     # in three places each time -- is checkable without a directory tree.
@@ -328,7 +341,7 @@ if(CARTA_ZARR_BUILD_TESTS AND BUILD_TESTING)
         LIBRARIES nlohmann_json::nlohmann_json)
 
     # A whole reduction against pixels that were never written down. This target links no Store and
-    # no TensorStore, which is the seam the pass's SlabSource exists to create: the oracle is the
+    # no TensorStore, which is the seam the pass's PixelSource exists to create: the oracle is the
     # formula the pixels come from, so the image can be whatever size the question needs rather than
     # whatever size is worth committing.
     carta_zarr_add_test(carta_zarr_reduce_synthetic_tests INTERNAL

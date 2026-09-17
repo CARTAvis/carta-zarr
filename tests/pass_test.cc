@@ -17,7 +17,7 @@
 #include "reduce/axis_map.h"
 #include "reduce/pass.h"
 
-#include "support/synthetic_slab_source.h"
+#include "support/synthetic_pixel_source.h"
 
 #include <chrono>
 #include <cmath>
@@ -37,7 +37,7 @@ using carta::zarr::internal::PassPlan;
 using carta::zarr::internal::PlanPass;
 using carta::zarr::internal::RunPass;
 using carta::zarr::internal::Slab;
-using carta::zarr::testing::SyntheticSlabSource;
+using carta::zarr::testing::SyntheticPixelSource;
 
 void Require(bool condition, const std::string& message) {
     if (!condition) {
@@ -243,7 +243,7 @@ struct Walked {
     std::uint64_t slabs = 0;
 };
 
-Walked WalkEverything(const SyntheticSlabSource& source, const PassPlan& plan, const ReadOptions& options,
+Walked WalkEverything(const SyntheticPixelSource& source, const PassPlan& plan, const ReadOptions& options,
                       std::uint64_t channels) {
     Walked walked;
     std::uint64_t chunks_done = 0;
@@ -276,7 +276,7 @@ void TestEachChunkIsReadOnce() {
     // Small enough that the pass has to split along the chunk rows and along the spectrum at once.
     options.temporary_memory_limit_bytes = 4 * 128 * 130 * 4 * 4;
     const auto plan = Plan(image, geometry, Range{0, 32, 1}, options);
-    SyntheticSlabSource source(image, geometry, Encoded);
+    SyntheticPixelSource source(image, geometry, Encoded);
 
     const auto walked = WalkEverything(source, plan, options, 32);
     Require(walked.slabs > 1, "this budget should have split the walk; if it did not, raise the image size");
@@ -294,7 +294,7 @@ void TestThePassVisitsEveryPixelOnce() {
     ReadOptions options;
     options.temporary_memory_limit_bytes = 16 * 20 * 2 * 4;
     const auto plan = Plan(image, geometry, Range{0, 8, 1}, options);
-    SyntheticSlabSource source(image, geometry, Encoded);
+    SyntheticPixelSource source(image, geometry, Encoded);
 
     const auto walked = WalkEverything(source, plan, options, 8);
     Require(walked.pixels == 64ULL * 40ULL * 8ULL, "every pixel of the selection, once");
@@ -319,7 +319,7 @@ void TestAFlaggedPixelArrivesAsNaN() {
     const auto plan = Plan(image, geometry, Range{0, 4, 1}, options);
     Require(plan.apply_mask, "an image with a flag applies it by default");
 
-    SyntheticSlabSource source(image, geometry, Encoded);
+    SyntheticPixelSource source(image, geometry, Encoded);
     // Every third pixel along l is bad.
     source.set_flags([](const std::vector<std::uint64_t>& logical) { return (logical.at(0) % 3) != 0; });
 
@@ -356,7 +356,7 @@ void TestCancellationStopsThePass() {
     int reads = 0;
     options.cancellation_requested = [&]() { return reads >= 2; };
     const auto plan = Plan(image, geometry, Range{0, 16, 1}, options);
-    SyntheticSlabSource source(image, geometry, Encoded);
+    SyntheticPixelSource source(image, geometry, Encoded);
 
     std::uint64_t chunks_done = 0;
     const auto outcome = RunPass(
@@ -373,7 +373,7 @@ void TestAnExpiredDeadlineStopsThePass() {
     ReadOptions options;
     options.deadline = std::chrono::steady_clock::now() - std::chrono::seconds(1);
     const auto plan = Plan(image, geometry, Range{0, 8, 1}, options);
-    SyntheticSlabSource source(image, geometry, Encoded);
+    SyntheticPixelSource source(image, geometry, Encoded);
 
     std::uint64_t chunks_done = 0;
     const auto outcome = RunPass(
@@ -391,7 +391,7 @@ void TestAReadFailureStopsThePass() {
     ReadOptions options;
     options.temporary_memory_limit_bytes = 32 * 65 * 2 * 4;
     const auto plan = Plan(image, geometry, Range{0, 8, 1}, options);
-    SyntheticSlabSource source(image, geometry, Encoded);
+    SyntheticPixelSource source(image, geometry, Encoded);
     source.fail_read(2, carta::zarr::ErrorCode::io_error);
 
     int visits = 0;
@@ -413,7 +413,7 @@ void TestALargePlaneSplitsIntoBands() {
     // Eight chunks to a read, which is the floor chunk_blocks measured.
     options.temporary_memory_limit_bytes = 8 * 512 * 512 * 4;
     const auto plan = Plan(image, geometry, Range{0, 4, 1}, options);
-    SyntheticSlabSource source(image, geometry, Encoded);
+    SyntheticPixelSource source(image, geometry, Encoded);
     // This one is about the splitting, not the pixels, so it does not pay for them.
     source.set_constant(1.0F);
 

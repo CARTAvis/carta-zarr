@@ -22,7 +22,7 @@ namespace carta::zarr::internal {
  * translate a request and hand it to the store, while this walks a chunk grid and owns an inner
  * loop whose shape is the entire reason the API takes N regions at once.
  */
-Result<void> ReduceSpectral(const SlabSource& source, const ImageDescriptor& descriptor,
+Result<void> ReduceSpectral(const PixelSource& source, const ImageDescriptor& descriptor,
                             const ChunkGeometry& geometry, const SpectralReduceRequest& request,
                             const SpectralSink& sink, const ReadOptions& options, WorkPool& workers);
 

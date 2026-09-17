@@ -11,6 +11,7 @@
 #include "carta-zarr/result.h"
 
 #include "chunk_blocks.h"
+#include "pixel_source.h"
 #include "reduce/axis_map.h"
 #include "zarr/pixel_selection.h"
 
@@ -20,34 +21,6 @@
 #include <vector>
 
 namespace carta::zarr::internal {
-
-/**
- * Where a pass gets its pixels.
- *
- * Two adapters: StoreSlabSource, which reads them from a `Store`, and the synthetic one in
- * tests/support, which computes them from their own coordinates. The second is what lets a pass be
- * asked how it walks a cube -- how many times it decodes a chunk, what it does when a read fails,
- * what it does at four thousand pixels square -- none of which a directory tree can answer.
- *
- * Consulted once per slab, so the indirect call is paid per megabyte of pixels rather than per
- * pixel. That is the whole reason it can be an interface at all while the visitor cannot: see
- * ADR 0005.
- */
-class SlabSource {
-public:
-    SlabSource() = default;
-    SlabSource(const SlabSource&) = delete;
-    SlabSource& operator=(const SlabSource&) = delete;
-    SlabSource(SlabSource&&) = delete;
-    SlabSource& operator=(SlabSource&&) = delete;
-    virtual ~SlabSource() = default;
-
-    virtual Result<void> ReadPixels(const zarr::PixelSelection& selection, float* destination,
-                                    std::size_t elements, const ReadOptions& options) const = 0;
-    // Only called when the plan says the image has a pixel mask to apply.
-    virtual Result<void> ReadMask(const zarr::PixelSelection& selection, std::uint8_t* destination,
-                                  std::size_t elements, const ReadOptions& options) const = 0;
-};
 
 /**
  * One read of the pass, handed to the visitor.
@@ -212,7 +185,7 @@ struct SlabBuffers {
  *
  * The returned Slab points into `buffers`, so it is valid until the next call with them.
  */
-Result<Slab> ReadSlab(const SlabSource& source, const PassPlan& plan, const ReadOptions& options,
+Result<Slab> ReadSlab(const PixelSource& source, const PassPlan& plan, const ReadOptions& options,
                       const SlabRequest& request, SlabBuffers& buffers);
 
 // Samples of `stride` that fall in [begin, end), as a start and a count.
@@ -258,13 +231,13 @@ struct SlabFootprint {
  *
  * `visit` is a template parameter and must not become a `std::function`: the per-pixel loop inlines
  * through it, and 54731c1 measured a quarter of a reduction riding on that. ADR 0005. `report` is
- * one call per slab, which is the same footing `SlabSource` stands on.
+ * one call per slab, which is the same footing `PixelSource` stands on.
  *
  * Holds the buffers, so a walk allocates once rather than once per footprint.
  */
 class SlabWalk {
 public:
-    SlabWalk(const SlabSource& source, const PassPlan& plan, const ReadOptions& options)
+    SlabWalk(const PixelSource& source, const PassPlan& plan, const ReadOptions& options)
         : _source(source), _plan(plan), _options(options) {}
 
     SlabWalk(const SlabWalk&) = delete;
@@ -319,7 +292,7 @@ public:
     }
 
 private:
-    const SlabSource& _source;
+    const PixelSource& _source;
     const PassPlan& _plan;
     const ReadOptions& _options;
     SlabBuffers _buffers;
@@ -335,7 +308,7 @@ private:
  * through `visit`, and 54731c1 measured a quarter of a reduction riding on that. ADR 0005.
  */
 template <typename BeforeRead, typename Visit>
-Result<void> RunPass(const SlabSource& source, const PassPlan& plan, const ReadOptions& options,
+Result<void> RunPass(const PixelSource& source, const PassPlan& plan, const ReadOptions& options,
                      std::uint64_t begin, std::uint64_t end, std::uint64_t& chunks_done,
                      BeforeRead&& before_read, Visit&& visit) {
     SlabWalk walk(source, plan, options);

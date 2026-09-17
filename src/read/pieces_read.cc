@@ -4,13 +4,15 @@
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
 
-// The half of an ordinary read that touches the store. See pieces.cc for why the two are apart.
+// The half of an ordinary read that reads. See pieces.cc for why the two are apart.
+//
+// It names no Store: pixels arrive through the PixelSource seam, so everything under src/read/
+// compiles without one, the same way src/reduce/ already did.
 
 #include "read/pieces.h"
 
 #include "chunk_blocks.h"
 #include "pixel_mask.h"
-#include "store.h"
 #include "zarr/pixel_selection.h"
 
 #include <cstdint>
@@ -27,7 +29,7 @@ Error MakeError(ErrorCode code, std::string message, std::string node_path = {})
 
 }  // namespace
 
-Result<std::size_t> ReadInPieces(const Store& store, const ImageDescriptor& descriptor,
+Result<std::size_t> ReadInPieces(const PixelSource& source, const ImageDescriptor& descriptor,
                                  const ChunkGeometry& geometry, const ReadRequest& request,
                                  BufferView<float> destination, const ReadOptions& options) {
     auto selection = zarr::BuildSelection(descriptor, request);
@@ -85,14 +87,12 @@ Result<std::size_t> ReadInPieces(const Store& store, const ImageDescriptor& desc
             // piece of the destination updated. TensorStore still owns the pixel operation's
             // in-flight completion before it returns, so the destination remains valid for the next
             // read.
-            auto mask_read = store.ReadPixelMaskBytes(descriptor.pixel_mask_id, piece_selection.value(),
-                                                      mask.data(), mask.size(), options);
+            auto mask_read = source.ReadMask(piece_selection.value(), mask.data(), mask.size(), options);
             if (!mask_read) {
                 return mask_read.error();
             }
         }
-        auto read = store.ReadPixelsFloat32(descriptor.id, piece_selection.value(), piece_pixels,
-                                            piece_elements, options);
+        auto read = source.ReadPixels(piece_selection.value(), piece_pixels, piece_elements, options);
         if (!read) {
             return read.error();
         }

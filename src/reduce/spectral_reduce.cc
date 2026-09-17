@@ -388,7 +388,7 @@ std::vector<std::vector<ColumnRun>> BuildColumnRuns(const ChunkBuckets& buckets)
 
 }  // namespace
 
-Result<void> ReduceSpectral(const SlabSource& source, const ImageDescriptor& descriptor,
+Result<void> ReduceSpectral(const PixelSource& source, const ImageDescriptor& descriptor,
                             const ChunkGeometry& geometry, const SpectralReduceRequest& request,
                             const SpectralSink& sink, const ReadOptions& options, WorkPool& workers) {
     const auto& node = descriptor.id;

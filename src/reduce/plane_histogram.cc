@@ -9,6 +9,7 @@
 #include "chunk_blocks.h"
 #include "axis_map.h"
 #include "reduce/tuning.h"
+#include "reduce/block_emit.h"
 #include "reduce/growing_histogram.h"
 #include "reduce/pass.h"
 #include "reduce/plane_selection.h"
@@ -93,10 +94,11 @@ Result<void> ComputeHistogram(const ReadableImage& image, const HistogramRequest
 
     const auto plan = PlanPass(descriptor, geometry, map, planes, 1, options);
 
-    // A whole plane, so the layer the emit budget is spent against is the plan's own.
+    // A whole plane, so the layer the emit budget is spent against -- which is the same layer
+    // progress is counted in -- is the plan's own.
     const std::size_t bytes_per_channel = static_cast<std::size_t>(request.bins) * sizeof(std::uint64_t);
-    const std::uint64_t wanted_channels =
-        plan.EmitChannels(plan.layer_chunks, bytes_per_channel, request.emit_every_channels);
+    const BlockEmitter emitter(plan, plan.layer_chunks, bytes_per_channel, request.emit_every_channels,
+                               "The histogram was cancelled by its sink");
 
     // The caller's own sequence: divide in double, narrow the width, compare against the narrowed
     // bounds. Doing any one of those in the other type moves pixels across bin edges.
@@ -126,103 +128,82 @@ Result<void> ComputeHistogram(const ReadableImage& image, const HistogramRequest
         partials.resize(max_tasks * bins);
     }
 
-    for (std::uint64_t block_begin = 0; block_begin < planes.count();) {
-        const std::uint64_t block_end = plan.AlignedSlabEnd(block_begin, wanted_channels, planes.count());
-        const auto block_length = static_cast<std::size_t>(block_end - block_begin);
-        counts.assign(block_length * bins, 0);
+    // One read's worth of pixels binned into the block's counts. Named rather than written
+    // into the call below, because a visitor nested inside the walk inside the emitter is
+    // three lambdas deep before the first loop.
+    const auto bin_slab = [&](const Slab& slab) {
+        // Hoisted into locals so that the loops below are the same text they were when the
+        // pass handed these over as eight separate arguments.
+        const std::uint64_t stride_u = slab.stride_u;
+        const std::uint64_t stride_v = slab.stride_v;
+        const std::uint64_t stride_z = slab.stride_z;
+        const std::uint64_t u_count = slab.u_count;
+        const std::uint64_t v_count = slab.v_count;
+        for (std::uint64_t offset = 0; offset < slab.channel_count; ++offset) {
+            const float* plane = slab.pixels + (offset * stride_z);
+            std::uint64_t* into = counts.data() + (static_cast<std::size_t>(slab.first_channel + offset) * bins);
 
-        const std::uint64_t block_chunks_total =
-            std::max<std::uint64_t>(1, plan.layer_chunks * plan.ChunksFor(block_length));
-        std::uint64_t chunks_done = 0;
+            const auto bin_rows = [&](std::uint64_t v_first, std::uint64_t v_last, std::uint64_t* destination) {
+                for (std::uint64_t v = v_first; v < v_last; ++v) {
+                    const float* row = plane + (v * stride_v);
+                    for (std::uint64_t u = 0; u < u_count; ++u) {
+                        const float value = row[u * stride_u];
+                        // The caller's own rule: a pixel outside the range is not counted, and
+                        // NaN fails both comparisons.
+                        if (lower <= value && value <= upper) {
+                            auto bin = static_cast<std::size_t>((value - lower) / width);
+                            if (bin >= bins) {
+                                bin = bins - 1;
+                            }
+                            ++destination[bin];
+                        }
+                    }
+                }
+            };
 
-        const auto hand_over = [&](bool complete) -> Result<void> {
+            // Rows, not planes: a read holding one plane is the common case for a large image,
+            // so splitting by plane would leave the split with nothing to divide.
+            const std::size_t tasks = PlanRowTasks(u_count, v_count, max_tasks, kLeastPixelsPerTask);
+            if (tasks <= 1) {
+                bin_rows(0, v_count, into);
+                continue;
+            }
+
+            std::fill(partials.begin(), partials.begin() + static_cast<std::ptrdiff_t>(tasks * bins), 0);
+            const std::uint64_t rows_per_task = (v_count + tasks - 1) / tasks;
+            workers.Run(tasks, [&](std::size_t task, std::size_t) {
+                const std::uint64_t v_first = static_cast<std::uint64_t>(task) * rows_per_task;
+                if (v_first >= v_count) {
+                    return;
+                }
+                bin_rows(v_first, std::min(v_first + rows_per_task, v_count), partials.data() + (task * bins));
+            });
+            // Integer counts, so this sum is the serial loop's answer exactly -- which is what
+            // lets histogram_test keep comparing against an oracle rather than a tolerance.
+            for (std::size_t task = 0; task < tasks; ++task) {
+                const std::uint64_t* from = partials.data() + (task * bins);
+                for (std::size_t bin = 0; bin < bins; ++bin) {
+                    into[bin] += from[bin];
+                }
+            }
+        }
+    };
+
+    return emitter.Over(
+        [&](std::uint64_t length) { counts.assign(static_cast<std::size_t>(length) * bins, 0); },
+        [&](EmitBlock& block, const auto& report) {
+            return RunPass(source, plan, options, block.begin, block.end, block.chunks_done, report, bin_slab);
+        },
+        [&](std::uint64_t first_channel, std::uint64_t length, bool complete, double completeness) {
             HistogramBlock block;
-            block.first_channel = block_begin;
-            block.channel_count = block_length;
+            block.first_channel = first_channel;
+            block.channel_count = length;
             block.counts = counts.data();
             block.bin_count = bins;
             block.complete = complete;
-            block.completeness =
-                complete ? 1.0 : static_cast<double>(chunks_done) / static_cast<double>(block_chunks_total);
-            if (!sink(block)) {
-                return MakeError(ErrorCode::cancelled, "The histogram was cancelled by its sink", node);
-            }
-            return {};
-        };
-
-        const auto walked = RunPass(
-            source, plan, options, block_begin, block_end, chunks_done,
-            [&](std::uint64_t) -> Result<void> { return hand_over(false); },
-            [&](const Slab& slab) {
-              // Hoisted into locals so that the loops below are the same text they were when the
-              // pass handed these over as eight separate arguments.
-              const std::uint64_t stride_u = slab.stride_u;
-              const std::uint64_t stride_v = slab.stride_v;
-              const std::uint64_t stride_z = slab.stride_z;
-              const std::uint64_t u_count = slab.u_count;
-              const std::uint64_t v_count = slab.v_count;
-              for (std::uint64_t offset = 0; offset < slab.channel_count; ++offset) {
-                const float* plane = slab.pixels + (offset * stride_z);
-                std::uint64_t* into =
-                    counts.data() + (static_cast<std::size_t>(slab.first_channel + offset) * bins);
-
-                const auto bin_rows = [&](std::uint64_t v_first, std::uint64_t v_last,
-                                          std::uint64_t* destination) {
-                    for (std::uint64_t v = v_first; v < v_last; ++v) {
-                        const float* row = plane + (v * stride_v);
-                        for (std::uint64_t u = 0; u < u_count; ++u) {
-                            const float value = row[u * stride_u];
-                            // The caller's own rule: a pixel outside the range is not counted, and
-                            // NaN fails both comparisons.
-                            if (lower <= value && value <= upper) {
-                                auto bin = static_cast<std::size_t>((value - lower) / width);
-                                if (bin >= bins) {
-                                    bin = bins - 1;
-                                }
-                                ++destination[bin];
-                            }
-                        }
-                    }
-                };
-
-                // Rows, not planes: a read holding one plane is the common case for a large image,
-                // so splitting by plane would leave the split with nothing to divide.
-                const std::size_t tasks = PlanRowTasks(u_count, v_count, max_tasks, kLeastPixelsPerTask);
-                if (tasks <= 1) {
-                    bin_rows(0, v_count, into);
-                    continue;
-                }
-
-                std::fill(partials.begin(), partials.begin() + static_cast<std::ptrdiff_t>(tasks * bins), 0);
-                const std::uint64_t rows_per_task = (v_count + tasks - 1) / tasks;
-                workers.Run(tasks, [&](std::size_t task, std::size_t) {
-                    const std::uint64_t v_first = static_cast<std::uint64_t>(task) * rows_per_task;
-                    if (v_first >= v_count) {
-                        return;
-                    }
-                    bin_rows(v_first, std::min(v_first + rows_per_task, v_count),
-                             partials.data() + (task * bins));
-                });
-                // Integer counts, so this sum is the serial loop's answer exactly -- which is what
-                // lets histogram_test keep comparing against an oracle rather than a tolerance.
-                for (std::size_t task = 0; task < tasks; ++task) {
-                    const std::uint64_t* from = partials.data() + (task * bins);
-                    for (std::size_t bin = 0; bin < bins; ++bin) {
-                        into[bin] += from[bin];
-                    }
-                }
-              }
-            });
-        if (!walked) {
-            return walked.error();
-        }
-
-        if (auto handed = hand_over(true); !handed) {
-            return handed.error();
-        }
-        block_begin = block_end;
-    }
-    return {};
+            block.completeness = completeness;
+            return sink(block);
+        });
 }
 
 Result<CubeHistogramResult> ComputeCubeHistogram(const ReadableImage& image,

@@ -9,6 +9,7 @@
 #include "chunk_blocks.h"
 #include "axis_map.h"
 #include "reduce/tuning.h"
+#include "reduce/block_emit.h"
 #include "reduce/pass.h"
 #include "reduce/plane_selection.h"
 #include "zarr/pixel_selection.h"
@@ -482,8 +483,6 @@ Result<void> ReduceSpectral(const ReadableImage& image, const SpectralReduceRequ
     // the whole reduction takes. One layer of a 7763x4742 image is 160 MiB and 70 ms; a thousand
     // channels of it is a minute of work with no partial answer and nowhere to cancel.
     const std::size_t bytes_per_channel = request.region_count * statistic_count * sizeof(double);
-    const std::uint64_t wanted_channels =
-        plan.EmitChannels(layer_chunks, bytes_per_channel, request.emit_every_channels);
 
     // Below this a unit is not worth its share of a dispatch, so the reduction runs in place. A
     // unit is one chunk cell of one channel, so this is a statement about chunk size: an image
@@ -491,90 +490,69 @@ Result<void> ReduceSpectral(const ReadableImage& image, const SpectralReduceRequ
     // the fixtures and for a cursor-sized region.
     constexpr std::uint64_t kLeastPixelsPerUnit = 1U << 16U;
 
+    const BlockEmitter emitter(plan, layer_chunks, bytes_per_channel, request.emit_every_channels,
+                               "The spectral reduction was cancelled by its sink");
+
     std::vector<double> accumulator;
     // One private accumulator per task, reused across slabs. See the dispatch below.
     std::vector<double> sinks;
     SlabWalk walk(source, plan, options);
     std::vector<ColumnRun> segments;
+    // The accumulator's current shape, which is the length of the block being filled. Set by the
+    // reset below and read by everything that indexes into it, including the sink's own strides.
+    std::size_t statistic_stride = 0;
+    std::size_t region_stride = 0;
 
-    for (std::uint64_t block_begin = 0; block_begin < planes.count();) {
-        const std::uint64_t block_end = plan.AlignedSlabEnd(block_begin, wanted_channels, planes.count());
-        const auto block_length = static_cast<std::size_t>(block_end - block_begin);
-        const std::size_t statistic_stride = block_length;
-        const std::size_t region_stride = statistic_count * statistic_stride;
+    // An extremum nothing contributed to is still its identity, which is the one value it must
+    // not be reported as. Finding those needs no extra bookkeeping: a finite pixel can never
+    // leave an infinity behind, so only the untouched entries are still infinite -- and by the
+    // same argument the NaN that replaced one is the only NaN there, so the identity can be put
+    // back when the walk is not finished with it.
+    const auto settle_extrema = [&](bool report, std::size_t length) {
+        for (std::size_t r = 0; r < request.region_count; ++r) {
+            for (const int slot : {slot_min, slot_max}) {
+                if (slot < 0) {
+                    continue;
+                }
+                const double identity = slot == slot_min ? kInfinity : -kInfinity;
+                auto* base = accumulator.data() + (r * region_stride) +
+                             (static_cast<std::size_t>(slot) * statistic_stride);
+                for (std::size_t c = 0; c < length; ++c) {
+                    if (report) {
+                        if (std::isinf(base[c])) {
+                            base[c] = std::numeric_limits<double>::quiet_NaN();
+                        }
+                    } else if (std::isnan(base[c])) {
+                        base[c] = identity;
+                    }
+                }
+            }
+        }
+    };
+
+    const auto reset_block = [&](std::uint64_t length) {
+        statistic_stride = static_cast<std::size_t>(length);
+        region_stride = statistic_count * statistic_stride;
 
         accumulator.assign(request.region_count * region_stride, 0.0);
         for (std::size_t r = 0; r < request.region_count; ++r) {
             if (slot_min >= 0) {
                 auto* base = accumulator.data() + (r * region_stride) +
                              (static_cast<std::size_t>(slot_min) * statistic_stride);
-                std::fill(base, base + block_length, kInfinity);
+                std::fill(base, base + statistic_stride, kInfinity);
             }
             if (slot_max >= 0) {
                 auto* base = accumulator.data() + (r * region_stride) +
                              (static_cast<std::size_t>(slot_max) * statistic_stride);
-                std::fill(base, base + block_length, -kInfinity);
+                std::fill(base, base + statistic_stride, -kInfinity);
             }
         }
+    };
 
-        const std::uint64_t block_spectral_chunks = plan.ChunksFor(block_length);
-        const std::uint64_t block_chunks_total =
-            std::max<std::uint64_t>(1, std::max<std::uint64_t>(1, layer_chunks) * block_spectral_chunks);
-        std::uint64_t block_chunks_done = 0;
-        std::uint64_t reads_done = 0;
-
-        // An extremum nothing contributed to is still its identity, which is the one value it must
-        // not be reported as. Finding those needs no extra bookkeeping: a finite pixel can never
-        // leave an infinity behind, so only the untouched entries are still infinite -- and by the
-        // same argument the NaN that replaced one is the only NaN there, so the identity can be put
-        // back when the walk is not finished with it.
-        const auto settle_extrema = [&](bool report) {
-            for (std::size_t r = 0; r < request.region_count; ++r) {
-                for (const int slot : {slot_min, slot_max}) {
-                    if (slot < 0) {
-                        continue;
-                    }
-                    const double identity = slot == slot_min ? kInfinity : -kInfinity;
-                    auto* base = accumulator.data() + (r * region_stride) +
-                                 (static_cast<std::size_t>(slot) * statistic_stride);
-                    for (std::size_t c = 0; c < block_length; ++c) {
-                        if (report) {
-                            if (std::isinf(base[c])) {
-                                base[c] = std::numeric_limits<double>::quiet_NaN();
-                            }
-                        } else if (std::isnan(base[c])) {
-                            base[c] = identity;
-                        }
-                    }
-                }
-            }
-        };
-
-        const auto hand_over = [&](bool complete) -> Result<void> {
-            settle_extrema(true);
-            SpectralBlock block;
-            block.first_channel = block_begin;
-            block.channel_count = block_length;
-            block.values = accumulator.data();
-            block.value_count = accumulator.size();
-            block.region_stride = region_stride;
-            block.statistic_stride = statistic_stride;
-            block.statistics = statistics.data();
-            block.statistic_count = statistic_count;
-            block.complete = complete;
-            block.completeness =
-                complete ? 1.0
-                         : static_cast<double>(block_chunks_done) / static_cast<double>(block_chunks_total);
-            const bool keep_going = sink(block);
-            if (!complete) {
-                settle_extrema(false);
-            }
-            if (!keep_going) {
-                return MakeError(ErrorCode::cancelled, "The spectral reduction was cancelled by its sink", node);
-            }
-            return {};
-        };
-
+    // Which chunk runs this block's regions occupy, cut into bands of identical rows and then into
+    // segments a budget wide. Two footprints of the same block share `reads_done`, so a block taken
+    // in a single read still reports once -- at the end, through the emitter.
+    const auto walk_block = [&](EmitBlock& block, const auto& report) -> Result<void> {
         for (std::uint64_t row = 0; row < buckets.rows;) {
             const auto& runs = runs_per_row.at(static_cast<std::size_t>(row));
             if (runs.empty()) {
@@ -630,8 +608,7 @@ Result<void> ReduceSpectral(const ReadableImage& image, const SpectralReduceRequ
                 footprint.chunks = run_chunks;
 
                 const auto walked = walk.Over(
-                    footprint, block_begin, block_end, reads_done, block_chunks_done,
-                    [&](std::uint64_t) -> Result<void> { return hand_over(false); },
+                    footprint, block.begin, block.end, block.reads_done, block.chunks_done, report,
                     [&](const Slab& slab) {
                         // Into locals so that the accumulation below is the text it was when this
                         // function did its own reading.
@@ -845,14 +822,31 @@ Result<void> ReduceSpectral(const ReadableImage& image, const SpectralReduceRequ
             }
             row = band_end;
         }
+        return {};
+    };
 
-        if (auto handed = hand_over(true); !handed) {
-            return handed.error();
+    const auto hand_over = [&](std::uint64_t first_channel, std::uint64_t length, bool complete,
+                               double completeness) {
+        settle_extrema(true, static_cast<std::size_t>(length));
+        SpectralBlock block;
+        block.first_channel = first_channel;
+        block.channel_count = length;
+        block.values = accumulator.data();
+        block.value_count = accumulator.size();
+        block.region_stride = region_stride;
+        block.statistic_stride = statistic_stride;
+        block.statistics = statistics.data();
+        block.statistic_count = statistic_count;
+        block.complete = complete;
+        block.completeness = completeness;
+        const bool keep_going = sink(block);
+        if (!complete) {
+            settle_extrema(false, static_cast<std::size_t>(length));
         }
+        return keep_going;
+    };
 
-        block_begin = block_end;
-    }
-    return {};
+    return emitter.Over(reset_block, walk_block, hand_over);
 }
 
 }  // namespace carta::zarr::internal

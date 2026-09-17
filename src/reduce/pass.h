@@ -154,10 +154,14 @@ struct SlabRequest {
     std::uint64_t v_count = 0;
     std::uint64_t v_stride = 1;
     // Which channels to read, as an index into the pass's own spectral selection -- so channel
-    // `channel_index` of the image is `spectral.start + channel_index * spectral.stride`. Absolute,
-    // unlike Slab::first_channel, which is relative to the range one RunPass was given. They are
-    // the same number only when a pass starts at the beginning of the selection, which is why
-    // confusing them is invisible until something asks for a later block.
+    // `channel_index` of the image is `planes.spectral.start + channel_index * planes.spectral.stride`.
+    // Absolute, unlike Slab::first_channel, which is relative to the range one RunPass was given.
+    // They are the same number only when a pass starts at the beginning of the selection, which is
+    // why confusing them is invisible until something asks for a later block.
+    //
+    // A reduction does not choose between them: EmitBlock hands it the absolute pair to walk with
+    // and the relative one to index by, which is what stopped this from being prose a caller has to
+    // read. See block_emit.h.
     std::uint64_t channel_index = 0;
     std::uint64_t channel_count = 0;
 };

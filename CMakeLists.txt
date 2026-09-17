@@ -260,6 +260,14 @@ if(CARTA_ZARR_BUILD_TESTS AND BUILD_TESTING)
         SOURCES tests/memo_test.cc
         LIBRARIES Threads::Threads)
 
+    # What the filesystem transport says is in a store. Compiled on its own because it needs nothing
+    # above the seam: the listing is asserted as the transport hands it over, before Store sorts and
+    # de-duplicates it and the shape of the walk stops being observable.
+    carta_zarr_add_test(carta_zarr_transport_tests INTERNAL
+        TEST_NAME carta-zarr-transport
+        SOURCES tests/transport_test.cc src/zarr/transport.cc
+        LIBRARIES nlohmann_json::nlohmann_json)
+
     # The worker pool and the rule that decides whether to wake it. Compiled on its own because the
     # reductions' own fixtures are far smaller than the split's threshold, so the parallel path is
     # unreachable from there -- see the comment at the top of the test.

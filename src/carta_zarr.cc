@@ -57,6 +57,34 @@ auto Guarded(ErrorCode code, std::string node, Function&& function) -> decltype(
     });
 }
 
+// Everything an Image entry point does before it has something to read from: name the node so a
+// failure says which image it was about, refuse a handle that was moved from, build the
+// ReadableImage, and guard the lot.
+//
+// Five entry points wrote this out in full, and the five did not agree: two refused an empty
+// handle, the other three also refused a null store -- a condition Image::Impl's constructor
+// cannot produce, so the difference was a reader's problem rather than a behaviour. Said once,
+// there is one answer.
+//
+// The handle is a template parameter because Image::Impl is private to Image and this is not.
+// Deducing the type asks nothing of access control, where naming it would.
+template <typename ImplPtr, typename Function>
+auto WithReadableImage(const ImplPtr& impl, Function&& function)
+    -> decltype(function(std::declval<const internal::ReadableImage&>())) {
+    using Answer = decltype(function(std::declval<const internal::ReadableImage&>()));
+    const std::string node = impl ? impl->descriptor.id : std::string{};
+    return Guarded(ErrorCode::io_error, node, [&]() -> Answer {
+        if (!impl) {
+            return Error{ErrorCode::invalid_argument, "Image handle is empty"};
+        }
+        auto image = impl->Readable();
+        if (!image) {
+            return image.error();
+        }
+        return function(image.value());
+    });
+}
+
 bool TryComputeDirectorySize(std::string_view location, std::chrono::milliseconds timeout, std::uint64_t& size) {
     const std::string location_string(location);
     std::filesystem::path root_path;
@@ -199,16 +227,8 @@ Result<std::size_t> Image::Read(const ReadRequest& request, BufferView<float> de
 
 Result<std::size_t> Image::Read(const ReadRequest& request, BufferView<float> destination,
                                 const ReadOptions& options) const {
-    const std::string node = _impl ? _impl->descriptor.id : std::string{};
-    return Guarded(ErrorCode::io_error, node, [&]() -> Result<std::size_t> {
-        if (!_impl) {
-            return Error{ErrorCode::invalid_argument, "Image handle is empty"};
-        }
-        auto image = _impl->Readable();
-        if (!image) {
-            return image.error();
-        }
-        return internal::ReadInPieces(image.value(), request, destination, options);
+    return WithReadableImage(_impl, [&](const internal::ReadableImage& image) {
+        return internal::ReadInPieces(image, request, destination, options);
     });
 }
 
@@ -218,16 +238,8 @@ Result<std::size_t> Image::ReadPixelMask(const ReadRequest& request, BufferView<
 
 Result<std::size_t> Image::ReadPixelMask(const ReadRequest& request, BufferView<std::uint8_t> destination,
                                          const ReadOptions& options) const {
-    const std::string node = _impl ? _impl->descriptor.id : std::string{};
-    return Guarded(ErrorCode::io_error, node, [&]() -> Result<std::size_t> {
-        if (!_impl) {
-            return Error{ErrorCode::invalid_argument, "Image handle is empty"};
-        }
-        auto image = _impl->Readable();
-        if (!image) {
-            return image.error();
-        }
-        return internal::ReadPixelMask(image.value(), request, destination, options);
+    return WithReadableImage(_impl, [&](const internal::ReadableImage& image) {
+        return internal::ReadPixelMask(image, request, destination, options);
     });
 }
 
@@ -237,16 +249,8 @@ Result<void> Image::ReduceSpectral(const SpectralReduceRequest& request, const S
 
 Result<void> Image::ReduceSpectral(const SpectralReduceRequest& request, const SpectralSink& sink,
                                    const ReadOptions& options) const {
-    const std::string node = _impl ? _impl->descriptor.id : std::string{};
-    return Guarded(ErrorCode::io_error, node, [&]() -> Result<void> {
-        if (!_impl || !_impl->store) {
-            return Error{ErrorCode::invalid_argument, "Image handle is empty"};
-        }
-        auto image = _impl->Readable();
-        if (!image) {
-            return image.error();
-        }
-        return internal::ReduceSpectral(image.value(), request, sink, options);
+    return WithReadableImage(_impl, [&](const internal::ReadableImage& image) {
+        return internal::ReduceSpectral(image, request, sink, options);
     });
 }
 
@@ -256,16 +260,8 @@ Result<void> Image::ComputeHistogram(const HistogramRequest& request, const Hist
 
 Result<void> Image::ComputeHistogram(const HistogramRequest& request, const HistogramSink& sink,
                                      const ReadOptions& options) const {
-    const std::string node = _impl ? _impl->descriptor.id : std::string{};
-    return Guarded(ErrorCode::io_error, node, [&]() -> Result<void> {
-        if (!_impl || !_impl->store) {
-            return Error{ErrorCode::invalid_argument, "Image handle is empty"};
-        }
-        auto image = _impl->Readable();
-        if (!image) {
-            return image.error();
-        }
-        return internal::ComputeHistogram(image.value(), request, sink, options);
+    return WithReadableImage(_impl, [&](const internal::ReadableImage& image) {
+        return internal::ComputeHistogram(image, request, sink, options);
     });
 }
 
@@ -275,16 +271,8 @@ Result<CubeHistogramResult> Image::ComputeCubeHistogram(const CubeHistogramReque
 
 Result<CubeHistogramResult> Image::ComputeCubeHistogram(const CubeHistogramRequest& request,
                                                         const ReadOptions& options) const {
-    const std::string node = _impl ? _impl->descriptor.id : std::string{};
-    return Guarded(ErrorCode::io_error, node, [&]() -> Result<CubeHistogramResult> {
-        if (!_impl || !_impl->store) {
-            return Error{ErrorCode::invalid_argument, "Image handle is empty"};
-        }
-        auto image = _impl->Readable();
-        if (!image) {
-            return image.error();
-        }
-        return internal::ComputeCubeHistogram(image.value(), request, options);
+    return WithReadableImage(_impl, [&](const internal::ReadableImage& image) {
+        return internal::ComputeCubeHistogram(image, request, options);
     });
 }
 

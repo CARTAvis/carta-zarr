@@ -412,7 +412,10 @@ Result<std::vector<std::string>> Store::ReadStringArray1DUncached(std::string_vi
         return zarr_metadata::ReadFixedLengthUtf32StringArray(array_path.value(), array_meta_res.value(), metadata,
                                                               node);
     } catch (const std::exception& e) {
-        return Error{ErrorCode::invalid_argument, e.what(), std::string(node)};
+        // io_error, as in every other read on this Store. What the decoder itself refuses comes back
+        // as a Result with its own code; what escapes as an exception is a file or an allocation,
+        // which is nothing the caller passed in.
+        return Error{ErrorCode::io_error, e.what(), std::string(node)};
     }
 }
 

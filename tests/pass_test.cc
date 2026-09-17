@@ -14,7 +14,7 @@
 //
 // None of it needs a store, a transport or a fixture, which is the point.
 
-#include "reduce/axis_map.h"
+#include "axis_map.h"
 #include "reduce/pass.h"
 
 #include "support/synthetic_pixel_source.h"

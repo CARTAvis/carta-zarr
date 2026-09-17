@@ -113,6 +113,13 @@ The coordinate order the library reports and reads in, chosen by the schema prof
 the file.
 _Avoid_: canonical order, CARTA order, display order
 
+**Plane selection**:
+Which planes of an image a reduction is over: a range along the spectral coordinate, one
+polarization, and one time. The three travel together on every reduction request, because a
+reduction is always over whole planes. An ordinary read says the same thing as one range per axis
+instead, which is why it takes no plane selection.
+_Avoid_: slice, cube selection, channel range, plane range
+
 **Pass**:
 One ordered visit to every chunk an image read covers, made once and shared by every reduction that
 wants those pixels. It decides how much to decode at a time, when to hand a result over, and how to

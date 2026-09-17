@@ -33,13 +33,29 @@ using carta::zarr::ImageDescriptor;
 using carta::zarr::Range;
 using carta::zarr::ReadOptions;
 using carta::zarr::ReadRequest;
+using carta::zarr::internal::ReadableImage;
 using carta::zarr::internal::ReadInPieces;
+using carta::zarr::internal::WorkPool;
 using carta::zarr::testing::SyntheticPixelSource;
 
 void Require(bool condition, const std::string& message) {
     if (!condition) {
         throw std::runtime_error(message);
     }
+}
+
+// A ReadableImage names a pool because a reduction runs its arithmetic on one. An ordinary read
+// never touches it, and a pool of one starts no threads at all, so this costs nothing here.
+WorkPool& InlinePool() {
+    static WorkPool pool(1);
+    return pool;
+}
+
+ReadableImage Readable(const SyntheticPixelSource& source, const ImageDescriptor& image,
+                       const ChunkGeometry& geometry) {
+    auto readable = ReadableImage::Of(source, image, geometry, InlinePool());
+    Require(static_cast<bool>(readable), "the synthetic image's axes could not be mapped");
+    return readable.value();
 }
 
 constexpr std::uint64_t kX = 64;
@@ -133,7 +149,7 @@ void TestAFailedFlagLeavesTheDestinationAlone() {
     source.fail_mask_read(1, ErrorCode::io_error);
 
     std::vector<float> destination(kElements, kUntouched);
-    const auto read = ReadInPieces(source, image, geometry, WholeCube(),
+    const auto read = ReadInPieces(Readable(source, image, geometry), WholeCube(),
                                    BufferView<float>{destination.data(), destination.size()}, ReadOptions{});
 
     Require(!read && read.error().code == ErrorCode::io_error, "a failed flag read was not reported");
@@ -154,7 +170,7 @@ void TestACeilingTooLowToFitIsRefused() {
     ReadOptions options;
     options.temporary_memory_limit_bytes = 1;
     std::vector<float> destination(kElements, kUntouched);
-    const auto read = ReadInPieces(source, image, geometry, WholeCube(),
+    const auto read = ReadInPieces(Readable(source, image, geometry), WholeCube(),
                                    BufferView<float>{destination.data(), destination.size()}, options);
 
     Require(!read && read.error().code == ErrorCode::buffer_too_small,
@@ -180,7 +196,7 @@ void TestProgressCountsElementsAndFinishesAtTheTotal() {
     };
 
     std::vector<float> destination(kElements, kUntouched);
-    const auto read = ReadInPieces(source, image, geometry, WholeCube(),
+    const auto read = ReadInPieces(Readable(source, image, geometry), WholeCube(),
                                    BufferView<float>{destination.data(), destination.size()}, options);
     Require(static_cast<bool>(read) && read.value() == kElements, "a watched read did not produce the whole cube");
 
@@ -204,7 +220,7 @@ void TestProgressCanStopTheRead() {
     options.progress = [](std::size_t, std::size_t) { return false; };
 
     std::vector<float> destination(kElements, kUntouched);
-    const auto read = ReadInPieces(source, image, geometry, WholeCube(),
+    const auto read = ReadInPieces(Readable(source, image, geometry), WholeCube(),
                                    BufferView<float>{destination.data(), destination.size()}, options);
     Require(!read && read.error().code == ErrorCode::cancelled, "a progress callback returning false did not cancel");
     Require(source.pixel_reads() == 1, "the read carried on past the piece its caller stopped it at");
@@ -218,7 +234,7 @@ void TestASplitReadAgreesWithAnUnsplitOne() {
 
     SyntheticPixelSource whole_source(image, geometry, Value);
     std::vector<float> whole(kElements, kUntouched);
-    const auto unsplit = ReadInPieces(whole_source, image, geometry, WholeCube(),
+    const auto unsplit = ReadInPieces(Readable(whole_source, image, geometry), WholeCube(),
                                       BufferView<float>{whole.data(), whole.size()}, ReadOptions{});
     Require(static_cast<bool>(unsplit), "the unsplit read failed");
     Require(whole_source.pixel_reads() == 1, "a read with no reason to split was issued in pieces");
@@ -228,7 +244,7 @@ void TestASplitReadAgreesWithAnUnsplitOne() {
     ReadOptions options;
     options.temporary_memory_limit_bytes = kThreePieces;
     std::vector<float> split(kElements, kUntouched);
-    const auto in_pieces = ReadInPieces(split_source, image, geometry, WholeCube(),
+    const auto in_pieces = ReadInPieces(Readable(split_source, image, geometry), WholeCube(),
                                         BufferView<float>{split.data(), split.size()}, options);
     Require(static_cast<bool>(in_pieces), "the split read failed");
     Require(split_source.pixel_reads() == 3, "the split read was issued in one piece after all");
@@ -244,7 +260,7 @@ void TestAFlaggedPixelArrivesAsNaN() {
     source.set_flags([](const std::vector<std::uint64_t>& logical) { return logical.at(0) % 2 == 0; });
 
     std::vector<float> destination(kElements, kUntouched);
-    const auto read = ReadInPieces(source, image, geometry, WholeCube(),
+    const auto read = ReadInPieces(Readable(source, image, geometry), WholeCube(),
                                    BufferView<float>{destination.data(), destination.size()}, ReadOptions{});
     Require(static_cast<bool>(read), "a masked read failed");
     Require(source.mask_reads() > 0, "the flag was never read");
@@ -274,7 +290,7 @@ void TestDecliningTheMaskReadsNoFlag() {
     ReadOptions options;
     options.apply_pixel_mask = false;
     std::vector<float> destination(kElements, kUntouched);
-    const auto read = ReadInPieces(source, image, geometry, WholeCube(),
+    const auto read = ReadInPieces(Readable(source, image, geometry), WholeCube(),
                                    BufferView<float>{destination.data(), destination.size()}, options);
     Require(static_cast<bool>(read), "declining the mask still failed on a flag that cannot be read");
     Require(source.mask_reads() == 0, "declining the mask still read the flag");

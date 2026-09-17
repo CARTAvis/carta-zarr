@@ -329,8 +329,9 @@ if(CARTA_ZARR_BUILD_TESTS AND BUILD_TESTING)
             tests/read_synthetic_test.cc
             src/read/pieces.cc
             src/read/pieces_read.cc
+            src/work_pool.cc
             src/zarr/pixel_selection.cc
-        LIBRARIES nlohmann_json::nlohmann_json)
+        LIBRARIES nlohmann_json::nlohmann_json Threads::Threads)
 
     # What a pass decides before it reads anything. Compiled against pass.cc alone: PlanPass touches
     # no store and no transport, so the read strategy -- which has moved more than once, and moved

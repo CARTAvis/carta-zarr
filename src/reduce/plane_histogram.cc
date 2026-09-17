@@ -7,7 +7,7 @@
 #include "plane_histogram.h"
 
 #include "chunk_blocks.h"
-#include "reduce/axis_map.h"
+#include "axis_map.h"
 #include "reduce/tuning.h"
 #include "reduce/pass.h"
 
@@ -220,22 +220,21 @@ private:
 
 }  // namespace
 
-Result<void> ComputeHistogram(const PixelSource& source, const ImageDescriptor& descriptor,
-                              const ChunkGeometry& geometry, const HistogramRequest& request,
-                              const HistogramSink& sink, const ReadOptions& options, WorkPool& workers) {
+Result<void> ComputeHistogram(const ReadableImage& image, const HistogramRequest& request,
+                              const HistogramSink& sink, const ReadOptions& options) {
+    const auto& descriptor = image.descriptor();
+    const auto& geometry = image.geometry();
+    const auto& source = image.source();
+    const auto& map = image.map();
+    auto& workers = image.workers();
     const auto& node = descriptor.id;
     if (!sink) {
         return MakeError(ErrorCode::invalid_argument, "A histogram needs a sink", node);
     }
-    auto axes = MapAxes(descriptor);
-    if (!axes) {
-        return axes.error();
-    }
-    const auto& map = axes.value();
     if (auto valid = ValidateRequest(descriptor, map, request); !valid) {
         return valid.error();
     }
-    if (auto valid = ValidateSpectralRange(descriptor, map, request.spectral); !valid) {
+    if (auto valid = image.ValidateSpectral(request.spectral); !valid) {
         return valid.error();
     }
 
@@ -375,10 +374,14 @@ Result<void> ComputeHistogram(const PixelSource& source, const ImageDescriptor& 
     return {};
 }
 
-Result<CubeHistogramResult> ComputeCubeHistogram(const PixelSource& source, const ImageDescriptor& descriptor,
-                                                 const ChunkGeometry& geometry,
+Result<CubeHistogramResult> ComputeCubeHistogram(const ReadableImage& image,
                                                  const CubeHistogramRequest& request,
-                                                 const ReadOptions& options, WorkPool& workers) {
+                                                 const ReadOptions& options) {
+    const auto& descriptor = image.descriptor();
+    const auto& geometry = image.geometry();
+    const auto& source = image.source();
+    const auto& map = image.map();
+    auto& workers = image.workers();
     const auto& node = descriptor.id;
     if (request.bins == 0 || request.bins > kMaxHistogramBins) {
         return MakeError(ErrorCode::invalid_argument,
@@ -388,11 +391,6 @@ Result<CubeHistogramResult> ComputeCubeHistogram(const PixelSource& source, cons
     if (request.spatial_sample == 0) {
         return MakeError(ErrorCode::invalid_argument, "A spatial sample of zero selects nothing", node);
     }
-    auto axes = MapAxes(descriptor);
-    if (!axes) {
-        return axes.error();
-    }
-    const auto& map = axes.value();
     // The polarization and time checks are the same ones a fixed-range histogram makes; the bins and
     // bounds in this stand-in are only there to get past its own checks, and nothing reads them.
     HistogramRequest shape;
@@ -405,7 +403,7 @@ Result<CubeHistogramResult> ComputeCubeHistogram(const PixelSource& source, cons
     if (auto valid = ValidateRequest(descriptor, map, shape); !valid) {
         return valid.error();
     }
-    if (auto valid = ValidateSpectralRange(descriptor, map, request.spectral); !valid) {
+    if (auto valid = image.ValidateSpectral(request.spectral); !valid) {
         return valid.error();
     }
 

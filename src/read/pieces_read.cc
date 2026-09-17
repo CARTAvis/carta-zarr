@@ -29,9 +29,11 @@ Error MakeError(ErrorCode code, std::string message, std::string node_path = {})
 
 }  // namespace
 
-Result<std::size_t> ReadInPieces(const PixelSource& source, const ImageDescriptor& descriptor,
-                                 const ChunkGeometry& geometry, const ReadRequest& request,
+Result<std::size_t> ReadInPieces(const ReadableImage& image, const ReadRequest& request,
                                  BufferView<float> destination, const ReadOptions& options) {
+    const auto& descriptor = image.descriptor();
+    const auto& geometry = image.geometry();
+    const auto& source = image.source();
     auto selection = zarr::BuildSelection(descriptor, request);
     if (!selection) {
         return selection.error();

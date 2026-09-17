@@ -12,7 +12,7 @@
 
 #include "chunk_blocks.h"
 #include "pixel_source.h"
-#include "reduce/axis_map.h"
+#include "axis_map.h"
 #include "zarr/pixel_selection.h"
 
 #include <algorithm>
@@ -144,12 +144,6 @@ private:
     std::uint64_t _chunk_depth = 1;
     std::uint64_t _least_channels = 1;
 };
-
-// The spectral range a pass was asked for has to fall inside the image. Compared by dividing the
-// room that is left rather than by multiplying out the span: (count - 1) * stride wraps, and a
-// wrapped span passes a check it should fail.
-Result<void> ValidateSpectralRange(const ImageDescriptor& descriptor, const AxisMap& map,
-                                   const Range& spectral);
 
 // One slab to read, in the pass's own axes.
 struct SlabRequest {

@@ -10,7 +10,7 @@
 #include "carta-zarr/read.h"
 #include "carta-zarr/result.h"
 
-#include "pixel_source.h"
+#include "readable_image.h"
 
 #include <cstddef>
 #include <cstdint>
@@ -72,8 +72,7 @@ PiecePlan PlanPieces(const ImageDescriptor& descriptor, const ChunkGeometry& geo
  * Reports buffer_too_small when the destination cannot hold the selection, or when a piece's flag
  * buffer exceeds a ceiling that no further splitting gets under.
  */
-Result<std::size_t> ReadInPieces(const PixelSource& source, const ImageDescriptor& descriptor,
-                                 const ChunkGeometry& geometry, const ReadRequest& request,
+Result<std::size_t> ReadInPieces(const ReadableImage& image, const ReadRequest& request,
                                  BufferView<float> destination, const ReadOptions& options);
 
 }  // namespace carta::zarr::internal

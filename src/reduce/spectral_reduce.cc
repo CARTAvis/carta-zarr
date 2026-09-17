@@ -7,7 +7,7 @@
 #include "spectral_reduce.h"
 
 #include "chunk_blocks.h"
-#include "reduce/axis_map.h"
+#include "axis_map.h"
 #include "reduce/tuning.h"
 #include "reduce/pass.h"
 #include "zarr/pixel_selection.h"
@@ -388,18 +388,17 @@ std::vector<std::vector<ColumnRun>> BuildColumnRuns(const ChunkBuckets& buckets)
 
 }  // namespace
 
-Result<void> ReduceSpectral(const PixelSource& source, const ImageDescriptor& descriptor,
-                            const ChunkGeometry& geometry, const SpectralReduceRequest& request,
-                            const SpectralSink& sink, const ReadOptions& options, WorkPool& workers) {
+Result<void> ReduceSpectral(const ReadableImage& image, const SpectralReduceRequest& request,
+                            const SpectralSink& sink, const ReadOptions& options) {
+    const auto& descriptor = image.descriptor();
+    const auto& geometry = image.geometry();
+    const auto& source = image.source();
+    const auto& map = image.map();
+    auto& workers = image.workers();
     const auto& node = descriptor.id;
     if (!sink) {
         return MakeError(ErrorCode::invalid_argument, "A spectral reduction needs a sink", node);
     }
-    auto axes = MapAxes(descriptor);
-    if (!axes) {
-        return axes.error();
-    }
-    const auto& map = axes.value();
 
     // The walk follows the store. Of the two spatial axes the one written last varies fastest, so
     // asking for it first is what keeps a plane from being transposed on its way into the
@@ -432,7 +431,7 @@ Result<void> ReduceSpectral(const PixelSource& source, const ImageDescriptor& de
     // Checked here as well as inside each slab request, so that a bad range is one error naming the
     // axis rather than a partial reduction that fails on some later slab.
     const Range spectral = request.spectral;
-    if (auto valid = ValidateSpectralRange(descriptor, map, spectral); !valid) {
+    if (auto valid = image.ValidateSpectral(spectral); !valid) {
         return valid.error();
     }
 

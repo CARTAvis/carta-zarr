@@ -8,6 +8,7 @@
 
 #include "chunk_blocks.h"
 #include "read/pieces.h"
+#include "readable_image.h"
 #include "reduce/plane_histogram.h"
 #include "reduce/spectral_reduce.h"
 #include "schema/profile.h"
@@ -155,7 +156,8 @@ public:
           profile(profile),
           store(std::move(store)),
           descriptor(std::move(descriptor)),
-          geometry(std::move(geometry)) {}
+          geometry(std::move(geometry)),
+          source(*this->store, this->descriptor) {}
 
     std::shared_ptr<Context::Impl> context;
     std::string location;
@@ -166,6 +168,17 @@ public:
     std::shared_ptr<internal::Store> store;
     ImageDescriptor descriptor;
     ChunkGeometry geometry;
+    // Built once, from members rather than from the constructor's arguments, and declared last so
+    // that both of those are already initialised. A PixelSource cannot be copied or moved, which is
+    // why it lives here rather than being made at each entry point.
+    internal::StorePixelSource source;
+
+    // What every read and reduction is against. Built per call, so that an image whose axes cannot
+    // be mapped fails the operation that needed them rather than the open -- which is where that
+    // failure has always reached the caller.
+    Result<internal::ReadableImage> Readable() const {
+        return internal::ReadableImage::Of(source, descriptor, geometry, *context->workers);
+    }
 };
 
 namespace {
@@ -235,9 +248,11 @@ Result<std::size_t> Image::Read(const ReadRequest& request, BufferView<float> de
         if (!_impl) {
             return MakeError(ErrorCode::invalid_argument, "Image handle is empty");
         }
-        const internal::StorePixelSource source(*_impl->store, _impl->descriptor);
-        return internal::ReadInPieces(source, _impl->descriptor, _impl->geometry, request, destination,
-                                      options);
+        auto image = _impl->Readable();
+        if (!image) {
+            return image.error();
+        }
+        return internal::ReadInPieces(image.value(), request, destination, options);
     });
 }
 
@@ -294,9 +309,11 @@ Result<void> Image::ReduceSpectral(const SpectralReduceRequest& request, const S
         if (!_impl || !_impl->store) {
             return MakeError(ErrorCode::invalid_argument, "Image handle is empty");
         }
-        const internal::StorePixelSource source(*_impl->store, _impl->descriptor);
-        return internal::ReduceSpectral(source, _impl->descriptor, _impl->geometry, request, sink, options,
-                                        *_impl->context->workers);
+        auto image = _impl->Readable();
+        if (!image) {
+            return image.error();
+        }
+        return internal::ReduceSpectral(image.value(), request, sink, options);
     });
 }
 
@@ -311,9 +328,11 @@ Result<void> Image::ComputeHistogram(const HistogramRequest& request, const Hist
         if (!_impl || !_impl->store) {
             return MakeError(ErrorCode::invalid_argument, "Image handle is empty");
         }
-        const internal::StorePixelSource source(*_impl->store, _impl->descriptor);
-        return internal::ComputeHistogram(source, _impl->descriptor, _impl->geometry, request, sink, options,
-                                          *_impl->context->workers);
+        auto image = _impl->Readable();
+        if (!image) {
+            return image.error();
+        }
+        return internal::ComputeHistogram(image.value(), request, sink, options);
     });
 }
 
@@ -328,9 +347,11 @@ Result<CubeHistogramResult> Image::ComputeCubeHistogram(const CubeHistogramReque
         if (!_impl || !_impl->store) {
             return MakeError(ErrorCode::invalid_argument, "Image handle is empty");
         }
-        const internal::StorePixelSource source(*_impl->store, _impl->descriptor);
-        return internal::ComputeCubeHistogram(source, _impl->descriptor, _impl->geometry, request, options,
-                                              *_impl->context->workers);
+        auto image = _impl->Readable();
+        if (!image) {
+            return image.error();
+        }
+        return internal::ComputeCubeHistogram(image.value(), request, options);
     });
 }
 

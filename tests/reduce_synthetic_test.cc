@@ -37,6 +37,7 @@ using carta::zarr::Range;
 using carta::zarr::ReadOptions;
 using carta::zarr::internal::MapAxes;
 using carta::zarr::internal::PlanPass;
+using carta::zarr::internal::ReadableImage;
 using carta::zarr::internal::WorkPool;
 using carta::zarr::testing::SyntheticPixelSource;
 
@@ -44,6 +45,13 @@ void Require(bool condition, const std::string& message) {
     if (!condition) {
         throw std::runtime_error(message);
     }
+}
+
+ReadableImage Readable(const SyntheticPixelSource& source, const ImageDescriptor& image,
+                       const ChunkGeometry& geometry, WorkPool& workers) {
+    auto readable = ReadableImage::Of(source, image, geometry, workers);
+    Require(static_cast<bool>(readable), "the synthetic image's axes could not be mapped");
+    return readable.value();
 }
 
 ImageDescriptor MakeImage(std::uint64_t x, std::uint64_t y, std::uint64_t channels) {
@@ -106,8 +114,9 @@ void TestAHistogramCountsEveryPixel() {
 
     std::vector<std::uint64_t> counts(request.bins * kZ, 0);
     std::uint64_t blocks = 0;
+    const auto readable = Readable(source, image, geometry, workers);
     const auto outcome = carta::zarr::internal::ComputeHistogram(
-        source, image, geometry, request, [&](const carta::zarr::HistogramBlock& block) {
+        readable, request, [&](const carta::zarr::HistogramBlock& block) {
             if (!block.complete) {
                 return true;
             }
@@ -119,7 +128,7 @@ void TestAHistogramCountsEveryPixel() {
                 }
             }
             return true;
-        }, options, workers);
+        }, options);
     Require(static_cast<bool>(outcome),
             std::string("the histogram failed: ") + (outcome ? "" : outcome.error().message));
     Require(blocks > 1,
@@ -178,8 +187,9 @@ void TestASpectralReductionAgreesWithTheFormula() {
     std::vector<double> sums(regions.size() * kZ, 0.0);
     std::vector<double> minima(regions.size() * kZ, 0.0);
     std::vector<double> maxima(regions.size() * kZ, 0.0);
+    const auto readable = Readable(source, image, geometry, workers);
     const auto outcome = carta::zarr::internal::ReduceSpectral(
-        source, image, geometry, request, [&](const carta::zarr::SpectralBlock& block) {
+        readable, request, [&](const carta::zarr::SpectralBlock& block) {
             if (!block.complete) {
                 return true;
             }
@@ -197,7 +207,7 @@ void TestASpectralReductionAgreesWithTheFormula() {
                 }
             }
             return true;
-        }, options, workers);
+        }, options);
     Require(static_cast<bool>(outcome),
             std::string("the reduction failed: ") + (outcome ? "" : outcome.error().message));
 

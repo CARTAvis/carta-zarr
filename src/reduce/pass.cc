@@ -44,16 +44,6 @@ PassPlan PlanPass(const ImageDescriptor& descriptor, const ChunkGeometry& geomet
 }
 
 
-Result<void> ValidateSpectralRange(const ImageDescriptor& descriptor, const AxisMap& map,
-                                   const Range& spectral) {
-    const auto channels = descriptor.axes.at(map.spectral).length;
-    if (spectral.stride == 0 || spectral.count == 0 || spectral.start >= channels ||
-        spectral.count - 1 > (channels - 1 - spectral.start) / spectral.stride) {
-        return Error{ErrorCode::invalid_argument, "The spectral range falls outside the image", descriptor.id};
-    }
-    return {};
-}
-
 std::uint64_t PassPlan::EmitChannels(std::uint64_t layer_chunks, std::size_t bytes_per_channel,
                                      std::uint32_t hint) const {
     const std::uint64_t budget_channels =

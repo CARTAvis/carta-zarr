@@ -446,59 +446,19 @@ void TestRunsSelectTheSamePixelsAsTheRaster(const carta::zarr::Image& sky) {
     }
 }
 
-// And the runs narrow the chunk index the same way the raster does, without the raster being there.
-void TestRunsNarrowTheChunksTheWalkReads(const carta::zarr::Image& sky) {
-    std::vector<std::uint8_t> raster(static_cast<std::size_t>(kL) * static_cast<std::size_t>(kM), 0);
-    for (std::uint64_t y = 0; y < kM; ++y) {
-        for (std::uint64_t x = 0; x < 2; ++x) {  // the left chunk only
-            raster.at(static_cast<std::size_t>((y * kL) + x)) = 1;
-        }
-    }
-    const auto axis = sky.chunk_geometry().fastest_spatial_axis;
-    const auto runs = RunsOf(raster, kL, kM, axis == carta::zarr::AxisRole::spatial_y);
-    std::vector<carta::zarr::RegionMask> regions{{0, 0, kL, kM, nullptr}};
-    Attach(regions.at(0), runs, axis);
-
-    carta::zarr::ReadOptions options;
-    options.temporary_memory_limit_bytes = 40;  // one chunk of the fixture
-    const auto collected = Collect(sky, WholeSpectrum(regions, 0), options);
-    Require(collected.partial_counts.empty(),
-            "runs confined to one chunk should make the walk read one chunk; a hand-over on the way "
-            "means it read the second one too");
-}
-
-// A region is indexed by the chunks its mask occupies, not by the chunks its bounding box covers.
-// The two differ whenever a region is thin and slanted: a three-pixel-wide rectangle along the
-// diagonal of an image has a bounding box the size of the image, and bucketing by the box reads
-// every chunk to reach the band.
+// Where the chunk-pruning cases went.
 //
-// The fixture's plane is two chunks wide, so a mask confined to one of them should make the walk
-// read one chunk and not two. With a budget of a single chunk that is observable: two chunks cannot
-// be read together, so reading both would hand the block over unfinished on the way.
-void TestAMaskNarrowsTheChunksTheWalkReads(const carta::zarr::Image& sky) {
-    std::vector<std::uint8_t> raster(static_cast<std::size_t>(kL) * static_cast<std::size_t>(kM), 0);
-    for (std::uint64_t y = 0; y < kM; ++y) {
-        for (std::uint64_t x = 0; x < 2; ++x) {  // the left chunk only
-            raster.at(static_cast<std::size_t>((y * kL) + x)) = 1;
-        }
-    }
-    const std::vector<carta::zarr::RegionMask> regions{{0, 0, kL, kM, raster.data()}};
-
-    carta::zarr::ReadOptions options;
-    options.temporary_memory_limit_bytes = 40;  // one chunk of the fixture
-    const auto collected = Collect(sky, WholeSpectrum(regions, 0), options);
-    Require(collected.partial_counts.empty(),
-            "the walk should have read the one chunk the mask occupies; a hand-over on the way means "
-            "it read the second chunk too, which only the bounding box asked for");
-    CheckAgainstOracle(collected, regions, 0, "mask-narrowed");
-
-    // The same bounding box with nothing to narrow it does read both, which is what makes the check
-    // above a measurement rather than a coincidence.
-    const std::vector<carta::zarr::RegionMask> whole_box{{0, 0, kL, kM, nullptr}};
-    const auto unnarrowed = Collect(sky, WholeSpectrum(whole_box, 0), options);
-    Require(!unnarrowed.partial_counts.empty(),
-            "a region with no mask covers its whole bounding box, which here is two chunks");
-}
+// Two tests lived here that ran a reduction with a budget of one chunk and read the pruning off
+// whether a block had been handed over unfinished -- "no hand-over, so it read one chunk". Both
+// said in their own comments that they stop testing anything if this fixture's chunk shape ever
+// changes, and this plane is two chunks wide, so the difference they could see was one chunk
+// against two.
+//
+// The claim is now made twice, in the two halves it was always two claims: carta-zarr-occupancy
+// asserts the index over a 4 x 4 chunk grid, and carta-zarr-reduce-synthetic asks the pixel source
+// how many chunks it was actually given -- sixteen against four, and it says which. What stays here
+// is what needs a real store: TestRunsSelectTheSamePixelsAsTheRaster still checks a masked region's
+// statistics against the oracle through the public interface.
 
 void TestABigRegionIsEmittedALayerAtATime(const carta::zarr::Image& sky) {
     const std::vector<carta::zarr::RegionMask> regions{{0, 0, kL, kM, nullptr}};
@@ -673,9 +633,7 @@ int main() {
             TestEmitGranularityIsReported(sky);
             TestABigRegionIsEmittedALayerAtATime(sky);
             TestAnUnfinishedBlockIsHandedOver(sky);
-            TestAMaskNarrowsTheChunksTheWalkReads(sky);
             TestRunsSelectTheSamePixelsAsTheRaster(sky);
-            TestRunsNarrowTheChunksTheWalkReads(sky);
             TestSinkCancels(sky);
             TestRejectedRequests(sky);
         } catch (const std::exception& error) {

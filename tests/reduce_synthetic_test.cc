@@ -254,6 +254,120 @@ void TestASpectralReductionAgreesWithTheFormula() {
     Require(source.most_hits_on_one_chunk() == 1, "and it decoded each chunk once getting there");
 }
 
+// A region occupies the chunks its mask touches, not the chunks its bounding box covers.
+//
+// This is what the reduction's chunk index is for, and until now the only thing asserting it was a
+// pair of cases on a 4 x 5 x 2 x 3 fixture that ran a reduction, saw that no hand-over was left
+// unfinished, and reasoned backwards to "so it read one chunk" -- both saying in their own comments
+// that they stop testing anything if the chunk shape ever changes. Here the source is asked what it
+// was given instead, at a size where the box and the occupancy are four times apart.
+//
+// Occupancy's own tests say the index is right. This says the reduction walks it: an index that is
+// correct and then ignored reads all sixteen chunks and still returns the right statistics.
+void TestAMaskedRegionReadsOnlyTheChunksItOccupies() {
+    constexpr std::uint64_t kSide = 256;
+    constexpr std::uint64_t kChunk = 64;
+    constexpr std::uint64_t kChannels = 4;
+    constexpr std::uint64_t kGrid = kSide / kChunk;  // 4 x 4 chunks in the plane
+
+    const auto image = MakeImage(kSide, kSide, kChannels);
+    const auto geometry = MakeGeometry(kChunk, kChunk, kChannels);
+
+    // Set only where the chunk is on the diagonal of the chunk grid. The bounding box is the whole
+    // plane; the selection is four of its sixteen chunks.
+    std::vector<std::uint8_t> raster(static_cast<std::size_t>(kSide * kSide), 0);
+    for (std::uint64_t y = 0; y < kSide; ++y) {
+        for (std::uint64_t x = 0; x < kSide; ++x) {
+            if (x / kChunk == y / kChunk) {
+                raster.at(static_cast<std::size_t>((y * kSide) + x)) = 1;
+            }
+        }
+    }
+
+    // The same selection as runs. This image varies y fastest, so a run is a range of rows and the
+    // r-th of them belongs to column r -- see RegionMask::run_axis.
+    std::vector<std::uint32_t> runs;
+    std::vector<std::uint64_t> run_offsets{0};
+    for (std::uint64_t x = 0; x < kSide; ++x) {
+        runs.push_back(static_cast<std::uint32_t>(kChunk * (x / kChunk)));
+        runs.push_back(static_cast<std::uint32_t>((kChunk * (x / kChunk)) + kChunk));
+        run_offsets.push_back(runs.size() / 2);
+    }
+
+    // What the diagonal comes to, from the formula the pixels come from.
+    std::vector<double> expected_sum(kChannels, 0.0);
+    std::vector<double> expected_count(kChannels, 0.0);
+    for (std::uint64_t z = 0; z < kChannels; ++z) {
+        for (std::uint64_t y = 0; y < kSide; ++y) {
+            for (std::uint64_t x = 0; x < kSide; ++x) {
+                if (x / kChunk == y / kChunk) {
+                    expected_sum.at(z) += Value({x, y, z, 0, 0});
+                    expected_count.at(z) += 1.0;
+                }
+            }
+        }
+    }
+
+    const auto reduce = [&](const carta::zarr::RegionMask& region, const char* described) {
+        SyntheticPixelSource source(image, geometry, Value);
+        const std::vector<carta::zarr::RegionMask> regions{region};
+
+        carta::zarr::SpectralReduceRequest request;
+        request.planes.spectral = {0, kChannels, 1};
+        request.regions = regions.data();
+        request.region_count = regions.size();
+        request.statistics = carta::zarr::Statistic::num_pixels | carta::zarr::Statistic::sum;
+
+        ReadOptions options;
+        options.temporary_memory_limit_bytes = kRoomyBudget;
+        WorkPool workers(4);
+
+        std::vector<double> sums(kChannels, 0.0);
+        std::vector<double> counts(kChannels, 0.0);
+        const auto readable = Readable(source, image, geometry, workers);
+        const auto outcome = carta::zarr::internal::ReduceSpectral(
+            readable, request, [&](const carta::zarr::SpectralBlock& block) {
+                if (!block.complete) {
+                    return true;
+                }
+                for (std::size_t slot = 0; slot < block.statistic_count; ++slot) {
+                    const double* from = block.values + (slot * block.statistic_stride);
+                    auto* into = block.statistics[slot] == carta::zarr::Statistic::sum ? &sums : &counts;
+                    for (std::uint64_t c = 0; c < block.channel_count; ++c) {
+                        into->at(block.first_channel + c) = from[c];
+                    }
+                }
+                return true;
+            }, options);
+        Require(static_cast<bool>(outcome), std::string(described) + ": the reduction failed: " +
+                                                (outcome ? "" : outcome.error().message));
+
+        for (std::uint64_t z = 0; z < kChannels; ++z) {
+            Require(counts.at(z) == expected_count.at(z),
+                    std::string(described) + ": the diagonal's pixel count");
+            Require(std::abs(sums.at(z) - expected_sum.at(z)) <= 1e-9 * (1.0 + std::abs(expected_sum.at(z))),
+                    std::string(described) + ": the diagonal's sum");
+        }
+
+        // The assertion the fixture-driven pair could only reach by inference. Four chunks of the
+        // grid, one channel chunk, each decoded once.
+        Require(source.chunks_touched() == kGrid,
+                std::string(described) + ": read " + std::to_string(source.chunks_touched()) +
+                    " chunks rather than the " + std::to_string(kGrid) + " the mask occupies");
+        Require(source.most_hits_on_one_chunk() == 1,
+                std::string(described) + ": a chunk was decoded more than once");
+    };
+
+    carta::zarr::RegionMask rastered{0, 0, kSide, kSide, raster.data()};
+    reduce(rastered, "as a raster");
+
+    carta::zarr::RegionMask run_length{0, 0, kSide, kSide, nullptr};
+    run_length.row_runs = runs.data();
+    run_length.row_run_offsets = run_offsets.data();
+    run_length.run_axis = AxisRole::spatial_y;
+    reduce(run_length, "as runs");
+}
+
 // The same counts whether the plane is binned in place or in four pieces that are added up.
 //
 // Integer counts, so this is exact rather than close: a split that divided the rows wrongly, or a
@@ -380,6 +494,7 @@ int main() {
     try {
         TestAHistogramCountsEveryPixel();
         TestASpectralReductionAgreesWithTheFormula();
+        TestAMaskedRegionReadsOnlyTheChunksItOccupies();
         TestAPlaneHistogramSplitAcrossWorkers();
         TestACubeHistogramSplitAcrossWorkers();
     } catch (const std::exception& error) {

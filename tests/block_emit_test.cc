@@ -64,7 +64,8 @@ ImageDescriptor MakeImage(std::uint64_t channels) {
     return descriptor;
 }
 
-PassPlan Plan(const ImageDescriptor& descriptor, std::uint64_t chunk_z, const Range& spectral) {
+PassPlan Plan(const ImageDescriptor& descriptor, std::uint64_t chunk_z, const Range& spectral,
+              std::size_t budget_bytes = 0) {
     ChunkGeometry geometry;
     geometry.fastest_spatial_axis = AxisRole::spatial_y;
     geometry.chunk_shape = {64, 64, chunk_z, 1, 1};
@@ -72,7 +73,9 @@ PassPlan Plan(const ImageDescriptor& descriptor, std::uint64_t chunk_z, const Ra
     Require(static_cast<bool>(map), "MapAxes failed on a well-formed image");
     const auto planes = CheckedPlanes::Of(descriptor, map.value(), {spectral, 0, 0});
     Require(static_cast<bool>(planes), "the spectral range does not fit this image");
-    return PlanPass(descriptor, geometry, map.value(), planes.value(), 1, ReadOptions{});
+    ReadOptions options;
+    options.temporary_memory_limit_bytes = budget_bytes;
+    return PlanPass(descriptor, geometry, map.value(), planes.value(), 1, options);
 }
 
 // One hand-over, as the sink saw it.
@@ -238,6 +241,43 @@ void TestTheBudgetLowersTheCallersHint() {
     Require(expensive.emit_channels() >= 1, "and a block always holds at least one channel");
 }
 
+
+// A region set that occupies no chunks at all.
+//
+// Reachable from the public interface: a raster mask of zeroes selects nothing, which the request
+// checks do not refuse -- a caller with a region that this frame happens not to cover is asking a
+// legitimate question, and the answer is zero counts and no extrema.
+//
+// Both of the constructor's uses of layer_chunks meet zero here, and they want opposite things.
+void TestALayerOfNoChunks() {
+    const auto image = MakeImage(64);
+    // A budget of four chunks, so that a layer of one chunk is visibly cut and a layer of none is
+    // visibly not.
+    const auto plan = Plan(image, 1, Range{0, 64, 1}, 4 * 64 * 64 * sizeof(float));
+
+    const BlockEmitter occupied(plan, 1, sizeof(double), 0);
+    const BlockEmitter empty(plan, 0, sizeof(double), 0);
+    Require(occupied.emit_channels() < 64, "a layer of one chunk should be cut by a four-chunk budget");
+    Require(empty.emit_channels() == 64,
+            "a layer of no chunks decodes nothing, so the whole selection is one block, not " +
+                std::to_string(empty.emit_channels()));
+
+    // And the completeness denominator survives it: the walk reads nothing, the block is finished
+    // the moment it starts, and the one hand-over is complete rather than a division by zero.
+    std::vector<Handed> handed;
+    const auto outcome = empty.Over([](std::uint64_t) {}, [](EmitBlock&, const auto&) -> Result<void> { return {}; },
+                                    [&](std::uint64_t first, std::uint64_t length, bool complete,
+                                        double completeness) {
+                                        handed.push_back({first, length, complete, completeness});
+                                        return true;
+                                    });
+    Require(static_cast<bool>(outcome), "a walk over nothing should succeed");
+    Require(handed.size() == 1, "a single block should be handed over once, not " + std::to_string(handed.size()));
+    Require(handed.at(0).complete && handed.at(0).completeness == 1.0,
+            "the one hand-over should be complete");
+    Require(handed.at(0).length == 64, "and should cover the whole selection");
+}
+
 }  // namespace
 
 int main() {
@@ -246,6 +286,7 @@ int main() {
         TestAPartFilledBlockReportsItsOwnChunks();
         TestASinkThatSaysNoCancels();
         TestTheBudgetLowersTheCallersHint();
+        TestALayerOfNoChunks();
     } catch (const std::exception& error) {
         std::fprintf(stderr, "block emit test failed: %s\n", error.what());
         return 1;

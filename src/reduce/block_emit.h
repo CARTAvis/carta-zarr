@@ -72,6 +72,12 @@ public:
      * for a whole plane, the region set's for a reduction. `bytes_per_channel` and `hint` size the
      * block, as PassPlan::EmitChannels describes.
      */
+    // `layer_chunks` is clamped for one of its two uses and not for the other, which is deliberate.
+    // Zero is reachable -- a region set whose mask selects nothing occupies no chunks -- and the two
+    // want opposite things about it. As the denominator of a part-filled block's completeness it
+    // must never be zero, so it is clamped. As the layer the emit budget is spent against, zero is
+    // the honest answer and gives the right one: there is nothing to read, so the whole selection is
+    // handed over in a single block rather than cut into pieces sized for chunks nobody will decode.
     BlockEmitter(const PassPlan& plan, std::uint64_t layer_chunks, std::size_t bytes_per_channel,
                  std::uint32_t hint,
                  std::string cancelled = "The reduction was cancelled by its sink")

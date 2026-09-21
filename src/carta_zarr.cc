@@ -405,21 +405,4 @@ Result<SchemaProbeResult> ProbeSchema(std::string_view location, std::string_vie
     });
 }
 
-Result<bool> IsXradioImage(std::string_view location) {
-    auto result = ProbeSchema(location, kXradioImageSchema);
-    if (!result) {
-        return result.error();
-    }
-    if (result.value().kind == SchemaMatchKind::match) {
-        return true;
-    }
-    if (result.value().kind == SchemaMatchKind::invalid) {
-        return Error{ErrorCode::invalid_metadata,
-                     internal::RejectionMessage(result.value().diagnostics,
-                                                "The requested schema did not match"),
-                     std::string(location)};
-    }
-    return false;
-}
-
 }  // namespace carta::zarr

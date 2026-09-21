@@ -159,10 +159,14 @@ private:
 
 CARTA_ZARR_EXPORT ProbeResult Probe(std::string_view location, const ProbeOptions& options = {});
 
+// Ask one named schema profile about a location. The answer is its SchemaMatchKind -- matched, did
+// not match, or matched something malformed -- and an Error only when the store could not be read
+// at all.
+//
+// There used to be an IsXradioImage(location) beside this returning Result<bool>. It folded a third
+// answer into an error and put two bools in one Result, so `if (IsXradioImage(p))` compiled and
+// meant "did not fail" rather than "yes". Its body was this call and a comparison.
 CARTA_ZARR_EXPORT Result<SchemaProbeResult> ProbeSchema(std::string_view location, std::string_view schema_id);
-
-// Returns an error for an unreadable or malformed store; false is a valid non-match.
-CARTA_ZARR_EXPORT Result<bool> IsXradioImage(std::string_view location);
 
 }  // namespace carta::zarr
 

@@ -32,10 +32,14 @@ constexpr double kInfinity = std::numeric_limits<double>::infinity();
 // rather than an allocation nothing can serve.
 constexpr std::size_t kMaxChunkIncidences = 1u << 26;
 
-// One region as the walk sees it: u is the spatial axis the store varies fastest and v is the other,
-// so that a plane arrives with u contiguous and never has to be transposed on the way in. A caller's
-// x and y are mapped onto these once, at the top of the reduction.
-struct WalkRegion {
+// One region placed on the axes the walk reads in: u is the spatial axis the store varies fastest
+// and v is the other, so that a plane arrives with u contiguous and never has to be transposed on
+// the way in. A caller's x and y are mapped onto these once, at the top of the reduction.
+//
+// Placed rather than "as the walk sees it", which is what it used to be called: a pass never knows
+// what a region is, so this is what a region looks like after the placement rather than something
+// the walk holds.
+struct PlacedRegion {
     std::uint64_t u_start = 0;
     std::uint64_t v_start = 0;
     std::uint64_t u_size = 0;
@@ -72,7 +76,7 @@ struct ChunkBuckets {
     }
 };
 
-Result<ChunkBuckets> BuildChunkBuckets(const WalkRegion* regions, std::size_t region_count,
+Result<ChunkBuckets> BuildChunkBuckets(const PlacedRegion* regions, std::size_t region_count,
                                        std::uint64_t chunk_u, std::uint64_t chunk_v,
                                        const std::string& node) {
     ChunkBuckets buckets;
@@ -99,7 +103,7 @@ Result<ChunkBuckets> BuildChunkBuckets(const WalkRegion* regions, std::size_t re
     buckets.offsets.assign(cells + 1, 0);
 
     // The chunk span of one region's bounding box.
-    const auto span = [&](const WalkRegion& region, std::uint64_t& cx0, std::uint64_t& cx1, std::uint64_t& cy0,
+    const auto span = [&](const PlacedRegion& region, std::uint64_t& cx0, std::uint64_t& cx1, std::uint64_t& cy0,
                           std::uint64_t& cy1) {
         cx0 = region.u_start / chunk_u;
         cx1 = (region.u_start + region.u_size - 1) / chunk_u;
@@ -125,7 +129,7 @@ Result<ChunkBuckets> BuildChunkBuckets(const WalkRegion* regions, std::size_t re
     // scanner reads `occupied` directly to skip a column already marked: without that it rescans
     // pixels whose answer is settled, which on a region whose box is the image is tens of megabytes
     // of them.
-    const auto scan_rows = [&](const WalkRegion& region, auto&& mark_row, auto&& visit) {
+    const auto scan_rows = [&](const PlacedRegion& region, auto&& mark_row, auto&& visit) {
         std::uint64_t cx0 = 0;
         std::uint64_t cx1 = 0;
         std::uint64_t cy0 = 0;
@@ -162,7 +166,7 @@ Result<ChunkBuckets> BuildChunkBuckets(const WalkRegion* regions, std::size_t re
         }
     };
 
-    const auto for_each_cell = [&](const WalkRegion& region, auto&& visit) {
+    const auto for_each_cell = [&](const PlacedRegion& region, auto&& visit) {
         if (region.runs == nullptr && region.mask == nullptr) {
             std::uint64_t cx0 = 0;
             std::uint64_t cx1 = 0;
@@ -445,11 +449,11 @@ Result<void> ReduceSpectral(const ReadableImage& image, const SpectralReduceRequ
 
     // The caller's regions in the walk's own axes. The raster keeps whatever order the caller wrote
     // it in; only the steps through it change.
-    std::vector<WalkRegion> regions;
+    std::vector<PlacedRegion> regions;
     regions.reserve(request.region_count);
     for (std::size_t i = 0; i < request.region_count; ++i) {
         const auto& given = request.regions[i];
-        WalkRegion region;
+        PlacedRegion region;
         region.u_start = swap_spatial ? given.y_start : given.x_start;
         region.v_start = swap_spatial ? given.x_start : given.y_start;
         region.u_size = swap_spatial ? given.height : given.width;

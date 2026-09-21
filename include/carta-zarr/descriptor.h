@@ -137,8 +137,15 @@ struct DirectionCoordinate {
     std::string projection;
     std::string reference_frame;  // e.g. "FK5", "ICRS", "GALACTIC"
     std::optional<double> equinox;
-    std::array<double, 2> reference_pixel{
-        0.0, 0.0};  // CRPIX (0-indexed or 1-indexed convention noted, standard FITS CRPIX is stored)
+    // CRPIX, and 1-based as FITS counts it: the first pixel of an axis is 1.0, not 0.0.
+    //
+    // Stated rather than implied because a consumer that reads it the other way shifts every
+    // coordinate it builds by a whole pixel and is told nothing -- which is the failure ADR 0002
+    // describes for the projection parameters, arriving by a different route. casacore counts from
+    // zero, so a consumer handing this to a DirectionCoordinate subtracts one.
+    //
+    // SpectralCoordinate::reference_pixel is the same convention, from the same fit.
+    std::array<double, 2> reference_pixel{0.0, 0.0};
     std::array<double, 2> reference_value{0.0, 0.0};                                       // CRVAL in degrees
     std::array<double, 2> increment{0.0, 0.0};                                             // CDELT in degrees
     std::array<std::array<double, 2>, 2> transformation_matrix{{{1.0, 0.0}, {0.0, 1.0}}};  // PC matrix
@@ -149,7 +156,10 @@ struct DirectionCoordinate {
 struct SpectralCoordinate {
     std::string unit;
     std::string system;                     // SPECSYS, e.g. "LSRK", "BARY", "TOPOCENT"
-    std::optional<double> reference_pixel;  // CRPIX3
+    // CRPIX3, 1-based as DirectionCoordinate::reference_pixel is. Absent, with the two below it,
+    // when the channels are not evenly spaced: there is then no linear description to give and a
+    // consumer builds a tabular axis from channel_frequencies instead.
+    std::optional<double> reference_pixel;
     std::optional<double> reference_value;  // CRVAL3
     std::optional<double> increment;        // CDELT3
     std::optional<double> rest_frequency;

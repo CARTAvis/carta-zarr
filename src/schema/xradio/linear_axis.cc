@@ -107,6 +107,22 @@ DirectionAxisFit FitDirectionAxis(const std::vector<double>& cosines, std::strin
     }
     direction.reference_pixel = fit.reference_pixel;
     direction.diagnostics = std::move(fit.diagnostics);
+    // A direction axis is linear by construction, so an axis that cannot be described linearly is a
+    // store this library cannot make sense of rather than a coordinate it reports tabularly -- which
+    // is what a spectral axis in the same position is. Two ways to reach it: fewer than two samples,
+    // and two samples that are the same. Both leave the caller's reference pixel and increment at
+    // whatever they were, and before this they left them there silently.
+    //
+    // Diagnosed here rather than in FitLinearAxis because a spectral axis with one channel is not
+    // degenerate, it is a continuum image, and it takes the tabular path by design.
+    if (!fit.reference_pixel) {
+        direction.diagnostics.push_back(
+            MakeDiagnostic("degenerate_axis",
+                           "The " + std::string(axis_name) +
+                               " coordinate has fewer than two distinct samples, so it has no linear "
+                               "description; any reference pixel or increment reported for it is not usable",
+                           axis_name));
+    }
     return direction;
 }
 

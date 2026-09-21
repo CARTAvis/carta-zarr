@@ -136,10 +136,14 @@ public:
     static Result<Dataset> Open(const Context& context, std::string_view location);
 
     const DatasetDescriptor& descriptor() const noexcept;
-    // Returns the physical store size when directory enumeration completes within the timeout;
-    // otherwise returns the logical uncompressed size of all arrays and marks it as an upper bound.
+    // How much room this dataset takes where it is stored, and whether that number was measured or
+    // inferred. Measured when the store can be sized within the timeout; otherwise the logical
+    // uncompressed size of all arrays, marked as an upper bound.
+    //
+    // The timeout is not named after a directory because a dataset need not live in one: what can
+    // be sized, and how quickly, is the transport's affair.
     Result<DatasetSize> Size(
-        std::chrono::milliseconds directory_size_timeout = std::chrono::milliseconds(50)) const;
+        std::chrono::milliseconds stored_size_timeout = std::chrono::milliseconds(50)) const;
     Result<Image> OpenImage(std::string_view image_id) const;
 
 private:

@@ -7,6 +7,7 @@
 #ifndef CARTA_ZARR_SRC_STORE_H_
 #define CARTA_ZARR_SRC_STORE_H_
 
+#include "carta-zarr/descriptor.h"
 #include "carta-zarr/read.h"
 #include "carta-zarr/result.h"
 
@@ -16,6 +17,7 @@
 
 #include <nlohmann/json.hpp>
 
+#include <chrono>
 #include <cstdint>
 #include <map>
 #include <memory>
@@ -87,6 +89,11 @@ public:
     Result<std::vector<std::string>> ReadStringArray1D(std::string_view node) const;
     Result<StorageLayout> ReadStorageLayout(std::string_view node) const;
 
+    // How many bytes this store occupies where it lives. Handed straight to the transport, which is
+    // the only thing that knows; Store fronts it for the same reason it fronts every other
+    // transport question, so that nothing above here learns where the bytes came from.
+    Result<std::uint64_t> StoredSizeBytes(std::chrono::steady_clock::time_point deadline) const;
+
     // Pixel reads are deliberately uncached here: a slab is requested once and is far larger than
     // anything the metadata tables hold. Reuse belongs in TensorStore's chunk cache, which already
     // works at chunk granularity and is sized by the consumer's Context.
@@ -122,12 +129,15 @@ Result<Store> OpenStore(std::string_view location, StoreContextPtr context = {})
 // Open a store over an already-built transport. This is the seam tests enter through.
 Result<Store> OpenStore(TransportPtr transport, StoreContextPtr context = {});
 
-// Every array in the hierarchy, at its uncompressed size. A report about a dataset rather than
-// something a node reader does, so it asks Store the same three questions any other caller would
-// and holds no state of its own.
+// How large a dataset is, and whether that number was measured or inferred.
+//
+// The store's own size when the transport can report it before the deadline, and otherwise the
+// total uncompressed size of every array, marked as an upper bound. Which of the two a caller gets
+// is this module's decision rather than the facade's: it is one question -- how much room does this
+// take -- and answering half of it up there is what had the facade walking a directory of its own.
 //
 // Reports invalid_metadata for a store with no arrays at all, and for a size that overflows.
-Result<std::uint64_t> TotalArraySizeBytes(const Store& store);
+Result<DatasetSize> DatasetSizeBytes(const Store& store, std::chrono::steady_clock::time_point deadline);
 
 }  // namespace carta::zarr::internal
 

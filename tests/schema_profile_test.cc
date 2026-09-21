@@ -24,6 +24,7 @@
 #include "support/in_memory_transport.h"
 
 #include <algorithm>
+#include <chrono>
 #include <exception>
 #include <iostream>
 #include <map>
@@ -546,6 +547,48 @@ void TestStoreRejections() {
     Require(!unknown && unknown.error().code == ErrorCode::unsupported_schema, "an unknown schema id was accepted");
 }
 
+
+// How large a dataset is, when the transport cannot say how much room it takes.
+//
+// The measured half of this answer used to be the facade's: it re-parsed the location string and
+// walked the directory itself, so the fallback could only be reached from here by pointing at a real
+// store and setting the timeout to zero to make the walk give up. An in-memory transport gives up
+// honestly instead -- it holds no bytes -- so the branch is reachable with a map.
+void TestSizeFallsBackWhenTheStoreCannotBeMeasured() {
+    auto store = Open(CompleteStore());
+    Require(static_cast<bool>(store), "OpenStore rejected the in-memory store");
+
+    const auto size = carta::zarr::internal::DatasetSizeBytes(store.value(),
+                                                              std::chrono::steady_clock::now() +
+                                                                  std::chrono::seconds(5));
+    Require(static_cast<bool>(size), "sizing an in-memory store failed");
+    Require(size.value().is_upper_bound,
+            "a size the transport could not measure must be reported as an upper bound");
+    // SKY is 120 float32 at 480 bytes; time, frequency, l and m are 1, 3, 4 and 5 float64 at 8, 24,
+    // 32 and 40; polarization is two four-byte labels at 8. The arrays, not the store.
+    Require(size.value().bytes == 592,
+            "the logical total was " + std::to_string(size.value().bytes) + ", not 592");
+
+    // A deadline that has already passed reaches the same answer by the same route: this transport
+    // refuses whatever the clock says, and every way of failing to measure means the upper bound.
+    const auto expired = carta::zarr::internal::DatasetSizeBytes(
+        store.value(), std::chrono::steady_clock::now() - std::chrono::seconds(1));
+    Require(expired && expired.value().is_upper_bound && expired.value().bytes == 592,
+            "an expired deadline did not reach the same upper bound");
+}
+
+// And the fallback does not turn every failure into a number: a store with nothing to add up is
+// still an error, not a zero.
+void TestSizeRefusesAStoreWithNoArrays() {
+    auto store = Open({{"", RootGroup()}});
+    Require(static_cast<bool>(store), "OpenStore rejected a bare root group");
+
+    const auto size = carta::zarr::internal::DatasetSizeBytes(store.value(),
+                                                              std::chrono::steady_clock::now());
+    Require(!size && size.error().code == ErrorCode::invalid_metadata,
+            "a store holding no arrays was given a size");
+}
+
 }  // namespace
 
 int main() {
@@ -568,6 +611,8 @@ int main() {
         TestADeclaredFlagIsBinding();
         TestAmbiguousFlagsSelectNone();
         TestStoreRejections();
+        TestSizeFallsBackWhenTheStoreCannotBeMeasured();
+        TestSizeRefusesAStoreWithNoArrays();
         std::cout << "carta-zarr schema profile tests passed\n";
         return 0;
     } catch (const std::exception& error) {

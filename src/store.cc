@@ -421,6 +421,10 @@ Result<std::vector<std::string>> Store::ReadStringArray1DUncached(std::string_vi
     }
 }
 
+Result<std::uint64_t> Store::StoredSizeBytes(std::chrono::steady_clock::time_point deadline) const {
+    return _transport->StoredSizeBytes(deadline);
+}
+
 Result<StorageLayout> Store::ReadStorageLayout(std::string_view node) const {
     const auto& meta_res = ReadNodeMetadata(node);
     if (!meta_res) {

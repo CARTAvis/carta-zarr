@@ -231,6 +231,7 @@ if(CARTA_ZARR_BUILD_TESTS AND BUILD_TESTING)
             tests/schema_profile_test.cc
             tests/support/value_reader_stub.cc
             tests/support/pixel_reader_stub.cc
+            src/dataset_size.cc
             src/store.cc
             src/schema/profile.cc
             src/schema/xradio/probe_report.cc

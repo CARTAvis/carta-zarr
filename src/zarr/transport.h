@@ -9,6 +9,8 @@
 
 #include "carta-zarr/result.h"
 
+#include <chrono>
+#include <cstdint>
 #include <filesystem>
 #include <memory>
 #include <string>
@@ -59,6 +61,23 @@ public:
     // long after it is opened, and a store that answered relatively would hand out locations that
     // stop meaning the same thing. Nothing above or below this normalizes it again.
     virtual Result<std::filesystem::path> ArrayDirectory(std::string_view node) const = 0;
+
+    // How many bytes this store occupies where it lives, counting everything: chunks, shards and
+    // metadata, not only what the arrays logically hold.
+    //
+    // Here rather than above the seam because it is the one question about a store that only the
+    // place the bytes live can answer. A facade that walked a directory itself would be holding a
+    // second opinion about what a location means, and a weaker one -- it would not have the
+    // absolute path OpenFilesystemTransport resolved, so a process that changed directory between
+    // opening the store and asking its size would measure somewhere else.
+    //
+    // Reports `cancelled` when the deadline passes mid-walk, and `unsupported_transport` when the
+    // transport has no stored bytes to count. Pure virtual for the same reason ArrayDirectory is: a
+    // transport that cannot answer says so rather than serving a number that looks measured.
+    //
+    // Every failure here means the caller gets a logical upper bound instead, so this is allowed to
+    // give up. It is a size, not a read.
+    virtual Result<std::uint64_t> StoredSizeBytes(std::chrono::steady_clock::time_point deadline) const = 0;
 };
 
 using TransportPtr = std::shared_ptr<const Transport>;

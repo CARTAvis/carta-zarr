@@ -225,8 +225,8 @@ struct Beam {
 };
 
 struct DatasetSize {
-    // The size of the on-disk store when it could be enumerated quickly, or the total logical
-    // bytes represented by all arrays when the directory scan timed out.
+    // The size of the store where it lives when it could be measured quickly, or the total logical
+    // bytes represented by all arrays when it could not.
     std::uint64_t bytes = 0;
     bool is_upper_bound = false;
 };

@@ -85,10 +85,15 @@ struct ProbeResult : DatasetDescriptor {
 };
 
 struct OpenOptions {
-    std::size_t cache_bytes = 0;
+    // How much decoded-chunk cache this context may hold, in bytes.
+    //
+    // Three answers, and one field because they are one question: no value leaves TensorStore's own
+    // default alone, zero asks for a pool that holds nothing, and any other number sizes it. It was
+    // two fields -- a size where zero meant "default" and a separate disable_cache -- which made
+    // "no cache" sayable twice and, when both were set, resolved silently in favour of the size.
+    std::optional<std::size_t> cache_bytes;
     unsigned int io_threads = 0;
     unsigned int decode_threads = 0;
-    bool disable_cache = false;
 };
 
 enum class AxisRole {

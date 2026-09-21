@@ -41,6 +41,18 @@ struct ArrayMetadata {
 
 Result<ArrayMetadata> ParseArrayMetadata(const nlohmann::json& metadata, std::string_view node);
 
+// How an array is laid out on whatever is storing it: its chunk shape, whether the chunks are
+// gathered into shards, and what compressed them.
+//
+// A projection of the document rather than a second reading of it, which is why it is here and not
+// on Store. It was a Store method reaching into the raw node metadata, so the one thing it decides
+// -- what a sharding codec says about the real chunk shape -- could only be exercised by writing a
+// store to a directory and opening an image out of it. Nothing in it touches a transport.
+//
+// Reports invalid_metadata for a sharding codec whose chunk_shape is not positive integers, or does
+// not have the rank of the shard it sits in.
+Result<StorageLayout> ParseStorageLayout(const ArrayMetadata& metadata, std::string_view node);
+
 bool IsNonNegativeInteger(const nlohmann::json& value);
 bool IsPositiveInteger(const nlohmann::json& value);
 bool IsNumericVector(const nlohmann::json& value, std::size_t length);

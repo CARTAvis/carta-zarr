@@ -250,6 +250,15 @@ if(CARTA_ZARR_BUILD_TESTS AND BUILD_TESTING)
 
     # ArrayView addresses a flat Zarr buffer by dimension name. It needs only its own metadata type,
     # so it is tested directly rather than through a store.
+    # What an array's document says about how it is stored. Links only nlohmann: ParseStorageLayout
+    # was a Store method reading the raw node metadata, so its sharding rules could be reached only
+    # by writing a store to a directory and opening an image out of it, and two of its refusals
+    # could not be reached at all.
+    carta_zarr_add_test(carta_zarr_array_metadata_tests INTERNAL
+        TEST_NAME carta-zarr-array-metadata
+        SOURCES tests/array_metadata_test.cc ${CARTA_ZARR_METADATA_SOURCES}
+        LIBRARIES nlohmann_json::nlohmann_json)
+
     carta_zarr_add_test(carta_zarr_array_view_tests INTERNAL
         TEST_NAME carta-zarr-array-view
         SOURCES tests/array_view_test.cc src/zarr/array_view.cc ${CARTA_ZARR_METADATA_SOURCES}

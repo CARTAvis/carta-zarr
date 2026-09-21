@@ -13,7 +13,6 @@
 #include "zarr/value_reader.h"
 
 #include <algorithm>
-#include <array>
 #include <limits>
 #include <map>
 #include <optional>
@@ -70,31 +69,6 @@ Result<std::string> NormalizeNodeName(std::string_view node) {
     return normalized.generic_string();
 }
 
-// Return the named codec from a Zarr v3 codec chain, or nullptr when it is absent.
-const nlohmann::json* FindCodec(const nlohmann::json* codecs, std::string_view name) {
-    if (codecs == nullptr) {
-        return nullptr;
-    }
-    for (const auto& codec : *codecs) {
-        if (codec.is_object() && codec.value("name", "") == name) {
-            return &codec;
-        }
-    }
-    return nullptr;
-}
-
-// Return the bytes-to-bytes compressor in a codec chain, or an empty string when the chain stores
-// raw bytes. Checksum and array-to-bytes codecs are not compressors and are ignored here.
-std::string FindCompressor(const nlohmann::json* codecs) {
-    static constexpr std::array<std::string_view, 3> compressors{"zstd", "gzip", "blosc"};
-    for (const auto compressor : compressors) {
-        if (FindCodec(codecs, compressor) != nullptr) {
-            return std::string(compressor);
-        }
-    }
-    return {};
-}
-
 std::string NormalizeMetadataKey(std::string key) {
     while (!key.empty() && key.front() == '/') {
         key.erase(key.begin());
@@ -130,35 +104,6 @@ void CollectConsolidatedMetadata(nlohmann::json& metadata, const std::string& pr
             CollectConsolidatedMetadata(value, path, output);
         }
     }
-}
-
-Result<void> ApplyShardingLayout(const nlohmann::json& sharding, StorageLayout& layout, std::string_view node) {
-    layout.sharded = true;
-    layout.shard_shape = std::move(layout.chunk_shape);
-    layout.chunk_shape.clear();
-
-    if (sharding.contains("configuration") && sharding.at("configuration").is_object()) {
-        const auto& configuration = sharding.at("configuration");
-        if (configuration.contains("chunk_shape") && configuration.at("chunk_shape").is_array()) {
-            for (const auto& dimension : configuration.at("chunk_shape")) {
-                if (!zarr_metadata::IsPositiveInteger(dimension)) {
-                    return Error{ErrorCode::invalid_metadata,
-                                 "Sharding codec chunk_shape must be positive integers", std::string(node)};
-                }
-                layout.chunk_shape.push_back(dimension.get<std::uint64_t>());
-            }
-        }
-        // The compressor applies to the inner chunks, so look inside the sharding codec first.
-        if (configuration.contains("codecs") && configuration.at("codecs").is_array()) {
-            layout.compressor = FindCompressor(&configuration.at("codecs"));
-        }
-    }
-
-    if (layout.chunk_shape.size() != layout.shard_shape.size()) {
-        return Error{ErrorCode::invalid_metadata, "Sharding codec chunk_shape must match the shard rank",
-                     std::string(node)};
-    }
-    return {};
 }
 
 }  // namespace
@@ -424,23 +369,7 @@ Result<StorageLayout> Store::ReadStorageLayout(std::string_view node) const {
     if (!array_meta_res) {
         return array_meta_res.error();
     }
-
-    StorageLayout layout;
-    layout.chunk_shape = array_meta_res.value().chunk_shape;
-
-    const nlohmann::json* const codecs = &array_meta_res.value().codecs;
-
-    if (const nlohmann::json* sharding = FindCodec(codecs, "sharding_indexed"); sharding != nullptr) {
-        auto sharding_result = ApplyShardingLayout(*sharding, layout, node);
-        if (!sharding_result) {
-            return sharding_result.error();
-        }
-    }
-
-    if (layout.compressor.empty()) {
-        layout.compressor = FindCompressor(codecs);
-    }
-    return layout;
+    return zarr_metadata::ParseStorageLayout(array_meta_res.value(), node);
 }
 
 }  // namespace carta::zarr::internal

@@ -24,6 +24,48 @@
 namespace carta::zarr::internal {
 
 /**
+ * An index into a run of channels, tagged by which run.
+ *
+ * Two indices into different runs do not convert to each other, and that is the whole of why this
+ * exists. e97066f asked the slab reader for an index into the block being filled, where the reader
+ * takes an index into the pass's whole spectral selection; every block after the first re-read the
+ * first block's channels, and the totals hid it -- each block still read the right number of pixels
+ * and produced a full count. Both numbers were std::uint64_t, so nothing could have said otherwise.
+ *
+ * The same fact was documented in three places instead (here, at SlabRequest, and at EmitBlock).
+ * Three comments describing one trap is the sign the type should be carrying it.
+ *
+ * An index plus a count is an index into the same run; two indices into one run are a count apart.
+ * Writing the wrong one on purpose is still possible -- `SelectionChannel{relative}` compiles -- but
+ * it can no longer happen by assignment, which is how it happened.
+ */
+template <typename Tag>
+struct ChannelIndex {
+    std::uint64_t index = 0;
+
+    friend bool operator<(ChannelIndex a, ChannelIndex b) noexcept {
+        return a.index < b.index;
+    }
+    friend bool operator==(ChannelIndex a, ChannelIndex b) noexcept {
+        return a.index == b.index;
+    }
+    friend ChannelIndex operator+(ChannelIndex a, std::uint64_t channels) noexcept {
+        return ChannelIndex{a.index + channels};
+    }
+    friend std::uint64_t operator-(ChannelIndex a, ChannelIndex b) noexcept {
+        return a.index - b.index;
+    }
+};
+
+// An index into the pass's own spectral selection: channel `index` of the image is
+// `planes.spectral.start + index * planes.spectral.stride`.
+using SelectionChannel = ChannelIndex<struct SelectionChannelTag>;
+
+// An index into the channel range one RunPass was given, which is what a visitor accumulating into
+// a block of its own indexes by.
+using BlockChannel = ChannelIndex<struct BlockChannelTag>;
+
+/**
  * One read of the pass, handed to the visitor.
  *
  * A pointer and three strides rather than a packed buffer, because the destination comes back in
@@ -34,10 +76,10 @@ namespace carta::zarr::internal {
  * wants planes loops over `channel_count` itself, which costs it nothing.
  */
 struct Slab {
-    // Index into the channel range this RunPass was given -- so a visitor accumulating into a block
-    // of its own indexes by it directly. Not an index into the pass's spectral selection; see
-    // SlabRequest::channel_index.
-    std::uint64_t first_channel = 0;
+    // Where this slab starts in the channel range this RunPass was given, which is what a visitor
+    // accumulating into a block of its own indexes by. Set by the walk, not by the reader: the
+    // reader is given an absolute index and has nothing to measure a relative one against.
+    BlockChannel first_channel;
     std::uint64_t channel_count = 0;
     const float* pixels = nullptr;
     std::uint64_t stride_u = 1;
@@ -123,9 +165,10 @@ public:
 
     // The end of a slab that begins at `begin` and would like to be `desired` channels long, moved
     // onto a chunk boundary so that no decode serves two slabs.
-    std::uint64_t AlignedSlabEnd(std::uint64_t begin, std::uint64_t desired, std::uint64_t end) const {
-        return AlignedBlockEnd(begin, desired, end, planes.spectral.start, planes.spectral.stride,
-                               _chunk_depth);
+    SelectionChannel AlignedSlabEnd(SelectionChannel begin, std::uint64_t desired,
+                                    SelectionChannel end) const {
+        return SelectionChannel{AlignedBlockEnd(begin.index, desired, end.index, planes.spectral.start,
+                                                planes.spectral.stride, _chunk_depth)};
     }
 
     // How many channels one emitted block may hold.
@@ -163,16 +206,10 @@ struct SlabRequest {
     std::uint64_t v_start = 0;
     std::uint64_t v_count = 0;
     std::uint64_t v_stride = 1;
-    // Which channels to read, as an index into the pass's own spectral selection -- so channel
-    // `channel_index` of the image is `planes.spectral.start + channel_index * planes.spectral.stride`.
-    // Absolute, unlike Slab::first_channel, which is relative to the range one RunPass was given.
-    // They are the same number only when a pass starts at the beginning of the selection, which is
-    // why confusing them is invisible until something asks for a later block.
-    //
-    // A reduction does not choose between them: EmitBlock hands it the absolute pair to walk with
-    // and the relative one to index by, which is what stopped this from being prose a caller has to
-    // read. See block_emit.h.
-    std::uint64_t channel_index = 0;
+    // Which channels to read. A SelectionChannel rather than a plain number because Slab carries a
+    // BlockChannel, and handing one where the other belongs is the mistake this pair of types exists
+    // to refuse -- see ChannelIndex.
+    SelectionChannel channel_index;
     std::uint64_t channel_count = 0;
 };
 
@@ -252,12 +289,12 @@ public:
     SlabWalk& operator=(const SlabWalk&) = delete;
 
     template <typename Report, typename Visit>
-    Result<void> Over(const SlabFootprint& footprint, std::uint64_t begin, std::uint64_t end,
+    Result<void> Over(const SlabFootprint& footprint, SelectionChannel begin, SelectionChannel end,
                       std::uint64_t& reads_done, std::uint64_t& chunks_done, Report&& report, Visit&& visit) {
         const std::uint64_t slab_channels = _plan.SlabChannels(footprint.chunks);
 
-        for (std::uint64_t slab_begin = begin; slab_begin < end;) {
-            const std::uint64_t slab_end =
+        for (SelectionChannel slab_begin = begin; slab_begin < end;) {
+            const SelectionChannel slab_end =
                 _plan.AlignedSlabEnd(slab_begin, std::min(slab_channels, end - slab_begin), end);
             const std::uint64_t slab_length = slab_end - slab_begin;
 
@@ -288,8 +325,10 @@ public:
             if (!slab) {
                 return slab.error();
             }
-            // What was read is absolute; what the visitor indexes by is relative to this walk.
-            slab.value().first_channel = slab_begin - begin;
+            // What was read is absolute; what the visitor indexes by is relative to this walk. The
+            // subtraction is the only place the two meet, and it is the only place it can be: the
+            // reader never sees `begin`, so it cannot compute this and does not try.
+            slab.value().first_channel = BlockChannel{slab_begin - begin};
 
             visit(slab.value());
 
@@ -317,7 +356,7 @@ private:
  */
 template <typename BeforeRead, typename Visit>
 Result<void> RunPass(const PixelSource& source, const PassPlan& plan, const ReadOptions& options,
-                     std::uint64_t begin, std::uint64_t end, std::uint64_t& chunks_done,
+                     SelectionChannel begin, SelectionChannel end, std::uint64_t& chunks_done,
                      BeforeRead&& before_read, Visit&& visit) {
     SlabWalk walk(source, plan, options);
     std::uint64_t reads_done = 0;

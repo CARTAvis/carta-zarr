@@ -37,6 +37,7 @@ using carta::zarr::internal::EmitBlock;
 using carta::zarr::internal::MapAxes;
 using carta::zarr::internal::PassPlan;
 using carta::zarr::internal::PlanPass;
+using carta::zarr::internal::SelectionChannel;
 
 using carta::zarr::testing::Require;
 
@@ -80,7 +81,7 @@ PassPlan Plan(const ImageDescriptor& descriptor, std::uint64_t chunk_z, const Ra
 
 // One hand-over, as the sink saw it.
 struct Handed {
-    std::uint64_t first_channel = 0;
+    SelectionChannel first_channel;
     std::uint64_t length = 0;
     bool complete = false;
     double completeness = 0.0;
@@ -88,8 +89,8 @@ struct Handed {
 
 // The two numbers a walk is given, as the walk saw them.
 struct Walked {
-    std::uint64_t begin = 0;
-    std::uint64_t end = 0;
+    SelectionChannel begin;
+    SelectionChannel end;
 };
 
 // A block is never cut inside a spectral chunk, however small a block the caller asks for: a decode
@@ -108,7 +109,7 @@ void TestBlocksAreCutOnChunkBoundaries() {
             walked.push_back({block.begin, block.end});
             return {};
         },
-        [&](std::uint64_t first, std::uint64_t length, bool complete, double completeness) {
+        [&](SelectionChannel first, std::uint64_t length, bool complete, double completeness) {
             handed.push_back({first, length, complete, completeness});
             return true;
         });
@@ -120,18 +121,18 @@ void TestBlocksAreCutOnChunkBoundaries() {
 
     // The one confusion this module exists to own: what the walk is given is absolute into the
     // selection, and so is what the sink is told -- a later block does not start at zero.
-    std::uint64_t expected = 0;
+    SelectionChannel expected{};
     for (std::size_t i = 0; i < handed.size(); ++i) {
         Require(handed.at(i).first_channel == expected,
-                "block " + std::to_string(i) + " should start at " + std::to_string(expected));
+                "block " + std::to_string(i) + " should start at " + std::to_string(expected.index));
         Require(handed.at(i).length == 4, "block " + std::to_string(i) + " should hold four channels");
-        Require(walked.at(i).begin == expected && walked.at(i).end == expected + 4,
+        Require(walked.at(i).begin == expected && walked.at(i).end == expected + 4U,
                 "the walk of block " + std::to_string(i) + " should be given the same absolute range");
         Require(handed.at(i).complete, "a block walked without reporting is handed over once, finished");
         Require(handed.at(i).completeness == 1.0, "and a finished block is complete");
-        expected += 4;
+        expected = expected + 4U;
     }
-    Require(expected == 32, "the blocks should tile the selection");
+    Require(expected == SelectionChannel{32}, "the blocks should tile the selection");
 }
 
 // A block whose walk takes more than one read is handed over as it fills, and what it says about
@@ -159,7 +160,7 @@ void TestAPartFilledBlockReportsItsOwnChunks() {
             block.chunks_done = 10;
             return {};
         },
-        [&](std::uint64_t first, std::uint64_t length, bool complete, double completeness) {
+        [&](SelectionChannel first, std::uint64_t length, bool complete, double completeness) {
             handed.push_back({first, length, complete, completeness});
             return true;
         });
@@ -172,7 +173,7 @@ void TestAPartFilledBlockReportsItsOwnChunks() {
     Require(handed.at(2).complete && handed.at(2).completeness == 1.0,
             "a finished block says one exactly, not ten tenths");
     for (const auto& one : handed) {
-        Require(one.first_channel == 0 && one.length == 8, "every hand-over describes the same block");
+        Require(one.first_channel == SelectionChannel{} && one.length == 8, "every hand-over describes the same block");
     }
 }
 
@@ -193,7 +194,7 @@ void TestASinkThatSaysNoCancels() {
                 ++blocks_walked;
                 return {};
             },
-            [&](std::uint64_t, std::uint64_t, bool, double) {
+            [&](SelectionChannel, std::uint64_t, bool, double) {
                 ++hand_overs;
                 return false;
             });
@@ -218,7 +219,7 @@ void TestASinkThatSaysNoCancels() {
                 read_on = true;
                 return {};
             },
-            [&](std::uint64_t, std::uint64_t, bool, double) { return false; });
+            [&](SelectionChannel, std::uint64_t, bool, double) { return false; });
         Require(!outcome && outcome.error().code == ErrorCode::cancelled,
                 "refusing a part-filled block should cancel too");
         Require(!read_on, "and the rest of that block should not be read");
@@ -266,7 +267,7 @@ void TestALayerOfNoChunks() {
     // the moment it starts, and the one hand-over is complete rather than a division by zero.
     std::vector<Handed> handed;
     const auto outcome = empty.Over([](std::uint64_t) {}, [](EmitBlock&, const auto&) -> Result<void> { return {}; },
-                                    [&](std::uint64_t first, std::uint64_t length, bool complete,
+                                    [&](SelectionChannel first, std::uint64_t length, bool complete,
                                         double completeness) {
                                         handed.push_back({first, length, complete, completeness});
                                         return true;

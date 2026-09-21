@@ -38,6 +38,7 @@ using carta::zarr::internal::CheckedPlanes;
 using carta::zarr::internal::MapAxes;
 using carta::zarr::internal::PassPlan;
 using carta::zarr::internal::PlanPass;
+using carta::zarr::internal::SelectionChannel;
 using carta::zarr::internal::RunPass;
 using carta::zarr::internal::Slab;
 using carta::zarr::testing::SyntheticPixelSource;
@@ -249,7 +250,7 @@ Walked WalkEverything(const SyntheticPixelSource& source, const PassPlan& plan, 
     Walked walked;
     std::uint64_t chunks_done = 0;
     const auto outcome = RunPass(
-        source, plan, options, 0, channels, chunks_done, [](std::uint64_t) -> carta::zarr::Result<void> { return {}; },
+        source, plan, options, SelectionChannel{}, SelectionChannel{channels}, chunks_done, [](std::uint64_t) -> carta::zarr::Result<void> { return {}; },
         [&](const Slab& slab) {
             ++walked.slabs;
             for (std::uint64_t z = 0; z < slab.channel_count; ++z) {
@@ -328,7 +329,7 @@ void TestAFlaggedPixelArrivesAsNaN() {
     std::uint64_t bad = 0;
     std::uint64_t chunks_done = 0;
     const auto outcome = RunPass(
-        source, plan, options, 0, 4, chunks_done, [](std::uint64_t) -> carta::zarr::Result<void> { return {}; },
+        source, plan, options, SelectionChannel{}, SelectionChannel{4}, chunks_done, [](std::uint64_t) -> carta::zarr::Result<void> { return {}; },
         [&](const Slab& slab) {
             for (std::uint64_t z = 0; z < slab.channel_count; ++z) {
                 const float* plane = slab.pixels + (z * slab.stride_z);
@@ -361,7 +362,7 @@ void TestCancellationStopsThePass() {
 
     std::uint64_t chunks_done = 0;
     const auto outcome = RunPass(
-        source, plan, options, 0, 16, chunks_done, [](std::uint64_t) -> carta::zarr::Result<void> { return {}; },
+        source, plan, options, SelectionChannel{}, SelectionChannel{16}, chunks_done, [](std::uint64_t) -> carta::zarr::Result<void> { return {}; },
         [&](const Slab&) { ++reads; });
     Require(!outcome && outcome.error().code == carta::zarr::ErrorCode::cancelled,
             "a cancelled pass reports cancelled");
@@ -378,7 +379,7 @@ void TestAnExpiredDeadlineStopsThePass() {
 
     std::uint64_t chunks_done = 0;
     const auto outcome = RunPass(
-        source, plan, options, 0, 8, chunks_done, [](std::uint64_t) -> carta::zarr::Result<void> { return {}; },
+        source, plan, options, SelectionChannel{}, SelectionChannel{8}, chunks_done, [](std::uint64_t) -> carta::zarr::Result<void> { return {}; },
         [](const Slab&) {});
     Require(!outcome && outcome.error().code == carta::zarr::ErrorCode::cancelled,
             "a pass past its deadline reports cancelled before reading anything");
@@ -398,7 +399,7 @@ void TestAReadFailureStopsThePass() {
     int visits = 0;
     std::uint64_t chunks_done = 0;
     const auto outcome = RunPass(
-        source, plan, options, 0, 8, chunks_done, [](std::uint64_t) -> carta::zarr::Result<void> { return {}; },
+        source, plan, options, SelectionChannel{}, SelectionChannel{8}, chunks_done, [](std::uint64_t) -> carta::zarr::Result<void> { return {}; },
         [&](const Slab&) { ++visits; });
     Require(!outcome && outcome.error().code == carta::zarr::ErrorCode::io_error,
             "the source's error is the pass's error");
@@ -421,7 +422,7 @@ void TestALargePlaneSplitsIntoBands() {
     std::uint64_t slabs = 0;
     std::uint64_t chunks_done = 0;
     const auto outcome = RunPass(
-        source, plan, options, 0, 4, chunks_done,
+        source, plan, options, SelectionChannel{}, SelectionChannel{4}, chunks_done,
         [](std::uint64_t) -> carta::zarr::Result<void> { return {}; }, [&](const Slab&) { ++slabs; });
     Require(static_cast<bool>(outcome), "the pass failed on a large plane");
     Require(source.elements_read() == 4096ULL * 4096ULL * 4ULL, "every pixel of a sixty-seven megapixel cube");

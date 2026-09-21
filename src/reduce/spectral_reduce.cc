@@ -491,7 +491,7 @@ Result<void> ReduceSpectral(const ReadableImage& image, const SpectralReduceRequ
                         partial + (r * partial_region_stride) + (slot * slab_length);
                     double* to = accumulator.data() + (r * region_stride) +
                                  (slot * statistic_stride) +
-                                 static_cast<std::size_t>(slab.first_channel);
+                                 static_cast<std::size_t>(slab.first_channel.index);
                     const bool is_min = slot_min >= 0 && slot == static_cast<std::size_t>(slot_min);
                     const bool is_max = slot_max >= 0 && slot == static_cast<std::size_t>(slot_max);
                     for (std::uint64_t channel = 0; channel < slab_length; ++channel) {
@@ -588,11 +588,12 @@ Result<void> ReduceSpectral(const ReadableImage& image, const SpectralReduceRequ
         return {};
     };
 
-    const auto hand_over = [&](std::uint64_t first_channel, std::uint64_t length, bool complete,
+    const auto hand_over = [&](SelectionChannel first_channel, std::uint64_t length, bool complete,
                                double completeness) {
         settle_extrema(true, static_cast<std::size_t>(length));
         SpectralBlock block;
-        block.first_channel = first_channel;
+        // Out of the type and into the public block, which is the one place it happens.
+        block.first_channel = first_channel.index;
         block.channel_count = length;
         block.values = accumulator.data();
         block.value_count = accumulator.size();

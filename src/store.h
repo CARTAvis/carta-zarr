@@ -105,7 +105,7 @@ public:
     // those two in store.cc and for nothing else.
     template <typename T>
     Result<void> ReadPixelsInto(std::string_view node, const zarr::PixelSelection& selection, T* destination,
-                                std::size_t destination_elements, const ReadOptions& options) const;
+                                std::size_t destination_elements, const ReadControl& control) const;
 
 private:
     Result<std::filesystem::path> ResolveArrayDirectory(std::string_view node) const;

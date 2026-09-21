@@ -42,11 +42,11 @@ public:
     virtual ~PixelSource() = default;
 
     virtual Result<void> ReadPixels(const zarr::PixelSelection& selection, float* destination,
-                                    std::size_t elements, const ReadOptions& options) const = 0;
+                                    std::size_t elements, const ReadControl& control) const = 0;
     // Only called when the caller has established that the image has a flag and that this read
     // applies it. A source that has none may report not_found rather than serve zeroes.
     virtual Result<void> ReadMask(const zarr::PixelSelection& selection, std::uint8_t* destination,
-                                  std::size_t elements, const ReadOptions& options) const = 0;
+                                  std::size_t elements, const ReadControl& control) const = 0;
 };
 
 }  // namespace carta::zarr::internal

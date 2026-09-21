@@ -306,7 +306,7 @@ Result<std::filesystem::path> Store::ResolveArrayDirectory(std::string_view node
 
 template <typename T>
 Result<void> Store::ReadPixelsInto(std::string_view node, const zarr::PixelSelection& selection, T* destination,
-                                   std::size_t destination_elements, const ReadOptions& options) const {
+                                   std::size_t destination_elements, const ReadControl& control) const {
     try {
         const auto& metadata = ReadArrayMetadata(node);
         if (!metadata) {
@@ -318,10 +318,10 @@ Result<void> Store::ReadPixelsInto(std::string_view node, const zarr::PixelSelec
         }
         if constexpr (std::is_same_v<T, float>) {
             return zarr_metadata::ReadFloat32(target_path.value(), _context, node, metadata.value().data_type,
-                                              selection, destination, destination_elements, options);
+                                              selection, destination, destination_elements, control);
         } else {
             return zarr_metadata::ReadMaskBytes(target_path.value(), _context, node, metadata.value().data_type,
-                                                selection, destination, destination_elements, options);
+                                                selection, destination, destination_elements, control);
         }
     } catch (const std::exception& e) {
         return Error{ErrorCode::io_error, e.what(), std::string(node)};
@@ -329,9 +329,9 @@ Result<void> Store::ReadPixelsInto(std::string_view node, const zarr::PixelSelec
 }
 
 template Result<void> Store::ReadPixelsInto<float>(std::string_view, const zarr::PixelSelection&, float*,
-                                                   std::size_t, const ReadOptions&) const;
+                                                   std::size_t, const ReadControl&) const;
 template Result<void> Store::ReadPixelsInto<std::uint8_t>(std::string_view, const zarr::PixelSelection&,
-                                                          std::uint8_t*, std::size_t, const ReadOptions&) const;
+                                                          std::uint8_t*, std::size_t, const ReadControl&) const;
 
 Result<std::vector<std::string>> Store::ReadStringArray1D(std::string_view node) const {
     auto key = NormalizeNodeName(node);

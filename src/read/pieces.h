@@ -88,13 +88,15 @@ Result<std::size_t> ReadInPieces(const ReadableImage& image, const ReadRequest& 
  * Reports not_found for an image with no flag, which is a question about the image rather than
  * about the request and is therefore answered before the request is looked at.
  *
- * Not cut into pieces, and that is the honest difference rather than an omission: a piece exists to
+ * Takes a ReadControl and not a ReadOptions: the two fields of the latter say what a read of
+ * pixels may do, and neither means anything here. That is also why it is not cut into pieces -- a
+ * piece exists to
  * bound what a read holds at once and to have somewhere to report from, and this allocates nothing
  * -- the destination is the caller's and it is one byte per element. A caller that wants a mask in
  * bounded pieces asks for it in pieces.
  */
 Result<std::size_t> ReadPixelMask(const ReadableImage& image, const ReadRequest& request,
-                                  BufferView<std::uint8_t> destination, const ReadOptions& options);
+                                  BufferView<std::uint8_t> destination, const ReadControl& control);
 
 }  // namespace carta::zarr::internal
 

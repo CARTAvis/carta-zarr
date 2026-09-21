@@ -36,7 +36,7 @@ struct CheckedRequest {
 // The three are one question -- can this image serve this request into this buffer, now -- and a
 // read that answered two of them would be a read that had not checked.
 Result<CheckedRequest> CheckRead(const ImageDescriptor& descriptor, const ReadRequest& request,
-                                 std::size_t destination_size, const ReadOptions& options) {
+                                 std::size_t destination_size, const ReadControl& control) {
     auto selection = zarr::BuildSelection(descriptor, request);
     if (!selection) {
         return selection.error();
@@ -49,8 +49,8 @@ Result<CheckedRequest> CheckRead(const ImageDescriptor& descriptor, const ReadRe
 
     // Before allocating a mask or starting any storage work. A cancelled request must not consume
     // temporary memory, or open an array, just to discover that it cannot proceed.
-    if (auto control = zarr::CheckReadControl(options, descriptor.id); !control) {
-        return control.error();
+    if (auto allowed = zarr::CheckReadControl(control, descriptor.id); !allowed) {
+        return allowed.error();
     }
     return CheckedRequest{std::move(selection.value()), elements};
 }
@@ -62,7 +62,7 @@ Result<std::size_t> ReadInPieces(const ReadableImage& image, const ReadRequest& 
     const auto& descriptor = image.descriptor();
     const auto& geometry = image.geometry();
     const auto& source = image.source();
-    const auto checked = CheckRead(descriptor, request, destination.size, options);
+    const auto checked = CheckRead(descriptor, request, destination.size, options.control);
     if (!checked) {
         return checked.error();
     }
@@ -108,12 +108,12 @@ Result<std::size_t> ReadInPieces(const ReadableImage& image, const ReadRequest& 
             // piece of the destination updated. TensorStore still owns the pixel operation's
             // in-flight completion before it returns, so the destination remains valid for the next
             // read.
-            auto mask_read = source.ReadMask(piece_selection.value(), mask.data(), mask.size(), options);
+            auto mask_read = source.ReadMask(piece_selection.value(), mask.data(), mask.size(), options.control);
             if (!mask_read) {
                 return mask_read.error();
             }
         }
-        auto read = source.ReadPixels(piece_selection.value(), piece_pixels, piece_elements, options);
+        auto read = source.ReadPixels(piece_selection.value(), piece_pixels, piece_elements, options.control);
         if (!read) {
             return read.error();
         }
@@ -132,19 +132,19 @@ Result<std::size_t> ReadInPieces(const ReadableImage& image, const ReadRequest& 
 }
 
 Result<std::size_t> ReadPixelMask(const ReadableImage& image, const ReadRequest& request,
-                                  BufferView<std::uint8_t> destination, const ReadOptions& options) {
+                                  BufferView<std::uint8_t> destination, const ReadControl& control) {
     const auto& descriptor = image.descriptor();
     if (!descriptor.has_pixel_mask) {
         return Error{ErrorCode::not_found, "This image has no pixel mask", descriptor.id};
     }
 
-    const auto checked = CheckRead(descriptor, request, destination.size, options);
+    const auto checked = CheckRead(descriptor, request, destination.size, control);
     if (!checked) {
         return checked.error();
     }
     const auto elements = checked.value().elements;
     if (auto read = image.source().ReadMask(checked.value().selection, destination.data,
-                                            static_cast<std::size_t>(elements), options);
+                                            static_cast<std::size_t>(elements), control);
         !read) {
         return read.error();
     }

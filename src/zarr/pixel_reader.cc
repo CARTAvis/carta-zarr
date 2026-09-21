@@ -121,7 +121,7 @@ template <typename Element>
 Result<void> ReadInto(const std::filesystem::path& array_path, const StoreContextPtr& context,
                       std::string_view node, std::string_view expected_data_type, const PixelSelection& selection,
                       tensorstore::DataType target_dtype,
-                      Element* destination, std::size_t destination_elements, const ReadOptions& options) {
+                      Element* destination, std::size_t destination_elements, const ReadControl& control) {
     if (destination == nullptr) {
         return Error{ErrorCode::invalid_argument, "Destination buffer is null", std::string(node)};
     }
@@ -140,9 +140,9 @@ Result<void> ReadInto(const std::filesystem::path& array_path, const StoreContex
         return Error{ErrorCode::invalid_argument, "Pixel reads require a context", std::string(node)};
     }
 
-    auto control = CheckReadControl(options, node);
-    if (!control) {
-        return control.error();
+    auto allowed = CheckReadControl(control, node);
+    if (!allowed) {
+        return allowed.error();
     }
 
     try {
@@ -152,14 +152,14 @@ Result<void> ReadInto(const std::filesystem::path& array_path, const StoreContex
         // whose pool holds nothing. Chosen here rather than by the caller because this is where the
         // array handle is taken, and a handle carries the pool it was opened against.
         const StoreContextPtr pool =
-            options.cache_policy == CachePolicy::bypass ? context->WithoutCache() : context;
+            control.cache_policy == CachePolicy::bypass ? context->WithoutCache() : context;
         auto opened = pool->OpenArray(array_path, node);
         if (!opened) {
             return opened.error();
         }
-        control = CheckReadControl(options, node);
-        if (!control) {
-            return control.error();
+        allowed = CheckReadControl(control, node);
+        if (!allowed) {
+            return allowed.error();
         }
         auto const store = std::move(opened).value();
         if (auto agreed = VerifyStoreMatchesSelection(store, selection, expected_data_type, node); !agreed) {
@@ -217,7 +217,7 @@ Result<void> ReadInto(const std::filesystem::path& array_path, const StoreContex
             return Error{ErrorCode::io_error, "TensorStore read failed: " + read_result.status().ToString(),
                          std::string(node)};
         }
-        return CheckReadControl(options, node);
+        return CheckReadControl(control, node);
     } catch (const std::exception& error) {
         return Error{ErrorCode::io_error, error.what(), std::string(node)};
     }
@@ -227,20 +227,20 @@ Result<void> ReadInto(const std::filesystem::path& array_path, const StoreContex
 
 Result<void> ReadFloat32(const std::filesystem::path& array_path, const StoreContextPtr& context,
                          std::string_view node, std::string_view expected_data_type, const PixelSelection& selection, float* destination,
-                         std::size_t destination_elements, const ReadOptions& options) {
+                         std::size_t destination_elements, const ReadControl& control) {
     return ReadInto(array_path, context, node, expected_data_type, selection, tensorstore::dtype_v<float>, destination,
-                    destination_elements, options);
+                    destination_elements, control);
 }
 
 Result<void> ReadMaskBytes(const std::filesystem::path& array_path, const StoreContextPtr& context,
                            std::string_view node, std::string_view expected_data_type, const PixelSelection& selection, std::uint8_t* destination,
-                           std::size_t destination_elements, const ReadOptions& options) {
+                           std::size_t destination_elements, const ReadControl& control) {
     // The caller's buffer holds bytes, so the read converts into bytes. Asking TensorStore for
     // bool and writing it through a reinterpret_cast of that buffer assumed bool and uint8_t are
     // the same object, which C++ does not say they are; the conversion costs nothing here because
     // it rides the copy the read already performs.
     return ReadInto(array_path, context, node, expected_data_type, selection, tensorstore::dtype_v<std::uint8_t>,
-                    destination, destination_elements, options);
+                    destination, destination_elements, control);
 }
 
 }  // namespace carta::zarr::internal::zarr

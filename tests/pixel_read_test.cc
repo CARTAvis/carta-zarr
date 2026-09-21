@@ -195,7 +195,7 @@ void TestMaskReadTakesTheSameControls(const carta::zarr::Image& sky) {
     const std::size_t elements = kL * kM * kFrequency * kPolarization * kTime;
     std::vector<std::uint8_t> mask(elements, 0xEE);
 
-    carta::zarr::ReadOptions cancelled;
+    carta::zarr::ReadControl cancelled;
     cancelled.cancellation_requested = [] { return true; };
     const auto stopped = sky.ReadPixelMask(request, {mask.data(), mask.size()}, cancelled);
     Require(!stopped && stopped.error().code == carta::zarr::ErrorCode::cancelled,
@@ -203,7 +203,7 @@ void TestMaskReadTakesTheSameControls(const carta::zarr::Image& sky) {
     Require(std::all_of(mask.begin(), mask.end(), [](std::uint8_t byte) { return byte == 0xEE; }),
             "a cancelled mask read wrote to its destination");
 
-    carta::zarr::ReadOptions expired;
+    carta::zarr::ReadControl expired;
     expired.deadline = std::chrono::steady_clock::now() - std::chrono::milliseconds(1);
     const auto too_late = sky.ReadPixelMask(request, {mask.data(), mask.size()}, expired);
     Require(!too_late && too_late.error().code == carta::zarr::ErrorCode::cancelled,
@@ -216,7 +216,7 @@ void TestMaskReadTakesTheSameControls(const carta::zarr::Image& sky) {
     Require(static_cast<bool>(sky.ReadPixelMask(request, {inherited.data(), inherited.size()})),
             "the reference mask read failed");
 
-    carta::zarr::ReadOptions bypassing;
+    carta::zarr::ReadControl bypassing;
     bypassing.cache_policy = carta::zarr::CachePolicy::bypass;
     std::vector<std::uint8_t> bypassed(elements, 0);
     const auto bypass_read = sky.ReadPixelMask(request, {bypassed.data(), bypassed.size()}, bypassing);
@@ -308,7 +308,7 @@ void TestReadControls(const carta::zarr::Image& sky) {
     std::vector<float> pixels(elements, 123.0F);
 
     carta::zarr::ReadOptions cancelled;
-    cancelled.cancellation_requested = [] { return true; };
+    cancelled.control.cancellation_requested = [] { return true; };
     const auto cancelled_read = sky.Read(request, {pixels.data(), pixels.size()}, cancelled);
     Require(!cancelled_read && cancelled_read.error().code == carta::zarr::ErrorCode::cancelled,
             "a cancelled read was not rejected");
@@ -316,7 +316,7 @@ void TestReadControls(const carta::zarr::Image& sky) {
             "a cancelled read modified its destination");
 
     carta::zarr::ReadOptions expired;
-    expired.deadline = std::chrono::steady_clock::now() - std::chrono::milliseconds(1);
+    expired.control.deadline = std::chrono::steady_clock::now() - std::chrono::milliseconds(1);
     const auto expired_read = sky.Read(request, {pixels.data(), pixels.size()}, expired);
     Require(!expired_read && expired_read.error().code == carta::zarr::ErrorCode::cancelled,
             "a read past its deadline was not rejected");

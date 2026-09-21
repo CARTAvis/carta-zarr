@@ -23,13 +23,13 @@ public:
         : _store(&store), _descriptor(&descriptor) {}
 
     Result<void> ReadPixels(const zarr::PixelSelection& selection, float* destination, std::size_t elements,
-                            const ReadOptions& options) const override {
-        return _store->ReadPixelsInto(_descriptor->id, selection, destination, elements, options);
+                            const ReadControl& control) const override {
+        return _store->ReadPixelsInto(_descriptor->id, selection, destination, elements, control);
     }
 
     Result<void> ReadMask(const zarr::PixelSelection& selection, std::uint8_t* destination,
-                          std::size_t elements, const ReadOptions& options) const override {
-        return _store->ReadPixelsInto(_descriptor->pixel_mask_id, selection, destination, elements, options);
+                          std::size_t elements, const ReadControl& control) const override {
+        return _store->ReadPixelsInto(_descriptor->pixel_mask_id, selection, destination, elements, control);
     }
 
 private:

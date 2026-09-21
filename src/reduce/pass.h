@@ -270,7 +270,7 @@ public:
             }
             ++reads_done;
 
-            if (auto control = zarr::CheckReadControl(_options, _plan.descriptor->id); !control) {
+            if (auto control = zarr::CheckReadControl(_options.control, _plan.descriptor->id); !control) {
                 return control.error();
             }
 

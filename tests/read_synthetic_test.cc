@@ -33,6 +33,7 @@ using carta::zarr::ChunkGeometry;
 using carta::zarr::ErrorCode;
 using carta::zarr::ImageDescriptor;
 using carta::zarr::Range;
+using carta::zarr::ReadControl;
 using carta::zarr::ReadOptions;
 using carta::zarr::ReadRequest;
 using carta::zarr::internal::ReadableImage;
@@ -307,7 +308,7 @@ void TestTheMaskReadIsRefusedForAnImageWithNoFlag() {
     std::vector<std::uint8_t> destination(kElements, 7);
     const auto read = ReadPixelMask(Readable(source, image, geometry), WholeCube(),
                                     BufferView<std::uint8_t>{destination.data(), destination.size()},
-                                    ReadOptions{});
+                                    ReadControl{});
     Require(!read, "an image with no flag has no pixel mask to read");
     Require(read.error().code == ErrorCode::not_found, "and it should say so as not_found");
     Require(source.mask_reads() == 0, "without asking the source for one");
@@ -325,7 +326,7 @@ void TestTheMaskReadChecksBeforeItReads() {
         std::vector<std::uint8_t> too_small(kElements - 1, 0);
         const auto read = ReadPixelMask(readable, WholeCube(),
                                         BufferView<std::uint8_t>{too_small.data(), too_small.size()},
-                                        ReadOptions{});
+                                        ReadControl{});
         Require(!read && read.error().code == ErrorCode::invalid_argument,
                 "a destination one element short should be refused");
         Require(source.mask_reads() == 0, "before the source is asked for anything");
@@ -333,11 +334,11 @@ void TestTheMaskReadChecksBeforeItReads() {
 
     {
         std::vector<std::uint8_t> destination(kElements, 0);
-        ReadOptions options;
-        options.cancellation_requested = []() { return true; };
+        ReadControl control;
+        control.cancellation_requested = []() { return true; };
         const auto read = ReadPixelMask(readable, WholeCube(),
                                         BufferView<std::uint8_t>{destination.data(), destination.size()},
-                                        options);
+                                        control);
         Require(!read && read.error().code == ErrorCode::cancelled,
                 "a request that is already cancelled should not open an array");
         Require(source.mask_reads() == 0, "and should not reach the source");
@@ -358,7 +359,7 @@ void TestTheMaskReadFillsTheDestinationInLogicalOrder() {
     std::vector<std::uint8_t> destination(kElements, 9);
     const auto read = ReadPixelMask(Readable(source, image, geometry), WholeCube(),
                                     BufferView<std::uint8_t>{destination.data(), destination.size()},
-                                    ReadOptions{});
+                                    ReadControl{});
     Require(static_cast<bool>(read), "the mask read should succeed");
     Require(read.value() == kElements, "and report every selected element");
     Require(source.mask_reads() == 1, "in a single read, because a mask allocates nothing to bound");
@@ -388,7 +389,7 @@ void TestAFailedMaskReadIsReported() {
     std::vector<std::uint8_t> destination(kElements, 0);
     const auto read = ReadPixelMask(Readable(source, image, geometry), WholeCube(),
                                     BufferView<std::uint8_t>{destination.data(), destination.size()},
-                                    ReadOptions{});
+                                    ReadControl{});
     Require(!read && read.error().code == ErrorCode::io_error, "a failed flag read should be reported");
 }
 

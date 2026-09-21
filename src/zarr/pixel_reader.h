@@ -25,12 +25,12 @@ namespace carta::zarr::internal::zarr {
  */
 Result<void> ReadFloat32(const std::filesystem::path& array_directory, const StoreContextPtr& context,
                          std::string_view node, std::string_view expected_data_type, const PixelSelection& selection, float* destination,
-                         std::size_t destination_elements, const ReadOptions& options);
+                         std::size_t destination_elements, const ReadControl& control);
 
 // Read a boolean array as one byte per element, true meaning a good pixel.
 Result<void> ReadMaskBytes(const std::filesystem::path& array_directory, const StoreContextPtr& context,
                            std::string_view node, std::string_view expected_data_type, const PixelSelection& selection, std::uint8_t* destination,
-                           std::size_t destination_elements, const ReadOptions& options);
+                           std::size_t destination_elements, const ReadControl& control);
 
 }  // namespace carta::zarr::internal::zarr
 

@@ -74,11 +74,11 @@ Result<PixelSelection> BuildSelection(const ImageDescriptor& descriptor, const R
     return selection;
 }
 
-Result<void> CheckReadControl(const ReadOptions& options, std::string_view node) {
-    if (options.cancellation_requested && options.cancellation_requested()) {
+Result<void> CheckReadControl(const ReadControl& control, std::string_view node) {
+    if (control.cancellation_requested && control.cancellation_requested()) {
         return Error{ErrorCode::cancelled, "Pixel read was cancelled", std::string(node)};
     }
-    if (std::chrono::steady_clock::now() >= options.deadline) {
+    if (std::chrono::steady_clock::now() >= control.deadline) {
         return Error{ErrorCode::cancelled, "Pixel read deadline expired", std::string(node)};
     }
     return {};

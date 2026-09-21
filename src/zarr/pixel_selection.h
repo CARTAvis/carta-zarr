@@ -24,7 +24,7 @@
 namespace carta::zarr::internal::zarr {
 
 // Check cooperative cancellation and the deadline at a storage-operation boundary.
-Result<void> CheckReadControl(const ReadOptions& options, std::string_view node);
+Result<void> CheckReadControl(const ReadControl& control, std::string_view node);
 
 /**
  * One hyperslab of an array, addressed in the array's own stored axis order.

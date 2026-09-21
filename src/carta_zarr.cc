@@ -182,13 +182,13 @@ Result<std::size_t> Image::Read(const ReadRequest& request, BufferView<float> de
 }
 
 Result<std::size_t> Image::ReadPixelMask(const ReadRequest& request, BufferView<std::uint8_t> destination) const {
-    return ReadPixelMask(request, destination, ReadOptions{});
+    return ReadPixelMask(request, destination, ReadControl{});
 }
 
 Result<std::size_t> Image::ReadPixelMask(const ReadRequest& request, BufferView<std::uint8_t> destination,
-                                         const ReadOptions& options) const {
+                                         const ReadControl& control) const {
     return WithReadableImage(_impl, [&](const internal::ReadableImage& image) {
-        return internal::ReadPixelMask(image, request, destination, options);
+        return internal::ReadPixelMask(image, request, destination, control);
     });
 }
 

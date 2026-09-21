@@ -355,7 +355,7 @@ void TestCancellationStopsThePass() {
     ReadOptions options;
     options.temporary_memory_limit_bytes = 64 * 65 * 2 * 4;
     int reads = 0;
-    options.cancellation_requested = [&]() { return reads >= 2; };
+    options.control.cancellation_requested = [&]() { return reads >= 2; };
     const auto plan = Plan(image, geometry, Range{0, 16, 1}, options);
     SyntheticPixelSource source(image, geometry, Encoded);
 
@@ -372,7 +372,7 @@ void TestAnExpiredDeadlineStopsThePass() {
     const auto image = MakeImage(64, 40, 8);
     const auto geometry = MakeGeometry(16, 20, 2, AxisRole::spatial_y);
     ReadOptions options;
-    options.deadline = std::chrono::steady_clock::now() - std::chrono::seconds(1);
+    options.control.deadline = std::chrono::steady_clock::now() - std::chrono::seconds(1);
     const auto plan = Plan(image, geometry, Range{0, 8, 1}, options);
     SyntheticPixelSource source(image, geometry, Encoded);
 

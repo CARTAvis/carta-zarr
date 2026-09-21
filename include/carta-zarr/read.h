@@ -44,11 +44,14 @@ enum class CachePolicy {
     bypass,
 };
 
-struct ReadOptions {
-    // Write NaN wherever the pixel mask is false, so that one call answers what would otherwise be
-    // a pixel read plus a mask read. On by default: masking during the read costs one pass over
-    // data already in hand, while a caller doing it afterwards pays for a second traversal.
-    bool apply_pixel_mask = true;
+// What a read is allowed to do while it runs, whatever it is reading for.
+//
+// These three are the whole of what every path through this library honours: an ordinary read, a
+// pixel mask read, and all three reductions reach the same storage operations underneath and check
+// the same things at the same boundaries. Said in its own type so that an operation which honours
+// only these can take only these -- ReadPixelMask does, and everything below the pixel source seam
+// does, because that is all any of them ever looked at.
+struct ReadControl {
     // Cooperative cancellation checked before and after each storage operation. The callback
     // must be safe to invoke from the calling thread.
     std::function<bool()> cancellation_requested;
@@ -56,6 +59,26 @@ struct ReadOptions {
     // TensorStore operation is not interrupted, but a request never starts another operation once
     // this deadline has passed.
     std::chrono::steady_clock::time_point deadline = std::chrono::steady_clock::time_point::max();
+    // Whether this read may put what it decodes in the shared cache. See CachePolicy.
+    CachePolicy cache_policy = CachePolicy::inherit;
+};
+
+// Everything a read of pixels takes, on top of what any read takes.
+//
+// The two fields here are the ones that mean something only when pixels are being read into a
+// buffer this library sized: whether a flag is folded in on the way, and how much the library may
+// hold at once while doing it. A pixel mask read has neither -- it is the flag, and the destination
+// is the caller's -- which is why it takes a ReadControl and this cannot be handed to it.
+//
+// That is the point of the split. Every field of this type is honoured by every operation that
+// takes it, so there is no table of which ones apply where, and setting one where it would have
+// been ignored does not compile.
+struct ReadOptions {
+    ReadControl control;
+    // Write NaN wherever the pixel mask is false, so that one call answers what would otherwise be
+    // a pixel read plus a mask read. On by default: masking during the read costs one pass over
+    // data already in hand, while a caller doing it afterwards pays for a second traversal.
+    bool apply_pixel_mask = true;
     // Called as the read advances, with the number of destination elements that are final and the
     // number the request will produce in total. Returning false cancels the read, which then
     // reports cancelled.
@@ -69,8 +92,7 @@ struct ReadOptions {
     // with neither is issued in one piece.
     //
     // Image::Read is the only operation that reads this field. A reduction reports through its sink
-    // and, for a cube histogram, through its own request's callback; ReadPixelMask is one piece and
-    // has nothing to report from.
+    // and, for a cube histogram, through its own request's callback.
     //
     // A read that nothing interrupts is not made slower by this: the pieces are sized to hold
     // enough chunks to decode in parallel, and at that size a split read measures the same as an
@@ -92,8 +114,6 @@ struct ReadOptions {
     // the ratio, and refusing to reduce would be the worse answer. ChunkGeometry::chunk_shape says
     // in advance when that will happen.
     std::size_t temporary_memory_limit_bytes = 0;
-    // Whether this read may put what it decodes in the shared cache. See CachePolicy.
-    CachePolicy cache_policy = CachePolicy::inherit;
 };
 
 // Somewhere for a read to write, counted in elements rather than in bytes.

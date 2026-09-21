@@ -34,7 +34,7 @@ carta::zarr::Result<std::vector<std::string>> ReadFixture(const std::string& nam
 
     auto array_metadata = zarr_metadata::ParseArrayMetadata(metadata, name);
     Require(static_cast<bool>(array_metadata), "Fixture " + name + " has unreadable array metadata");
-    return zarr_metadata::ReadFixedLengthUtf32StringArray(array_dir, array_metadata.value(), metadata, name);
+    return zarr_metadata::ReadFixedLengthUtf32StringArray(array_dir, array_metadata.value(), name);
 }
 
 void ExpectValues(const std::string& name, const std::vector<std::string>& expected) {

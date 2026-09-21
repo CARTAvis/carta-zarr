@@ -167,6 +167,13 @@ Result<ArrayMetadata> ParseArrayMetadata(const nlohmann::json& metadata, std::st
         result.attributes = nlohmann::json::object();
     }
 
+    if (metadata.contains("codecs") && metadata.at("codecs").is_array()) {
+        result.codecs = metadata.at("codecs");
+    }
+    if (metadata.contains("chunk_key_encoding") && metadata.at("chunk_key_encoding").is_object()) {
+        result.chunk_key_encoding = metadata.at("chunk_key_encoding");
+    }
+
     if (!metadata.contains("chunk_grid") || !metadata.at("chunk_grid").is_object() ||
         !metadata.at("chunk_grid").contains("name") || !metadata.at("chunk_grid").at("name").is_string() ||
         metadata.at("chunk_grid").at("name").get<std::string>() != "regular" ||

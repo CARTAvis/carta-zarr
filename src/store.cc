@@ -397,11 +397,6 @@ Result<std::vector<std::string>> Store::ReadStringArray1D(std::string_view node)
 }
 
 Result<std::vector<std::string>> Store::ReadStringArray1DUncached(std::string_view node) const {
-    const auto& meta_res = ReadNodeMetadata(node);
-    if (!meta_res) {
-        return meta_res.error();
-    }
-    const auto& metadata = meta_res.value();
     const auto& array_meta_res = ReadArrayMetadata(node);
     if (!array_meta_res) {
         return array_meta_res.error();
@@ -411,8 +406,7 @@ Result<std::vector<std::string>> Store::ReadStringArray1DUncached(std::string_vi
         return array_path.error();
     }
     try {
-        return zarr_metadata::ReadFixedLengthUtf32StringArray(array_path.value(), array_meta_res.value(), metadata,
-                                                              node);
+        return zarr_metadata::ReadFixedLengthUtf32StringArray(array_path.value(), array_meta_res.value(), node);
     } catch (const std::exception& e) {
         // io_error, as in every other read on this Store. What the decoder itself refuses comes back
         // as a Result with its own code; what escapes as an exception is a file or an allocation,
@@ -426,11 +420,6 @@ Result<std::uint64_t> Store::StoredSizeBytes(std::chrono::steady_clock::time_poi
 }
 
 Result<StorageLayout> Store::ReadStorageLayout(std::string_view node) const {
-    const auto& meta_res = ReadNodeMetadata(node);
-    if (!meta_res) {
-        return meta_res.error();
-    }
-    const auto& metadata = meta_res.value();
     const auto& array_meta_res = ReadArrayMetadata(node);
     if (!array_meta_res) {
         return array_meta_res.error();
@@ -439,10 +428,7 @@ Result<StorageLayout> Store::ReadStorageLayout(std::string_view node) const {
     StorageLayout layout;
     layout.chunk_shape = array_meta_res.value().chunk_shape;
 
-    const nlohmann::json* codecs = nullptr;
-    if (metadata.contains("codecs") && metadata.at("codecs").is_array()) {
-        codecs = &metadata.at("codecs");
-    }
+    const nlohmann::json* const codecs = &array_meta_res.value().codecs;
 
     if (const nlohmann::json* sharding = FindCodec(codecs, "sharding_indexed"); sharding != nullptr) {
         auto sharding_result = ApplyShardingLayout(*sharding, layout, node);

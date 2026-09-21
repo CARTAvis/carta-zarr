@@ -44,6 +44,27 @@ enum class CachePolicy {
     bypass,
 };
 
+// Called as a read advances, with the number of destination elements that are final and the number
+// the request will produce in total. Returning false cancels the read, which then reports cancelled.
+//
+// Supplying one splits the read into chunk-aligned pieces along the slowest-varying selected axis,
+// so that there is somewhere to report from and somewhere to stop. The destination is dense in
+// logical order with axis 0 fastest, which is what makes the finished part a prefix rather than a
+// scatter -- a caller can render or forward it as it arrives.
+//
+// It is not the only thing that splits a read; ReadOptions::temporary_memory_limit_bytes does too,
+// and a read with neither is issued in one piece.
+//
+// An argument of Image::Read rather than a field of ReadOptions, because it is the only operation
+// that has anywhere to report from -- a reduction reports through its sink, and a cube histogram
+// through its own request's callback. As a field it was a field four of the five entry points
+// silently ignored; as an argument it is simply not part of what they take.
+//
+// A read that nothing interrupts is not made slower by supplying one: the pieces are sized to hold
+// enough chunks to decode in parallel, and at that size a split read measures the same as an
+// unsplit one.
+using ProgressCallback = std::function<bool(std::size_t elements_written, std::size_t elements_total)>;
+
 // What a read is allowed to do while it runs, whatever it is reading for.
 //
 // These three are the whole of what every path through this library honours: an ordinary read, a
@@ -79,25 +100,6 @@ struct ReadOptions {
     // a pixel read plus a mask read. On by default: masking during the read costs one pass over
     // data already in hand, while a caller doing it afterwards pays for a second traversal.
     bool apply_pixel_mask = true;
-    // Called as the read advances, with the number of destination elements that are final and the
-    // number the request will produce in total. Returning false cancels the read, which then
-    // reports cancelled.
-    //
-    // Supplying this splits the read into chunk-aligned pieces along the slowest-varying selected
-    // axis, so that there is somewhere to report from and somewhere to stop. The destination is
-    // dense in logical order with axis 0 fastest, which is what makes the finished part a prefix
-    // rather than a scatter -- a caller can render or forward it as it arrives.
-    //
-    // It is not the only thing that splits a read; temporary_memory_limit_bytes does too. A read
-    // with neither is issued in one piece.
-    //
-    // Image::Read is the only operation that reads this field. A reduction reports through its sink
-    // and, for a cube histogram, through its own request's callback.
-    //
-    // A read that nothing interrupts is not made slower by this: the pieces are sized to hold
-    // enough chunks to decode in parallel, and at that size a split read measures the same as an
-    // unsplit one.
-    std::function<bool(std::size_t elements_written, std::size_t elements_total)> progress;
     // Maximum temporary memory one piece of the read may use. Zero means the library's own budget.
     //
     // This bounds the pixel mask buffer, and it is also what a split read sizes its pieces by --

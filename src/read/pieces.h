@@ -45,7 +45,8 @@ struct PiecePlan {
  * the strategy is checkable without a store, a transport or a directory tree.
  *
  * A read is cut when there is a reason to cut it, and either reason is enough on its own. Somebody
- * to report progress to is one. A stated memory ceiling is the other: it says how much the read may
+ * to report progress to is one -- `watching` says whether there is, which is the whole of what this
+ * ever asked about the callback. A stated memory ceiling is the other: it says how much the read may
  * hold at once, and splitting to fit is a better answer than refusing to read at all. A read with
  * neither reason, or with no axis selecting more than one element, is one piece.
  *
@@ -54,8 +55,8 @@ struct PiecePlan {
  * cost that ignores the flag would size pieces against a cost the read does not have.
  */
 PiecePlan PlanPieces(const ImageDescriptor& descriptor, const ChunkGeometry& geometry,
-                     const ReadRequest& request, const ReadOptions& options, std::uint64_t elements,
-                     bool apply_mask);
+                     const ReadRequest& request, const ReadOptions& options, bool watching,
+                     std::uint64_t elements, bool apply_mask);
 
 /**
  * Read a densely packed float32 result, one piece at a time.
@@ -73,7 +74,8 @@ PiecePlan PlanPieces(const ImageDescriptor& descriptor, const ChunkGeometry& geo
  * buffer exceeds a ceiling that no further splitting gets under.
  */
 Result<std::size_t> ReadInPieces(const ReadableImage& image, const ReadRequest& request,
-                                 BufferView<float> destination, const ReadOptions& options);
+                                 BufferView<float> destination, const ReadOptions& options,
+                                 const ProgressCallback& progress);
 
 /**
  * Read an image's pixel mask, as a byte per selected pixel.

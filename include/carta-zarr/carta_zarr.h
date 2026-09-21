@@ -62,6 +62,9 @@ public:
     Result<std::size_t> Read(const ReadRequest& request, BufferView<float> destination) const;
     Result<std::size_t> Read(const ReadRequest& request, BufferView<float> destination,
                              const ReadOptions& options) const;
+    // Watched as it advances, which also splits it into pieces. See ProgressCallback.
+    Result<std::size_t> Read(const ReadRequest& request, BufferView<float> destination,
+                             const ReadOptions& options, const ProgressCallback& progress) const;
 
     // Reads this image's pixel mask over the same region, one byte per pixel, true meaning a good
     // pixel. Reports not_found when the image has no mask.

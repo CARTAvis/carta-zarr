@@ -58,7 +58,8 @@ Result<CheckedRequest> CheckRead(const ImageDescriptor& descriptor, const ReadRe
 }  // namespace
 
 Result<std::size_t> ReadInPieces(const ReadableImage& image, const ReadRequest& request,
-                                 BufferView<float> destination, const ReadOptions& options) {
+                                 BufferView<float> destination, const ReadOptions& options,
+                                 const ProgressCallback& progress) {
     const auto& descriptor = image.descriptor();
     const auto& geometry = image.geometry();
     const auto& source = image.source();
@@ -71,7 +72,7 @@ Result<std::size_t> ReadInPieces(const ReadableImage& image, const ReadRequest& 
     const auto elements = checked.value().elements;
 
     const bool apply_mask = options.apply_pixel_mask && descriptor.has_pixel_mask;
-    const PiecePlan plan = PlanPieces(descriptor, geometry, request, options, elements, apply_mask);
+    const PiecePlan plan = PlanPieces(descriptor, geometry, request, options, static_cast<bool>(progress), elements, apply_mask);
 
     std::vector<std::uint8_t> mask;
     for (std::uint64_t begin = 0; begin < plan.units;) {
@@ -122,7 +123,7 @@ Result<std::size_t> ReadInPieces(const ReadableImage& image, const ReadRequest& 
         }
 
         begin = end;
-        if (options.progress && !options.progress(static_cast<std::size_t>(begin * plan.elements_per_unit),
+        if (progress && !progress(static_cast<std::size_t>(begin * plan.elements_per_unit),
                                                   static_cast<std::size_t>(elements))) {
             return Error{ErrorCode::cancelled, "The read was cancelled by its progress callback",
                          descriptor.id};

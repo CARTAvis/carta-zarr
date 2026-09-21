@@ -176,8 +176,13 @@ Result<std::size_t> Image::Read(const ReadRequest& request, BufferView<float> de
 
 Result<std::size_t> Image::Read(const ReadRequest& request, BufferView<float> destination,
                                 const ReadOptions& options) const {
+    return Read(request, destination, options, ProgressCallback{});
+}
+
+Result<std::size_t> Image::Read(const ReadRequest& request, BufferView<float> destination,
+                                const ReadOptions& options, const ProgressCallback& progress) const {
     return WithReadableImage(_impl, [&](const internal::ReadableImage& image) {
-        return internal::ReadInPieces(image, request, destination, options);
+        return internal::ReadInPieces(image, request, destination, options, progress);
     });
 }
 

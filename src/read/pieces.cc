@@ -62,14 +62,14 @@ std::uint64_t UnitsPerPiece(const ImageDescriptor& descriptor, const ReadRequest
 }  // namespace
 
 PiecePlan PlanPieces(const ImageDescriptor& descriptor, const ChunkGeometry& geometry,
-                     const ReadRequest& request, const ReadOptions& options, std::uint64_t elements,
-                     bool apply_mask) {
+                     const ReadRequest& request, const ReadOptions& options, bool watching,
+                     std::uint64_t elements, bool apply_mask) {
     PiecePlan plan;
     plan.units = 1;
     plan.elements_per_unit = elements;
 
     const auto axis = SlowestSelectedAxis(request);
-    if (!axis || (!options.progress && options.temporary_memory_limit_bytes == 0)) {
+    if (!axis || (!watching && options.temporary_memory_limit_bytes == 0)) {
         return plan;
     }
 

@@ -62,17 +62,21 @@ public:
     Result<std::size_t> Read(const ReadRequest& request, BufferView<float> destination) const;
     Result<std::size_t> Read(const ReadRequest& request, BufferView<float> destination,
                              const ReadOptions& options) const;
+    // Watched as it advances, which also splits it into pieces. See ProgressCallback.
+    Result<std::size_t> Read(const ReadRequest& request, BufferView<float> destination,
+                             const ReadOptions& options, const ProgressCallback& progress) const;
 
     // Reads this image's pixel mask over the same region, one byte per pixel, true meaning a good
     // pixel. Reports not_found when the image has no mask.
     //
-    // Of ReadOptions it honours cancellation, the deadline and the cache policy. The rest do not
-    // apply and are ignored: apply_pixel_mask, because this is the mask; progress and
-    // temporary_memory_limit_bytes, because the read is issued in one piece -- the destination is
-    // the caller's, so there is no temporary of ours for a ceiling to bound.
+    // Takes a ReadControl rather than a ReadOptions, which is the whole of what it used to honour:
+    // apply_pixel_mask means nothing here because this is the mask, and the read is issued in one
+    // piece -- the destination is the caller's, so there is no temporary of ours for a ceiling to
+    // bound and nowhere to report from. Those three used to be fields a caller could set and this
+    // would quietly ignore; now they are not fields it can be handed.
     Result<std::size_t> ReadPixelMask(const ReadRequest& request, BufferView<std::uint8_t> destination) const;
     Result<std::size_t> ReadPixelMask(const ReadRequest& request, BufferView<std::uint8_t> destination,
-                                      const ReadOptions& options) const;
+                                      const ReadControl& control) const;
 
     // Reduces every region over the same channels in one pass over the pixels, handing results to
     // the sink block by block.
@@ -136,10 +140,14 @@ public:
     static Result<Dataset> Open(const Context& context, std::string_view location);
 
     const DatasetDescriptor& descriptor() const noexcept;
-    // Returns the physical store size when directory enumeration completes within the timeout;
-    // otherwise returns the logical uncompressed size of all arrays and marks it as an upper bound.
+    // How much room this dataset takes where it is stored, and whether that number was measured or
+    // inferred. Measured when the store can be sized within the timeout; otherwise the logical
+    // uncompressed size of all arrays, marked as an upper bound.
+    //
+    // The timeout is not named after a directory because a dataset need not live in one: what can
+    // be sized, and how quickly, is the transport's affair.
     Result<DatasetSize> Size(
-        std::chrono::milliseconds directory_size_timeout = std::chrono::milliseconds(50)) const;
+        std::chrono::milliseconds stored_size_timeout = std::chrono::milliseconds(50)) const;
     Result<Image> OpenImage(std::string_view image_id) const;
 
 private:
@@ -151,10 +159,14 @@ private:
 
 CARTA_ZARR_EXPORT ProbeResult Probe(std::string_view location, const ProbeOptions& options = {});
 
+// Ask one named schema profile about a location. The answer is its SchemaMatchKind -- matched, did
+// not match, or matched something malformed -- and an Error only when the store could not be read
+// at all.
+//
+// There used to be an IsXradioImage(location) beside this returning Result<bool>. It folded a third
+// answer into an error and put two bools in one Result, so `if (IsXradioImage(p))` compiled and
+// meant "did not fail" rather than "yes". Its body was this call and a comparison.
 CARTA_ZARR_EXPORT Result<SchemaProbeResult> ProbeSchema(std::string_view location, std::string_view schema_id);
-
-// Returns an error for an unreadable or malformed store; false is a valid non-match.
-CARTA_ZARR_EXPORT Result<bool> IsXradioImage(std::string_view location);
 
 }  // namespace carta::zarr
 

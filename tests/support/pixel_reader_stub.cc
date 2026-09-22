@@ -20,12 +20,12 @@
 namespace carta::zarr::internal::zarr {
 
 Result<void> ReadFloat32(const std::filesystem::path&, const StoreContextPtr&, std::string_view node,
-                         std::string_view, const PixelSelection&, float*, std::size_t, const ReadOptions&) {
+                         std::string_view, const PixelSelection&, float*, std::size_t, const ReadControl&) {
     return Error{ErrorCode::unsupported_transport, "This build reads no pixels", std::string(node)};
 }
 
 Result<void> ReadMaskBytes(const std::filesystem::path&, const StoreContextPtr&, std::string_view node,
-                           std::string_view, const PixelSelection&, std::uint8_t*, std::size_t, const ReadOptions&) {
+                           std::string_view, const PixelSelection&, std::uint8_t*, std::size_t, const ReadControl&) {
     return Error{ErrorCode::unsupported_transport, "This build reads no pixels", std::string(node)};
 }
 

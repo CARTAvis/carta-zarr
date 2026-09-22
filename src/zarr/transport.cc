@@ -9,6 +9,7 @@
 #include <nlohmann/json.hpp>
 
 #include <fstream>
+#include <limits>
 #include <string>
 #include <utility>
 
@@ -154,6 +155,50 @@ public:
                          _root.string()};
         }
         return nodes;
+    }
+
+    Result<std::uint64_t> StoredSizeBytes(std::chrono::steady_clock::time_point deadline) const override {
+        std::uint64_t total = 0;
+        std::error_code error;
+        std::filesystem::recursive_directory_iterator iterator(
+            _root, std::filesystem::directory_options::skip_permission_denied, error);
+        if (error) {
+            return Error{ErrorCode::io_error, "Unable to enumerate the Zarr store: " + error.message(),
+                         _root.string()};
+        }
+
+        const std::filesystem::recursive_directory_iterator end;
+        while (iterator != end) {
+            // Checked per entry rather than per directory: a store is mostly chunk files, so the
+            // entries are where the time goes and a deadline checked a level up would overrun a
+            // wide array by however long that array takes.
+            if (std::chrono::steady_clock::now() >= deadline) {
+                return Error{ErrorCode::cancelled, "The Zarr store size deadline expired", _root.string()};
+            }
+
+            std::error_code entry_error;
+            if (iterator->is_regular_file(entry_error)) {
+                const auto file_size = iterator->file_size(entry_error);
+                if (entry_error) {
+                    return Error{ErrorCode::io_error, "Unable to size a Zarr store file: " + entry_error.message(),
+                                 iterator->path().string()};
+                }
+                if (file_size > std::numeric_limits<std::uint64_t>::max() - total) {
+                    return Error{ErrorCode::io_error, "The Zarr store's size overflows uint64_t", _root.string()};
+                }
+                total += file_size;
+            } else if (entry_error) {
+                return Error{ErrorCode::io_error, "Unable to inspect a Zarr store entry: " + entry_error.message(),
+                             iterator->path().string()};
+            }
+
+            iterator.increment(error);
+            if (error) {
+                return Error{ErrorCode::io_error, "Unable to enumerate the Zarr store: " + error.message(),
+                             _root.string()};
+            }
+        }
+        return total;
     }
 
     Result<std::filesystem::path> ArrayDirectory(std::string_view node) const override {

@@ -33,6 +33,8 @@ using carta::zarr::ChunkGeometry;
 using carta::zarr::ErrorCode;
 using carta::zarr::ImageDescriptor;
 using carta::zarr::Range;
+using carta::zarr::ProgressCallback;
+using carta::zarr::ReadControl;
 using carta::zarr::ReadOptions;
 using carta::zarr::ReadRequest;
 using carta::zarr::internal::ReadableImage;
@@ -149,7 +151,7 @@ void TestAFailedFlagLeavesTheDestinationAlone() {
 
     std::vector<float> destination(kElements, kUntouched);
     const auto read = ReadInPieces(Readable(source, image, geometry), WholeCube(),
-                                   BufferView<float>{destination.data(), destination.size()}, ReadOptions{});
+                                   BufferView<float>{destination.data(), destination.size()}, ReadOptions{}, ProgressCallback{});
 
     Require(!read && read.error().code == ErrorCode::io_error, "a failed flag read was not reported");
     Require(source.pixel_reads() == 0, "the pixels were read although the flag could not be");
@@ -170,7 +172,7 @@ void TestACeilingTooLowToFitIsRefused() {
     options.temporary_memory_limit_bytes = 1;
     std::vector<float> destination(kElements, kUntouched);
     const auto read = ReadInPieces(Readable(source, image, geometry), WholeCube(),
-                                   BufferView<float>{destination.data(), destination.size()}, options);
+                                   BufferView<float>{destination.data(), destination.size()}, options, ProgressCallback{});
 
     Require(!read && read.error().code == ErrorCode::buffer_too_small,
             "a flag buffer over the ceiling was allocated rather than refused");
@@ -188,7 +190,7 @@ void TestProgressCountsElementsAndFinishesAtTheTotal() {
     std::size_t reported_total = 0;
     ReadOptions options;
     options.temporary_memory_limit_bytes = kThreePieces;
-    options.progress = [&](std::size_t elements_written, std::size_t elements_total) {
+    const ProgressCallback progress = [&](std::size_t elements_written, std::size_t elements_total) {
         written.push_back(elements_written);
         reported_total = elements_total;
         return true;
@@ -196,7 +198,7 @@ void TestProgressCountsElementsAndFinishesAtTheTotal() {
 
     std::vector<float> destination(kElements, kUntouched);
     const auto read = ReadInPieces(Readable(source, image, geometry), WholeCube(),
-                                   BufferView<float>{destination.data(), destination.size()}, options);
+                                   BufferView<float>{destination.data(), destination.size()}, options, progress);
     Require(static_cast<bool>(read) && read.value() == kElements, "a watched read did not produce the whole cube");
 
     Require(reported_total == kElements, "progress reported a total that is not the destination's size");
@@ -216,11 +218,11 @@ void TestProgressCanStopTheRead() {
 
     ReadOptions options;
     options.temporary_memory_limit_bytes = kThreePieces;
-    options.progress = [](std::size_t, std::size_t) { return false; };
+    const ProgressCallback progress = [](std::size_t, std::size_t) { return false; };
 
     std::vector<float> destination(kElements, kUntouched);
     const auto read = ReadInPieces(Readable(source, image, geometry), WholeCube(),
-                                   BufferView<float>{destination.data(), destination.size()}, options);
+                                   BufferView<float>{destination.data(), destination.size()}, options, progress);
     Require(!read && read.error().code == ErrorCode::cancelled, "a progress callback returning false did not cancel");
     Require(source.pixel_reads() == 1, "the read carried on past the piece its caller stopped it at");
 }
@@ -234,7 +236,7 @@ void TestASplitReadAgreesWithAnUnsplitOne() {
     SyntheticPixelSource whole_source(image, geometry, Value);
     std::vector<float> whole(kElements, kUntouched);
     const auto unsplit = ReadInPieces(Readable(whole_source, image, geometry), WholeCube(),
-                                      BufferView<float>{whole.data(), whole.size()}, ReadOptions{});
+                                      BufferView<float>{whole.data(), whole.size()}, ReadOptions{}, ProgressCallback{});
     Require(static_cast<bool>(unsplit), "the unsplit read failed");
     Require(whole_source.pixel_reads() == 1, "a read with no reason to split was issued in pieces");
     RequireCubeMatchesTheFormula(whole, "an unsplit read");
@@ -244,7 +246,7 @@ void TestASplitReadAgreesWithAnUnsplitOne() {
     options.temporary_memory_limit_bytes = kThreePieces;
     std::vector<float> split(kElements, kUntouched);
     const auto in_pieces = ReadInPieces(Readable(split_source, image, geometry), WholeCube(),
-                                        BufferView<float>{split.data(), split.size()}, options);
+                                        BufferView<float>{split.data(), split.size()}, options, ProgressCallback{});
     Require(static_cast<bool>(in_pieces), "the split read failed");
     Require(split_source.pixel_reads() == 3, "the split read was issued in one piece after all");
     Require(split == whole, "a split read and an unsplit one disagreed about the same cube");
@@ -260,7 +262,7 @@ void TestAFlaggedPixelArrivesAsNaN() {
 
     std::vector<float> destination(kElements, kUntouched);
     const auto read = ReadInPieces(Readable(source, image, geometry), WholeCube(),
-                                   BufferView<float>{destination.data(), destination.size()}, ReadOptions{});
+                                   BufferView<float>{destination.data(), destination.size()}, ReadOptions{}, ProgressCallback{});
     Require(static_cast<bool>(read), "a masked read failed");
     Require(source.mask_reads() > 0, "the flag was never read");
 
@@ -290,7 +292,7 @@ void TestDecliningTheMaskReadsNoFlag() {
     options.apply_pixel_mask = false;
     std::vector<float> destination(kElements, kUntouched);
     const auto read = ReadInPieces(Readable(source, image, geometry), WholeCube(),
-                                   BufferView<float>{destination.data(), destination.size()}, options);
+                                   BufferView<float>{destination.data(), destination.size()}, options, ProgressCallback{});
     Require(static_cast<bool>(read), "declining the mask still failed on a flag that cannot be read");
     Require(source.mask_reads() == 0, "declining the mask still read the flag");
     RequireCubeMatchesTheFormula(destination, "a read that declined the mask");
@@ -307,7 +309,7 @@ void TestTheMaskReadIsRefusedForAnImageWithNoFlag() {
     std::vector<std::uint8_t> destination(kElements, 7);
     const auto read = ReadPixelMask(Readable(source, image, geometry), WholeCube(),
                                     BufferView<std::uint8_t>{destination.data(), destination.size()},
-                                    ReadOptions{});
+                                    ReadControl{});
     Require(!read, "an image with no flag has no pixel mask to read");
     Require(read.error().code == ErrorCode::not_found, "and it should say so as not_found");
     Require(source.mask_reads() == 0, "without asking the source for one");
@@ -325,7 +327,7 @@ void TestTheMaskReadChecksBeforeItReads() {
         std::vector<std::uint8_t> too_small(kElements - 1, 0);
         const auto read = ReadPixelMask(readable, WholeCube(),
                                         BufferView<std::uint8_t>{too_small.data(), too_small.size()},
-                                        ReadOptions{});
+                                        ReadControl{});
         Require(!read && read.error().code == ErrorCode::invalid_argument,
                 "a destination one element short should be refused");
         Require(source.mask_reads() == 0, "before the source is asked for anything");
@@ -333,11 +335,11 @@ void TestTheMaskReadChecksBeforeItReads() {
 
     {
         std::vector<std::uint8_t> destination(kElements, 0);
-        ReadOptions options;
-        options.cancellation_requested = []() { return true; };
+        ReadControl control;
+        control.cancellation_requested = []() { return true; };
         const auto read = ReadPixelMask(readable, WholeCube(),
                                         BufferView<std::uint8_t>{destination.data(), destination.size()},
-                                        options);
+                                        control);
         Require(!read && read.error().code == ErrorCode::cancelled,
                 "a request that is already cancelled should not open an array");
         Require(source.mask_reads() == 0, "and should not reach the source");
@@ -358,7 +360,7 @@ void TestTheMaskReadFillsTheDestinationInLogicalOrder() {
     std::vector<std::uint8_t> destination(kElements, 9);
     const auto read = ReadPixelMask(Readable(source, image, geometry), WholeCube(),
                                     BufferView<std::uint8_t>{destination.data(), destination.size()},
-                                    ReadOptions{});
+                                    ReadControl{});
     Require(static_cast<bool>(read), "the mask read should succeed");
     Require(read.value() == kElements, "and report every selected element");
     Require(source.mask_reads() == 1, "in a single read, because a mask allocates nothing to bound");
@@ -388,7 +390,7 @@ void TestAFailedMaskReadIsReported() {
     std::vector<std::uint8_t> destination(kElements, 0);
     const auto read = ReadPixelMask(Readable(source, image, geometry), WholeCube(),
                                     BufferView<std::uint8_t>{destination.data(), destination.size()},
-                                    ReadOptions{});
+                                    ReadControl{});
     Require(!read && read.error().code == ErrorCode::io_error, "a failed flag read should be reported");
 }
 

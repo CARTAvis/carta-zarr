@@ -9,6 +9,8 @@
 
 #include "zarr/transport.h"
 
+#include <chrono>
+#include <cstdint>
 #include <map>
 #include <memory>
 #include <set>
@@ -59,6 +61,14 @@ public:
 
     Result<std::filesystem::path> ArrayDirectory(std::string_view node) const override {
         return Error{ErrorCode::unsupported_transport, "An in-memory transport holds no array data", std::string(node)};
+    }
+
+    // Not the total length of the documents it holds, which would be a number that looks measured
+    // and is three orders of magnitude short: it counts no chunks, because there are none. Saying
+    // so is what makes a dataset's size fall back to the logical upper bound, which is the only
+    // true thing this transport can say about how much room a store takes.
+    Result<std::uint64_t> StoredSizeBytes(std::chrono::steady_clock::time_point) const override {
+        return Error{ErrorCode::unsupported_transport, "An in-memory transport stores no bytes"};
     }
 
     // The nodes whose bytes were asked for, and how many times the hierarchy was listed. The root

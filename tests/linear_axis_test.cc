@@ -159,9 +159,29 @@ void TestADirectionAxisKeepsAnUnevenIncrement() {
     Require(Diagnosed(fit, "nonuniform_axis"), "and it says the samples were not evenly spaced");
 }
 
-void TestADegenerateDirectionAxisHasNoIncrement() {
-    Require(!FitDirectionAxis({1.0e-4}, "l").increment, "a single sample describes no axis");
+// A direction axis is linear by construction, so one that cannot be described linearly is a store
+// this library cannot make sense of -- unlike a spectral axis in the same position, which is a
+// continuum image taking the tabular path. It said nothing about it until now: DescribeDirection
+// leaves the caller's reference pixel and increment at their defaults, and a consumer received a
+// DirectionCoordinate reading 0 for both with no indication that it was not an answer.
+void TestADegenerateDirectionAxisSaysSo() {
+    const auto one = FitDirectionAxis({1.0e-4}, "l");
+    Require(!one.increment && !one.reference_pixel, "a single sample describes no axis");
+    Require(Diagnosed(one, "degenerate_axis"), "and it should say so");
+
     Require(!FitDirectionAxis({}, "l").increment, "and neither does none");
+    Require(Diagnosed(FitDirectionAxis({}, "l"), "degenerate_axis"), "which is the same answer");
+
+    // Two samples that are the same: the increment is reported as the zero it is, but there is no
+    // reference pixel to go with it, so this is the same non-answer wearing a number.
+    const auto flat = FitDirectionAxis({1.0e-4, 1.0e-4}, "m");
+    Require(!flat.reference_pixel, "a zero increment locates no reference pixel");
+    Require(Diagnosed(flat, "degenerate_axis"), "and that is worth saying too");
+
+    // An axis that is merely uneven is not degenerate: it has a linear description and says it is an
+    // approximation. The two must not be confused.
+    const auto uneven = FitDirectionAxis({0.0, 1.0e-4, 2.5e-4, 3.0e-4}, "l");
+    Require(!Diagnosed(uneven, "degenerate_axis"), "an uneven axis is described, not refused");
 }
 
 // The opposite rule: unevenly spaced channels get no linear description at all, because a consumer
@@ -209,7 +229,7 @@ int main() {
         TestDescendingAxis();
         TestADirectionAxisReportsDegrees();
         TestADirectionAxisKeepsAnUnevenIncrement();
-        TestADegenerateDirectionAxisHasNoIncrement();
+        TestADegenerateDirectionAxisSaysSo();
         TestASpectralAxisWithholdsWhatItCannotDescribe();
         TestTheDroppedDiagnosticWasReallyThere();
         TestAnEvenSpectralAxisKeepsItsDescription();

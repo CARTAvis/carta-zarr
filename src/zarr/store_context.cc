@@ -97,12 +97,12 @@ StoreContextPtr StoreContext::WithoutCache() const {
 
 Result<StoreContextPtr> MakeStoreContext(const OpenOptions& options) {
     nlohmann::json spec = nlohmann::json::object();
-    if (options.cache_bytes > 0) {
+    if (options.cache_bytes) {
+        // Zero is a size like any other here: it is the pool that holds nothing, which is what a
+        // caller declining the cache asks for. No value at all is the only thing that leaves
+        // TensorStore's default in place.
         // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-        spec["cache_pool"] = {{"total_bytes_limit", options.cache_bytes}};
-    } else if (options.disable_cache) {
-        // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-        spec["cache_pool"] = {{"total_bytes_limit", 0}};
+        spec["cache_pool"] = {{"total_bytes_limit", *options.cache_bytes}};
     }
     if (options.io_threads > 0) {
         // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)

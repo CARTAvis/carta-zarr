@@ -21,18 +21,16 @@ namespace carta::zarr::internal {
 /**
  * One emitted block, while it is being filled.
  *
- * `begin` and `end` are indices into the pass's spectral selection, which is what a walk is given.
- * A `Slab::first_channel` is relative to `begin` instead, which is what an accumulator is indexed
- * by, and the two are the same number only for the first block of a reduction -- so getting them
- * the wrong way round reads correctly until something asks for a later block. e97066f was that.
- *
  * Nothing here is computed by the reduction. It hands `begin` and `end` straight to the walk and
  * indexes by the slab's own relative number, and the absolute one the sink reports comes from the
  * emitter.
+ *
+ * Which of those numbers is which used to be three paragraphs, here and at both of the types in
+ * pass.h, because both were std::uint64_t and nothing else could say it. See ChannelIndex.
  */
 struct EmitBlock {
-    std::uint64_t begin = 0;
-    std::uint64_t end = 0;
+    SelectionChannel begin;
+    SelectionChannel end;
     // The chunks of this block the walk has finished, and the reads it has made. Both belong to the
     // block rather than to the reduction: they reset when a block does, which is the difference
     // between a reduction's walk and a whole-plane pass's. A walk made of several footprints carries
@@ -72,6 +70,12 @@ public:
      * for a whole plane, the region set's for a reduction. `bytes_per_channel` and `hint` size the
      * block, as PassPlan::EmitChannels describes.
      */
+    // `layer_chunks` is clamped for one of its two uses and not for the other, which is deliberate.
+    // Zero is reachable -- a region set whose mask selects nothing occupies no chunks -- and the two
+    // want opposite things about it. As the denominator of a part-filled block's completeness it
+    // must never be zero, so it is clamped. As the layer the emit budget is spent against, zero is
+    // the honest answer and gives the right one: there is nothing to read, so the whole selection is
+    // handed over in a single block rather than cut into pieces sized for chunks nobody will decode.
     BlockEmitter(const PassPlan& plan, std::uint64_t layer_chunks, std::size_t bytes_per_channel,
                  std::uint32_t hint,
                  std::string cancelled = "The reduction was cancelled by its sink")
@@ -100,19 +104,21 @@ public:
      *
      * `hand_over(first_channel, length, complete, completeness)` fills the reduction's own block
      * struct and calls its sink, returning what the sink returned. It is called once for every read
-     * after the first of a block, and once more when the block is finished.
+     * after the first of a block, and once more when the block is finished. `first_channel` is a
+     * SelectionChannel, and turning it into the plain number a public block carries is the one place
+     * the type is left behind.
      *
      * All three are template parameters and none may become a std::function; `walk` carries the
      * visitor, which is the one ADR 0005 is about.
      */
     template <typename Reset, typename Walk, typename HandOver>
     Result<void> Over(Reset&& reset, Walk&& walk, HandOver&& hand_over) const {
-        const std::uint64_t count = _plan->planes.spectral.count;
+        const SelectionChannel end_of_selection{_plan->planes.spectral.count};
 
-        for (std::uint64_t begin = 0; begin < count;) {
+        for (SelectionChannel begin{}; begin < end_of_selection;) {
             EmitBlock block;
             block.begin = begin;
-            block.end = _plan->AlignedSlabEnd(begin, _emit_channels, count);
+            block.end = _plan->AlignedSlabEnd(begin, _emit_channels, end_of_selection);
 
             reset(block.length());
 

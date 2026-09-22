@@ -45,7 +45,8 @@ struct PiecePlan {
  * the strategy is checkable without a store, a transport or a directory tree.
  *
  * A read is cut when there is a reason to cut it, and either reason is enough on its own. Somebody
- * to report progress to is one. A stated memory ceiling is the other: it says how much the read may
+ * to report progress to is one -- `watching` says whether there is, which is the whole of what this
+ * ever asked about the callback. A stated memory ceiling is the other: it says how much the read may
  * hold at once, and splitting to fit is a better answer than refusing to read at all. A read with
  * neither reason, or with no axis selecting more than one element, is one piece.
  *
@@ -54,8 +55,8 @@ struct PiecePlan {
  * cost that ignores the flag would size pieces against a cost the read does not have.
  */
 PiecePlan PlanPieces(const ImageDescriptor& descriptor, const ChunkGeometry& geometry,
-                     const ReadRequest& request, const ReadOptions& options, std::uint64_t elements,
-                     bool apply_mask);
+                     const ReadRequest& request, const ReadOptions& options, bool watching,
+                     std::uint64_t elements, bool apply_mask);
 
 /**
  * Read a densely packed float32 result, one piece at a time.
@@ -73,7 +74,8 @@ PiecePlan PlanPieces(const ImageDescriptor& descriptor, const ChunkGeometry& geo
  * buffer exceeds a ceiling that no further splitting gets under.
  */
 Result<std::size_t> ReadInPieces(const ReadableImage& image, const ReadRequest& request,
-                                 BufferView<float> destination, const ReadOptions& options);
+                                 BufferView<float> destination, const ReadOptions& options,
+                                 const ProgressCallback& progress);
 
 /**
  * Read an image's pixel mask, as a byte per selected pixel.
@@ -88,13 +90,15 @@ Result<std::size_t> ReadInPieces(const ReadableImage& image, const ReadRequest& 
  * Reports not_found for an image with no flag, which is a question about the image rather than
  * about the request and is therefore answered before the request is looked at.
  *
- * Not cut into pieces, and that is the honest difference rather than an omission: a piece exists to
+ * Takes a ReadControl and not a ReadOptions: the two fields of the latter say what a read of
+ * pixels may do, and neither means anything here. That is also why it is not cut into pieces -- a
+ * piece exists to
  * bound what a read holds at once and to have somewhere to report from, and this allocates nothing
  * -- the destination is the caller's and it is one byte per element. A caller that wants a mask in
  * bounded pieces asks for it in pieces.
  */
 Result<std::size_t> ReadPixelMask(const ReadableImage& image, const ReadRequest& request,
-                                  BufferView<std::uint8_t> destination, const ReadOptions& options);
+                                  BufferView<std::uint8_t> destination, const ReadControl& control);
 
 }  // namespace carta::zarr::internal
 

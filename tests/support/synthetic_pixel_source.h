@@ -70,7 +70,7 @@ public:
 
     carta::zarr::Result<void> ReadPixels(const carta::zarr::internal::zarr::PixelSelection& selection,
                                          float* destination, std::size_t elements,
-                                         const carta::zarr::ReadOptions&) const override {
+                                         const carta::zarr::ReadControl&) const override {
         ++_pixel_reads;
         if (_fail_at != 0 && _pixel_reads == _fail_at) {
             return carta::zarr::Error{_fail_code, "The synthetic source was told to fail here", "SKY"};
@@ -96,7 +96,7 @@ public:
 
     carta::zarr::Result<void> ReadMask(const carta::zarr::internal::zarr::PixelSelection& selection,
                                        std::uint8_t* destination, std::size_t elements,
-                                       const carta::zarr::ReadOptions&) const override {
+                                       const carta::zarr::ReadControl&) const override {
         ++_mask_reads;
         if (_mask_fail_at != 0 && _mask_reads == _mask_fail_at) {
             return carta::zarr::Error{_mask_fail_code, "The synthetic source was told to fail this flag read",

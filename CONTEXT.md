@@ -127,6 +127,13 @@ split the work across workers. It never knows what a region is and never does th
 caller came for.
 _Avoid_: walk, traversal, scan, loop
 
+**Occupancy**:
+The chunks a set of regions actually occupies, and which of those regions touch each one. Not the
+chunks their bounding boxes cover: a thin cut laid along the diagonal has a box the size of the
+image and touches one chunk per row. Decided from each region's own mask or runs, worked out once,
+and read for the whole of the pass that follows.
+_Avoid_: bucket, index, incidence, coverage, bounding box
+
 **Piece**:
 One chunk-aligned part of an ordinary read, cut along the slowest-varying axis the request selects
 more than one element of. A read is always made of pieces; an unsplit one is a single piece covering

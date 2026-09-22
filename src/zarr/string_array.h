@@ -11,8 +11,6 @@
 
 #include "array_metadata.h"
 
-#include <nlohmann/json.hpp>
-
 #include <filesystem>
 #include <string>
 #include <vector>
@@ -30,7 +28,7 @@ namespace carta::zarr::internal::zarr {
  */
 Result<std::vector<std::string>> ReadFixedLengthUtf32StringArray(const std::filesystem::path& array_directory,
                                                                  const ArrayMetadata& array_metadata,
-                                                                 const nlohmann::json& metadata, std::string_view node);
+                                                                 std::string_view node);
 
 }  // namespace carta::zarr::internal::zarr
 

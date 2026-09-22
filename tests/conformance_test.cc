@@ -42,8 +42,9 @@ carta::zarr::Image OpenSky() {
     Require(std::filesystem::exists(kFixture),
             "the conformance fixture is missing; run tests/data/generate_conformance_fixtures.py");
 
-    const auto matched = carta::zarr::IsXradioImage(kFixture.string());
-    Require(matched && matched.value(), "XRADIO's own output was not recognized as an image dataset");
+    const auto matched = carta::zarr::ProbeSchema(kFixture.string(), carta::zarr::kXradioImageSchema);
+    Require(matched && matched.value().kind == carta::zarr::SchemaMatchKind::match,
+            "XRADIO's own output was not recognized as an image dataset");
 
     const auto context = carta::zarr::Context::Create();
     Require(static_cast<bool>(context), "Context::Create failed");

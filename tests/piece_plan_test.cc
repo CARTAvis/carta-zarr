@@ -84,8 +84,8 @@ std::uint64_t ElementCount(const ReadRequest& request) {
 }
 
 PiecePlan Plan(const ImageDescriptor& descriptor, const ChunkGeometry& geometry, const ReadRequest& request,
-               const ReadOptions& options, bool apply_mask = false) {
-    return PlanPieces(descriptor, geometry, request, options, ElementCount(request), apply_mask);
+               const ReadOptions& options, bool apply_mask = false, bool watching = false) {
+    return PlanPieces(descriptor, geometry, request, options, watching, ElementCount(request), apply_mask);
 }
 
 // A read nobody is watching and nobody has put a ceiling on is issued exactly as it was asked for.
@@ -110,9 +110,8 @@ void TestEitherReasonCutsTheRead() {
     const auto geometry = MakeGeometry(32, 64, 1);
     const auto request = WholeImage(image);
 
-    ReadOptions watching;
-    watching.progress = [](std::size_t, std::size_t) { return true; };
-    Require(Plan(image, geometry, request, watching).split, "a watched read was not cut");
+    Require(Plan(image, geometry, request, ReadOptions{}, false, /*watching=*/true).split,
+            "a watched read was not cut");
 
     ReadOptions bounded;
     bounded.temporary_memory_limit_bytes = 4096;
@@ -124,11 +123,8 @@ void TestEitherReasonCutsTheRead() {
 void TestTheCutGoesOnTheSlowestSelectedAxis() {
     const auto image = MakeImage(64, 64, 8);
     const auto geometry = MakeGeometry(32, 64, 1);
-    ReadOptions watching;
-    watching.progress = [](std::size_t, std::size_t) { return true; };
-
     // Axes 3 and 4 are degenerate here, so the spectrum at index 2 is the slowest one selected.
-    const auto plan = Plan(image, geometry, WholeImage(image), watching);
+    const auto plan = Plan(image, geometry, WholeImage(image), ReadOptions{}, false, /*watching=*/true);
     Require(plan.split && plan.axis == 2, "the cut should have gone on the spectral axis");
     Require(plan.units == 8, "the plan should cover every channel");
     Require(plan.elements_per_unit == 64 * 64, "one channel is worth a plane of the destination");
@@ -136,7 +132,7 @@ void TestTheCutGoesOnTheSlowestSelectedAxis() {
     // Narrow the spectrum to one channel and the only axis left with more than one element is m.
     auto one_channel = WholeImage(image);
     one_channel.axes.at(2) = Range{0, 1, 1};
-    const auto narrowed = Plan(image, geometry, one_channel, watching);
+    const auto narrowed = Plan(image, geometry, one_channel, ReadOptions{}, false, /*watching=*/true);
     Require(narrowed.split && narrowed.axis == 1, "with one channel the cut should move to m");
     Require(narrowed.elements_per_unit == 64, "one m is worth a row of the destination");
 }
@@ -149,10 +145,10 @@ void TestAReadWithNowhereToCutIsOnePiece() {
     ReadRequest single;
     single.axes.assign(5, Range{0, 1, 1});
 
-    ReadOptions watching;
-    watching.progress = [](std::size_t, std::size_t) { return true; };
-    watching.temporary_memory_limit_bytes = 1;
-    Require(!Plan(image, geometry, single, watching).split, "a single-element read has nowhere to be cut");
+    ReadOptions bounded;
+    bounded.temporary_memory_limit_bytes = 1;
+    Require(!Plan(image, geometry, single, bounded, false, /*watching=*/true).split,
+            "a single-element read has nowhere to be cut");
 }
 
 // A piece is measured in chunks, not in elements: the budget buys whole chunks along the cut axis

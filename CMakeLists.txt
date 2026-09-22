@@ -49,6 +49,7 @@ add_library(carta_zarr SHARED
     src/dataset_size.cc
     src/read/pieces.cc
     src/read/pieces_read.cc
+    src/reduce/occupancy.cc
     src/reduce/pass.cc
     src/reduce/pass_read.cc
     src/reduce/plane_histogram.cc
@@ -230,6 +231,7 @@ if(CARTA_ZARR_BUILD_TESTS AND BUILD_TESTING)
             tests/schema_profile_test.cc
             tests/support/value_reader_stub.cc
             tests/support/pixel_reader_stub.cc
+            src/dataset_size.cc
             src/store.cc
             src/schema/profile.cc
             src/schema/xradio/probe_report.cc
@@ -248,6 +250,15 @@ if(CARTA_ZARR_BUILD_TESTS AND BUILD_TESTING)
 
     # ArrayView addresses a flat Zarr buffer by dimension name. It needs only its own metadata type,
     # so it is tested directly rather than through a store.
+    # What an array's document says about how it is stored. Links only nlohmann: ParseStorageLayout
+    # was a Store method reading the raw node metadata, so its sharding rules could be reached only
+    # by writing a store to a directory and opening an image out of it, and two of its refusals
+    # could not be reached at all.
+    carta_zarr_add_test(carta_zarr_array_metadata_tests INTERNAL
+        TEST_NAME carta-zarr-array-metadata
+        SOURCES tests/array_metadata_test.cc ${CARTA_ZARR_METADATA_SOURCES}
+        LIBRARIES nlohmann_json::nlohmann_json)
+
     carta_zarr_add_test(carta_zarr_array_view_tests INTERNAL
         TEST_NAME carta-zarr-array-view
         SOURCES tests/array_view_test.cc src/zarr/array_view.cc ${CARTA_ZARR_METADATA_SOURCES}
@@ -390,6 +401,7 @@ if(CARTA_ZARR_BUILD_TESTS AND BUILD_TESTING)
         TEST_NAME carta-zarr-reduce-synthetic
         SOURCES
             tests/reduce_synthetic_test.cc
+            src/reduce/occupancy.cc
             src/reduce/plane_histogram.cc
             src/reduce/spectral_reduce.cc
             src/work_pool.cc
@@ -399,6 +411,15 @@ if(CARTA_ZARR_BUILD_TESTS AND BUILD_TESTING)
     carta_zarr_add_test(carta_zarr_chunk_blocks_tests INTERNAL
         TEST_NAME carta-zarr-chunk-blocks
         SOURCES tests/chunk_blocks_test.cc)
+
+    # Which chunks a set of regions occupies. LIBRARIES is empty and meant to stay empty: the
+    # question is regions and a chunk shape in, an index out, so a target that starts needing a
+    # plan, a store or a thread pool has been handed something that is not its question. The 180
+    # lines behind Occupancy::Of were reachable only through ReduceSpectral over a real image
+    # before this, and two of their refusals were reachable from nothing at all.
+    carta_zarr_add_test(carta_zarr_occupancy_tests INTERNAL
+        TEST_NAME carta-zarr-occupancy
+        SOURCES tests/occupancy_test.cc src/reduce/occupancy.cc)
 
     # Conformance runs against a store XRADIO itself produced, so that a bump of the pinned XRADIO
     # version reports which of this library's assumptions it broke.

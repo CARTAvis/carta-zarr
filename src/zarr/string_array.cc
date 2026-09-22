@@ -251,13 +251,15 @@ void SetBytesCodec(StringCodecInfo& info, BytesCodec codec) {
     info.bytes_codec = codec;
 }
 
-StringCodecInfo ParseStringCodecs(const nlohmann::json& metadata) {
+// The compressor is found by walking the chain in order, and a second one is refused. That is a
+// different rule from the one a StorageLayout asks -- which reports the first of zstd, gzip, blosc
+// it can see and shrugs at a malformed chain -- and the difference is deliberate: that field is
+// descriptive, while this one decides which decompressor actually runs. Unifying them would mean
+// either failing an open over a cosmetic field or letting this one guess.
+StringCodecInfo ParseStringCodecs(const nlohmann::json& codecs) {
     StringCodecInfo info;
-    if (!metadata.contains("codecs") || !metadata.at("codecs").is_array()) {
-        return info;
-    }
     bool seen_bytes = false;
-    for (const auto& codec : metadata.at("codecs")) {
+    for (const auto& codec : codecs) {
         const std::string codec_name = codec.is_object() ? codec.value("name", "") : "";
         if (codec_name == "blosc") {
             SetBytesCodec(info, BytesCodec::blosc);
@@ -317,19 +319,16 @@ StringArrayLayout ParseStringArrayLayout(const ArrayMetadata& array_metadata) {
                              array_metadata.data_type_configuration.at("length_bytes").get<std::size_t>()};
 }
 
-std::filesystem::path GetStringChunkPath(const std::filesystem::path& array_dir, const nlohmann::json& metadata) {
+std::filesystem::path GetStringChunkPath(const std::filesystem::path& array_dir, const nlohmann::json& encoding) {
     std::string key_encoding = "default";
     std::string separator = "/";
-    if (metadata.contains("chunk_key_encoding") && metadata.at("chunk_key_encoding").is_object()) {
-        const auto& encoding = metadata.at("chunk_key_encoding");
-        if (encoding.contains("name") && encoding.at("name").is_string()) {
-            key_encoding = encoding.at("name").get<std::string>();
-        }
-        if (encoding.contains("configuration") && encoding.at("configuration").is_object() &&
-            encoding.at("configuration").contains("separator") &&
-            encoding.at("configuration").at("separator").is_string()) {
-            separator = encoding.at("configuration").at("separator").get<std::string>();
-        }
+    if (encoding.contains("name") && encoding.at("name").is_string()) {
+        key_encoding = encoding.at("name").get<std::string>();
+    }
+    if (encoding.contains("configuration") && encoding.at("configuration").is_object() &&
+        encoding.at("configuration").contains("separator") &&
+        encoding.at("configuration").at("separator").is_string()) {
+        separator = encoding.at("configuration").at("separator").get<std::string>();
     }
     if (key_encoding == "default") {
         if (separator != "/" && separator != ".") {
@@ -395,11 +394,10 @@ std::vector<std::uint8_t> DecodeStringChunk(std::vector<std::uint8_t> bytes, con
 
 Result<std::vector<std::string>> ReadFixedLengthUtf32StringArray(const std::filesystem::path& array_directory,
                                                                  const ArrayMetadata& array_metadata,
-                                                                 const nlohmann::json& metadata,
                                                                  std::string_view node) {
     try {
         const StringArrayLayout layout = ParseStringArrayLayout(array_metadata);
-        const std::filesystem::path chunk_path = GetStringChunkPath(array_directory, metadata);
+        const std::filesystem::path chunk_path = GetStringChunkPath(array_directory, array_metadata.chunk_key_encoding);
 
         // Missing chunk: all elements take the (empty) fill value.
         std::error_code error;
@@ -412,7 +410,7 @@ Result<std::vector<std::string>> ReadFixedLengthUtf32StringArray(const std::file
         }
 
         std::vector<std::uint8_t> bytes = ReadChunkFile(chunk_path);
-        const StringCodecInfo codec_info = ParseStringCodecs(metadata);
+        const StringCodecInfo codec_info = ParseStringCodecs(array_metadata.codecs);
         bytes = DecodeStringChunk(std::move(bytes), codec_info, layout);
         return DecodeFixedLengthUtf32(bytes, layout.num_elements, layout.length_bytes, codec_info.little_endian);
     } catch (const DecodeFailure& failure) {

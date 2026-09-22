@@ -135,7 +135,7 @@ Result<void> ComputeHistogram(const ReadableImage& image, const HistogramRequest
         const std::uint64_t v_count = slab.v_count;
         for (std::uint64_t offset = 0; offset < slab.channel_count; ++offset) {
             const float* plane = slab.pixels + (offset * stride_z);
-            std::uint64_t* into = counts.data() + (static_cast<std::size_t>(slab.first_channel + offset) * bins);
+            std::uint64_t* into = counts.data() + (static_cast<std::size_t>((slab.first_channel + offset).index) * bins);
 
             const auto bin_rows = [&](std::uint64_t v_first, std::uint64_t v_last, std::uint64_t* destination) {
                 for (std::uint64_t v = v_first; v < v_last; ++v) {
@@ -188,9 +188,10 @@ Result<void> ComputeHistogram(const ReadableImage& image, const HistogramRequest
         [&](EmitBlock& block, const auto& report) {
             return RunPass(source, plan, options, block.begin, block.end, block.chunks_done, report, bin_slab);
         },
-        [&](std::uint64_t first_channel, std::uint64_t length, bool complete, double completeness) {
+        [&](SelectionChannel first_channel, std::uint64_t length, bool complete, double completeness) {
             HistogramBlock block;
-            block.first_channel = first_channel;
+            // Out of the type and into the public block, which is the one place it happens.
+            block.first_channel = first_channel.index;
             block.channel_count = length;
             block.counts = counts.data();
             block.bin_count = bins;
@@ -321,7 +322,7 @@ Result<CubeHistogramResult> ComputeCubeHistogram(const ReadableImage& image,
 
     std::uint64_t chunks_done = 0;
     const auto walked = RunPass(
-        source, plan, options, 0, planes.count(), chunks_done,
+        source, plan, options, SelectionChannel{}, SelectionChannel{planes.count()}, chunks_done,
         [&](std::uint64_t done) -> Result<void> {
             if (request.progress) {
                 CubeHistogramProgress update;

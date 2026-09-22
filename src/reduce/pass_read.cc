@@ -28,7 +28,7 @@ Result<Slab> ReadSlab(const PixelSource& source, const PassPlan& plan, const Rea
     read_request.axes.at(plan.axis_u) = Range{request.u_start, request.u_count, request.u_stride};
     read_request.axes.at(plan.axis_v) = Range{request.v_start, request.v_count, request.v_stride};
     read_request.axes.at(plan.map.spectral) = Range{
-        spectral.start + (request.channel_index * spectral.stride), request.channel_count, spectral.stride};
+        spectral.start + (request.channel_index.index * spectral.stride), request.channel_count, spectral.stride};
     if (plan.map.has_polarization) {
         read_request.axes.at(plan.map.polarization) = Range{plan.planes.polarization, 1, 1};
     }
@@ -60,13 +60,13 @@ Result<Slab> ReadSlab(const PixelSource& source, const PassPlan& plan, const Rea
     const auto elements = static_cast<std::size_t>(running);
 
     buffers.pixels.resize(elements);
-    if (auto read = source.ReadPixels(selection.value(), buffers.pixels.data(), buffers.pixels.size(), options);
+    if (auto read = source.ReadPixels(selection.value(), buffers.pixels.data(), buffers.pixels.size(), options.control);
         !read) {
         return read.error();
     }
     if (plan.apply_mask) {
         buffers.mask.resize(elements);
-        if (auto read = source.ReadMask(selection.value(), buffers.mask.data(), buffers.mask.size(), options);
+        if (auto read = source.ReadMask(selection.value(), buffers.mask.data(), buffers.mask.size(), options.control);
             !read) {
             return read.error();
         }
@@ -76,7 +76,6 @@ Result<Slab> ReadSlab(const PixelSource& source, const PassPlan& plan, const Rea
     }
 
     Slab slab;
-    slab.first_channel = request.channel_index;
     slab.channel_count = request.channel_count;
     slab.pixels = buffers.pixels.data();
     slab.stride_u = stored_stride.at(descriptor.axes.at(plan.axis_u).storage_index);

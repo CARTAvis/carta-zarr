@@ -195,7 +195,7 @@ void TestMaskReadTakesTheSameControls(const carta::zarr::Image& sky) {
     const std::size_t elements = kL * kM * kFrequency * kPolarization * kTime;
     std::vector<std::uint8_t> mask(elements, 0xEE);
 
-    carta::zarr::ReadOptions cancelled;
+    carta::zarr::ReadControl cancelled;
     cancelled.cancellation_requested = [] { return true; };
     const auto stopped = sky.ReadPixelMask(request, {mask.data(), mask.size()}, cancelled);
     Require(!stopped && stopped.error().code == carta::zarr::ErrorCode::cancelled,
@@ -203,7 +203,7 @@ void TestMaskReadTakesTheSameControls(const carta::zarr::Image& sky) {
     Require(std::all_of(mask.begin(), mask.end(), [](std::uint8_t byte) { return byte == 0xEE; }),
             "a cancelled mask read wrote to its destination");
 
-    carta::zarr::ReadOptions expired;
+    carta::zarr::ReadControl expired;
     expired.deadline = std::chrono::steady_clock::now() - std::chrono::milliseconds(1);
     const auto too_late = sky.ReadPixelMask(request, {mask.data(), mask.size()}, expired);
     Require(!too_late && too_late.error().code == carta::zarr::ErrorCode::cancelled,
@@ -216,7 +216,7 @@ void TestMaskReadTakesTheSameControls(const carta::zarr::Image& sky) {
     Require(static_cast<bool>(sky.ReadPixelMask(request, {inherited.data(), inherited.size()})),
             "the reference mask read failed");
 
-    carta::zarr::ReadOptions bypassing;
+    carta::zarr::ReadControl bypassing;
     bypassing.cache_policy = carta::zarr::CachePolicy::bypass;
     std::vector<std::uint8_t> bypassed(elements, 0);
     const auto bypass_read = sky.ReadPixelMask(request, {bypassed.data(), bypassed.size()}, bypassing);
@@ -308,7 +308,7 @@ void TestReadControls(const carta::zarr::Image& sky) {
     std::vector<float> pixels(elements, 123.0F);
 
     carta::zarr::ReadOptions cancelled;
-    cancelled.cancellation_requested = [] { return true; };
+    cancelled.control.cancellation_requested = [] { return true; };
     const auto cancelled_read = sky.Read(request, {pixels.data(), pixels.size()}, cancelled);
     Require(!cancelled_read && cancelled_read.error().code == carta::zarr::ErrorCode::cancelled,
             "a cancelled read was not rejected");
@@ -316,7 +316,7 @@ void TestReadControls(const carta::zarr::Image& sky) {
             "a cancelled read modified its destination");
 
     carta::zarr::ReadOptions expired;
-    expired.deadline = std::chrono::steady_clock::now() - std::chrono::milliseconds(1);
+    expired.control.deadline = std::chrono::steady_clock::now() - std::chrono::milliseconds(1);
     const auto expired_read = sky.Read(request, {pixels.data(), pixels.size()}, expired);
     Require(!expired_read && expired_read.error().code == carta::zarr::ErrorCode::cancelled,
             "a read past its deadline was not rejected");
@@ -418,7 +418,7 @@ void TestProgressiveRead(const carta::zarr::Image& sky) {
     // fixture -- forty bytes per chunk -- produce more than one. Without it the whole image fits in
     // a single piece and the split below is never exercised.
     options.temporary_memory_limit_bytes = 160;
-    options.progress = [&](std::size_t written, std::size_t elements_total) {
+    const carta::zarr::ProgressCallback progress = [&](std::size_t written, std::size_t elements_total) {
         Require(elements_total == total, "progress should report the request's own element count");
         Require(written > 0 && written <= total, "progress should report a prefix of the destination");
         Require(reported.empty() || written > reported.back(), "the finished prefix should only grow");
@@ -431,7 +431,7 @@ void TestProgressiveRead(const carta::zarr::Image& sky) {
         reported.push_back(written);
         return true;
     };
-    const auto read = sky.Read(request, {pixels.data(), pixels.size()}, options);
+    const auto read = sky.Read(request, {pixels.data(), pixels.size()}, options, progress);
     Require(static_cast<bool>(read), "a progressive read failed");
     Require(read.value() == total, "a progressive read reported the wrong element count");
     Require(!reported.empty() && reported.back() == total, "the last progress report should cover everything");
@@ -453,11 +453,11 @@ void TestProgressiveRead(const carta::zarr::Image& sky) {
     carta::zarr::ReadOptions masked_options;
     masked_options.temporary_memory_limit_bytes = 160;
     std::size_t masked_pieces = 0;
-    masked_options.progress = [&](std::size_t, std::size_t) {
+    const carta::zarr::ProgressCallback masked_progress = [&](std::size_t, std::size_t) {
         ++masked_pieces;
         return true;
     };
-    Require(static_cast<bool>(sky.Read(request, {masked.data(), masked.size()}, masked_options)),
+    Require(static_cast<bool>(sky.Read(request, {masked.data(), masked.size()}, masked_options, masked_progress)),
             "a progressive masked read failed");
     Require(masked_pieces > 1, "the masked read should have been split too");
     for (std::size_t i = 0; i < total; ++i) {
@@ -470,11 +470,11 @@ void TestProgressiveRead(const carta::zarr::Image& sky) {
     auto cancelling = Unmasked();
     cancelling.temporary_memory_limit_bytes = 160;
     std::size_t calls = 0;
-    cancelling.progress = [&](std::size_t, std::size_t) {
+    const carta::zarr::ProgressCallback refusing = [&](std::size_t, std::size_t) {
         ++calls;
         return false;
     };
-    const auto cancelled = sky.Read(request, {abandoned.data(), abandoned.size()}, cancelling);
+    const auto cancelled = sky.Read(request, {abandoned.data(), abandoned.size()}, cancelling, refusing);
     Require(!cancelled, "a progress callback returning false should cancel the read");
     Require(cancelled.error().code == carta::zarr::ErrorCode::cancelled, "cancelling should report cancelled");
     Require(calls == 1, "a cancelled read should stop at the piece that refused");

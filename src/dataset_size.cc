@@ -7,11 +7,18 @@
 // How large a dataset is, which is a question about a dataset and not about a node. It was a method
 // on Store, which is what made Store look like a dataset facade: it uses nothing private, holds no
 // state, and has one caller.
+//
+// Both halves of the answer live here now. The facade used to keep the measured half -- it parsed
+// the location string a second time and walked the directory itself -- which meant the rule for
+// what a location means existed twice, and the copy up there was the weaker one: it never resolved
+// the path, so a process that changed directory after opening the store measured somewhere else, or
+// nowhere, and silently reported the upper bound instead.
 
 #include "store.h"
 
 #include "zarr/data_type.h"
 
+#include <chrono>
 #include <limits>
 #include <string>
 #include <string_view>
@@ -39,7 +46,8 @@ Result<std::uint64_t> ElementSizeBytes(const zarr::ArrayMetadata& metadata, std:
                  std::string(node)};
 }
 
-}  // namespace
+// Every array in the hierarchy, at its uncompressed size. The upper bound, and what a caller gets
+// when the store itself cannot be measured.
 
 Result<std::uint64_t> TotalArraySizeBytes(const Store& store) {
     const auto& nodes_result = store.ListNodes();
@@ -88,6 +96,24 @@ Result<std::uint64_t> TotalArraySizeBytes(const Store& store) {
         return Error{ErrorCode::invalid_metadata, "Zarr store contains no arrays"};
     }
     return total_bytes;
+}
+
+}  // namespace
+
+Result<DatasetSize> DatasetSizeBytes(const Store& store, std::chrono::steady_clock::time_point deadline) {
+    if (auto stored = store.StoredSizeBytes(deadline)) {
+        return DatasetSize{stored.value(), false};
+    }
+    // Every way of failing to measure means the same thing to a caller asking how much room this
+    // takes: the transport has no bytes to count, the deadline passed part-way through, a directory
+    // refused to be enumerated, or the total overflowed. An upper bound is a more useful answer than
+    // an error to all four, and is what this reported before there was an error to swallow -- the
+    // walk was a bool and every one of its failure paths returned false.
+    auto logical = TotalArraySizeBytes(store);
+    if (!logical) {
+        return logical.error();
+    }
+    return DatasetSize{logical.value(), true};
 }
 
 }  // namespace carta::zarr::internal

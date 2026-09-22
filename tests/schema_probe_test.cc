@@ -152,8 +152,9 @@ void TestValidAndTimeAxis(const std::filesystem::path& root) {
     Require(result.value().schema_id == carta::zarr::kXradioImageSchema, "unexpected schema id");
     Require(result.value().schema_version == "1.2", "unexpected schema version");
 
-    const auto is_xradio = carta::zarr::IsXradioImage(root.string());
-    Require(is_xradio && is_xradio.value(), "IsXradioImage rejected a valid store");
+    const auto is_xradio = carta::zarr::ProbeSchema(root.string(), carta::zarr::kXradioImageSchema);
+    Require(is_xradio && is_xradio.value().kind == SchemaMatchKind::match,
+            "a valid store was not matched by the XRADIO profile");
 
     const auto context = carta::zarr::Context::Create();
     Require(static_cast<bool>(context), "Context::Create failed");
@@ -192,8 +193,9 @@ void TestValidAndTimeAxis(const std::filesystem::path& root) {
 
 void TestTimeGreaterThanOne(const std::filesystem::path& root) {
     CreateValidStore(root, 2);
-    const auto result = carta::zarr::IsXradioImage(root.string());
-    Require(result && result.value(), "time > 1 must remain valid at library level");
+    const auto result = carta::zarr::ProbeSchema(root.string(), carta::zarr::kXradioImageSchema);
+    Require(result && result.value().kind == SchemaMatchKind::match,
+            "time > 1 must remain valid at library level");
     const auto context = carta::zarr::Context::Create();
     const auto dataset = carta::zarr::Dataset::Open(context.value(), root.string());
     Require(static_cast<bool>(dataset), "Dataset::Open rejected time > 1");
@@ -204,16 +206,17 @@ void TestTimeGreaterThanOne(const std::filesystem::path& root) {
 void TestNonMatchAndInvalid(const std::filesystem::path& root) {
     Write(root / "zarr.json", RootMetadata());
     Write(root / "OTHER" / "zarr.json", NumericArray("[2]", "[\"x\"]"));
-    const auto non_match = carta::zarr::IsXradioImage(root.string());
-    Require(non_match && !non_match.value(), "valid non-XRADIO Zarr was not a non-match");
+    const auto non_match = carta::zarr::ProbeSchema(root.string(), carta::zarr::kXradioImageSchema);
+    Require(non_match && non_match.value().kind == SchemaMatchKind::no_match,
+            "valid non-XRADIO Zarr was not a non-match");
     Require(carta::zarr::Probe(root.string()).kind == ProbeKind::zarr_without_supported_schema,
             "Probe did not report a valid unsupported schema");
 
     CreateValidStore(root);
     std::filesystem::remove(root / "time" / "zarr.json");
-    const auto invalid = carta::zarr::IsXradioImage(root.string());
-    Require(!invalid && invalid.error().code == ErrorCode::invalid_metadata,
-            "metadata-incomplete XRADIO-like store did not report invalid metadata");
+    const auto invalid = carta::zarr::ProbeSchema(root.string(), carta::zarr::kXradioImageSchema);
+    Require(invalid && invalid.value().kind == SchemaMatchKind::invalid,
+            "metadata-incomplete XRADIO-like store was not reported as an invalid match");
     Require(carta::zarr::Probe(root.string()).kind == ProbeKind::invalid_dataset,
             "Probe did not report invalid XRADIO-like metadata");
 }
@@ -281,11 +284,11 @@ void TestProbingAndOpeningDescribeTheSameDataset(const std::filesystem::path& ro
 }
 
 void TestMissingAndUnsupported(const std::filesystem::path& root) {
-    const auto missing = carta::zarr::IsXradioImage((root / "missing").string());
+    const auto missing = carta::zarr::ProbeSchema((root / "missing").string(), carta::zarr::kXradioImageSchema);
     Require(!missing && missing.error().code == ErrorCode::not_found, "missing store error category changed");
 
     Write(root / "not-zarr" / "zarr.json", "{\"zarr_format\": 2, \"node_type\": \"group\"}");
-    const auto unsupported = carta::zarr::IsXradioImage((root / "not-zarr").string());
+    const auto unsupported = carta::zarr::ProbeSchema((root / "not-zarr").string(), carta::zarr::kXradioImageSchema);
     Require(!unsupported && unsupported.error().code == ErrorCode::unsupported_zarr_version,
             "unsupported Zarr version error category changed");
 
@@ -326,8 +329,9 @@ void TestReferenceFixture() {
     const std::filesystem::path fixture(CARTA_ZARR_REFERENCE_FIXTURE);
     Require(std::filesystem::exists(fixture), "the XRADIO reference fixture is missing from tests/data");
 
-    const auto result = carta::zarr::IsXradioImage(fixture.string());
-    Require(result && result.value(), "the XRADIO reference fixture did not match");
+    const auto result = carta::zarr::ProbeSchema(fixture.string(), carta::zarr::kXradioImageSchema);
+    Require(result && result.value().kind == SchemaMatchKind::match,
+            "the XRADIO reference fixture did not match");
 
     // Resource limits must be accepted and applied to every read made through this context.
     carta::zarr::OpenOptions options;
@@ -423,8 +427,9 @@ void TestReferenceFixture() {
 void TestCompatibilityFixture() {
     const std::filesystem::path fixture(CARTA_ZARR_LEGACY_FIXTURE);
     Require(std::filesystem::exists(fixture), "the compatibility fixture is missing");
-    const auto result = carta::zarr::IsXradioImage(fixture.string());
-    Require(result && result.value(), "the compatibility fixture did not match");
+    const auto result = carta::zarr::ProbeSchema(fixture.string(), carta::zarr::kXradioImageSchema);
+    Require(result && result.value().kind == SchemaMatchKind::match,
+            "the compatibility fixture did not match");
 }
 
 void TestDiscoveryIgnoresNameAllowlist(const std::filesystem::path& root) {
@@ -531,8 +536,9 @@ void TestNonDoubleCoordinates(const std::filesystem::path& root) {
 
     const auto context = carta::zarr::Context::Create();
     Require(static_cast<bool>(context), "Context::Create failed for float32 coordinates");
-    const auto supported = carta::zarr::IsXradioImage(root.string());
-    Require(supported && supported.value(), "a float32 coordinate was not probed as a supported image dataset");
+    const auto supported = carta::zarr::ProbeSchema(root.string(), carta::zarr::kXradioImageSchema);
+    Require(supported && supported.value().kind == SchemaMatchKind::match,
+            "a float32 coordinate was not probed as a supported image dataset");
 
     const auto dataset = carta::zarr::Dataset::Open(context.value(), root.string());
     Require(static_cast<bool>(dataset), "float32-coordinate dataset did not open");
@@ -674,8 +680,9 @@ void TestImageDatasetWithoutSky(const std::filesystem::path& root) {
     Write(root / "l" / "zarr.json", NumericArray("[4]", R"(["l"])"));
     Write(root / "m" / "zarr.json", NumericArray("[5]", R"(["m"])"));
 
-    const auto matched = carta::zarr::IsXradioImage(root.string());
-    Require(matched && matched.value(), "an image dataset without SKY was not recognized");
+    const auto matched = carta::zarr::ProbeSchema(root.string(), carta::zarr::kXradioImageSchema);
+    Require(matched && matched.value().kind == SchemaMatchKind::match,
+            "an image dataset without SKY was not recognized");
 
     const auto context = carta::zarr::Context::Create();
     Require(static_cast<bool>(context), "Context::Create failed for the SKY-less dataset");
@@ -698,9 +705,9 @@ void TestImageDatasetMissingTimeCoordinate(const std::filesystem::path& root) {
     Write(root / "l" / "zarr.json", NumericArray("[4]", R"(["l"])"));
     Write(root / "m" / "zarr.json", NumericArray("[5]", R"(["m"])"));
 
-    const auto matched = carta::zarr::IsXradioImage(root.string());
-    Require(!matched && matched.error().code == ErrorCode::invalid_metadata,
-            "an image dataset missing its time coordinate was not reported as invalid metadata");
+    const auto matched = carta::zarr::ProbeSchema(root.string(), carta::zarr::kXradioImageSchema);
+    Require(matched && matched.value().kind == SchemaMatchKind::invalid,
+            "an image dataset missing its time coordinate was not reported as an invalid match");
     Require(carta::zarr::Probe(root.string()).kind == ProbeKind::invalid_dataset,
             "Probe did not report the missing time coordinate as an invalid dataset");
 }

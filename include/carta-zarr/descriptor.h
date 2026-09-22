@@ -239,11 +239,26 @@ struct Beam {
     std::string unit;
 };
 
+// Which of two questions a reported size answers.
+//
+// Said rather than resolved into "how close is this", because the library cannot tell: the declared
+// answer is what a caller gets when the store could not be measured, so there is no measurement to
+// compare it against. Nor can it be inferred -- compression pushes what a store occupies below what
+// its arrays declare, while per-node metadata and shard indices push it above, and which wins is a
+// property of the store this path could not read. See ADR 0008.
+//
+// `declared` is first so that a DatasetSize nobody filled in claims the weaker of the two.
+enum class SizeBasis {
+    // Read from the metadata: every array's shape times its element size, uncompressed. What the
+    // dataset says it holds, which is not a bound on what the store occupies.
+    declared,
+    // Walked: the sum of the sizes of the files under the store.
+    measured,
+};
+
 struct DatasetSize {
-    // The size of the store where it lives when it could be measured quickly, or the total logical
-    // bytes represented by all arrays when it could not.
     std::uint64_t bytes = 0;
-    bool is_upper_bound = false;
+    SizeBasis basis = SizeBasis::declared;
 };
 
 struct ImageDescriptor {

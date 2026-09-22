@@ -163,13 +163,23 @@ void TestValidAndTimeAxis(const std::filesystem::path& root) {
     Require(ImageIds(dataset.value().descriptor().images) == std::vector<std::string>{"SKY"}, "unexpected image ids");
     Require(dataset.value().descriptor().default_image_id == "SKY", "unexpected default image id");
 
-    const auto logical_size = dataset.value().Size(std::chrono::milliseconds(0));
-    Require(logical_size && logical_size.value().bytes == 592 && logical_size.value().is_upper_bound,
-            "logical Zarr size calculation was incorrect");
+    const auto declared_size = dataset.value().Size(std::chrono::milliseconds(0));
+    Require(declared_size && declared_size.value().bytes == 592 &&
+                declared_size.value().basis == carta::zarr::SizeBasis::declared,
+            "the declared Zarr size calculation was incorrect");
 
-    const auto physical_size = dataset.value().Size(std::chrono::milliseconds(5000));
-    Require(physical_size && physical_size.value().bytes > 0 && !physical_size.value().is_upper_bound,
-            "physical Zarr size calculation was not used");
+    const auto measured_size = dataset.value().Size(std::chrono::milliseconds(5000));
+    Require(measured_size && measured_size.value().bytes > 0 &&
+                measured_size.value().basis == carta::zarr::SizeBasis::measured,
+            "the measured Zarr size calculation was not used");
+
+    // The two are different questions, and the declared one does not bound the other: this store's
+    // arrays declare 592 bytes while the store holds several times that in zarr.json documents
+    // alone. Asserted on the store the rest of this case already built, because the point is that
+    // nothing about it is unusual -- it is what the relationship between the two is worth.
+    Require(declared_size.value().bytes < measured_size.value().bytes,
+            "the declared size was not below the measured one, so this store no longer shows that "
+            "the declared size is not an upper bound");
 
     const auto image = dataset.value().OpenImage("SKY");
     Require(static_cast<bool>(image),

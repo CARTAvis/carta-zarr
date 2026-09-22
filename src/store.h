@@ -129,12 +129,12 @@ Result<Store> OpenStore(std::string_view location, StoreContextPtr context = {})
 // Open a store over an already-built transport. This is the seam tests enter through.
 Result<Store> OpenStore(TransportPtr transport, StoreContextPtr context = {});
 
-// How large a dataset is, and whether that number was measured or inferred.
+// How large a dataset is, and which of two questions the answer is to -- see SizeBasis.
 //
 // The store's own size when the transport can report it before the deadline, and otherwise the
-// total uncompressed size of every array, marked as an upper bound. Which of the two a caller gets
-// is this module's decision rather than the facade's: it is one question -- how much room does this
-// take -- and answering half of it up there is what had the facade walking a directory of its own.
+// total uncompressed size the metadata declares for every array. Which of the two a caller gets is
+// this module's decision rather than the facade's: it is one question -- how large is this -- and
+// answering half of it up there is what had the facade walking a directory of its own.
 //
 // Reports invalid_metadata for a store with no arrays at all, and for a size that overflows.
 Result<DatasetSize> DatasetSizeBytes(const Store& store, std::chrono::steady_clock::time_point deadline);

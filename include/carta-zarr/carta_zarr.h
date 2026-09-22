@@ -140,9 +140,12 @@ public:
     static Result<Dataset> Open(const Context& context, std::string_view location);
 
     const DatasetDescriptor& descriptor() const noexcept;
-    // How much room this dataset takes where it is stored, and whether that number was measured or
-    // inferred. Measured when the store can be sized within the timeout; otherwise the logical
-    // uncompressed size of all arrays, marked as an upper bound.
+    // How large this dataset is, and which of two questions the answer is to -- see SizeBasis.
+    // Within the timeout, the sum of the sizes of the files the store holds; otherwise the
+    // uncompressed size the metadata declares for all arrays.
+    //
+    // The two are not interchangeable and the second does not bound the first, so a consumer that
+    // shows the number to someone should show which one it got.
     //
     // The timeout is not named after a directory because a dataset need not live in one: what can
     // be sized, and how quickly, is the transport's affair.

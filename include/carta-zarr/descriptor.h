@@ -55,7 +55,7 @@ struct SchemaProbeResult {
 
 struct ImageEntry {
     std::string id;
-    bool readable = false;
+    bool openable = false;
     std::vector<Diagnostic> diagnostics;
 };
 

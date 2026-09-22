@@ -284,7 +284,7 @@ void TestProbingAndOpeningDescribeTheSameDataset(const std::filesystem::path& ro
     Require(ImageIds(opened.images) == ImageIds(probe.images), "they disagree about which images exist");
     Require(opened.images.size() == probe.images.size(), "they disagree about how many images exist");
     for (std::size_t i = 0; i < opened.images.size(); ++i) {
-        Require(opened.images.at(i).readable == probe.images.at(i).readable,
+        Require(opened.images.at(i).openable == probe.images.at(i).openable,
                 "they disagree about whether " + opened.images.at(i).id + " is openable");
         Require(opened.images.at(i).diagnostics.size() == probe.images.at(i).diagnostics.size(),
                 "they disagree about what was diagnosed for " + opened.images.at(i).id);
@@ -360,7 +360,7 @@ void TestReferenceFixture() {
     Require(image_ids ==
                 std::vector<std::string>{"SKY", "MODEL", "RESIDUAL", "MASK_DECONVOLVE", "APERTURE", "COMPLEX"},
             "discovery did not enumerate the multi-image fixture in display order");
-    Require(dataset.value().descriptor().default_image_id == "SKY", "default image was not the first readable image");
+    Require(dataset.value().descriptor().default_image_id == "SKY", "default image was not the first openable image");
     // right_ascension and declination are float64 over (l, m) with no type attribute. Matching only
     // "has l and m" would list them as openable images; matching the whole axis set never reads them.
     for (const auto& coordinate : {"right_ascension", "declination", "velocity", "beam_params_label"}) {
@@ -562,7 +562,7 @@ void TestNonDoubleCoordinates(const std::filesystem::path& root) {
 
 // Coordinates belong to the dataset, not to one image, and discovery lists an image on its
 // dimension names alone. A second image whose own frequency axis is a different length was listed
-// as readable and then described with the dataset's frequency coordinate as though it were its
+// as openable and then described with the dataset's frequency coordinate as though it were its
 // own: an image reporting three channels' worth of coordinates over seven channels of pixels.
 void TestImageDisagreeingWithACoordinate(const std::filesystem::path& root) {
     CreateValidStore(root);

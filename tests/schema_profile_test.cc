@@ -66,10 +66,10 @@ std::vector<std::string> ImageIds(const std::vector<carta::zarr::ImageEntry>& im
     return ids;
 }
 
-std::vector<std::string> ReadableImageIds(const std::vector<carta::zarr::ImageEntry>& images) {
+std::vector<std::string> OpenableImageIds(const std::vector<carta::zarr::ImageEntry>& images) {
     std::vector<std::string> ids;
     for (const auto& image : images) {
-        if (image.readable) {
+        if (image.openable) {
             ids.push_back(image.id);
         }
     }
@@ -262,9 +262,9 @@ void TestDiscoveryClassifiesVariables() {
 
     Require(ImageIds(discovery.value().images) == std::vector<std::string>{"SKY", "MODEL", "APERTURE", "COMPLEX"},
             "discovery did not enumerate the images in display order");
-    Require(ReadableImageIds(discovery.value().images) == std::vector<std::string>{"SKY", "MODEL"},
+    Require(OpenableImageIds(discovery.value().images) == std::vector<std::string>{"SKY", "MODEL"},
             "discovery did not restrict the openable images to real sky-plane variables");
-    Require(discovery.value().default_image_id == "SKY", "discovery did not select the default readable image");
+    Require(discovery.value().default_image_id == "SKY", "discovery did not select the default openable image");
     Require(HasDiagnostic(discovery.value().diagnostics, "unsupported_coordinate_plane"),
             "the aperture-plane variable produced no diagnostic");
     Require(HasDiagnostic(discovery.value().diagnostics, "unsupported_data_type"),
@@ -309,7 +309,7 @@ void TestOneRuleDecidesWhatIsOpenable() {
     const auto& images = discovery.value().images;
 
     Require(static_cast<bool>(carta::zarr::internal::RequireOpenable(images, "SKY")),
-            "a readable image was refused");
+            "an openable image was refused");
 
     const auto complex = carta::zarr::internal::RequireOpenable(images, "COMPLEX");
     Require(!complex && complex.error().code == ErrorCode::unsupported_data_type,
@@ -384,7 +384,7 @@ void TestOneRuleDecidesWhatDatasetIsOpenable() {
     }
 }
 
-void TestDefaultImageSkipsUnreadablePreferredImage() {
+void TestDefaultImageSkipsUnopenablePreferredImage() {
     auto nodes = CompleteStore();
     nodes["SKY"] = SkyArray("complex64");
     nodes["RESIDUAL"] = SkyArray();
@@ -394,13 +394,13 @@ void TestDefaultImageSkipsUnreadablePreferredImage() {
     auto discovery = XradioProfile().Discover(store.value());
     Require(static_cast<bool>(discovery), "default-image discovery reported an error");
     Require(discovery.value().default_image_id == "RESIDUAL",
-            "discovery selected an unreadable preferred image as the default");
+            "discovery selected an unopenable preferred image as the default");
 
     const auto sky = std::find_if(discovery.value().images.begin(), discovery.value().images.end(),
                                   [](const auto& image) { return image.id == "SKY"; });
-    Require(sky != discovery.value().images.end() && !sky->readable &&
+    Require(sky != discovery.value().images.end() && !sky->openable &&
                 HasDiagnostic(sky->diagnostics, "unsupported_data_type"),
-            "the unreadable image did not carry its capability diagnostic");
+            "the unopenable image did not carry its capability diagnostic");
 }
 
 // What consolidated metadata is for: the root's copy answers for every child, so discovery reads
@@ -421,7 +421,7 @@ void TestConsolidatedMetadataDiscovery() {
     Require(static_cast<bool>(store), "the consolidated store failed to open");
     auto discovery = XradioProfile().Discover(store.value());
     Require(static_cast<bool>(discovery), "discovery over consolidated metadata reported an error");
-    Require(ReadableImageIds(discovery.value().images) == std::vector<std::string>{"SKY"},
+    Require(OpenableImageIds(discovery.value().images) == std::vector<std::string>{"SKY"},
             "discovery did not find SKY through consolidated metadata");
     Require(transport->nodes_read() == std::set<std::string>{""},
             "discovery read a child node that the root's consolidated copy already answered for");
@@ -435,7 +435,7 @@ void TestConsolidatedMetadataDiscovery() {
     Require(static_cast<bool>(plain_store), "the unconsolidated store failed to open");
     auto plain_discovery = XradioProfile().Discover(plain_store.value());
     Require(static_cast<bool>(plain_discovery), "discovery without consolidated metadata reported an error");
-    Require(ReadableImageIds(plain_discovery.value().images) == ReadableImageIds(discovery.value().images),
+    Require(OpenableImageIds(plain_discovery.value().images) == OpenableImageIds(discovery.value().images),
             "the two metadata layouts did not describe the same images");
     Require(plain->nodes_read().size() > 1,
             "a store without consolidated metadata has to read its children");
@@ -607,7 +607,7 @@ int main() {
         TestOpenableGate();
         TestOneRuleDecidesWhatIsOpenable();
         TestOneRuleDecidesWhatDatasetIsOpenable();
-        TestDefaultImageSkipsUnreadablePreferredImage();
+        TestDefaultImageSkipsUnopenablePreferredImage();
         TestConsolidatedMetadataDiscovery();
         TestADeclaredFlagIsBinding();
         TestAmbiguousFlagsSelectNone();

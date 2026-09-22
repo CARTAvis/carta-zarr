@@ -21,7 +21,7 @@ Result<void> RequireOpenable(const std::vector<ImageEntry>& images, std::string_
     if (found == images.end()) {
         return Error{ErrorCode::not_found, "Image variable was not found", std::string(image_id)};
     }
-    if (found->readable) {
+    if (found->openable) {
         return {};
     }
     // Whatever the profile said about why it would not open this one is more use than a generic

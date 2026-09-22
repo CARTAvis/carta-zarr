@@ -263,10 +263,10 @@ Result<ImageDiscovery> DiscoverImages(const Store& store) {
         });
     };
     sort_images(result.images);
-    const auto readable = std::find_if(result.images.begin(), result.images.end(),
-                                       [](const ImageEntry& image) { return image.readable; });
-    if (readable != result.images.end()) {
-        result.default_image_id = readable->id;
+    const auto openable = std::find_if(result.images.begin(), result.images.end(),
+                                       [](const ImageEntry& image) { return image.openable; });
+    if (openable != result.images.end()) {
+        result.default_image_id = openable->id;
     }
     return result;
 }

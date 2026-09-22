@@ -55,6 +55,14 @@ struct NodeQualification {
     // What there is to say: why a listed variable will not open, or why a node was passed over.
     // Absent for an ordinary image and for a node that is simply not an image.
     std::optional<Diagnostic> diagnostic;
+    // Whether what there is to say is a defect in the store rather than a limit of this library.
+    //
+    // A complex sky-plane variable and an aperture-plane variable are well-formed things this
+    // profile does not open; a variable whose extent disagrees with the coordinate it names, and a
+    // node whose metadata will not parse, are the store being wrong about itself. The probe acts on
+    // the difference: a dataset with nothing openable in it is a store this profile does not match,
+    // unless something in it was malformed, which is a store it matched and found broken.
+    bool malformed = false;
 };
 
 // Asked of every node a listing hands back. A node that will not parse as an array is one of the

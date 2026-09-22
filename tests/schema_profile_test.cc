@@ -293,6 +293,56 @@ void TestOpenableGate() {
     Require(!absent && absent.error().code == ErrorCode::not_found, "an absent variable was not reported as missing");
 }
 
+// Coordinates belong to the dataset and every image references them by dimension name, so an image
+// whose own extent disagrees with the coordinate it names cannot be described with it: it would be
+// reported with three channels' worth of coordinates over seven channels of pixels. It used to be
+// listed as openable and refused when a consumer tried to open it.
+void TestAnImageDisagreeingWithACoordinateIsNotOpenable() {
+    auto nodes = CompleteStore();
+    // Seven channels of pixels where the dataset's frequency coordinate has three.
+    nodes["MODEL"] = NumericArray("[1,7,2,4,5]", R"(["time","frequency","polarization","l","m"])", "float32",
+                                  R"({"units":"Jy/beam"})");
+
+    auto store = Open(nodes);
+    Require(static_cast<bool>(store), "the disagreeing-image store failed to open");
+    const auto profile = XradioProfile();
+    const auto discovery = profile.Discover(store.value());
+    Require(static_cast<bool>(discovery), "discovery failed on the disagreeing-image store");
+    Require(ImageIds(discovery.value().images) == std::vector<std::string>{"SKY", "MODEL"},
+            "the disagreeing image was dropped from the listing rather than listed with its reason");
+    Require(OpenableImageIds(discovery.value().images) == std::vector<std::string>{"SKY"},
+            "an image that will not open was listed as openable");
+    Require(discovery.value().default_image_id == "SKY", "the default image was not the first openable one");
+
+    const auto model = profile.Describe(store.value(), "MODEL");
+    Require(!model && model.error().code == ErrorCode::invalid_metadata,
+            "a store that is wrong about an image was refused as a library limitation");
+}
+
+// Nothing openable is two different answers, and a consumer acts on the difference. A store of
+// well-formed variables this library does not open is a store it is not for; a store whose only
+// image disagrees with its coordinates is one this profile recognised and found broken, and
+// reporting that as "no profile matched" names nothing anyone can act on.
+void TestNothingOpenableIsInvalidOnlyWhenSomethingIsMalformed() {
+    auto capability = CompleteStore();
+    capability["SKY"] = SkyArray("complex64");
+    Require(Probe(capability).kind == SchemaMatchKind::no_match,
+            "a store of variables this library does not open was reported as broken");
+
+    auto malformed = CompleteStore();
+    malformed["SKY"] = NumericArray("[1,7,2,4,5]", R"(["time","frequency","polarization","l","m"])", "float32",
+                                    R"({"units":"Jy/beam"})");
+    // Enumerated before SKY, and a limitation rather than a defect: without the reason for the
+    // refusal being put first, this is the diagnostic a consumer would be shown.
+    malformed["APERTURE"] = NumericArray("[1,3,2,4,5]", R"(["time","frequency","polarization","u","v"])", "float32");
+
+    const auto broken = Probe(malformed);
+    Require(broken.kind == SchemaMatchKind::invalid,
+            "a store whose only image disagrees with a coordinate was reported as unrecognised");
+    Require(broken.diagnostics.front().node_path == "SKY",
+            "the refusal did not lead with the reason the store was refused");
+}
+
 // A group is a node in the hierarchy, and a store is free to hold one. It was being read as an
 // array, failing, and reported as a node that could not be read -- so every store with a nested
 // group carried a diagnostic about a node that was perfectly well formed, and a promotion rule that
@@ -476,10 +526,14 @@ void TestConsolidatedMetadataDiscovery() {
 // The report latches: once a requirement is unmet, later ones are no-ops. A store with two faults
 // is therefore diagnosed once, by the first fault reached -- the behaviour a probe had when every
 // check returned early, now stated somewhere rather than emerging from the control flow.
+//
+// Both faults have to be ones the probe still reaches. A coordinate of the wrong length is not:
+// agreeing with it is part of being an image this profile opens, so a store with one has no
+// openable image and never gets as far as the requirements below.
 void TestFirstFaultIsTheOnlyDiagnostic() {
     auto nodes = CompleteStore();
-    nodes["frequency"] = NumericArray("[7]", R"(["frequency"])");  // wrong length
-    nodes["polarization"] = PolarizationArray("\"float64\"");      // wrong data type
+    nodes["frequency"] = NumericArray("[3]", R"(["x"])");     // right length, names another axis
+    nodes["polarization"] = PolarizationArray("\"float64\"");  // wrong data type
 
     const auto probe = Probe(nodes);
     Require(probe.kind == SchemaMatchKind::invalid, "a store with two faults was not reported as invalid");
@@ -637,6 +691,8 @@ int main() {
         TestIncompleteImageIsNotMatch();
         TestDiscoveryClassifiesVariables();
         TestOpenableGate();
+        TestAnImageDisagreeingWithACoordinateIsNotOpenable();
+        TestNothingOpenableIsInvalidOnlyWhenSomethingIsMalformed();
         TestANestedGroupIsNotABrokenArray();
         TestARefusalCarriesTheVariablesOwnReason();
         TestOneRuleDecidesWhatDatasetIsOpenable();

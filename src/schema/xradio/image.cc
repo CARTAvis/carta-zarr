@@ -97,31 +97,6 @@ std::vector<AxisDescriptor> DescribeAxes(const Store& store, const zarr_metadata
     return axes;
 }
 
-// A dataset stores each coordinate once and every image references it by dimension name, so an
-// image whose own extent disagrees with the coordinate it names cannot be described with it. The
-// probe checks this against the default image, which is the only one it looks at; a dataset may
-// hold several images, and this is where the rest of them are held to the same requirement rather
-// than being described with a coordinate vector of another image's length.
-Result<void> RequireMatchingCoordinates(const Store& store, const zarr_metadata::ArrayMetadata& image,
-                                        std::string_view image_id) {
-    const auto rank = std::min(image.dimension_names.size(), image.shape.size());
-    for (std::size_t axis = 0; axis < rank; ++axis) {
-        const auto& name = image.dimension_names.at(axis);
-        const auto& coordinate = store.ReadArrayMetadata(name);
-        // A coordinate the dataset does not carry at all is the probe's business, and reading one
-        // reports its own absence. This is only about the two disagreeing.
-        if (!coordinate) {
-            continue;
-        }
-        if (coordinate.value().shape.size() != 1 || coordinate.value().shape.front() != image.shape.at(axis)) {
-            return Error{ErrorCode::invalid_metadata,
-                         "Image dimension '" + name + "' is not the length of the coordinate of that name",
-                         std::string(image_id)};
-        }
-    }
-    return {};
-}
-
 Result<std::vector<double>> ReadNumericCoordinate(const Store& store, std::string_view name) {
     const auto& metadata = store.ReadNodeMetadata(name);
     if (!metadata) {
@@ -194,19 +169,34 @@ std::optional<TemporalCoordinate> DescribeTemporalCoordinate(const Store& store,
     return temporal;
 }
 
+// What discovery found, and the one thing beyond the listing that deciding the match needs: whether
+// anything in this store was malformed rather than merely unopenable, and which diagnostic says so.
+//
+// Here rather than on ImageDiscovery because it is this profile reasoning about its own store, and
+// ImageDiscovery is what every profile answers with. A second profile would decide its own match
+// from its own reasons; shaping that for it now would be guessing at a caller that does not exist.
+struct Discovered {
+    ImageDiscovery discovery;
+    std::optional<std::size_t> first_malformation;
+};
+
 // Which variables of this store are images this profile will open. Only InspectImages calls it:
 // deciding whether the store matches means enumerating it, and the answer to both questions comes
 // back together so that nothing has to enumerate twice or cache the result.
-Result<ImageDiscovery> DiscoverImages(const Store& store) {
+Result<Discovered> DiscoverImages(const Store& store) {
     const auto& nodes = store.ListNodes();
     if (!nodes) {
         return nodes.error();
     }
 
-    ImageDiscovery result;
+    Discovered found;
+    ImageDiscovery& result = found.discovery;
     for (const auto& node : nodes.value()) {
         auto qualified = QualifyNode(store, node);
         if (qualified.diagnostic) {
+            if (qualified.malformed && !found.first_malformation) {
+                found.first_malformation = result.diagnostics.size();
+            }
             result.diagnostics.push_back(*qualified.diagnostic);
         }
         if (!qualified.listed) {
@@ -232,7 +222,7 @@ Result<ImageDiscovery> DiscoverImages(const Store& store) {
     if (openable != result.images.end()) {
         result.default_image_id = openable->id;
     }
-    return result;
+    return found;
 }
 
 }  // namespace
@@ -241,11 +231,22 @@ Result<SchemaInspection> InspectImages(const Store& store) {
     ProbeReport report(store, "image dataset");
 
     const auto& root_attributes = store.RootAttributes();
-    auto discovery = DiscoverImages(store);
-    if (!discovery) {
-        return discovery.error();
+    auto found = DiscoverImages(store);
+    if (!found) {
+        return found.error();
     }
-    report.SetDiagnostics(discovery.value().diagnostics);
+    auto& discovery = found.value().discovery;
+
+    // What a refusal is reported as is the first diagnostic, and node enumeration order decides
+    // which that is otherwise -- which is alphabetical, and has nothing to do with why the store was
+    // refused. A store holding an aperture-plane variable and a malformed one would name the
+    // aperture plane.
+    if (!discovery.default_image_id && found.value().first_malformation) {
+        auto& said = discovery.diagnostics;
+        const auto reason = said.begin() + static_cast<std::ptrdiff_t>(*found.value().first_malformation);
+        std::rotate(said.begin(), reason, reason + 1);
+    }
+    report.SetDiagnostics(discovery.diagnostics);
 
     // What was found goes back with what was decided from it, whichever way the decision went.
     const auto finish = [&](SchemaMatchKind kind) -> Result<SchemaInspection> {
@@ -253,18 +254,20 @@ Result<SchemaInspection> InspectImages(const Store& store) {
         if (!probe) {
             return probe.error();
         }
-        return SchemaInspection{std::move(probe.value()), std::move(discovery.value())};
+        return SchemaInspection{std::move(probe.value()), std::move(discovery)};
     };
 
-    if (!discovery.value().default_image_id) {
-        // A valid Zarr store without an image that this profile can open is a non-match. The
-        // discovery diagnostics still explain why variables such as complex or aperture-plane
-        // arrays were not openable.
-        return finish(SchemaMatchKind::no_match);
+    if (!discovery.default_image_id) {
+        // Nothing here this profile will open, and which answer that is depends on why. A store of
+        // complex or aperture-plane variables is well formed and simply not for this library. One
+        // whose images disagree with their coordinates, or whose metadata will not parse, is a
+        // store this profile recognised and found broken -- and reporting that as a non-match tells
+        // whoever picked the file that nothing knew what it was, which is untrue and no use.
+        return finish(found.value().first_malformation ? SchemaMatchKind::invalid : SchemaMatchKind::no_match);
     }
 
     // Once discovery found an openable image, validate the metadata needed by the image reader.
-    const auto& first_image = *discovery.value().default_image_id;
+    const auto& first_image = *discovery.default_image_id;
     const auto& array_result = store.ReadArrayMetadata(first_image);
     if (report.RequireArrayMetadata(array_result, first_image)) {
         RequirePresentCoordinates(report, array_result.value());
@@ -284,10 +287,6 @@ Result<ImageDescriptor> DescribeImage(const Store& store, std::string_view image
     }
     // Parsed already, and the qualification just accepted it: the store hands back what it holds.
     const auto& image = store.ReadArrayMetadata(image_id).value();
-
-    if (auto matching = RequireMatchingCoordinates(store, image, image_id); !matching) {
-        return matching.error();
-    }
 
     ImageDescriptor descriptor;
     descriptor.id = std::string(image_id);

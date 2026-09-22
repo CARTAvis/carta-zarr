@@ -560,11 +560,15 @@ void TestNonDoubleCoordinates(const std::filesystem::path& root) {
             "float32 frequency values were not converted to their double equivalents");
 }
 
-// Coordinates belong to the dataset, not to one image, and discovery lists an image on its
-// dimension names alone. A second image whose own frequency axis is a different length was listed
-// as openable and then described with the dataset's frequency coordinate as though it were its
-// own: an image reporting three channels' worth of coordinates over seven channels of pixels.
-void TestImageDisagreeingWithACoordinate(const std::filesystem::path& root) {
+// What the listing says about an image reaches a consumer opening it.
+//
+// The rule itself -- an image whose own frequency axis is a different length from the dataset's
+// frequency coordinate is not one this profile opens -- is checked against a store in memory, in
+// tests/schema_profile_test.cc. What is checked here is the three steps between that rule and a
+// consumer, which are not a restatement of it: the dataset keeps the listing the probe built, the
+// entry in it says the variable will not open, and OpenImage refuses it with the reason rather than
+// with something of its own.
+void TestADisagreeingImageIsRefusedThroughTheDataset(const std::filesystem::path& root) {
     CreateValidStore(root);
     Write(root / "MODEL" / "zarr.json",
           "{\"shape\":[1,7,2,4,5],\"data_type\":\"float32\",\"chunk_grid\":{\"name\":\"regular\","
@@ -576,15 +580,21 @@ void TestImageDisagreeingWithACoordinate(const std::filesystem::path& root) {
     Require(static_cast<bool>(context), "Context::Create failed for a disagreeing image");
     const auto dataset = carta::zarr::Dataset::Open(context.value(), root.string());
     Require(static_cast<bool>(dataset), "the dataset holding a disagreeing image did not open");
-    Require(ImageIds(dataset.value().descriptor().images) == std::vector<std::string>{"SKY", "MODEL"},
-            "the dataset did not list both images");
 
-    const auto sky = dataset.value().OpenImage("SKY");
-    Require(static_cast<bool>(sky), "the image that agrees with the coordinates did not open");
+    const auto& images = dataset.value().descriptor().images;
+    Require(ImageIds(images) == std::vector<std::string>{"SKY", "MODEL"},
+            "the dataset dropped the disagreeing image instead of listing it with its reason");
+    const auto listed = std::find_if(images.begin(), images.end(),
+                                     [](const auto& image) { return image.id == "MODEL"; });
+    Require(listed != images.end() && !listed->openable,
+            "the dataset offered an image that opening would refuse");
+
+    Require(static_cast<bool>(dataset.value().OpenImage("SKY")),
+            "the image that agrees with the coordinates did not open");
 
     const auto model = dataset.value().OpenImage("MODEL");
     Require(!model && model.error().code == ErrorCode::invalid_metadata,
-            "an image whose frequency axis disagrees with the frequency coordinate was described anyway");
+            "the reason the listing carried did not reach a consumer opening the image");
 }
 
 // A node name is a relative path, and "./MASK_0" names the same node as "MASK_0". Two rules decide
@@ -806,7 +816,7 @@ int main() {
         TestProbingAndOpeningDescribeTheSameDataset(root / "probe-open-agree");
         TestCoordinateCompletion(root / "coordinates");
         TestNonDoubleCoordinates(root / "float32-coordinates");
-        TestImageDisagreeingWithACoordinate(root / "coordinate-disagreement");
+        TestADisagreeingImageIsRefusedThroughTheDataset(root / "coordinate-disagreement");
         TestDiscoveryIgnoresNameAllowlist(root / "unlisted-image");
         TestMetadataCache(root / "metadata-cache");
         TestDiscoveryDoesNotDescendIntoArrayChunks(root / "array-chunks");

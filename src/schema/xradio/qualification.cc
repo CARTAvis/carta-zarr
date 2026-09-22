@@ -10,6 +10,7 @@
 #include "flag.h"
 
 #include <algorithm>
+#include <cstddef>
 #include <string>
 
 namespace carta::zarr::internal::xradio {
@@ -35,6 +36,32 @@ bool IsGroup(const Store& store, std::string_view node) {
     return metadata && metadata.value().is_object() && metadata.value().value("node_type", "") == "group";
 }
 
+// A dataset stores each coordinate once and every image references it by dimension name, so an
+// image whose own extent disagrees with the coordinate it names cannot be described with it -- it
+// would be reported with another image's coordinate vector, three channels' worth over seven
+// channels of pixels.
+//
+// A coordinate the dataset does not carry at all is the probe's business rather than this one's:
+// every image references it, so its absence closes the dataset instead of one variable.
+std::optional<Diagnostic> DisagreementWithCoordinates(const Store& store,
+                                                      const zarr_metadata::ArrayMetadata& image,
+                                                      std::string_view node) {
+    const auto rank = std::min(image.dimension_names.size(), image.shape.size());
+    for (std::size_t axis = 0; axis < rank; ++axis) {
+        const auto& name = image.dimension_names.at(axis);
+        const auto& coordinate = store.ReadArrayMetadata(name);
+        if (!coordinate) {
+            continue;
+        }
+        if (coordinate.value().shape.size() != 1 || coordinate.value().shape.front() != image.shape.at(axis)) {
+            return Diagnostic{"invalid_metadata",
+                              "Image dimension '" + name + "' is not the length of the coordinate of that name",
+                              std::string(node)};
+        }
+    }
+    return std::nullopt;
+}
+
 }  // namespace
 
 NodeQualification QualifyNode(const Store& store, std::string_view node) {
@@ -54,7 +81,7 @@ NodeQualification QualifyNode(const Store& store, std::string_view node) {
         // Not a refusal. A malformed array elsewhere in a store does not stop the images that
         // parsed from opening.
         return NodeQualification{false, false,
-                                 Diagnostic{"unreadable_array", metadata.error().message, std::string(node)}};
+                                 Diagnostic{"unreadable_array", metadata.error().message, std::string(node)}, true};
     }
 
     const auto& array = metadata.value();
@@ -63,18 +90,23 @@ NodeQualification QualifyNode(const Store& store, std::string_view node) {
     }
 
     if (HasAllAxes(array, kSkyAxes)) {
-        if (zarr_metadata::IsRealDataType(array.data_type)) {
-            return NodeQualification{true, true, std::nullopt};
+        if (!zarr_metadata::IsRealDataType(array.data_type)) {
+            return NodeQualification{
+                true, false,
+                Diagnostic{"unsupported_data_type", "Complex sky-plane variables are not openable", std::string(node)},
+                false};
         }
-        return NodeQualification{
-            true, false,
-            Diagnostic{"unsupported_data_type", "Complex sky-plane variables are not openable", std::string(node)}};
+        if (auto disagreement = DisagreementWithCoordinates(store, array, node); disagreement) {
+            return NodeQualification{true, false, std::move(disagreement), true};
+        }
+        return NodeQualification{true, true, std::nullopt, false};
     }
 
     if (HasAllAxes(array, kApertureAxes)) {
         return NodeQualification{true, false,
                                  Diagnostic{"unsupported_coordinate_plane",
-                                            "Aperture-plane variables are not openable", std::string(node)}};
+                                            "Aperture-plane variables are not openable", std::string(node)},
+                                 false};
     }
 
     // A coordinate array, a normalization variable, a beam table: not an image, and nothing to say.
@@ -99,7 +131,11 @@ Result<void> RequireQualified(const Store& store, std::string_view image_id) {
         return {};
     }
     if (qualified.listed) {
-        return Error{ErrorCode::unsupported_data_type, qualified.diagnostic->message, std::string(image_id)};
+        // The code comes from the refusal rather than from the asking. A store that is wrong about
+        // an image and a library that does not open one are different answers, and a consumer that
+        // shows one to whoever picked the file acts on the difference.
+        return Error{qualified.malformed ? ErrorCode::invalid_metadata : ErrorCode::unsupported_data_type,
+                     qualified.diagnostic->message, std::string(image_id)};
     }
     if (qualified.diagnostic) {
         // The node is there and will not parse. It says what is wrong with it rather than being

@@ -6,6 +6,7 @@
 
 #include "qualification.h"
 
+#include "../../zarr/array_metadata.h"
 #include "flag.h"
 
 #include <algorithm>
@@ -26,10 +27,25 @@ bool HasAllAxes(const zarr_metadata::ArrayMetadata& metadata, const std::array<s
     });
 }
 
+// A node that says it is a group, asked only once parsing it as an array has already failed. Read
+// from the node's own document rather than from the message that parse produced, which says "Zarr
+// node is not an array" for a group and for several other things that are not one.
+bool IsGroup(const Store& store, std::string_view node) {
+    const auto& metadata = store.ReadNodeMetadata(node);
+    return metadata && metadata.value().is_object() && metadata.value().value("node_type", "") == "group";
+}
+
 }  // namespace
 
-NodeQualification QualifyNode(const Result<zarr::ArrayMetadata>& metadata, std::string_view node) {
+NodeQualification QualifyNode(const Store& store, std::string_view node) {
+    const auto& metadata = store.ReadArrayMetadata(node);
     if (!metadata) {
+        if (IsGroup(store, node)) {
+            // A group is a node in the hierarchy like any other, and nothing is wrong with it: it
+            // failed to parse as an array because it never claimed to be one. Passed over, the way
+            // everything else that is not an image is passed over.
+            return NodeQualification{};
+        }
         // Said rather than passed over, because this is where a node leaves the listing: nothing
         // here knows whether it was an image, a coordinate or something else in the directory, so a
         // store whose sky variable lands here reports no images at all. Without this, that reads as
@@ -37,7 +53,8 @@ NodeQualification QualifyNode(const Result<zarr::ArrayMetadata>& metadata, std::
         //
         // Not a refusal. A malformed array elsewhere in a store does not stop the images that
         // parsed from opening.
-        return NodeQualification{false, false, Diagnostic{"unreadable_array", metadata.error().message, std::string(node)}};
+        return NodeQualification{false, false,
+                                 Diagnostic{"unreadable_array", metadata.error().message, std::string(node)}};
     }
 
     const auto& array = metadata.value();
@@ -77,22 +94,21 @@ Result<void> RequireQualified(const Store& store, std::string_view image_id) {
         return Error{ErrorCode::not_found, "Image variable was not found", std::string(image_id)};
     }
 
-    const auto& metadata = store.ReadArrayMetadata(image_id);
-    const auto qualified = QualifyNode(metadata, image_id);
+    const auto qualified = QualifyNode(store, image_id);
     if (qualified.openable) {
         return {};
     }
     if (qualified.listed) {
         return Error{ErrorCode::unsupported_data_type, qualified.diagnostic->message, std::string(image_id)};
     }
-
-    // A node that is there and will not parse says so, rather than being reported as a name the
-    // dataset does not have. Everything else here is a node that is not an image at all -- the flag
-    // beside one, the coordinate under it, a beam table -- and a caller that named one asked for an
-    // image this dataset does not have.
-    if (!metadata) {
-        return metadata.error();
+    if (qualified.diagnostic) {
+        // The node is there and will not parse. It says what is wrong with it rather than being
+        // reported as a name the dataset does not have.
+        return store.ReadArrayMetadata(image_id).error();
     }
+
+    // Not an image, and nothing wrong with it: the flag beside one, the coordinate under it, a beam
+    // table, a group. A caller that named one asked for an image this dataset does not have.
     return Error{ErrorCode::not_found, "Image variable was not found", std::string(image_id)};
 }
 

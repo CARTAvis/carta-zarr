@@ -293,6 +293,31 @@ void TestOpenableGate() {
     Require(!absent && absent.error().code == ErrorCode::not_found, "an absent variable was not reported as missing");
 }
 
+// A group is a node in the hierarchy, and a store is free to hold one. It was being read as an
+// array, failing, and reported as a node that could not be read -- so every store with a nested
+// group carried a diagnostic about a node that was perfectly well formed, and a promotion rule that
+// counted such a diagnostic would close a store over it.
+void TestANestedGroupIsNotABrokenArray() {
+    auto nodes = CompleteStore();
+    nodes["SUBDIR"] = RootGroup(false);
+
+    auto store = Open(nodes);
+    Require(static_cast<bool>(store), "the nested-group store failed to open");
+    const auto profile = XradioProfile();
+    const auto discovery = profile.Discover(store.value());
+    Require(static_cast<bool>(discovery), "discovery failed on the nested-group store");
+    Require(!HasDiagnostic(discovery.value().diagnostics, "unreadable_array"),
+            "a valid group was diagnosed as an array that could not be read");
+    Require(ImageIds(discovery.value().images) == std::vector<std::string>{"SKY"},
+            "a group was listed among the dataset's images");
+
+    // Naming one is naming something that is not an image, which is the answer a flag and a
+    // coordinate get as well.
+    const auto group = profile.Describe(store.value(), "SUBDIR");
+    Require(!group && group.error().code == ErrorCode::not_found,
+            "a group was refused as a broken array rather than as something that is not an image");
+}
+
 // A refusal names the variable's own reason rather than answering generically.
 //
 // This used to be what two copies of the openability rule disagreed about: the facade passed the
@@ -612,6 +637,7 @@ int main() {
         TestIncompleteImageIsNotMatch();
         TestDiscoveryClassifiesVariables();
         TestOpenableGate();
+        TestANestedGroupIsNotABrokenArray();
         TestARefusalCarriesTheVariablesOwnReason();
         TestOneRuleDecidesWhatDatasetIsOpenable();
         TestDefaultImageSkipsUnopenablePreferredImage();

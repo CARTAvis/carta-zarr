@@ -205,7 +205,7 @@ Result<ImageDiscovery> DiscoverImages(const Store& store) {
 
     ImageDiscovery result;
     for (const auto& node : nodes.value()) {
-        auto qualified = QualifyNode(store.ReadArrayMetadata(node), node);
+        auto qualified = QualifyNode(store, node);
         if (qualified.diagnostic) {
             result.diagnostics.push_back(*qualified.diagnostic);
         }

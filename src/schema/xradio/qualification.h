@@ -20,7 +20,6 @@
 // 0006.
 
 #include "../../store.h"
-#include "../../zarr/array_metadata.h"
 
 #include "carta-zarr/descriptor.h"
 #include "carta-zarr/result.h"
@@ -58,9 +57,10 @@ struct NodeQualification {
     std::optional<Diagnostic> diagnostic;
 };
 
-// Asked of every node a listing hands back. The metadata is passed as it came from the store, since
-// a node that will not parse is one of the answers rather than a failure to arrive at one.
-NodeQualification QualifyNode(const Result<zarr::ArrayMetadata>& metadata, std::string_view node);
+// Asked of every node a listing hands back. A node that will not parse as an array is one of the
+// answers rather than a failure to arrive at one, and telling a group apart from a broken array
+// takes a second look at the node, so this reads the store rather than being handed a parse.
+NodeQualification QualifyNode(const Store& store, std::string_view node);
 
 // The precondition of describing an image, as the error a caller should report when it is not met.
 //

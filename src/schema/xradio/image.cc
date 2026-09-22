@@ -14,6 +14,7 @@
 #include "linear_axis.h"
 #include "observation.h"
 #include "probe_report.h"
+#include "qualification.h"
 
 #include <carta-zarr/descriptor.h>
 
@@ -30,7 +31,6 @@ namespace {
 namespace zarr_metadata = ::carta::zarr::internal::zarr;
 
 constexpr std::string_view kVersion = "1.2";
-constexpr std::array<std::string_view, 5> kSkyAxes{"time", "frequency", "polarization", "l", "m"};
 
 int KnownImageRank(std::string_view image_id) {
     static constexpr std::array<std::string_view, 6> known{
@@ -52,20 +52,6 @@ void RequirePresentCoordinates(ProbeReport& report, const zarr_metadata::ArrayMe
 void AppendDiagnostics(ImageDescriptor& descriptor, std::vector<Diagnostic> diagnostics) {
     descriptor.diagnostics.insert(descriptor.diagnostics.end(), std::make_move_iterator(diagnostics.begin()),
                                   std::make_move_iterator(diagnostics.end()));
-}
-
-constexpr std::array<std::string_view, 5> kApertureAxes{"time", "frequency", "polarization", "u", "v"};
-
-// An image carries every axis of its plane. XRADIO writes optional coordinate arrays that share the
-// image's spatial axes without being images at all: right_ascension and declination are float64 over
-// (l, m) and carry no type attribute, so a rule keyed only on "has l and m" mistakes them for
-// openable images. Matching the whole axis set also drops the (time, frequency, polarization)
-// normalization variables and the beam fit parameters, and it means the optional coordinates are
-// never read.
-bool HasAllAxes(const zarr_metadata::ArrayMetadata& metadata, const std::array<std::string_view, 5>& axes) {
-    return std::all_of(axes.begin(), axes.end(), [&metadata](const auto axis) {
-        return zarr_metadata::FindDimensionIndex(metadata, axis).has_value();
-    });
 }
 
 std::vector<std::string> FindDataGroups(const nlohmann::json& root_attributes, std::string_view image_id) {
@@ -219,40 +205,18 @@ Result<ImageDiscovery> DiscoverImages(const Store& store) {
 
     ImageDiscovery result;
     for (const auto& node : nodes.value()) {
-        const auto& array_result = store.ReadArrayMetadata(node);
-        if (!array_result) {
-            // Said rather than passed over, because this is where a node leaves the listing: the
-            // check runs before the array is classified, so nothing here knows whether it was an
-            // image, a coordinate or something else in the directory, and a store whose sky
-            // variable lands here reports no images at all. Without this, that reads as a store
-            // this profile does not recognise, with nothing to say which node went missing or why.
-            //
-            // Not a refusal. A malformed array elsewhere in a store does not stop the images that
-            // parsed from opening, so it is a diagnostic and the classification is unchanged.
-            result.diagnostics.push_back(
-                Diagnostic{"unreadable_array", array_result.error().message, node});
+        auto qualified = QualifyNode(store.ReadArrayMetadata(node), node);
+        if (qualified.diagnostic) {
+            result.diagnostics.push_back(*qualified.diagnostic);
+        }
+        if (!qualified.listed) {
             continue;
         }
-        const auto& array = array_result.value();
-        if (IsFlag(array)) {
-            continue;
+        std::vector<Diagnostic> said;
+        if (qualified.diagnostic) {
+            said.push_back(std::move(*qualified.diagnostic));
         }
-
-        if (HasAllAxes(array, kSkyAxes)) {
-            if (zarr_metadata::IsRealDataType(array.data_type)) {
-                result.images.push_back(ImageEntry{node, true, {}});
-            } else {
-                const Diagnostic diagnostic{"unsupported_data_type", "Complex sky-plane variables are not openable",
-                                            node};
-                result.images.push_back(ImageEntry{node, false, {diagnostic}});
-                result.diagnostics.push_back(diagnostic);
-            }
-        } else if (HasAllAxes(array, kApertureAxes)) {
-            const Diagnostic diagnostic{"unsupported_coordinate_plane", "Aperture-plane variables are not openable",
-                                        node};
-            result.images.push_back(ImageEntry{node, false, {diagnostic}});
-            result.diagnostics.push_back(diagnostic);
-        }
+        result.images.push_back(ImageEntry{node, qualified.openable, std::move(said)});
     }
 
     const auto sort_images = [](std::vector<ImageEntry>& images) {
@@ -312,16 +276,14 @@ Result<SchemaInspection> InspectImages(const Store& store) {
 }
 
 Result<ImageDescriptor> DescribeImage(const Store& store, std::string_view image_id) {
-    const auto& array_result = store.ReadArrayMetadata(image_id);
-    if (!array_result) {
-        return array_result.error();
+    // Asked rather than decided again. This used to classify the variable itself, on a weaker rule
+    // than the one the listing was built with -- l and m rather than the whole axis set -- so the
+    // two could disagree about what an image is.
+    if (auto qualified = RequireQualified(store, image_id); !qualified) {
+        return qualified.error();
     }
-    const auto& image = array_result.value();
-    if (IsFlag(image) || !zarr_metadata::FindDimensionIndex(image, "l") ||
-        !zarr_metadata::FindDimensionIndex(image, "m") || !zarr_metadata::IsRealDataType(image.data_type)) {
-        return Error{ErrorCode::unsupported_data_type, "Image variable is not an openable sky-plane image",
-                     std::string(image_id)};
-    }
+    // Parsed already, and the qualification just accepted it: the store hands back what it holds.
+    const auto& image = store.ReadArrayMetadata(image_id).value();
 
     if (auto matching = RequireMatchingCoordinates(store, image, image_id); !matching) {
         return matching.error();

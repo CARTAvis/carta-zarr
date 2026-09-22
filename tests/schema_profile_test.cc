@@ -293,30 +293,30 @@ void TestOpenableGate() {
     Require(!absent && absent.error().code == ErrorCode::not_found, "an absent variable was not reported as missing");
 }
 
-// One rule decides what is openable, and both sides of the library ask it. Dataset::OpenImage asks
-// it of the listing the dataset kept from opening; SchemaProfile::Describe asks it of a store it
-// has just inspected. They used to be two copies, and they disagreed about the message -- the
-// facade passed the variable's own diagnostic through and the profile answered generically -- so a
-// consumer got a worse explanation depending on which way it had arrived.
-void TestOneRuleDecidesWhatIsOpenable() {
+// A refusal names the variable's own reason rather than answering generically.
+//
+// This used to be what two copies of the openability rule disagreed about: the facade passed the
+// listing's diagnostic through and the profile answered "not openable by this profile", so a
+// consumer got a worse explanation depending on which way it had arrived. The copies are one
+// decision now, and what is asserted here is the half that a single rule does not guarantee on its
+// own -- that the reason survives the trip from the listing to the refusal.
+void TestARefusalCarriesTheVariablesOwnReason() {
     auto nodes = CompleteStore();
     nodes["COMPLEX"] = SkyArray("complex64");
+    // Valid JSON, and not array metadata: node_type says array and there is no shape.
+    nodes["BROKEN"] = R"({"zarr_format":3,"node_type":"array","data_type":"float32"})";
 
     auto store = Open(nodes);
-    Require(static_cast<bool>(store), "the openable-rule store failed to open");
-    const auto discovery = XradioProfile().Discover(store.value());
-    Require(static_cast<bool>(discovery), "discovery failed on the openable-rule store");
+    Require(static_cast<bool>(store), "the refusal store failed to open");
+    const auto profile = XradioProfile();
+    const auto discovery = profile.Discover(store.value());
+    Require(static_cast<bool>(discovery), "discovery failed on the refusal store");
     const auto& images = discovery.value().images;
 
-    Require(static_cast<bool>(carta::zarr::internal::RequireOpenable(images, "SKY")),
-            "an openable image was refused");
-
-    const auto complex = carta::zarr::internal::RequireOpenable(images, "COMPLEX");
+    const auto complex = profile.Describe(store.value(), "COMPLEX");
     Require(!complex && complex.error().code == ErrorCode::unsupported_data_type,
             "a listed but unopenable variable should be refused as an unsupported data type");
 
-    // What the profile said about this variable, rather than a generic refusal. This is the half
-    // the two copies used to differ on.
     const auto listed = std::find_if(images.begin(), images.end(),
                                      [](const auto& image) { return image.id == "COMPLEX"; });
     Require(listed != images.end() && !listed->diagnostics.empty(),
@@ -324,9 +324,16 @@ void TestOneRuleDecidesWhatIsOpenable() {
     Require(complex.error().message == listed->diagnostics.front().message,
             "the refusal did not carry the variable's own diagnostic");
 
-    const auto absent = carta::zarr::internal::RequireOpenable(images, "NOPE");
+    const auto absent = profile.Describe(store.value(), "NOPE");
     Require(!absent && absent.error().code == ErrorCode::not_found,
-            "a variable that was never listed should be reported as missing, not as unopenable");
+            "a variable that is not there should be reported as missing, not as unopenable");
+
+    // A node that is there and will not parse is neither of those. It used to answer "not found",
+    // because the rule ran against a listing the node had already dropped out of, which is a
+    // different thing from a name the dataset does not have.
+    const auto broken = profile.Describe(store.value(), "BROKEN");
+    Require(!broken && broken.error().code == ErrorCode::invalid_metadata,
+            "a node that is present and will not parse was reported as a missing variable");
 }
 
 // The dataset-level counterpart, and the three answers it has to keep apart. This used to be
@@ -605,7 +612,7 @@ int main() {
         TestIncompleteImageIsNotMatch();
         TestDiscoveryClassifiesVariables();
         TestOpenableGate();
-        TestOneRuleDecidesWhatIsOpenable();
+        TestARefusalCarriesTheVariablesOwnReason();
         TestOneRuleDecidesWhatDatasetIsOpenable();
         TestDefaultImageSkipsUnopenablePreferredImage();
         TestConsolidatedMetadataDiscovery();

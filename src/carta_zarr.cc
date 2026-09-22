@@ -327,12 +327,6 @@ Result<Image> Dataset::OpenImage(std::string_view image_id) const {
         }
         std::scoped_lock const lock(_impl->mutex);
         const std::string image_name(image_id);
-        // Asked of the listing this dataset kept, rather than by enumerating the store again. It is
-        // the same question and the same answer the profile would give, which is why it is the
-        // profile's function and not a second copy of the rule here.
-        if (auto openable = internal::RequireOpenable(_impl->descriptor.images, image_name); !openable) {
-            return openable.error();
-        }
         const auto make_image = [&](const ImageDescriptor& descriptor) {
             // The descriptor already carries the stored layout; the geometry is that layout permuted
             // into logical order, so it is derived here rather than read again.
@@ -344,7 +338,10 @@ Result<Image> Dataset::OpenImage(std::string_view image_id) const {
         if (cached != _impl->image_descriptors.end()) {
             return make_image(cached->second);
         }
-        auto image_descriptor = _impl->profile.DescribeVerified(*_impl->store, image_id);
+        // Describing asks the profile whether it will open this variable, so there is no gate here
+        // ahead of it. The listing this dataset kept would answer the same question, and answering
+        // it in both places is what let a listing say one thing and opening another.
+        auto image_descriptor = _impl->profile.Describe(*_impl->store, image_id);
         if (!image_descriptor) {
             return image_descriptor.error();
         }

@@ -37,14 +37,6 @@ struct SchemaInspection {
     ImageDiscovery discovery;
 };
 
-// Whether a profile will open this image, as the error a caller should report when it will not.
-//
-// Shared because the facade asks it of a descriptor it already holds and a profile asks it of a
-// store it has just inspected, and the two must give the same answer. A variable that was listed
-// but will not open is a different answer from one that was never seen, and a caller can act on the
-// difference.
-Result<void> RequireOpenable(const std::vector<ImageEntry>& images, std::string_view image_id);
-
 // What a probe's refusal should be reported as.
 //
 // A profile that rejects a store has already worked out why, often down to the attribute, and a
@@ -54,8 +46,8 @@ Result<void> RequireOpenable(const std::vector<ImageEntry>& images, std::string_
 std::string RejectionMessage(const std::vector<Diagnostic>& diagnostics, std::string_view fallback);
 
 // Whether a probe's answer is a dataset that can be opened, as the error a caller should report
-// when it is not. The counterpart of RequireOpenable one level up: that one is about an image
-// within a dataset, this one about the dataset.
+// when it is not. The counterpart, one level up, of the question a profile answers about a single
+// image within a dataset: that one is about an image, this one about the dataset holding it.
 //
 // Three ways it is not, and they are three different errors: nothing matched, something matched and
 // was malformed, and a profile matched a store that has no images in it. Each used to be written
@@ -86,13 +78,13 @@ public:
     Result<SchemaProbeResult> Probe(const Store& store) const;
     Result<ImageDiscovery> Discover(const Store& store) const;
 
-    // Inspects the store first, to ask whether the profile will open this image at all.
+    // One of these rather than a verified and an unverified form. Describing an image establishes
+    // its own precondition now, against the one variable it was handed rather than by enumerating
+    // the store, so there is no longer a caller that has established it first and none that has to
+    // be told to.
     Result<ImageDescriptor> Describe(const Store& store, std::string_view image_id) const;
-    // For a caller that has already established openability against a discovery it kept -- which is
-    // what Dataset does, so that opening an image does not re-enumerate the store.
-    Result<ImageDescriptor> DescribeVerified(const Store& store, std::string_view image_id) const;
-    // Verified in the same sense: an Image handle only exists for a variable Dataset::OpenImage
-    // already accepted, so asking again would enumerate the whole store on every call.
+    // Asks nothing about openability, deliberately: an Image handle exists only for a variable
+    // Dataset::OpenImage already opened, so there is nothing left here to establish.
     Result<std::vector<Beam>> ReadBeams(const Store& store, std::string_view image_id) const;
 
 private:

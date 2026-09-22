@@ -23,6 +23,14 @@
 
 namespace carta::zarr::internal {
 
+// Requires a layout of the descriptor's own rank: every storage_index must index its chunk_shape,
+// and its shard_shape too when it is sharded. ParseArrayMetadata guarantees this for any array that
+// parsed, so a mismatch is a caller that built a layout some other way -- `at` throws, and
+// Dataset::OpenImage is wrapped in Guarded, so it reaches that caller as invalid_metadata.
+//
+// Said with `at` rather than filled in. Falling back to the axis length is what this used to do, and
+// it turned "no layout here" into a geometry claiming one chunk covers the whole image -- a lie a
+// consumer cannot tell from an image that really is stored that way.
 inline ChunkGeometry BuildChunkGeometry(const ImageDescriptor& descriptor, const StorageLayout& layout) {
     ChunkGeometry geometry;
     geometry.sharded = layout.sharded;
@@ -35,13 +43,13 @@ inline ChunkGeometry BuildChunkGeometry(const ImageDescriptor& descriptor, const
     for (std::size_t logical = 0; logical < rank; ++logical) {
         const auto& axis = descriptor.axes.at(logical);
         const auto stored = axis.storage_index;
-        const auto chunk =
-            stored < layout.chunk_shape.size() ? layout.chunk_shape.at(stored) : axis.length;
-        const auto shard =
-            stored < layout.shard_shape.size() ? layout.shard_shape.at(stored) : chunk;
+        const auto chunk = layout.chunk_shape.at(stored);
+        const auto shard = layout.sharded ? layout.shard_shape.at(stored) : chunk;
         geometry.chunk_shape.at(logical) = chunk;
-        geometry.shard_shape.at(logical) = shard == 0 ? chunk : shard;
-        geometry.grid_shape.at(logical) = chunk == 0 ? 0 : (axis.length + chunk - 1) / chunk;
+        geometry.shard_shape.at(logical) = shard;
+        // Both extents are positive by the same guarantee, so neither zero this divides by nor the
+        // shard of no extent the line above used to substitute for can arrive.
+        geometry.grid_shape.at(logical) = (axis.length + chunk - 1) / chunk;
         if (stored != logical) {
             geometry.transpose_required = true;
         }

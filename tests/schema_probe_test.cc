@@ -402,12 +402,11 @@ void TestReferenceFixture() {
             "time coordinate values or attributes were not preserved");
 
     // The generator writes SKY as unsharded zstd chunks of (1, 1, 1, 2, 5) in stored axis order.
-    Require(desc.storage.has_value(), "StorageLayout missing in reference fixture");
-    Require(!desc.storage->sharded, "reference fixture was reported as sharded");
-    Require(desc.storage->shard_shape.empty(), "unsharded reference fixture reported a shard shape");
-    Require((desc.storage->chunk_shape == std::vector<std::uint64_t>{1, 1, 1, 2, 5}),
+    Require(!desc.storage.sharded, "reference fixture was reported as sharded");
+    Require(desc.storage.shard_shape.empty(), "unsharded reference fixture reported a shard shape");
+    Require((desc.storage.chunk_shape == std::vector<std::uint64_t>{1, 1, 1, 2, 5}),
             "reference fixture chunk shape changed");
-    Require(desc.storage->compressor == "zstd", "reference fixture compressor was not reported as zstd");
+    Require(desc.storage.compressor == "zstd", "reference fixture compressor was not reported as zstd");
 
     const auto beams = image.value().ReadBeams();
     if (!beams) {
@@ -632,6 +631,46 @@ void TestANodeNameSpelledWithADotIsTheSameNode(const std::filesystem::path& root
                 (read ? "" : read.error().message));
 }
 
+
+// A sharding codec whose inner chunk shape describes nothing leaves the array unreadable, and this
+// pins where that is noticed: at the parse, not after it.
+//
+// It used to be noticed after. ParseStorageLayout refused such an array, DescribeImage dropped the
+// refusal, and the image opened reporting a chunk geometry synthesised from its own shape -- one
+// chunk covering the whole image, unsharded, uncompressed, with no diagnostic. That geometry is
+// what the reduction plans its blocks from, so a walk would have taken the cube as a single chunk.
+//
+// Now the array does not parse, so it never becomes an image. What is asserted here is that this
+// does not happen in silence: the store reports no images, and the reason names the node.
+void TestAShardingCodecThatDescribesNoChunks(const std::filesystem::path& root) {
+    Write(root / "zarr.json", RootMetadata());
+    Write(root / "SKY" / "zarr.json",
+          "{\"shape\":[1,3,2,4,5],\"data_type\":\"float32\",\"chunk_grid\":{\"name\":\"regular\","
+          "\"configuration\":{\"chunk_shape\":[1,3,2,4,5]}},\"attributes\":{\"units\":\"Jy/beam\"},"
+          "\"codecs\":[{\"name\":\"sharding_indexed\",\"configuration\":{\"chunk_shape\":[1,1,1,0,5],"
+          "\"codecs\":[{\"name\":\"bytes\"},{\"name\":\"zstd\"}]}}],"
+          "\"dimension_names\":[\"time\",\"frequency\",\"polarization\",\"l\",\"m\"],"
+          "\"zarr_format\":3,\"node_type\":\"array\"}");
+    Write(root / "time" / "zarr.json", NumericArray("[1]", R"(["time"])"));
+    Write(root / "frequency" / "zarr.json", NumericArray("[3]", R"(["frequency"])"));
+    Write(root / "polarization" / "zarr.json", PolarizationArray());
+    Write(root / "l" / "zarr.json", NumericArray("[4]", R"(["l"])"));
+    Write(root / "m" / "zarr.json", NumericArray("[5]", R"(["m"])"));
+
+    const auto probe = carta::zarr::ProbeSchema(root.string(), carta::zarr::kXradioImageSchema);
+    Require(static_cast<bool>(probe), "probing the store failed outright");
+    Require(probe.value().kind != SchemaMatchKind::match,
+            "a store whose only image cannot be parsed was still matched");
+
+    const auto said = std::find_if(probe.value().diagnostics.begin(), probe.value().diagnostics.end(),
+                                   [](const carta::zarr::Diagnostic& diagnostic) {
+                                       return diagnostic.code == "unreadable_array";
+                                   });
+    Require(said != probe.value().diagnostics.end(),
+            "the store lost its image without saying which node or why");
+    Require(said->node_path.find("SKY") != std::string::npos,
+            "the diagnostic did not name the node that was skipped");
+}
 // A sharded array grids its store by shard; the inner chunk shape lives in the sharding codec.
 // An image dataset without SKY is valid: discovery identifies the dataset from its image variables.
 // An image that names a beam table is an image with a beam. When the labels that say which
@@ -745,12 +784,11 @@ void TestShardedStorageLayout(const std::filesystem::path& root) {
     Require(static_cast<bool>(image), "OpenImage failed for the sharded store");
 
     const auto& storage = image.value().descriptor().storage;
-    Require(storage.has_value(), "sharded store reported no StorageLayout");
-    Require(storage->sharded, "sharded store was not reported as sharded");
-    Require((storage->shard_shape == std::vector<std::uint64_t>{1, 3, 2, 4, 5}), "shard shape was not reported");
-    Require((storage->chunk_shape == std::vector<std::uint64_t>{1, 1, 1, 2, 5}),
+    Require(storage.sharded, "sharded store was not reported as sharded");
+    Require((storage.shard_shape == std::vector<std::uint64_t>{1, 3, 2, 4, 5}), "shard shape was not reported");
+    Require((storage.chunk_shape == std::vector<std::uint64_t>{1, 1, 1, 2, 5}),
             "inner chunk shape was not taken from the sharding codec");
-    Require(storage->compressor == "blosc", "compressor inside the sharding codec was not reported");
+    Require(storage.compressor == "blosc", "compressor inside the sharding codec was not reported");
 }
 
 }  // namespace
@@ -775,6 +813,7 @@ int main() {
         TestImageDatasetWithoutSky(root / "image-no-sky");
         TestImageDatasetMissingTimeCoordinate(root / "image-no-time");
         TestShardedStorageLayout(root / "sharded");
+        TestAShardingCodecThatDescribesNoChunks(root / "unusable-shard");
         TestEmptyAndOversizedMetadata(root / "metadata-bytes");
         TestBeamTableWithUnreadableLabels(root / "beam-labels");
         TestANodeNameSpelledWithADotIsTheSameNode(root / "dotted-node");

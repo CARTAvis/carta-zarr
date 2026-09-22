@@ -132,10 +132,9 @@ void TestTemporalAndStorage(const carta::zarr::ImageDescriptor& sky) {
     Require(sky.temporal->scale == "UTC", "the time scale was not normalized");
     Require(sky.temporal->format == "MJD", "the time format was not normalized");
 
-    Require(sky.storage.has_value(), "no storage layout was reported");
-    Require(!sky.storage->sharded, "XRADIO's zarr writer started sharding");
-    Require(sky.storage->compressor == "zstd", "XRADIO's zarr writer changed compressor");
-    Require((sky.storage->chunk_shape == std::vector<std::uint64_t>{1, 2, 3, 5, 4}),
+    Require(!sky.storage.sharded, "XRADIO's zarr writer started sharding");
+    Require(sky.storage.compressor == "zstd", "XRADIO's zarr writer changed compressor");
+    Require((sky.storage.chunk_shape == std::vector<std::uint64_t>{1, 2, 3, 5, 4}),
             "the chunk shape changed; it is reported in stored axis order");
 }
 

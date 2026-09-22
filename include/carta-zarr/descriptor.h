@@ -278,7 +278,10 @@ struct ImageDescriptor {
     std::optional<PolarizationCoordinate> polarization;
     std::optional<TemporalCoordinate> temporal;
     std::optional<ObservationInfo> observation;
-    std::optional<StorageLayout> storage;
+    // Always present. Every array this library opens declared a chunk grid it could read, so there
+    // is no image whose layout is unknown -- one whose sharding codec does not describe its chunks
+    // is refused rather than opened with the question left open.
+    StorageLayout storage;
     std::vector<Diagnostic> diagnostics;
 };
 

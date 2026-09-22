@@ -221,6 +221,16 @@ Result<ImageDiscovery> DiscoverImages(const Store& store) {
     for (const auto& node : nodes.value()) {
         const auto& array_result = store.ReadArrayMetadata(node);
         if (!array_result) {
+            // Said rather than passed over, because this is where a node leaves the listing: the
+            // check runs before the array is classified, so nothing here knows whether it was an
+            // image, a coordinate or something else in the directory, and a store whose sky
+            // variable lands here reports no images at all. Without this, that reads as a store
+            // this profile does not recognise, with nothing to say which node went missing or why.
+            //
+            // Not a refusal. A malformed array elsewhere in a store does not stop the images that
+            // parsed from opening, so it is a diagnostic and the classification is unchanged.
+            result.diagnostics.push_back(
+                Diagnostic{"unreadable_array", array_result.error().message, node});
             continue;
         }
         const auto& array = array_result.value();
@@ -361,6 +371,8 @@ Result<ImageDescriptor> DescribeImage(const Store& store, std::string_view image
         return frequency_result.error();
     }
     frequency_values = std::move(frequency_result.value());
+    // Absent because the image has none -- a continuum image has no frequency coordinate -- not
+    // because describing it failed. Same for the temporal one below.
     if (auto spectral = DescribeSpectralCoordinate(store, frequency_values, descriptor); spectral) {
         descriptor.spectral = std::move(spectral);
     }
@@ -388,10 +400,10 @@ Result<ImageDescriptor> DescribeImage(const Store& store, std::string_view image
     // Parse Observation & Telescope Metadata from the selected image's attributes.
     descriptor.observation = DescribeObservation(image);
 
-    auto layout_res = store.ReadStorageLayout(image_id);
-    if (layout_res) {
-        descriptor.storage = std::move(layout_res.value());
-    }
+    // Read from the metadata already in hand rather than asked of the store again, and assigned
+    // unconditionally: every array ParseArrayMetadata accepted has a layout, so there is no failure
+    // here to handle and no absence to represent.
+    descriptor.storage = zarr_metadata::ParseStorageLayout(image);
 
     auto pixel_mask = DetermineFlag(store, image, image_id, descriptor.diagnostics);
     if (!pixel_mask) {

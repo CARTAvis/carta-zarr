@@ -87,7 +87,6 @@ public:
     // them by dimension name rather than by offset.
     Result<std::vector<double>> ReadNumericArray(std::string_view node) const;
     Result<std::vector<std::string>> ReadStringArray1D(std::string_view node) const;
-    Result<StorageLayout> ReadStorageLayout(std::string_view node) const;
 
     // How many bytes this store occupies where it lives. Handed straight to the transport, which is
     // the only thing that knows; Store fronts it for the same reason it fronts every other

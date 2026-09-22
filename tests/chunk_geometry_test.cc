@@ -17,6 +17,7 @@
 #include <cstdio>
 #include <exception>
 #include <string>
+#include <stdexcept>
 #include <vector>
 
 #include "support/check.h"
@@ -124,23 +125,26 @@ void TestASharedArrayKeepsBothGranularities() {
             "the grid counts inner chunks, not shards");
 }
 
-// An axis the layout says nothing about -- a shorter chunk shape than the array has dimensions, or a
-// shard extent of zero -- falls back rather than indexing past the end or dividing by it.
+// An axis the layout does not describe is refused rather than filled in.
+//
+// This case used to assert the opposite: a short chunk shape fell back to the axis length, and a
+// shard extent of zero fell back to the chunk. Both were dropped, because the first turned "no
+// layout for this image" into a geometry claiming one chunk covers the whole image, and a consumer
+// could not tell that from an image really stored that way. ParseArrayMetadata now refuses the
+// array that produced it, so a layout of the wrong rank is a caller that built one some other way.
 void TestAnAxisTheLayoutDoesNotDescribe() {
     const auto image = MakeImage({0, 1, 2, 3, 4}, {64, 40, 6, 1, 1});
     StorageLayout layout;
     // Only the two spatial dimensions are described.
     layout.chunk_shape = {16, 20};
-    layout.shard_shape = {0, 20};
 
-    const auto geometry = BuildChunkGeometry(image, layout);
-
-    Require(geometry.chunk_shape == std::vector<std::uint64_t>{16, 20, 6, 1, 1},
-            "an undescribed axis is one chunk of its whole length");
-    Require(geometry.shard_shape == std::vector<std::uint64_t>{16, 20, 6, 1, 1},
-            "and a shard extent of zero falls back to the chunk rather than staying zero");
-    Require(geometry.grid_shape == std::vector<std::uint64_t>{4, 2, 1, 1, 1},
-            "so that axis is a single chunk");
+    bool refused = false;
+    try {
+        BuildChunkGeometry(image, layout);
+    } catch (const std::out_of_range&) {
+        refused = true;
+    }
+    Require(refused, "a layout that does not describe every axis should throw, not be filled in");
 }
 
 }  // namespace

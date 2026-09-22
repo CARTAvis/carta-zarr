@@ -562,19 +562,20 @@ void TestSizeFallsBackWhenTheStoreCannotBeMeasured() {
                                                               std::chrono::steady_clock::now() +
                                                                   std::chrono::seconds(5));
     Require(static_cast<bool>(size), "sizing an in-memory store failed");
-    Require(size.value().is_upper_bound,
-            "a size the transport could not measure must be reported as an upper bound");
+    Require(size.value().basis == carta::zarr::SizeBasis::declared,
+            "a size the transport could not measure must be reported as the declared one");
     // SKY is 120 float32 at 480 bytes; time, frequency, l and m are 1, 3, 4 and 5 float64 at 8, 24,
     // 32 and 40; polarization is two four-byte labels at 8. The arrays, not the store.
     Require(size.value().bytes == 592,
             "the logical total was " + std::to_string(size.value().bytes) + ", not 592");
 
     // A deadline that has already passed reaches the same answer by the same route: this transport
-    // refuses whatever the clock says, and every way of failing to measure means the upper bound.
+    // refuses whatever the clock says, and every way of failing to measure means the declared size.
     const auto expired = carta::zarr::internal::DatasetSizeBytes(
         store.value(), std::chrono::steady_clock::now() - std::chrono::seconds(1));
-    Require(expired && expired.value().is_upper_bound && expired.value().bytes == 592,
-            "an expired deadline did not reach the same upper bound");
+    Require(expired && expired.value().basis == carta::zarr::SizeBasis::declared &&
+                expired.value().bytes == 592,
+            "an expired deadline did not reach the same declared size");
 }
 
 // And the fallback does not turn every failure into a number: a store with nothing to add up is

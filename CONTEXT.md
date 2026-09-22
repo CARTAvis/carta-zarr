@@ -91,6 +91,19 @@ _Avoid_: driver, backend, kvstore, store
 The immutable metadata the library reports for a dataset or an image. It never contains pixels.
 _Avoid_: info, header, metadata (on its own)
 
+**Diagnostic**:
+Something the library has to say about a store it nonetheless accepted: a coded note carried on a
+probe result, an image entry, or a descriptor. Its counterpart is an error, and the two divide the
+same ground: an error is a refusal, so nothing is returned, while a diagnostic accompanies an answer
+the caller still gets. A variable that could not be opened, an axis with no linear description, and
+a node skipped because its metadata would not parse are all diagnosed rather than refused, because
+the rest of the dataset is still readable.
+
+The rule that follows is what it is for: a path that declines to fill in a value leaves a diagnostic
+saying so. Without one the caller receives a default that looks like an answer -- a reference pixel
+of zero, a chunk shape equal to the image -- and has no way to tell it apart from a real one.
+_Avoid_: warning, message, note, error (for this)
+
 **Observation**:
 What an image's own attributes say about the observing run behind it: the object, the observer, the
 telescope and where it stood, and the date the observation carries. Optional throughout — a field

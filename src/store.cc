@@ -364,12 +364,4 @@ Result<std::uint64_t> Store::StoredSizeBytes(std::chrono::steady_clock::time_poi
     return _transport->StoredSizeBytes(deadline);
 }
 
-Result<StorageLayout> Store::ReadStorageLayout(std::string_view node) const {
-    const auto& array_meta_res = ReadArrayMetadata(node);
-    if (!array_meta_res) {
-        return array_meta_res.error();
-    }
-    return zarr_metadata::ParseStorageLayout(array_meta_res.value(), node);
-}
-
 }  // namespace carta::zarr::internal

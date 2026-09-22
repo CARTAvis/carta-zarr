@@ -12,7 +12,7 @@
 // the location string a second time and walked the directory itself -- which meant the rule for
 // what a location means existed twice, and the copy up there was the weaker one: it never resolved
 // the path, so a process that changed directory after opening the store measured somewhere else, or
-// nowhere, and silently reported the upper bound instead.
+// nowhere, and silently fell back to the declared size instead.
 
 #include "store.h"
 
@@ -46,8 +46,14 @@ Result<std::uint64_t> ElementSizeBytes(const zarr::ArrayMetadata& metadata, std:
                  std::string(node)};
 }
 
-// Every array in the hierarchy, at its uncompressed size. The upper bound, and what a caller gets
-// when the store itself cannot be measured.
+// Every array in the hierarchy, at its uncompressed size: what the metadata declares the dataset
+// holds, and what a caller gets when the store itself cannot be measured.
+//
+// Not a bound on what the store occupies, in either direction. It counts array data only, so the
+// per-node zarr.json documents and any sharding indices are missing from it -- in this repo's own
+// fixtures those outweigh the compressed chunks several times over -- while compression pushes the
+// other way. Which wins is a property of the store, and this function runs when the store could not
+// be read. See ADR 0008.
 
 Result<std::uint64_t> TotalArraySizeBytes(const Store& store) {
     const auto& nodes_result = store.ListNodes();
@@ -102,18 +108,24 @@ Result<std::uint64_t> TotalArraySizeBytes(const Store& store) {
 
 Result<DatasetSize> DatasetSizeBytes(const Store& store, std::chrono::steady_clock::time_point deadline) {
     if (auto stored = store.StoredSizeBytes(deadline)) {
-        return DatasetSize{stored.value(), false};
+        return DatasetSize{stored.value(), SizeBasis::measured};
     }
-    // Every way of failing to measure means the same thing to a caller asking how much room this
-    // takes: the transport has no bytes to count, the deadline passed part-way through, a directory
-    // refused to be enumerated, or the total overflowed. An upper bound is a more useful answer than
-    // an error to all four, and is what this reported before there was an error to swallow -- the
-    // walk was a bool and every one of its failure paths returned false.
-    auto logical = TotalArraySizeBytes(store);
-    if (!logical) {
-        return logical.error();
+    // Every way of failing to measure leaves the same thing to answer with: the transport has no
+    // bytes to count, the deadline passed part-way through, a directory refused to be enumerated,
+    // or the total overflowed. The declared size is a more useful answer than an error to all four,
+    // and is what this reported before there was an error to swallow -- the walk was a bool and
+    // every one of its failure paths returned false.
+    //
+    // What is lost on the way is which of the four it was, and that is what would be needed to say
+    // anything about the number that comes back: a deadline that expired says the store is large,
+    // so the declared size is almost certainly above what it occupies, while a directory that
+    // refused to be read says nothing at all. The caller is told which question was answered, not
+    // how the answers compare.
+    auto declared = TotalArraySizeBytes(store);
+    if (!declared) {
+        return declared.error();
     }
-    return DatasetSize{logical.value(), true};
+    return DatasetSize{declared.value(), SizeBasis::declared};
 }
 
 }  // namespace carta::zarr::internal

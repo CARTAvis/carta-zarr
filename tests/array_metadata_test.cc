@@ -49,15 +49,15 @@ ArrayMetadata Parsed(const std::string& document) {
 }
 
 StorageLayout LayoutOf(const std::string& codecs, const std::string& chunk_shape = "[4,4]") {
-    auto layout = ParseStorageLayout(Parsed(Document(codecs, chunk_shape)), "SKY");
-    Require(static_cast<bool>(layout), "the layout was refused: " + (layout ? std::string{} : layout.error().message));
-    return std::move(layout.value());
+    return ParseStorageLayout(Parsed(Document(codecs, chunk_shape)));
 }
 
-carta::zarr::Error RefusedLayout(const std::string& codecs) {
-    auto layout = ParseStorageLayout(Parsed(Document(codecs)), "SKY");
-    Require(!layout, "the layout was accepted when it should have been refused");
-    return layout.error();
+// Refused by the parse, not by the layout: an array whose sharding codec does not describe its
+// chunks is turned away at the gate, so nothing downstream has to represent not knowing.
+carta::zarr::Error RefusedDocument(const std::string& codecs) {
+    auto metadata = ParseArrayMetadata(nlohmann::json::parse(Document(codecs)), "SKY");
+    Require(!metadata, "the document parsed when it should have been refused");
+    return metadata.error();
 }
 
 void TestTheCodecChainAndChunkKeyEncodingAreCarried() {
@@ -113,21 +113,25 @@ void TestTheOuterCompressorIsNotUsedForShardedChunks() {
 }
 
 void TestAShardingCodecWithAnUnusableChunkShapeIsRefused() {
-    const auto zeroed = RefusedLayout(
+    const auto zeroed = RefusedDocument(
         R"([{"name":"sharding_indexed","configuration":{"chunk_shape":[0,1]}}])");
     Require(zeroed.code == ErrorCode::invalid_metadata,
             "a zero inner chunk dimension should be invalid metadata");
 
-    const auto wrong_rank = RefusedLayout(
+    const auto wrong_rank = RefusedDocument(
         R"([{"name":"sharding_indexed","configuration":{"chunk_shape":[2]}}])");
     Require(wrong_rank.code == ErrorCode::invalid_metadata,
             "an inner chunk shape of the wrong rank should be invalid metadata");
 
-    // A sharding codec carrying no chunk_shape at all leaves the inner shape empty, which is the
-    // same failure: rank zero against a rank-two shard.
-    const auto absent = RefusedLayout(R"([{"name":"sharding_indexed"}])");
+    // A sharding codec carrying no chunk_shape at all describes no chunks, which is the same
+    // failure: there is nothing to decode a shard into.
+    const auto absent = RefusedDocument(R"([{"name":"sharding_indexed"}])");
     Require(absent.code == ErrorCode::invalid_metadata,
             "a sharding codec with no chunk_shape should be invalid metadata");
+
+    // And the refusal is the parse's, so nothing that reads a parsed document can meet it: an
+    // unsharded array and a well-formed sharded one both still describe themselves.
+    Require(!LayoutOf("").sharded, "an unsharded array should still be described");
 }
 
 }  // namespace

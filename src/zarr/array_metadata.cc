@@ -42,33 +42,24 @@ std::string FindCompressor(const nlohmann::json* codecs) {
     return {};
 }
 
-Result<void> ApplyShardingLayout(const nlohmann::json& sharding, StorageLayout& layout, std::string_view node) {
+// Reads the inner chunk shape and the compressor that applies to it out of a sharding codec that
+// ParseArrayMetadata has already accepted: the configuration is an object, its chunk_shape is an
+// array of positive integers, and it has the array's rank. Nothing here checks that again, because
+// the only way to reach this function is through metadata that parse turned away otherwise -- and
+// both live in this file, so there is no seam for a second caller to arrive through.
+void ApplyShardingLayout(const nlohmann::json& sharding, StorageLayout& layout) {
     layout.sharded = true;
     layout.shard_shape = std::move(layout.chunk_shape);
     layout.chunk_shape.clear();
 
-    if (sharding.contains("configuration") && sharding.at("configuration").is_object()) {
-        const auto& configuration = sharding.at("configuration");
-        if (configuration.contains("chunk_shape") && configuration.at("chunk_shape").is_array()) {
-            for (const auto& dimension : configuration.at("chunk_shape")) {
-                if (!IsPositiveInteger(dimension)) {
-                    return Error{ErrorCode::invalid_metadata,
-                                 "Sharding codec chunk_shape must be positive integers", std::string(node)};
-                }
-                layout.chunk_shape.push_back(dimension.get<std::uint64_t>());
-            }
-        }
-        // The compressor applies to the inner chunks, so look inside the sharding codec first.
-        if (configuration.contains("codecs") && configuration.at("codecs").is_array()) {
-            layout.compressor = FindCompressor(&configuration.at("codecs"));
-        }
+    const auto& configuration = sharding.at("configuration");
+    for (const auto& dimension : configuration.at("chunk_shape")) {
+        layout.chunk_shape.push_back(dimension.get<std::uint64_t>());
     }
-
-    if (layout.chunk_shape.size() != layout.shard_shape.size()) {
-        return Error{ErrorCode::invalid_metadata, "Sharding codec chunk_shape must match the shard rank",
-                     std::string(node)};
+    // The compressor applies to the inner chunks, so look inside the sharding codec first.
+    if (configuration.contains("codecs") && configuration.at("codecs").is_array()) {
+        layout.compressor = FindCompressor(&configuration.at("codecs"));
     }
-    return {};
 }
 
 }  // namespace
@@ -145,7 +136,7 @@ const char* ErrorCodeName(ErrorCode code) noexcept {
     return "unknown";
 }
 
-Result<StorageLayout> ParseStorageLayout(const ArrayMetadata& metadata, std::string_view node) {
+StorageLayout ParseStorageLayout(const ArrayMetadata& metadata) {
     StorageLayout layout;
     layout.chunk_shape = metadata.chunk_shape;
 
@@ -154,10 +145,7 @@ Result<StorageLayout> ParseStorageLayout(const ArrayMetadata& metadata, std::str
     // A sharded array's chunk_grid describes the shard; the chunks that are actually decoded are
     // inside the sharding codec, and so is the compressor that applies to them.
     if (const nlohmann::json* sharding = FindCodec(codecs, "sharding_indexed"); sharding != nullptr) {
-        auto sharding_result = ApplyShardingLayout(*sharding, layout, node);
-        if (!sharding_result) {
-            return sharding_result.error();
-        }
+        ApplyShardingLayout(*sharding, layout);
     }
 
     if (layout.compressor.empty()) {
@@ -269,6 +257,27 @@ Result<ArrayMetadata> ParseArrayMetadata(const nlohmann::json& metadata, std::st
     }
     for (const auto& chunk : chunks) {
         result.chunk_shape.push_back(chunk.get<std::uint64_t>());
+    }
+
+    // A sharded array's chunk_grid describes the shard; the chunks that are actually decoded are
+    // named inside the sharding codec, and they are checked here for the same reason the outer ones
+    // are -- this is where an array that cannot be read is turned away, and an inner chunk shape
+    // that is not a positive extent of the array's rank describes nothing.
+    //
+    // Checked and not kept: ParseStorageLayout reads it out when someone asks how the array is
+    // stored. That is a second walk over a handful of integers, once per array, and the alternative
+    // is a field here that one caller wants.
+    if (const nlohmann::json* const sharding = FindCodec(&result.codecs, "sharding_indexed");
+        sharding != nullptr) {
+        const auto* inner = sharding->contains("configuration") && sharding->at("configuration").is_object() &&
+                                    sharding->at("configuration").contains("chunk_shape")
+                                ? &sharding->at("configuration").at("chunk_shape")
+                                : nullptr;
+        if (inner == nullptr || !inner->is_array() || inner->size() != result.shape.size() ||
+            !std::all_of(inner->begin(), inner->end(), IsPositiveInteger)) {
+            return Error{ErrorCode::invalid_metadata,
+                         "Sharding codec chunk_shape must be positive and match the array rank", node_path};
+        }
     }
     return result;
 }

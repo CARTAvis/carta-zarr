@@ -75,7 +75,7 @@ public:
     // transport has no stored bytes to count. Pure virtual for the same reason ArrayDirectory is: a
     // transport that cannot answer says so rather than serving a number that looks measured.
     //
-    // Every failure here means the caller gets a logical upper bound instead, so this is allowed to
+    // Every failure here means the caller gets the declared size instead, so this is allowed to
     // give up. It is a size, not a read.
     virtual Result<std::uint64_t> StoredSizeBytes(std::chrono::steady_clock::time_point deadline) const = 0;
 };

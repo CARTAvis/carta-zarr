@@ -35,6 +35,17 @@ struct ArrayMetadata {
     //
     // An array with no codecs gets an empty array and no chunk key encoding gets an empty object,
     // so a reader asks what is in them rather than whether they are there.
+    //
+    // ParseArrayMetadata is the one exception, and it is not an interpretation: it looks inside a
+    // `sharding_indexed` codec far enough to refuse an inner chunk shape that is not a positive
+    // extent of the array's rank. That is the same well-formedness rule it applies to `shape`,
+    // `dimension_names` and the outer `chunk_grid`, asked at the same gate, and it keeps nothing.
+    //
+    // Deliberately not left to ParseStorageLayout, which is where it used to live. Its one caller
+    // dropped the error, so an array with a malformed sharding codec opened and then reported a
+    // chunk geometry synthesised from its own shape -- an image that says every one of its chunks
+    // is the whole image, with no diagnostic. Checking at the gate is what makes that unreachable
+    // rather than guarded against.
     nlohmann::json codecs = nlohmann::json::array();
     nlohmann::json chunk_key_encoding = nlohmann::json::object();
 };
@@ -51,7 +62,9 @@ Result<ArrayMetadata> ParseArrayMetadata(const nlohmann::json& metadata, std::st
 //
 // Reports invalid_metadata for a sharding codec whose chunk_shape is not positive integers, or does
 // not have the rank of the shard it sits in.
-Result<StorageLayout> ParseStorageLayout(const ArrayMetadata& metadata, std::string_view node);
+// How the array is stored, read out of metadata ParseArrayMetadata has already accepted. Infallible
+// for that reason: everything it could have refused is refused at the gate.
+StorageLayout ParseStorageLayout(const ArrayMetadata& metadata);
 
 bool IsNonNegativeInteger(const nlohmann::json& value);
 bool IsPositiveInteger(const nlohmann::json& value);

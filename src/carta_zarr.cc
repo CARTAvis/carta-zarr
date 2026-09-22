@@ -336,9 +336,9 @@ Result<Image> Dataset::OpenImage(std::string_view image_id) const {
         const auto make_image = [&](const ImageDescriptor& descriptor) {
             // The descriptor already carries the stored layout; the geometry is that layout permuted
             // into logical order, so it is derived here rather than read again.
-            const StorageLayout layout = descriptor.storage ? *descriptor.storage : StorageLayout{};
-            return Image{std::make_shared<Image::Impl>(_impl->context, _impl->location, _impl->profile, _impl->store,
-                                                       descriptor, internal::BuildChunkGeometry(descriptor, layout))};
+            return Image{std::make_shared<Image::Impl>(
+                _impl->context, _impl->location, _impl->profile, _impl->store, descriptor,
+                internal::BuildChunkGeometry(descriptor, descriptor.storage))};
         };
         const auto cached = _impl->image_descriptors.find(image_name);
         if (cached != _impl->image_descriptors.end()) {

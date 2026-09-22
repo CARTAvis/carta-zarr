@@ -88,8 +88,12 @@ bool ProbeReport::RequireCoordinateOf(const zarr::ArrayMetadata& image, std::str
     }
 
     const auto& coordinate = array_result.value();
-    if (coordinate.shape.size() != 1 || coordinate.shape.front() != image.shape.at(*index) ||
-        coordinate.dimension_names.size() != 1 || coordinate.dimension_names.front() != axis) {
+    // The length the image expects is not checked here. Agreeing with it is part of being an image
+    // this profile opens, so the default image -- which is the first one that qualified -- agrees
+    // with every coordinate it can read before the probe ever sees it. What is left is whether the
+    // coordinate is well formed in itself, which is a fact about the dataset.
+    if (coordinate.shape.size() != 1 || coordinate.dimension_names.size() != 1 ||
+        coordinate.dimension_names.front() != axis) {
         return Fail("invalid_metadata", "Coordinate shape or dimension name does not match " + _profile_name, node);
     }
     const bool typed = kind == CoordinateKind::labels ? zarr_metadata::IsFixedLengthUtf32(coordinate)

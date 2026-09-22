@@ -55,7 +55,7 @@ carta::zarr::Image OpenSky() {
     // SKY carries the full sky axis set, so only SKY is an image.
     Require(dataset.value().descriptor().images.size() == 1 &&
                 dataset.value().descriptor().images.front().id == "SKY" &&
-                dataset.value().descriptor().images.front().readable,
+                dataset.value().descriptor().images.front().openable,
             "discovery did not report SKY as the only image of XRADIO's own output");
     auto image = dataset.value().OpenImage("SKY");
     Require(static_cast<bool>(image), "SKY could not be opened");

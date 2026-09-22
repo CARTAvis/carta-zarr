@@ -66,10 +66,10 @@ std::vector<std::string> ImageIds(const std::vector<carta::zarr::ImageEntry>& im
     return ids;
 }
 
-std::vector<std::string> ReadableImageIds(const std::vector<carta::zarr::ImageEntry>& images) {
+std::vector<std::string> OpenableImageIds(const std::vector<carta::zarr::ImageEntry>& images) {
     std::vector<std::string> ids;
     for (const auto& image : images) {
-        if (image.readable) {
+        if (image.openable) {
             ids.push_back(image.id);
         }
     }
@@ -262,9 +262,9 @@ void TestDiscoveryClassifiesVariables() {
 
     Require(ImageIds(discovery.value().images) == std::vector<std::string>{"SKY", "MODEL", "APERTURE", "COMPLEX"},
             "discovery did not enumerate the images in display order");
-    Require(ReadableImageIds(discovery.value().images) == std::vector<std::string>{"SKY", "MODEL"},
+    Require(OpenableImageIds(discovery.value().images) == std::vector<std::string>{"SKY", "MODEL"},
             "discovery did not restrict the openable images to real sky-plane variables");
-    Require(discovery.value().default_image_id == "SKY", "discovery did not select the default readable image");
+    Require(discovery.value().default_image_id == "SKY", "discovery did not select the default openable image");
     Require(HasDiagnostic(discovery.value().diagnostics, "unsupported_coordinate_plane"),
             "the aperture-plane variable produced no diagnostic");
     Require(HasDiagnostic(discovery.value().diagnostics, "unsupported_data_type"),
@@ -293,30 +293,105 @@ void TestOpenableGate() {
     Require(!absent && absent.error().code == ErrorCode::not_found, "an absent variable was not reported as missing");
 }
 
-// One rule decides what is openable, and both sides of the library ask it. Dataset::OpenImage asks
-// it of the listing the dataset kept from opening; SchemaProfile::Describe asks it of a store it
-// has just inspected. They used to be two copies, and they disagreed about the message -- the
-// facade passed the variable's own diagnostic through and the profile answered generically -- so a
-// consumer got a worse explanation depending on which way it had arrived.
-void TestOneRuleDecidesWhatIsOpenable() {
+// Coordinates belong to the dataset and every image references them by dimension name, so an image
+// whose own extent disagrees with the coordinate it names cannot be described with it: it would be
+// reported with three channels' worth of coordinates over seven channels of pixels. It used to be
+// listed as openable and refused when a consumer tried to open it.
+void TestAnImageDisagreeingWithACoordinateIsNotOpenable() {
     auto nodes = CompleteStore();
-    nodes["COMPLEX"] = SkyArray("complex64");
+    // Seven channels of pixels where the dataset's frequency coordinate has three.
+    nodes["MODEL"] = NumericArray("[1,7,2,4,5]", R"(["time","frequency","polarization","l","m"])", "float32",
+                                  R"({"units":"Jy/beam"})");
 
     auto store = Open(nodes);
-    Require(static_cast<bool>(store), "the openable-rule store failed to open");
-    const auto discovery = XradioProfile().Discover(store.value());
-    Require(static_cast<bool>(discovery), "discovery failed on the openable-rule store");
+    Require(static_cast<bool>(store), "the disagreeing-image store failed to open");
+    const auto profile = XradioProfile();
+    const auto discovery = profile.Discover(store.value());
+    Require(static_cast<bool>(discovery), "discovery failed on the disagreeing-image store");
+    Require(ImageIds(discovery.value().images) == std::vector<std::string>{"SKY", "MODEL"},
+            "the disagreeing image was dropped from the listing rather than listed with its reason");
+    Require(OpenableImageIds(discovery.value().images) == std::vector<std::string>{"SKY"},
+            "an image that will not open was listed as openable");
+    Require(discovery.value().default_image_id == "SKY", "the default image was not the first openable one");
+
+    const auto model = profile.Describe(store.value(), "MODEL");
+    Require(!model && model.error().code == ErrorCode::invalid_metadata,
+            "a store that is wrong about an image was refused as a library limitation");
+}
+
+// Nothing openable is two different answers, and a consumer acts on the difference. A store of
+// well-formed variables this library does not open is a store it is not for; a store whose only
+// image disagrees with its coordinates is one this profile recognised and found broken, and
+// reporting that as "no profile matched" names nothing anyone can act on.
+void TestNothingOpenableIsInvalidOnlyWhenSomethingIsMalformed() {
+    auto capability = CompleteStore();
+    capability["SKY"] = SkyArray("complex64");
+    Require(Probe(capability).kind == SchemaMatchKind::no_match,
+            "a store of variables this library does not open was reported as broken");
+
+    auto malformed = CompleteStore();
+    malformed["SKY"] = NumericArray("[1,7,2,4,5]", R"(["time","frequency","polarization","l","m"])", "float32",
+                                    R"({"units":"Jy/beam"})");
+    // Enumerated before SKY, and a limitation rather than a defect: without the reason for the
+    // refusal being put first, this is the diagnostic a consumer would be shown.
+    malformed["APERTURE"] = NumericArray("[1,3,2,4,5]", R"(["time","frequency","polarization","u","v"])", "float32");
+
+    const auto broken = Probe(malformed);
+    Require(broken.kind == SchemaMatchKind::invalid,
+            "a store whose only image disagrees with a coordinate was reported as unrecognised");
+    Require(broken.diagnostics.front().node_path == "SKY",
+            "the refusal did not lead with the reason the store was refused");
+}
+
+// A group is a node in the hierarchy, and a store is free to hold one. It was being read as an
+// array, failing, and reported as a node that could not be read -- so every store with a nested
+// group carried a diagnostic about a node that was perfectly well formed, and a promotion rule that
+// counted such a diagnostic would close a store over it.
+void TestANestedGroupIsNotABrokenArray() {
+    auto nodes = CompleteStore();
+    nodes["SUBDIR"] = RootGroup(false);
+
+    auto store = Open(nodes);
+    Require(static_cast<bool>(store), "the nested-group store failed to open");
+    const auto profile = XradioProfile();
+    const auto discovery = profile.Discover(store.value());
+    Require(static_cast<bool>(discovery), "discovery failed on the nested-group store");
+    Require(!HasDiagnostic(discovery.value().diagnostics, "unreadable_array"),
+            "a valid group was diagnosed as an array that could not be read");
+    Require(ImageIds(discovery.value().images) == std::vector<std::string>{"SKY"},
+            "a group was listed among the dataset's images");
+
+    // Naming one is naming something that is not an image, which is the answer a flag and a
+    // coordinate get as well.
+    const auto group = profile.Describe(store.value(), "SUBDIR");
+    Require(!group && group.error().code == ErrorCode::not_found,
+            "a group was refused as a broken array rather than as something that is not an image");
+}
+
+// A refusal names the variable's own reason rather than answering generically.
+//
+// This used to be what two copies of the openability rule disagreed about: the facade passed the
+// listing's diagnostic through and the profile answered "not openable by this profile", so a
+// consumer got a worse explanation depending on which way it had arrived. The copies are one
+// decision now, and what is asserted here is the half that a single rule does not guarantee on its
+// own -- that the reason survives the trip from the listing to the refusal.
+void TestARefusalCarriesTheVariablesOwnReason() {
+    auto nodes = CompleteStore();
+    nodes["COMPLEX"] = SkyArray("complex64");
+    // Valid JSON, and not array metadata: node_type says array and there is no shape.
+    nodes["BROKEN"] = R"({"zarr_format":3,"node_type":"array","data_type":"float32"})";
+
+    auto store = Open(nodes);
+    Require(static_cast<bool>(store), "the refusal store failed to open");
+    const auto profile = XradioProfile();
+    const auto discovery = profile.Discover(store.value());
+    Require(static_cast<bool>(discovery), "discovery failed on the refusal store");
     const auto& images = discovery.value().images;
 
-    Require(static_cast<bool>(carta::zarr::internal::RequireOpenable(images, "SKY")),
-            "a readable image was refused");
-
-    const auto complex = carta::zarr::internal::RequireOpenable(images, "COMPLEX");
+    const auto complex = profile.Describe(store.value(), "COMPLEX");
     Require(!complex && complex.error().code == ErrorCode::unsupported_data_type,
             "a listed but unopenable variable should be refused as an unsupported data type");
 
-    // What the profile said about this variable, rather than a generic refusal. This is the half
-    // the two copies used to differ on.
     const auto listed = std::find_if(images.begin(), images.end(),
                                      [](const auto& image) { return image.id == "COMPLEX"; });
     Require(listed != images.end() && !listed->diagnostics.empty(),
@@ -324,9 +399,16 @@ void TestOneRuleDecidesWhatIsOpenable() {
     Require(complex.error().message == listed->diagnostics.front().message,
             "the refusal did not carry the variable's own diagnostic");
 
-    const auto absent = carta::zarr::internal::RequireOpenable(images, "NOPE");
+    const auto absent = profile.Describe(store.value(), "NOPE");
     Require(!absent && absent.error().code == ErrorCode::not_found,
-            "a variable that was never listed should be reported as missing, not as unopenable");
+            "a variable that is not there should be reported as missing, not as unopenable");
+
+    // A node that is there and will not parse is neither of those. It used to answer "not found",
+    // because the rule ran against a listing the node had already dropped out of, which is a
+    // different thing from a name the dataset does not have.
+    const auto broken = profile.Describe(store.value(), "BROKEN");
+    Require(!broken && broken.error().code == ErrorCode::invalid_metadata,
+            "a node that is present and will not parse was reported as a missing variable");
 }
 
 // The dataset-level counterpart, and the three answers it has to keep apart. This used to be
@@ -384,7 +466,7 @@ void TestOneRuleDecidesWhatDatasetIsOpenable() {
     }
 }
 
-void TestDefaultImageSkipsUnreadablePreferredImage() {
+void TestDefaultImageSkipsUnopenablePreferredImage() {
     auto nodes = CompleteStore();
     nodes["SKY"] = SkyArray("complex64");
     nodes["RESIDUAL"] = SkyArray();
@@ -394,13 +476,13 @@ void TestDefaultImageSkipsUnreadablePreferredImage() {
     auto discovery = XradioProfile().Discover(store.value());
     Require(static_cast<bool>(discovery), "default-image discovery reported an error");
     Require(discovery.value().default_image_id == "RESIDUAL",
-            "discovery selected an unreadable preferred image as the default");
+            "discovery selected an unopenable preferred image as the default");
 
     const auto sky = std::find_if(discovery.value().images.begin(), discovery.value().images.end(),
                                   [](const auto& image) { return image.id == "SKY"; });
-    Require(sky != discovery.value().images.end() && !sky->readable &&
+    Require(sky != discovery.value().images.end() && !sky->openable &&
                 HasDiagnostic(sky->diagnostics, "unsupported_data_type"),
-            "the unreadable image did not carry its capability diagnostic");
+            "the unopenable image did not carry its capability diagnostic");
 }
 
 // What consolidated metadata is for: the root's copy answers for every child, so discovery reads
@@ -421,7 +503,7 @@ void TestConsolidatedMetadataDiscovery() {
     Require(static_cast<bool>(store), "the consolidated store failed to open");
     auto discovery = XradioProfile().Discover(store.value());
     Require(static_cast<bool>(discovery), "discovery over consolidated metadata reported an error");
-    Require(ReadableImageIds(discovery.value().images) == std::vector<std::string>{"SKY"},
+    Require(OpenableImageIds(discovery.value().images) == std::vector<std::string>{"SKY"},
             "discovery did not find SKY through consolidated metadata");
     Require(transport->nodes_read() == std::set<std::string>{""},
             "discovery read a child node that the root's consolidated copy already answered for");
@@ -435,7 +517,7 @@ void TestConsolidatedMetadataDiscovery() {
     Require(static_cast<bool>(plain_store), "the unconsolidated store failed to open");
     auto plain_discovery = XradioProfile().Discover(plain_store.value());
     Require(static_cast<bool>(plain_discovery), "discovery without consolidated metadata reported an error");
-    Require(ReadableImageIds(plain_discovery.value().images) == ReadableImageIds(discovery.value().images),
+    Require(OpenableImageIds(plain_discovery.value().images) == OpenableImageIds(discovery.value().images),
             "the two metadata layouts did not describe the same images");
     Require(plain->nodes_read().size() > 1,
             "a store without consolidated metadata has to read its children");
@@ -444,10 +526,14 @@ void TestConsolidatedMetadataDiscovery() {
 // The report latches: once a requirement is unmet, later ones are no-ops. A store with two faults
 // is therefore diagnosed once, by the first fault reached -- the behaviour a probe had when every
 // check returned early, now stated somewhere rather than emerging from the control flow.
+//
+// Both faults have to be ones the probe still reaches. A coordinate of the wrong length is not:
+// agreeing with it is part of being an image this profile opens, so a store with one has no
+// openable image and never gets as far as the requirements below.
 void TestFirstFaultIsTheOnlyDiagnostic() {
     auto nodes = CompleteStore();
-    nodes["frequency"] = NumericArray("[7]", R"(["frequency"])");  // wrong length
-    nodes["polarization"] = PolarizationArray("\"float64\"");      // wrong data type
+    nodes["frequency"] = NumericArray("[3]", R"(["x"])");     // right length, names another axis
+    nodes["polarization"] = PolarizationArray("\"float64\"");  // wrong data type
 
     const auto probe = Probe(nodes);
     Require(probe.kind == SchemaMatchKind::invalid, "a store with two faults was not reported as invalid");
@@ -605,9 +691,12 @@ int main() {
         TestIncompleteImageIsNotMatch();
         TestDiscoveryClassifiesVariables();
         TestOpenableGate();
-        TestOneRuleDecidesWhatIsOpenable();
+        TestAnImageDisagreeingWithACoordinateIsNotOpenable();
+        TestNothingOpenableIsInvalidOnlyWhenSomethingIsMalformed();
+        TestANestedGroupIsNotABrokenArray();
+        TestARefusalCarriesTheVariablesOwnReason();
         TestOneRuleDecidesWhatDatasetIsOpenable();
-        TestDefaultImageSkipsUnreadablePreferredImage();
+        TestDefaultImageSkipsUnopenablePreferredImage();
         TestConsolidatedMetadataDiscovery();
         TestADeclaredFlagIsBinding();
         TestAmbiguousFlagsSelectNone();

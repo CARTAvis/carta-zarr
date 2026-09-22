@@ -81,6 +81,12 @@ A cheap, read-only inspection that decides whether a path is a supported image d
 images in it, without opening any of them.
 _Avoid_: detect, sniff, validate
 
+**Qualification**:
+Whether this library will open a data variable, and what it has to say about one it will not. One
+decision rather than one per stage: the probe, the listing a consumer chooses an image from, and
+describing an image all ask it, so none of them can answer differently about the same variable.
+_Avoid_: validation, classification, screening, eligibility
+
 **Transport**:
 Where an image dataset's bytes live, and the only thing the library swaps out to read from
 somewhere else. It hands up one node's metadata verbatim and lists the nodes; it never parses and

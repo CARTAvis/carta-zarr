@@ -61,6 +61,7 @@ add_library(carta_zarr SHARED
     src/schema/xradio/flag.cc
     src/schema/xradio/linear_axis.cc
     src/schema/xradio/observation.cc
+    src/schema/xradio/qualification.cc
     src/schema/xradio/image.cc
     src/zarr/array_metadata.cc
     src/zarr/array_view.cc
@@ -240,6 +241,7 @@ if(CARTA_ZARR_BUILD_TESTS AND BUILD_TESTING)
             src/schema/xradio/flag.cc
             src/schema/xradio/linear_axis.cc
             src/schema/xradio/observation.cc
+            src/schema/xradio/qualification.cc
             src/schema/xradio/image.cc
             src/zarr/array_view.cc
             src/zarr/pixel_selection.cc

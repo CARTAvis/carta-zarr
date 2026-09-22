@@ -15,22 +15,6 @@
 
 namespace carta::zarr::internal {
 
-Result<void> RequireOpenable(const std::vector<ImageEntry>& images, std::string_view image_id) {
-    const auto found = std::find_if(images.begin(), images.end(),
-                                    [&](const ImageEntry& image) { return image.id == image_id; });
-    if (found == images.end()) {
-        return Error{ErrorCode::not_found, "Image variable was not found", std::string(image_id)};
-    }
-    if (found->readable) {
-        return {};
-    }
-    // Whatever the profile said about why it would not open this one is more use than a generic
-    // refusal, and it is already in hand.
-    const auto message =
-        found->diagnostics.empty() ? "Image variable is not openable by this profile" : found->diagnostics.front().message;
-    return Error{ErrorCode::unsupported_data_type, message, std::string(image_id)};
-}
-
 std::string RejectionMessage(const std::vector<Diagnostic>& diagnostics, std::string_view fallback) {
     return diagnostics.empty() ? std::string(fallback) : diagnostics.front().message;
 }
@@ -93,17 +77,6 @@ Result<ImageDiscovery> SchemaProfile::Discover(const Store& store) const {
 }
 
 Result<ImageDescriptor> SchemaProfile::Describe(const Store& store, std::string_view image_id) const {
-    auto discovery = Discover(store);
-    if (!discovery) {
-        return discovery.error();
-    }
-    if (auto openable = RequireOpenable(discovery.value().images, image_id); !openable) {
-        return openable.error();
-    }
-    return _entry->describe(store, image_id);
-}
-
-Result<ImageDescriptor> SchemaProfile::DescribeVerified(const Store& store, std::string_view image_id) const {
     return _entry->describe(store, image_id);
 }
 

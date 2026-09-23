@@ -64,7 +64,11 @@ Result<std::uint64_t> TotalArraySizeBytes(const Store& store) {
     std::uint64_t total_bytes = 0;
     std::size_t array_count = 0;
     for (const auto& entry : inventory.value()) {
-        // A group holds no array data, and neither does a node that does not say it is an array.
+        // A group holds no array data, and neither does a node that does not say it is an array --
+        // including one whose document would not parse, which might have been an array and cannot
+        // be sized either way. Leaving it out makes the total smaller than it might be, which a
+        // declared size already does not claim to rule out (ADR 0008); refusing would leave a
+        // dataset that opens with no size at all.
         if (entry.kind != NodeKind::array) {
             continue;
         }

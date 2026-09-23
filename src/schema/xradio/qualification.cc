@@ -71,8 +71,13 @@ NodeQualification QualifyNode(const Store& store, const NodeEntry& entry) {
     //
     // Not a refusal. A malformed node elsewhere in a store does not stop the images that parsed from
     // opening.
+    //
+    // Two codes, because they are two different things to say. unreadable_array is a node that said it
+    // was an array and whose metadata will not parse as one; unrecognised_node is a node that did not
+    // say what it was -- a document that would not parse, or a node_type Zarr does not define -- and
+    // calling that an array would be a guess.
     if (entry.kind == NodeKind::unrecognised) {
-        return NodeQualification{false, false, Diagnostic{"unreadable_array", entry.reason->message, node}, true};
+        return NodeQualification{false, false, Diagnostic{"unrecognised_node", entry.reason->message, node}, true};
     }
     const auto& metadata = *entry.array;
     if (!metadata) {

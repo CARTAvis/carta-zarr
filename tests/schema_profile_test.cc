@@ -620,6 +620,44 @@ void TestTheInventorySaysWhatEachNodeIs() {
             "discovery could not walk a store holding a node whose node_type is not a string");
 }
 
+// A node whose document will not parse is diagnosed, not refused. CONTEXT.md says so of a node whose
+// metadata would not parse -- the rest of the dataset is still readable -- and the listing used to
+// refuse the whole hierarchy over one, so a stray broken document beside a perfectly good image
+// closed the dataset.
+void TestANodeThatWillNotParseIsDiagnosedNotRefused() {
+    auto nodes = CompleteStore();
+    nodes["JUNK"] = "{not valid json";
+    nodes["ODD"] = R"({"zarr_format":3,"node_type":"manifest"})";
+
+    Require(Probe(nodes).kind == SchemaMatchKind::match,
+            "a document that will not parse refused a store whose image is fine");
+
+    auto store = Open(nodes);
+    Require(static_cast<bool>(store), "the store holding an unparseable node failed to open");
+    const auto discovery = XradioProfile().Discover(store.value());
+    Require(static_cast<bool>(discovery), "discovery refused a store holding an unparseable node");
+    Require(OpenableImageIds(discovery.value().images) == std::vector<std::string>{"SKY"},
+            "the image beside an unparseable node was not openable");
+
+    // Neither said what it was, and both say so under the one code for that. Neither is called an
+    // array, because neither claimed to be one.
+    const auto& said = discovery.value().diagnostics;
+    const auto code_for = [&](const std::string& node) {
+        const auto found = std::find_if(said.begin(), said.end(),
+                                        [&](const auto& diagnostic) { return diagnostic.node_path == node; });
+        return found == said.end() ? std::string{} : found->code;
+    };
+    Require(code_for("JUNK") == "unrecognised_node", "a document that will not parse was not diagnosed as such");
+    Require(code_for("ODD") == "unrecognised_node", "a node_type Zarr does not define was not diagnosed as such");
+    Require(!HasDiagnostic(said, "unreadable_array"), "a node that never said it was an array was called one");
+
+    // The declared size counts the arrays it can see, and a node it cannot read is not one of them.
+    const auto size = carta::zarr::internal::DatasetSizeBytes(store.value(),
+                                                              std::chrono::steady_clock::now() +
+                                                                  std::chrono::seconds(5));
+    Require(size && size.value().bytes == 592, "an unparseable node left the dataset without a declared size");
+}
+
 // The report latches: once a requirement is unmet, later ones are no-ops. A store with two faults
 // is therefore diagnosed once, by the first fault reached -- the behaviour a probe had when every
 // check returned early, now stated somewhere rather than emerging from the control flow.
@@ -798,6 +836,7 @@ int main() {
         TestAConsolidatedKeyIsFiledUnderItsCanonicalName();
         TestAConsolidatedBlockThatMisnamesItsNodesIsRefused();
         TestTheInventorySaysWhatEachNodeIs();
+        TestANodeThatWillNotParseIsDiagnosedNotRefused();
         TestADeclaredFlagIsBinding();
         TestAmbiguousFlagsSelectNone();
         TestStoreRejections();

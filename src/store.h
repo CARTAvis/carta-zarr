@@ -39,8 +39,8 @@ struct PixelSelection;
 enum class NodeKind {
     group,
     array,
-    // A document that would not say: one that is not an object, or whose node_type is missing, not
-    // a string, or something Zarr does not define.
+    // A document that would not say: one that would not parse at all, one that is not an object, or
+    // one whose node_type is missing, not a string, or something Zarr does not define.
     unrecognised,
 };
 

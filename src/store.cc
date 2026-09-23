@@ -308,7 +308,19 @@ const Result<std::vector<NodeEntry>>& Store::Inventory() const {
         for (auto& node : node_names) {
             const auto& metadata = ReadNodeMetadata(node);
             if (!metadata) {
-                return metadata.error();
+                // A document that was read and would not parse says nothing about what the node is,
+                // and that is an answer about the node rather than about the hierarchy: the other
+                // nodes were read, and the images among them still open. CONTEXT.md says so of a
+                // node whose metadata would not parse -- diagnosed rather than refused -- and this
+                // used to refuse the whole dataset over one.
+                //
+                // Only that failure. A read that failed at all -- a transport error, a node listed
+                // and then gone -- says the hierarchy could not be taken, and is reported as such.
+                if (metadata.error().code != ErrorCode::invalid_metadata) {
+                    return metadata.error();
+                }
+                entries.push_back(NodeEntry{std::move(node), NodeKind::unrecognised, nullptr, metadata.error()});
+                continue;
             }
             NodeEntry entry{std::move(node), NodeKind::unrecognised, nullptr, std::nullopt};
 

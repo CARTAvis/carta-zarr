@@ -23,26 +23,19 @@
 namespace carta::zarr::internal {
 namespace {
 
-// What a checked request comes to: where the pixels are, and how many of them there are.
-struct CheckedRequest {
-    zarr::PixelSelection selection;
-    std::uint64_t elements = 0;
-};
-
 // What every pixel read of an image asks before it touches storage.
 //
 // Written out twice until this: once here and once in the facade, where the mask read built its own
 // selection, sized its own buffer check and made its own control check on the way to the pixel seam.
 // The three are one question -- can this image serve this request into this buffer, now -- and a
 // read that answered two of them would be a read that had not checked.
-Result<CheckedRequest> CheckRead(const ImageDescriptor& descriptor, const ReadRequest& request,
-                                 std::size_t destination_size, const ReadControl& control) {
-    auto selection = zarr::BuildSelection(descriptor, request);
+Result<zarr::PixelSelection> CheckRead(const ImageDescriptor& descriptor, const ReadRequest& request,
+                                       std::size_t destination_size, const ReadControl& control) {
+    auto selection = zarr::BuildSelection(descriptor, request, zarr::DestinationOrder::logical);
     if (!selection) {
         return selection.error();
     }
-    const auto elements = zarr::SelectionElementCount(selection.value());
-    if (elements == 0 || elements > destination_size) {
+    if (selection.value().elements() > destination_size) {
         return Error{ErrorCode::invalid_argument, "Destination buffer is too small for the request",
                      descriptor.id};
     }
@@ -52,7 +45,7 @@ Result<CheckedRequest> CheckRead(const ImageDescriptor& descriptor, const ReadRe
     if (auto allowed = zarr::CheckReadControl(control, descriptor.id); !allowed) {
         return allowed.error();
     }
-    return CheckedRequest{std::move(selection.value()), elements};
+    return selection;
 }
 
 }  // namespace
@@ -69,7 +62,7 @@ Result<std::size_t> ReadInPieces(const ReadableImage& image, const ReadRequest& 
     }
     // The whole read's element count is what a piece's share is measured against; the selection each
     // piece is actually read through is built per piece below.
-    const auto elements = checked.value().elements;
+    const auto elements = checked.value().elements();
 
     const bool apply_mask = options.apply_pixel_mask && descriptor.has_pixel_mask;
     const PiecePlan plan = PlanPieces(descriptor, geometry, request, options, static_cast<bool>(progress), elements, apply_mask);
@@ -88,7 +81,7 @@ Result<std::size_t> ReadInPieces(const ReadableImage& image, const ReadRequest& 
             range.start = request.axes.at(plan.axis).start + (begin * range.stride);
             range.count = end - begin;
         }
-        auto piece_selection = zarr::BuildSelection(descriptor, piece);
+        auto piece_selection = zarr::BuildSelection(descriptor, piece, zarr::DestinationOrder::logical);
         if (!piece_selection) {
             return piece_selection.error();
         }
@@ -143,8 +136,8 @@ Result<std::size_t> ReadPixelMask(const ReadableImage& image, const ReadRequest&
     if (!checked) {
         return checked.error();
     }
-    const auto elements = checked.value().elements;
-    if (auto read = image.source().ReadMask(checked.value().selection, destination.data,
+    const auto elements = checked.value().elements();
+    if (auto read = image.source().ReadMask(checked.value(), destination.data,
                                             static_cast<std::size_t>(elements), control);
         !read) {
         return read.error();

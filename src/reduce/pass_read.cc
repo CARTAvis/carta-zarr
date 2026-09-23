@@ -36,28 +36,15 @@ Result<Slab> ReadSlab(const PixelSource& source, const PassPlan& plan, const Rea
         read_request.axes.at(plan.map.time) = Range{plan.planes.time, 1, 1};
     }
 
-    auto selection = zarr::BuildSelection(descriptor, read_request);
+    // Take the plane in the order the store wrote it, so that it is never transposed. Read hands
+    // back logical order because its callers want a densely packed image; a pass wants whatever is
+    // cheapest to read, and pays for the difference in nothing but these strides.
+    auto selection = zarr::BuildSelection(descriptor, read_request, zarr::DestinationOrder::stored);
     if (!selection) {
         return selection.error();
     }
-    // Take the plane in the order the store wrote it. The reader's destination has its own
-    // dimension 0 fastest, so asking for the stored dimensions reversed is asking for no transpose
-    // at all: the last stored dimension, the one the array is contiguous along, lands fastest.
-    // Read hands back logical order because its callers want a densely packed image; a pass wants
-    // whatever is cheapest to read, and pays for the difference in nothing but these strides.
-    for (std::size_t i = 0; i < rank; ++i) {
-        selection.value().logical_to_stored.at(i) = rank - 1 - i;
-    }
-
-    // Strides of that destination, by stored dimension: the last one steps by 1 and each earlier
-    // one by the product of those after it.
-    std::vector<std::uint64_t> stored_stride(rank, 1);
-    std::uint64_t running = 1;
-    for (std::size_t stored = rank; stored-- > 0;) {
-        stored_stride.at(stored) = running;
-        running *= selection.value().count.at(stored);
-    }
-    const auto elements = static_cast<std::size_t>(running);
+    const auto stored_stride = selection.value().DestinationStrides();
+    const auto elements = static_cast<std::size_t>(selection.value().elements());
 
     buffers.pixels.resize(elements);
     if (auto read = source.ReadPixels(selection.value(), buffers.pixels.data(), buffers.pixels.size(), options.control);

@@ -54,35 +54,26 @@ bool MatchesDataType(std::string_view expected, tensorstore::DataType actual) {
     }
 }
 
-bool SelectionIsWellFormed(const PixelSelection& selection) {
-    const auto rank = selection.start.size();
-    if (rank == 0 || selection.count.size() != rank || selection.stride.size() != rank || selection.shape.size() != rank ||
-        selection.dimension_names.size() != rank ||
-        selection.logical_to_stored.size() != rank) {
-        return false;
-    }
-    std::vector<bool> seen(rank, false);
-    for (const auto stored : selection.logical_to_stored) {
-        if (stored >= rank || seen.at(stored)) {
-            return false;
-        }
-        seen.at(stored) = true;
-    }
-    return std::all_of(selection.stride.begin(), selection.stride.end(),
-                       [](std::uint64_t value) { return value > 0; });
-}
-
 // What the array on disk has to agree with the store's canonical metadata about before a single
 // pixel of it is read: its rank, its extent, what its dimensions are called, and what it holds.
+//
+// Every one of those is asked of the one document the store parsed. The data type used to come from
+// there and the extent and names from the selection, which had copied them out of the descriptor --
+// two sources for one check, agreeing only because the descriptor was once read from the same
+// document.
 //
 // Its own function because it is the one stretch of ReadInto that decides nothing about the read.
 // What is left reads as the seven steps it is: check the request, open the array, verify it, slice,
 // transpose, convert, read.
-Result<void> VerifyStoreMatchesSelection(const tensorstore::TensorStore<>& store, const PixelSelection& selection,
-                                         std::string_view expected_data_type, std::string_view node) {
-    const auto rank = selection.start.size();
-    if (static_cast<std::size_t>(store.rank()) != rank) {
+Result<void> VerifyStoreMatchesMetadata(const tensorstore::TensorStore<>& store, const PixelSelection& selection,
+                                        const ArrayMetadata& expected, std::string_view node) {
+    const auto rank = expected.shape.size();
+    if (selection.start().size() != rank) {
         return Error{ErrorCode::invalid_argument, "Selection rank does not match the array rank",
+                     std::string(node)};
+    }
+    if (static_cast<std::size_t>(store.rank()) != rank) {
+        return Error{ErrorCode::invalid_metadata, "Array rank differs between metadata sources",
                      std::string(node)};
     }
     const auto actual_shape = store.domain().shape();
@@ -91,25 +82,25 @@ Result<void> VerifyStoreMatchesSelection(const tensorstore::TensorStore<>& store
                      std::string(node)};
     }
     for (std::size_t axis = 0; axis < rank; ++axis) {
-        if (actual_shape[axis] != static_cast<tensorstore::Index>(selection.shape.at(axis))) {
+        if (actual_shape[axis] != static_cast<tensorstore::Index>(expected.shape.at(axis))) {
             return Error{ErrorCode::invalid_metadata,
                          "Array shape differs between canonical metadata and the array store",
                          std::string(node)};
         }
     }
     const auto actual_dimension_names = store.domain().labels();
-    if (actual_dimension_names.size() != rank) {
+    if (actual_dimension_names.size() != rank || expected.dimension_names.size() != rank) {
         return Error{ErrorCode::invalid_metadata, "Array dimension names differ between metadata sources",
                      std::string(node)};
     }
     for (std::size_t axis = 0; axis < rank; ++axis) {
-        if (actual_dimension_names[axis] != selection.dimension_names.at(axis)) {
+        if (actual_dimension_names[axis] != expected.dimension_names.at(axis)) {
             return Error{ErrorCode::invalid_metadata,
                          "Array dimension names differ between canonical metadata and the array store",
                          std::string(node)};
         }
     }
-    if (!MatchesDataType(expected_data_type, store.dtype())) {
+    if (!MatchesDataType(expected.data_type, store.dtype())) {
         return Error{ErrorCode::invalid_metadata,
                      "Array data type differs between canonical metadata and the array store",
                      std::string(node)};
@@ -119,19 +110,17 @@ Result<void> VerifyStoreMatchesSelection(const tensorstore::TensorStore<>& store
 
 template <typename Element>
 Result<void> ReadInto(const std::filesystem::path& array_path, const StoreContextPtr& context,
-                      std::string_view node, std::string_view expected_data_type, const PixelSelection& selection,
+                      std::string_view node, const ArrayMetadata& expected, const PixelSelection& selection,
                       tensorstore::DataType target_dtype,
                       Element* destination, std::size_t destination_elements, const ReadControl& control) {
     if (destination == nullptr) {
         return Error{ErrorCode::invalid_argument, "Destination buffer is null", std::string(node)};
     }
-    if (!SelectionIsWellFormed(selection)) {
-        return Error{ErrorCode::invalid_argument, "Malformed pixel selection", std::string(node)};
-    }
-    const auto elements = SelectionElementCount(selection);
-    if (elements == 0) {
-        return Error{ErrorCode::invalid_argument, "Pixel selection is empty", std::string(node)};
-    }
+    // The selection is well formed by construction, so nothing about it is checked again here. The
+    // destination is not the selection's: it is whatever the caller handed across the seam, and the
+    // read writes through it as far as the selection reaches. Holding the one to the other is what
+    // stands between a caller's mistake and a write past the end of its buffer.
+    const auto elements = selection.elements();
     if (elements > destination_elements) {
         return Error{ErrorCode::invalid_argument, "Destination buffer is too small", std::string(node)};
     }
@@ -162,23 +151,24 @@ Result<void> ReadInto(const std::filesystem::path& array_path, const StoreContex
             return allowed.error();
         }
         auto const store = std::move(opened).value();
-        if (auto agreed = VerifyStoreMatchesSelection(store, selection, expected_data_type, node); !agreed) {
+        if (auto agreed = VerifyStoreMatchesMetadata(store, selection, expected, node); !agreed) {
             return agreed.error();
         }
-        const auto rank = selection.start.size();
+        const auto rank = selection.start().size();
         std::vector<tensorstore::Index> start(rank);
         std::vector<tensorstore::Index> count(rank);
         std::vector<tensorstore::Index> stride(rank);
         std::vector<tensorstore::DimensionIndex> order(rank);
         for (std::size_t i = 0; i < rank; ++i) {
-            start.at(i) = static_cast<tensorstore::Index>(selection.start.at(i));
-            count.at(i) = static_cast<tensorstore::Index>(selection.count.at(i));
-            stride.at(i) = static_cast<tensorstore::Index>(selection.stride.at(i));
-            order.at(i) = static_cast<tensorstore::DimensionIndex>(selection.logical_to_stored.at(i));
+            start.at(i) = static_cast<tensorstore::Index>(selection.start().at(i));
+            count.at(i) = static_cast<tensorstore::Index>(selection.count().at(i));
+            stride.at(i) = static_cast<tensorstore::Index>(selection.stride().at(i));
+            order.at(i) = static_cast<tensorstore::DimensionIndex>(selection.destination_to_stored().at(i));
         }
 
-        // Slice in stored order, then move the stored dimensions into logical order. Both are index
-        // transforms, so TensorStore composes them into the one copy the read already performs.
+        // Slice in stored order, then move the stored dimensions into the destination's order. Both
+        // are index transforms, so TensorStore composes them into the one copy the read already
+        // performs.
         auto sliced = store | tensorstore::AllDims().TranslateSizedInterval(start, count, stride);
         if (!sliced.ok()) {
             return Error{ErrorCode::invalid_argument,
@@ -226,20 +216,20 @@ Result<void> ReadInto(const std::filesystem::path& array_path, const StoreContex
 }  // namespace
 
 Result<void> ReadFloat32(const std::filesystem::path& array_path, const StoreContextPtr& context,
-                         std::string_view node, std::string_view expected_data_type, const PixelSelection& selection, float* destination,
+                         std::string_view node, const ArrayMetadata& expected, const PixelSelection& selection, float* destination,
                          std::size_t destination_elements, const ReadControl& control) {
-    return ReadInto(array_path, context, node, expected_data_type, selection, tensorstore::dtype_v<float>, destination,
+    return ReadInto(array_path, context, node, expected, selection, tensorstore::dtype_v<float>, destination,
                     destination_elements, control);
 }
 
 Result<void> ReadMaskBytes(const std::filesystem::path& array_path, const StoreContextPtr& context,
-                           std::string_view node, std::string_view expected_data_type, const PixelSelection& selection, std::uint8_t* destination,
+                           std::string_view node, const ArrayMetadata& expected, const PixelSelection& selection, std::uint8_t* destination,
                            std::size_t destination_elements, const ReadControl& control) {
     // The caller's buffer holds bytes, so the read converts into bytes. Asking TensorStore for
     // bool and writing it through a reinterpret_cast of that buffer assumed bool and uint8_t are
     // the same object, which C++ does not say they are; the conversion costs nothing here because
     // it rides the copy the read already performs.
-    return ReadInto(array_path, context, node, expected_data_type, selection, tensorstore::dtype_v<std::uint8_t>,
+    return ReadInto(array_path, context, node, expected, selection, tensorstore::dtype_v<std::uint8_t>,
                     destination, destination_elements, control);
 }
 

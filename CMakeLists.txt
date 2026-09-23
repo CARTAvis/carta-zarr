@@ -423,6 +423,13 @@ if(CARTA_ZARR_BUILD_TESTS AND BUILD_TESTING)
         TEST_NAME carta-zarr-occupancy
         SOURCES tests/occupancy_test.cc src/reduce/occupancy.cc)
 
+    # What a pixel selection is: a descriptor and a request in, a selection out. It was reached only
+    # through reads that checked their answers, so a selection that was right about which pixels and
+    # wrong about where they land could only show up as a wrong sum.
+    carta_zarr_add_test(carta_zarr_selection_tests INTERNAL
+        TEST_NAME carta-zarr-selection
+        SOURCES tests/pixel_selection_test.cc src/zarr/pixel_selection.cc)
+
     # Conformance runs against a store XRADIO itself produced, so that a bump of the pinned XRADIO
     # version reports which of this library's assumptions it broke.
     carta_zarr_add_test(carta_zarr_conformance_tests PUBLIC

@@ -37,6 +37,17 @@ enum class DestinationOrder {
     stored,
 };
 
+class PixelSelection;
+
+// Translate a request over the logical axes into the stored axis order the array is written in,
+// checking it against the descriptor on the way, with its destination laid out in `order`. Ranges are
+// validated here rather than left to TensorStore so that an out-of-range request is an
+// invalid_argument naming the axis, instead of an I/O error naming a domain.
+//
+// The only way to make a PixelSelection, so every one that exists is one this accepted.
+Result<PixelSelection> BuildSelection(const ImageDescriptor& descriptor, const ReadRequest& request,
+                                      DestinationOrder order);
+
 /**
  * One hyperslab of an array, addressed in the array's own stored axis order, and the order its
  * destination is written in.
@@ -44,13 +55,29 @@ enum class DestinationOrder {
  * The destination's order is carried alongside rather than applied by the caller because TensorStore
  * can fold it into the same copy that moves the decoded chunk into the destination: transposing here
  * costs a strided write, transposing afterwards costs a second full pass over the data.
+ *
+ * Only BuildSelection makes one, and it makes only well-formed ones: every vector has the array's
+ * rank, the permutation is a permutation, no stride is zero, no count is zero, and the element count
+ * fits. A reader used to check all of that again, because a struct of six public vectors could be
+ * handed to it in any state; nothing could, and the check never fired. What a reader of pixels still
+ * checks is whether the caller's destination holds this many elements, which is about the caller's
+ * buffer rather than about the selection, and which a reader writing through a pointer must not take
+ * on trust.
  */
-struct PixelSelection {
+class PixelSelection {
+public:
     // All in stored axis order, one entry per stored dimension.
-    std::vector<std::uint64_t> start;
-    std::vector<std::uint64_t> count;
-    std::vector<std::uint64_t> stride;
-    // destination_to_stored[i] is the stored dimension that the destination's axis i is. The
+    const std::vector<std::uint64_t>& start() const noexcept {
+        return _start;
+    }
+    const std::vector<std::uint64_t>& count() const noexcept {
+        return _count;
+    }
+    const std::vector<std::uint64_t>& stride() const noexcept {
+        return _stride;
+    }
+
+    // destination_to_stored()[i] is the stored dimension that the destination's axis i is. The
     // destination is dense with its axis 0 fastest-varying.
     //
     // It says how the destination is laid out and nothing else. It used to be logical_to_stored --
@@ -59,21 +86,29 @@ struct PixelSelection {
     // coordinates from it got a plane that was consistent with itself and transposed. The order is
     // chosen when the selection is built now, and which logical axis a stored dimension is stays
     // with the descriptor, where it was all along.
-    std::vector<std::size_t> destination_to_stored;
+    const std::vector<std::size_t>& destination_to_stored() const noexcept {
+        return _destination_to_stored;
+    }
+
+    // How many elements the selection produces. Never zero, and counted once, when it was built.
+    std::uint64_t elements() const noexcept {
+        return _elements;
+    }
 
     // How far one step along each stored dimension moves in the destination, by stored dimension.
     std::vector<std::uint64_t> DestinationStrides() const;
+
+private:
+    PixelSelection() = default;
+    friend Result<PixelSelection> BuildSelection(const ImageDescriptor& descriptor, const ReadRequest& request,
+                                                 DestinationOrder order);
+
+    std::vector<std::uint64_t> _start;
+    std::vector<std::uint64_t> _count;
+    std::vector<std::uint64_t> _stride;
+    std::vector<std::size_t> _destination_to_stored;
+    std::uint64_t _elements = 0;
 };
-
-// Translate a request over the logical axes into the stored axis order the array is written in,
-// checking it against the descriptor on the way, with its destination laid out in `order`. Ranges are
-// validated here rather than left to TensorStore so that an out-of-range request is an
-// invalid_argument naming the axis, instead of an I/O error naming a domain.
-Result<PixelSelection> BuildSelection(const ImageDescriptor& descriptor, const ReadRequest& request,
-                                      DestinationOrder order);
-
-// Element count the selection produces, or zero when it is malformed.
-std::uint64_t SelectionElementCount(const PixelSelection& selection);
 
 }  // namespace carta::zarr::internal::zarr
 

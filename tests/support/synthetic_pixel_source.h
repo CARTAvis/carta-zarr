@@ -77,10 +77,7 @@ public:
         }
         Record(selection);
         if (_has_constant) {
-            std::uint64_t total = 1;
-            for (const auto count : selection.count) {
-                total *= count;
-            }
+            const std::uint64_t total = selection.elements();
             if (total != elements) {
                 return carta::zarr::Error{carta::zarr::ErrorCode::invalid_argument,
                                           "The selection and the destination disagree about size", "SKY"};
@@ -143,13 +140,13 @@ private:
     // cross-check.
     std::vector<std::uint64_t> DestinationStrides(
         const carta::zarr::internal::zarr::PixelSelection& selection) const {
-        const auto rank = selection.count.size();
+        const auto rank = selection.count().size();
         std::vector<std::uint64_t> strides(rank, 1);
         std::uint64_t running = 1;
         for (std::size_t axis = 0; axis < rank; ++axis) {
-            const auto stored = selection.destination_to_stored.at(axis);
+            const auto stored = selection.destination_to_stored().at(axis);
             strides.at(stored) = running;
-            running *= selection.count.at(stored);
+            running *= selection.count().at(stored);
         }
         return strides;
     }
@@ -157,11 +154,10 @@ private:
     template <typename Write>
     carta::zarr::Result<void> Fill(const carta::zarr::internal::zarr::PixelSelection& selection,
                                    std::size_t elements, Write&& write) const {
-        const auto rank = selection.count.size();
-        std::uint64_t total = 1;
-        for (const auto count : selection.count) {
-            total *= count;
-        }
+        const auto rank = selection.count().size();
+        // The seam's guard, as the TensorStore reader has one: the destination is the caller's, and
+        // this writes through it as far as the selection reaches.
+        const std::uint64_t total = selection.elements();
         if (total != elements) {
             return carta::zarr::Error{carta::zarr::ErrorCode::invalid_argument,
                                       "The selection and the destination disagree about size", "SKY"};
@@ -183,11 +179,11 @@ private:
             for (std::size_t stored = 0; stored < rank; ++stored) {
                 at += static_cast<std::size_t>(index.at(stored) * strides.at(stored));
                 logical.at(stored_to_logical.at(stored)) =
-                    selection.start.at(stored) + (index.at(stored) * selection.stride.at(stored));
+                    selection.start().at(stored) + (index.at(stored) * selection.stride().at(stored));
             }
             write(logical, at);
             for (std::size_t stored = rank; stored-- > 0;) {
-                if (++index.at(stored) < selection.count.at(stored)) {
+                if (++index.at(stored) < selection.count().at(stored)) {
                     break;
                 }
                 index.at(stored) = 0;
@@ -197,7 +193,7 @@ private:
     }
 
     void Record(const carta::zarr::internal::zarr::PixelSelection& selection) const {
-        const auto rank = selection.count.size();
+        const auto rank = selection.count().size();
         // The chunk shape is in logical order; the selection is in stored order.
         std::vector<std::uint64_t> chunk(rank, 1);
         for (std::size_t logical = 0; logical < _descriptor->axes.size(); ++logical) {
@@ -208,8 +204,8 @@ private:
         std::vector<std::uint64_t> first(rank, 0);
         std::vector<std::uint64_t> last(rank, 0);
         for (std::size_t stored = 0; stored < rank; ++stored) {
-            const auto begin = selection.start.at(stored);
-            const auto end = begin + ((selection.count.at(stored) - 1) * selection.stride.at(stored));
+            const auto begin = selection.start().at(stored);
+            const auto end = begin + ((selection.count().at(stored) - 1) * selection.stride().at(stored));
             first.at(stored) = begin / chunk.at(stored);
             last.at(stored) = end / chunk.at(stored);
         }

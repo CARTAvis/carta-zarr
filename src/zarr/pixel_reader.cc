@@ -54,23 +54,6 @@ bool MatchesDataType(std::string_view expected, tensorstore::DataType actual) {
     }
 }
 
-bool SelectionIsWellFormed(const PixelSelection& selection) {
-    const auto rank = selection.start.size();
-    if (rank == 0 || selection.count.size() != rank || selection.stride.size() != rank ||
-        selection.destination_to_stored.size() != rank) {
-        return false;
-    }
-    std::vector<bool> seen(rank, false);
-    for (const auto stored : selection.destination_to_stored) {
-        if (stored >= rank || seen.at(stored)) {
-            return false;
-        }
-        seen.at(stored) = true;
-    }
-    return std::all_of(selection.stride.begin(), selection.stride.end(),
-                       [](std::uint64_t value) { return value > 0; });
-}
-
 // What the array on disk has to agree with the store's canonical metadata about before a single
 // pixel of it is read: its rank, its extent, what its dimensions are called, and what it holds.
 //
@@ -85,7 +68,7 @@ bool SelectionIsWellFormed(const PixelSelection& selection) {
 Result<void> VerifyStoreMatchesMetadata(const tensorstore::TensorStore<>& store, const PixelSelection& selection,
                                         const ArrayMetadata& expected, std::string_view node) {
     const auto rank = expected.shape.size();
-    if (selection.start.size() != rank) {
+    if (selection.start().size() != rank) {
         return Error{ErrorCode::invalid_argument, "Selection rank does not match the array rank",
                      std::string(node)};
     }
@@ -133,13 +116,11 @@ Result<void> ReadInto(const std::filesystem::path& array_path, const StoreContex
     if (destination == nullptr) {
         return Error{ErrorCode::invalid_argument, "Destination buffer is null", std::string(node)};
     }
-    if (!SelectionIsWellFormed(selection)) {
-        return Error{ErrorCode::invalid_argument, "Malformed pixel selection", std::string(node)};
-    }
-    const auto elements = SelectionElementCount(selection);
-    if (elements == 0) {
-        return Error{ErrorCode::invalid_argument, "Pixel selection is empty", std::string(node)};
-    }
+    // The selection is well formed by construction, so nothing about it is checked again here. The
+    // destination is not the selection's: it is whatever the caller handed across the seam, and the
+    // read writes through it as far as the selection reaches. Holding the one to the other is what
+    // stands between a caller's mistake and a write past the end of its buffer.
+    const auto elements = selection.elements();
     if (elements > destination_elements) {
         return Error{ErrorCode::invalid_argument, "Destination buffer is too small", std::string(node)};
     }
@@ -173,16 +154,16 @@ Result<void> ReadInto(const std::filesystem::path& array_path, const StoreContex
         if (auto agreed = VerifyStoreMatchesMetadata(store, selection, expected, node); !agreed) {
             return agreed.error();
         }
-        const auto rank = selection.start.size();
+        const auto rank = selection.start().size();
         std::vector<tensorstore::Index> start(rank);
         std::vector<tensorstore::Index> count(rank);
         std::vector<tensorstore::Index> stride(rank);
         std::vector<tensorstore::DimensionIndex> order(rank);
         for (std::size_t i = 0; i < rank; ++i) {
-            start.at(i) = static_cast<tensorstore::Index>(selection.start.at(i));
-            count.at(i) = static_cast<tensorstore::Index>(selection.count.at(i));
-            stride.at(i) = static_cast<tensorstore::Index>(selection.stride.at(i));
-            order.at(i) = static_cast<tensorstore::DimensionIndex>(selection.destination_to_stored.at(i));
+            start.at(i) = static_cast<tensorstore::Index>(selection.start().at(i));
+            count.at(i) = static_cast<tensorstore::Index>(selection.count().at(i));
+            stride.at(i) = static_cast<tensorstore::Index>(selection.stride().at(i));
+            order.at(i) = static_cast<tensorstore::DimensionIndex>(selection.destination_to_stored().at(i));
         }
 
         // Slice in stored order, then move the stored dimensions into the destination's order. Both

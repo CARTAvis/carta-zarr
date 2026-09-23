@@ -44,7 +44,7 @@ Result<Slab> ReadSlab(const PixelSource& source, const PassPlan& plan, const Rea
         return selection.error();
     }
     const auto stored_stride = selection.value().DestinationStrides();
-    const auto elements = static_cast<std::size_t>(zarr::SelectionElementCount(selection.value()));
+    const auto elements = static_cast<std::size_t>(selection.value().elements());
 
     buffers.pixels.resize(elements);
     if (auto read = source.ReadPixels(selection.value(), buffers.pixels.data(), buffers.pixels.size(), options.control);

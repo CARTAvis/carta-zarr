@@ -32,10 +32,10 @@ Result<PixelSelection> BuildSelection(const ImageDescriptor& descriptor, const R
     }
 
     PixelSelection selection;
-    selection.start.assign(rank, 0);
-    selection.count.assign(rank, 0);
-    selection.stride.assign(rank, 1);
-    selection.destination_to_stored.resize(rank);
+    selection._start.assign(rank, 0);
+    selection._count.assign(rank, 0);
+    selection._stride.assign(rank, 1);
+    selection._destination_to_stored.resize(rank);
 
     for (std::size_t logical = 0; logical < rank; ++logical) {
         const auto& axis = descriptor.axes.at(logical);
@@ -63,27 +63,39 @@ Result<PixelSelection> BuildSelection(const ImageDescriptor& descriptor, const R
             return Error{ErrorCode::invalid_metadata, "Axis '" + axis.name + "' has an out-of-range storage index",
                          descriptor.id};
         }
-        selection.start.at(stored) = range.start;
-        selection.count.at(stored) = range.count;
-        selection.stride.at(stored) = range.stride;
-        selection.destination_to_stored.at(logical) = stored;
+        selection._start.at(stored) = range.start;
+        selection._count.at(stored) = range.count;
+        selection._stride.at(stored) = range.stride;
+        selection._destination_to_stored.at(logical) = stored;
     }
     // In stored order the destination's axis 0 is the last stored dimension -- the one the array is
     // contiguous along -- so that it lands fastest, as it was written.
     if (order == DestinationOrder::stored) {
         for (std::size_t axis = 0; axis < rank; ++axis) {
-            selection.destination_to_stored.at(axis) = rank - 1 - axis;
+            selection._destination_to_stored.at(axis) = rank - 1 - axis;
         }
     }
+
+    // Counted here, once. It used to be counted by whoever needed it, and a count that did not fit
+    // came back as zero -- which the read reported as a destination too small for the request.
+    std::uint64_t elements = 1;
+    for (const auto count : selection._count) {
+        if (elements > std::numeric_limits<std::uint64_t>::max() / count) {
+            return Error{ErrorCode::invalid_argument, "Request selects more elements than can be counted",
+                         descriptor.id};
+        }
+        elements *= count;
+    }
+    selection._elements = elements;
     return selection;
 }
 
 std::vector<std::uint64_t> PixelSelection::DestinationStrides() const {
-    std::vector<std::uint64_t> strides(count.size(), 1);
+    std::vector<std::uint64_t> strides(_count.size(), 1);
     std::uint64_t running = 1;
-    for (const auto stored : destination_to_stored) {
+    for (const auto stored : _destination_to_stored) {
         strides.at(stored) = running;
-        running *= count.at(stored);
+        running *= _count.at(stored);
     }
     return strides;
 }
@@ -96,20 +108,6 @@ Result<void> CheckReadControl(const ReadControl& control, std::string_view node)
         return Error{ErrorCode::cancelled, "Pixel read deadline expired", std::string(node)};
     }
     return {};
-}
-
-std::uint64_t SelectionElementCount(const PixelSelection& selection) {
-    if (selection.count.empty()) {
-        return 0;
-    }
-    std::uint64_t elements = 1;
-    for (const auto value : selection.count) {
-        if (value == 0 || elements > std::numeric_limits<std::uint64_t>::max() / value) {
-            return 0;
-        }
-        elements *= value;
-    }
-    return elements;
 }
 
 }  // namespace carta::zarr::internal::zarr

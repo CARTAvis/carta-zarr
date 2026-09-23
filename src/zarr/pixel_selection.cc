@@ -34,8 +34,6 @@ Result<PixelSelection> BuildSelection(const ImageDescriptor& descriptor, const R
     selection.start.assign(rank, 0);
     selection.count.assign(rank, 0);
     selection.stride.assign(rank, 1);
-    selection.shape.assign(rank, 0);
-    selection.dimension_names.assign(rank, {});
     selection.logical_to_stored.resize(rank);
 
     for (std::size_t logical = 0; logical < rank; ++logical) {
@@ -67,8 +65,6 @@ Result<PixelSelection> BuildSelection(const ImageDescriptor& descriptor, const R
         selection.start.at(stored) = range.start;
         selection.count.at(stored) = range.count;
         selection.stride.at(stored) = range.stride;
-        selection.shape.at(stored) = axis.length;
-        selection.dimension_names.at(stored) = axis.name;
         selection.logical_to_stored.at(logical) = stored;
     }
     return selection;

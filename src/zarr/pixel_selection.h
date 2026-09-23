@@ -38,10 +38,6 @@ struct PixelSelection {
     std::vector<std::uint64_t> start;
     std::vector<std::uint64_t> count;
     std::vector<std::uint64_t> stride;
-    // The full array shape from the Store's canonical metadata, in stored axis order.
-    std::vector<std::uint64_t> shape;
-    // The canonical dimension names from the Store's metadata, in stored axis order.
-    std::vector<std::string> dimension_names;
     // logical_to_stored[i] is the stored dimension that logical axis i names. The destination is
     // written densely in logical order with axis 0 fastest-varying.
     std::vector<std::size_t> logical_to_stored;

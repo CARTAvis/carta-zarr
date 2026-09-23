@@ -405,10 +405,10 @@ Result<void> Store::ReadPixelsInto(std::string_view node, const zarr::PixelSelec
             return target_path.error();
         }
         if constexpr (std::is_same_v<T, float>) {
-            return zarr_metadata::ReadFloat32(target_path.value(), _context, node, metadata.value().data_type,
+            return zarr_metadata::ReadFloat32(target_path.value(), _context, node, metadata.value(),
                                               selection, destination, destination_elements, control);
         } else {
-            return zarr_metadata::ReadMaskBytes(target_path.value(), _context, node, metadata.value().data_type,
+            return zarr_metadata::ReadMaskBytes(target_path.value(), _context, node, metadata.value(),
                                                 selection, destination, destination_elements, control);
         }
     } catch (const std::exception& e) {

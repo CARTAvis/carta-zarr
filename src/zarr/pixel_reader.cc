@@ -112,8 +112,8 @@ template <typename Element>
 Result<void> ReadInto(const std::filesystem::path& array_path, const StoreContextPtr& context,
                       std::string_view node, const ArrayMetadata& expected, const PixelSelection& selection,
                       tensorstore::DataType target_dtype,
-                      Element* destination, std::size_t destination_elements, const ReadControl& control) {
-    if (destination == nullptr) {
+                      BufferView<Element> destination, const ReadControl& control) {
+    if (destination.data == nullptr) {
         return Error{ErrorCode::invalid_argument, "Destination buffer is null", std::string(node)};
     }
     // The selection is well formed by construction, so nothing about it is checked again here. The
@@ -121,7 +121,7 @@ Result<void> ReadInto(const std::filesystem::path& array_path, const StoreContex
     // read writes through it as far as the selection reaches. Holding the one to the other is what
     // stands between a caller's mistake and a write past the end of its buffer.
     const auto elements = selection.elements();
-    if (elements > destination_elements) {
+    if (elements > destination.size) {
         return Error{ErrorCode::invalid_argument, "Destination buffer is too small", std::string(node)};
     }
 
@@ -199,7 +199,7 @@ Result<void> ReadInto(const std::filesystem::path& array_path, const StoreContex
         // densely packed buffer is Fortran-ordered. TensorStore requires a shared array here; the
         // caller owns this buffer and the read below is awaited before returning, so a non-owning
         // shared pointer is what the ownership actually is rather than a way around the check.
-        auto target = tensorstore::Array(tensorstore::internal::UnownedToShared(destination), shape,
+        auto target = tensorstore::Array(tensorstore::internal::UnownedToShared(destination.data), shape,
                                          tensorstore::fortran_order);
 
         auto const read_result = tensorstore::Read(std::move(converted).value(), target).result();
@@ -216,21 +216,21 @@ Result<void> ReadInto(const std::filesystem::path& array_path, const StoreContex
 }  // namespace
 
 Result<void> ReadFloat32(const std::filesystem::path& array_path, const StoreContextPtr& context,
-                         std::string_view node, const ArrayMetadata& expected, const PixelSelection& selection, float* destination,
-                         std::size_t destination_elements, const ReadControl& control) {
+                         std::string_view node, const ArrayMetadata& expected, const PixelSelection& selection,
+                         BufferView<float> destination, const ReadControl& control) {
     return ReadInto(array_path, context, node, expected, selection, tensorstore::dtype_v<float>, destination,
-                    destination_elements, control);
+                    control);
 }
 
 Result<void> ReadMaskBytes(const std::filesystem::path& array_path, const StoreContextPtr& context,
-                           std::string_view node, const ArrayMetadata& expected, const PixelSelection& selection, std::uint8_t* destination,
-                           std::size_t destination_elements, const ReadControl& control) {
+                           std::string_view node, const ArrayMetadata& expected, const PixelSelection& selection,
+                           BufferView<std::uint8_t> destination, const ReadControl& control) {
     // The caller's buffer holds bytes, so the read converts into bytes. Asking TensorStore for
     // bool and writing it through a reinterpret_cast of that buffer assumed bool and uint8_t are
     // the same object, which C++ does not say they are; the conversion costs nothing here because
     // it rides the copy the read already performs.
     return ReadInto(array_path, context, node, expected, selection, tensorstore::dtype_v<std::uint8_t>,
-                    destination, destination_elements, control);
+                    destination, control);
 }
 
 }  // namespace carta::zarr::internal::zarr

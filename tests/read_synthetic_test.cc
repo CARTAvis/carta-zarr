@@ -252,6 +252,51 @@ void TestASplitReadAgreesWithAnUnsplitOne() {
     Require(split == whole, "a split read and an unsplit one disagreed about the same cube");
 }
 
+// What crosses the seam is the caller's buffer from where a piece lands to its end, not the piece's
+// size restated. The seam's one check -- that the selection fits what it is writing into -- is only a
+// check if the length it is held to comes from the buffer: it used to be worked out from the very
+// selection it was compared with, so a piece planned to run past the caller's buffer would have
+// been written there. The buffer here is longer than the read, so the rest is visible, and so is
+// whether anything was written into it.
+void TestEachPieceIsHandedTheRestOfTheBuffer() {
+    const auto image = MakeImage();
+    const auto geometry = MakeGeometry();
+    SyntheticPixelSource source(image, geometry, Value);
+
+    constexpr std::size_t kSpare = 7;
+    constexpr std::size_t kPiece = static_cast<std::size_t>(kX * kY * 2);
+    ReadOptions options;
+    options.temporary_memory_limit_bytes = kThreePieces;
+    std::vector<float> destination(kElements + kSpare, kUntouched);
+    const auto read = ReadInPieces(Readable(source, image, geometry), WholeCube(),
+                                   BufferView<float>{destination.data(), destination.size()}, options,
+                                   ProgressCallback{});
+    Require(static_cast<bool>(read) && read.value() == kElements, "a read into a roomier buffer failed");
+
+    const std::vector<std::size_t> handed{kElements + kSpare, kElements + kSpare - kPiece,
+                                          kElements + kSpare - (2 * kPiece)};
+    Require(source.pixel_destinations() == handed,
+            "a piece was not handed the rest of the caller's buffer from where it lands");
+    for (std::size_t i = kElements; i < destination.size(); ++i) {
+        Require(destination.at(i) == kUntouched, "a read wrote past what it selected, at " + std::to_string(i));
+    }
+    destination.resize(kElements);
+    RequireCubeMatchesTheFormula(destination, "a read into a roomier buffer");
+
+    // The mask read is one read into the caller's buffer, so it is handed all of it.
+    const auto masked = MakeImage(true);
+    SyntheticPixelSource flags(masked, geometry, Value);
+    std::vector<std::uint8_t> mask(kElements + kSpare, 9);
+    const auto mask_read = ReadPixelMask(Readable(flags, masked, geometry), WholeCube(),
+                                         BufferView<std::uint8_t>{mask.data(), mask.size()}, ReadControl{});
+    Require(static_cast<bool>(mask_read), "a mask read into a roomier buffer failed");
+    Require(flags.mask_destinations() == std::vector<std::size_t>{kElements + kSpare},
+            "the mask read was not handed the caller's whole buffer");
+    for (std::size_t i = kElements; i < mask.size(); ++i) {
+        Require(mask.at(i) == 9, "a mask read wrote past what it selected, at " + std::to_string(i));
+    }
+}
+
 // A flag the read can get is folded in, so a dropped pixel arrives as NaN rather than as a value
 // the caller has to know to distrust.
 void TestAFlaggedPixelArrivesAsNaN() {
@@ -403,6 +448,7 @@ int main() {
         TestProgressCountsElementsAndFinishesAtTheTotal();
         TestProgressCanStopTheRead();
         TestASplitReadAgreesWithAnUnsplitOne();
+        TestEachPieceIsHandedTheRestOfTheBuffer();
         TestAFlaggedPixelArrivesAsNaN();
         TestDecliningTheMaskReadsNoFlag();
         TestTheMaskReadIsRefusedForAnImageWithNoFlag();

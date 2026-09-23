@@ -73,7 +73,12 @@ Result<std::size_t> ReadInPieces(const ReadableImage& image, const ReadRequest& 
             return piece_selection.error();
         }
         const auto piece_elements = static_cast<std::size_t>(piece_selection.value().elements());
-        float* piece_pixels = destination.data + piece.first_element;
+        // The rest of the caller's buffer from where this piece lands, not the piece's own size: the
+        // seam holds the one to the other, and handing it the piece's size would have it compare the
+        // piece with itself. first_element is short of the whole read's count, which CheckRead held
+        // to the buffer, so this never runs backwards.
+        const BufferView<float> piece_destination{destination.data + piece.first_element,
+                                                  destination.size - static_cast<std::size_t>(piece.first_element)};
 
         if (apply_mask) {
             // The limit bounds a piece, and a read that is not split is one piece, so a request that
@@ -89,17 +94,17 @@ Result<std::size_t> ReadInPieces(const ReadableImage& image, const ReadRequest& 
             // piece of the destination updated. TensorStore still owns the pixel operation's
             // in-flight completion before it returns, so the destination remains valid for the next
             // read.
-            auto mask_read = source.ReadMask(piece_selection.value(), mask.data(), mask.size(), options.control);
+            auto mask_read = source.ReadMask(piece_selection.value(), {mask.data(), mask.size()}, options.control);
             if (!mask_read) {
                 return mask_read.error();
             }
         }
-        auto read = source.ReadPixels(piece_selection.value(), piece_pixels, piece_elements, options.control);
+        auto read = source.ReadPixels(piece_selection.value(), piece_destination, options.control);
         if (!read) {
             return read.error();
         }
         if (apply_mask) {
-            ApplyPixelMask(piece_pixels, mask.data(), piece_elements);
+            ApplyPixelMask(piece_destination.data, mask.data(), piece_elements);
         }
 
         const auto finished = static_cast<std::size_t>(piece.first_element + piece_elements);
@@ -123,9 +128,7 @@ Result<std::size_t> ReadPixelMask(const ReadableImage& image, const ReadRequest&
         return checked.error();
     }
     const auto elements = checked.value().elements();
-    if (auto read = image.source().ReadMask(checked.value(), destination.data,
-                                            static_cast<std::size_t>(elements), control);
-        !read) {
+    if (auto read = image.source().ReadMask(checked.value(), destination, control); !read) {
         return read.error();
     }
     return static_cast<std::size_t>(elements);

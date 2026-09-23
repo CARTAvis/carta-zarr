@@ -87,23 +87,50 @@ std::string NormalizeMetadataKey(std::string key) {
 // nothing reads it again afterwards, and these are whole node metadata documents: copying them is
 // the single largest cost of opening a consolidated store, and it buys a second copy of what the
 // store is about to own anyway.
-void CollectConsolidatedMetadata(nlohmann::json& metadata, const std::string& prefix,
-                                 std::map<std::string, nlohmann::json>& output) {
+//
+// Each key is filed under the node's canonical name, the one every read of that node is keyed by.
+// A key is first stripped of what makes it name a document rather than a node -- a leading slash, a
+// trailing zarr.json -- and then held to the same rule as any other node name. Filed under what the
+// block happened to spell, a copy keyed "./SKY" was never found by a read of "SKY": the node was
+// read again, cached twice, and listed under a name no caller asks for.
+//
+// Two ways the block can be wrong about itself are refusals rather than keys to pass over. For a
+// consolidated store the block is the whole listing -- nothing enumerates the transport behind it --
+// so a key dropped here is a node missing from the dataset, and a variable that disappears without
+// a word is a worse answer than a store that is refused with one.
+Result<void> CollectConsolidatedMetadata(nlohmann::json& metadata, const std::string& prefix,
+                                         std::map<std::string, nlohmann::json>& output) {
     if (!metadata.is_object()) {
-        return;
+        return {};
     }
     for (auto& entry : metadata.items()) {
-        std::string path = prefix.empty() ? entry.key() : prefix + "/" + entry.key();
-        path = NormalizeMetadataKey(std::move(path));
+        const std::string spelled = prefix.empty() ? entry.key() : prefix + "/" + entry.key();
+        std::string path = NormalizeMetadataKey(spelled);
         auto& value = entry.value();
         if (value.is_object() && value.contains("node_type")) {
-            if (!path.empty()) {
-                output[path] = std::move(value);
+            // The root's own document, which the store has already read as itself.
+            if (path.empty()) {
+                continue;
+            }
+            auto node = NormalizeNodeName(path);
+            if (!node) {
+                return Error{ErrorCode::invalid_metadata,
+                             "Zarr consolidated_metadata lists '" + spelled + "', which is not a node path",
+                             "zarr.json"};
+            }
+            if (!output.emplace(node.value(), std::move(value)).second) {
+                return Error{ErrorCode::invalid_metadata,
+                             "Zarr consolidated_metadata lists the node '" + node.value() + "' twice, once as '" +
+                                 spelled + "'",
+                             "zarr.json"};
             }
         } else if (value.is_object()) {
-            CollectConsolidatedMetadata(value, path, output);
+            if (auto nested = CollectConsolidatedMetadata(value, path, output); !nested) {
+                return nested;
+            }
         }
     }
+    return {};
 }
 
 }  // namespace
@@ -180,7 +207,9 @@ Result<Store> OpenStore(TransportPtr transport, StoreContextPtr context) {
                          "Zarr consolidated_metadata must contain an object metadata member", "zarr.json"};
         }
         has_consolidated = true;
-        CollectConsolidatedMetadata(block.at("metadata"), {}, consolidated);
+        if (auto collected = CollectConsolidatedMetadata(block.at("metadata"), {}, consolidated); !collected) {
+            return collected.error();
+        }
     }
 
     return Store{std::move(transport), std::move(root_attributes), std::move(consolidated), has_consolidated,
@@ -248,13 +277,25 @@ const Result<std::vector<std::string>>& Store::ListNodes() const {
         // staleness zarr-python's own consolidated open accepts. Reading a node it does not
         // mention still falls through to the node itself, above.
         if (_has_consolidated_metadata) {
+            // Canonical already: they were filed that way when the store was built.
             node_names = _consolidated_nodes;
         } else {
             auto listed = _transport->ListNodes();
             if (!listed) {
                 return listed.error();
             }
-            node_names = std::move(listed.value());
+            // Held to the rule every other node name is held to, so that a listed name is the key
+            // its reads are cached under. A name that rule refuses cannot be read at all, and a
+            // transport that lists one is wrong about where its own nodes are -- which is not the
+            // store's metadata being wrong, and is not something to diagnose around.
+            node_names.reserve(listed.value().size());
+            for (const auto& name : listed.value()) {
+                auto canonical = NormalizeNodeName(name);
+                if (!canonical) {
+                    return Error{ErrorCode::io_error, "Zarr transport listed a node by an invalid path", name};
+                }
+                node_names.push_back(std::move(canonical.value()));
+            }
         }
 
         std::sort(node_names.begin(), node_names.end());

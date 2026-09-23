@@ -523,6 +523,51 @@ void TestConsolidatedMetadataDiscovery() {
             "a store without consolidated metadata has to read its children");
 }
 
+// A consolidated key is filed under the canonical name of the node it describes. A block is entitled
+// to spell a node "./SKY" -- it names the node SKY -- and filed under that spelling the copy was
+// never found by a read of "SKY": the node was read from the transport regardless, cached twice,
+// and listed as "./SKY". That is an image id no reader asks for, and since openability is decided
+// against the listing, SKY could not be opened by its own name.
+void TestAConsolidatedKeyIsFiledUnderItsCanonicalName() {
+    auto nodes = ConsolidatedStore();
+    auto& root = nodes[""];
+    const auto key = root.find("\"SKY\":");
+    Require(key != std::string::npos, "the consolidated fixture has no SKY entry to respell");
+    root.replace(key, 6, "\"./SKY\":");
+
+    auto transport = MakeInMemoryTransport(nodes);
+    auto store = carta::zarr::internal::OpenStore(transport);
+    Require(static_cast<bool>(store), "a consolidated key spelled with ./ was refused");
+    const auto discovery = XradioProfile().Discover(store.value());
+    Require(static_cast<bool>(discovery), "discovery failed over a respelled consolidated key");
+    Require(ImageIds(discovery.value().images) == std::vector<std::string>{"SKY"},
+            "the image was listed under the spelling the block used rather than under its name");
+    Require(transport->nodes_read() == std::set<std::string>{""},
+            "the node was read again although the consolidated copy described it");
+}
+
+// Two ways a consolidated block can be wrong about itself, and both refuse the store. For a store
+// that consolidated its metadata the block is the whole listing, so a key passed over would be a
+// variable missing from the dataset without a word said about it.
+void TestAConsolidatedBlockThatMisnamesItsNodesIsRefused() {
+    // A key that no node path can be.
+    auto escaping = ConsolidatedStore();
+    auto& escaping_root = escaping[""];
+    escaping_root.replace(escaping_root.find("\"SKY\":"), 6, "\"../SKY\":");
+    const auto outside = Open(escaping);
+    Require(!outside && outside.error().code == ErrorCode::invalid_metadata,
+            "a consolidated key naming a path outside the store was accepted");
+
+    // One node under two spellings. Which document won used to depend on the order the object was
+    // walked in.
+    auto doubled = ConsolidatedStore();
+    auto& doubled_root = doubled[""];
+    doubled_root.insert(doubled_root.find("\"SKY\":"), "\"./SKY\":" + SkyArray() + ",");
+    const auto twice = Open(doubled);
+    Require(!twice && twice.error().code == ErrorCode::invalid_metadata,
+            "a consolidated block listing one node twice was accepted");
+}
+
 // The report latches: once a requirement is unmet, later ones are no-ops. A store with two faults
 // is therefore diagnosed once, by the first fault reached -- the behaviour a probe had when every
 // check returned early, now stated somewhere rather than emerging from the control flow.
@@ -698,6 +743,8 @@ int main() {
         TestOneRuleDecidesWhatDatasetIsOpenable();
         TestDefaultImageSkipsUnopenablePreferredImage();
         TestConsolidatedMetadataDiscovery();
+        TestAConsolidatedKeyIsFiledUnderItsCanonicalName();
+        TestAConsolidatedBlockThatMisnamesItsNodesIsRefused();
         TestADeclaredFlagIsBinding();
         TestAmbiguousFlagsSelectNone();
         TestStoreRejections();

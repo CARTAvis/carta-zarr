@@ -21,7 +21,8 @@
 
 namespace carta::zarr::internal::zarr {
 
-Result<PixelSelection> BuildSelection(const ImageDescriptor& descriptor, const ReadRequest& request) {
+Result<PixelSelection> BuildSelection(const ImageDescriptor& descriptor, const ReadRequest& request,
+                                      DestinationOrder order) {
     const auto rank = descriptor.axes.size();
     if (request.axes.size() != rank) {
         return Error{ErrorCode::invalid_argument,
@@ -34,7 +35,7 @@ Result<PixelSelection> BuildSelection(const ImageDescriptor& descriptor, const R
     selection.start.assign(rank, 0);
     selection.count.assign(rank, 0);
     selection.stride.assign(rank, 1);
-    selection.logical_to_stored.resize(rank);
+    selection.destination_to_stored.resize(rank);
 
     for (std::size_t logical = 0; logical < rank; ++logical) {
         const auto& axis = descriptor.axes.at(logical);
@@ -65,9 +66,26 @@ Result<PixelSelection> BuildSelection(const ImageDescriptor& descriptor, const R
         selection.start.at(stored) = range.start;
         selection.count.at(stored) = range.count;
         selection.stride.at(stored) = range.stride;
-        selection.logical_to_stored.at(logical) = stored;
+        selection.destination_to_stored.at(logical) = stored;
+    }
+    // In stored order the destination's axis 0 is the last stored dimension -- the one the array is
+    // contiguous along -- so that it lands fastest, as it was written.
+    if (order == DestinationOrder::stored) {
+        for (std::size_t axis = 0; axis < rank; ++axis) {
+            selection.destination_to_stored.at(axis) = rank - 1 - axis;
+        }
     }
     return selection;
+}
+
+std::vector<std::uint64_t> PixelSelection::DestinationStrides() const {
+    std::vector<std::uint64_t> strides(count.size(), 1);
+    std::uint64_t running = 1;
+    for (const auto stored : destination_to_stored) {
+        strides.at(stored) = running;
+        running *= count.at(stored);
+    }
+    return strides;
 }
 
 Result<void> CheckReadControl(const ReadControl& control, std::string_view node) {

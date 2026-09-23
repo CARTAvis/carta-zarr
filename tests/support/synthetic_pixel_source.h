@@ -131,16 +131,23 @@ public:
     }
 
 private:
-    // The destination is dense in logical order with logical axis 0 fastest, which is what
-    // PixelSelection::logical_to_stored describes. Both the reversed mapping a pass asks for and
-    // the identity one a plain read asks for land here.
+    // The destination is dense with its axis 0 fastest, laid out as
+    // PixelSelection::destination_to_stored says -- logical order for a plain read, stored order for
+    // a pass.
+    //
+    // Worked out here rather than asked of PixelSelection::DestinationStrides, deliberately. This
+    // adapter writes pixels where these strides say and the pass reads them where the selection's
+    // say; were both the same function, a mistake in it would be made twice, consistently, and
+    // every test would pass while the real writer -- TensorStore, which lays the destination out
+    // from the permutation and not from that function -- disagreed. Deriving it again is the
+    // cross-check.
     std::vector<std::uint64_t> DestinationStrides(
         const carta::zarr::internal::zarr::PixelSelection& selection) const {
         const auto rank = selection.count.size();
         std::vector<std::uint64_t> strides(rank, 1);
         std::uint64_t running = 1;
-        for (std::size_t logical = 0; logical < rank; ++logical) {
-            const auto stored = selection.logical_to_stored.at(logical);
+        for (std::size_t axis = 0; axis < rank; ++axis) {
+            const auto stored = selection.destination_to_stored.at(axis);
             strides.at(stored) = running;
             running *= selection.count.at(stored);
         }
@@ -161,12 +168,8 @@ private:
         }
         _elements += total;
 
-        // stored_to_logical comes from the descriptor, never from the selection. A pass overwrites
-        // PixelSelection::logical_to_stored with rank - 1 - i to ask for the stored dimensions
-        // reversed, so after that the field describes the destination's layout and no longer says
-        // which logical axis a stored dimension is. Reading a coordinate out of it gives a plane
-        // that is self-consistent and transposed, which sums to the same answer and is therefore
-        // invisible to a test that only checks totals.
+        // stored_to_logical comes from the descriptor, because the selection does not say it: its
+        // permutation is the destination's layout, which for a pass is not logical order.
         std::vector<std::size_t> stored_to_logical(rank, 0);
         for (std::size_t logical = 0; logical < _descriptor->axes.size(); ++logical) {
             stored_to_logical.at(_descriptor->axes.at(logical).storage_index) = logical;

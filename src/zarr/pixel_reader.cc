@@ -57,11 +57,11 @@ bool MatchesDataType(std::string_view expected, tensorstore::DataType actual) {
 bool SelectionIsWellFormed(const PixelSelection& selection) {
     const auto rank = selection.start.size();
     if (rank == 0 || selection.count.size() != rank || selection.stride.size() != rank ||
-        selection.logical_to_stored.size() != rank) {
+        selection.destination_to_stored.size() != rank) {
         return false;
     }
     std::vector<bool> seen(rank, false);
-    for (const auto stored : selection.logical_to_stored) {
+    for (const auto stored : selection.destination_to_stored) {
         if (stored >= rank || seen.at(stored)) {
             return false;
         }
@@ -182,11 +182,12 @@ Result<void> ReadInto(const std::filesystem::path& array_path, const StoreContex
             start.at(i) = static_cast<tensorstore::Index>(selection.start.at(i));
             count.at(i) = static_cast<tensorstore::Index>(selection.count.at(i));
             stride.at(i) = static_cast<tensorstore::Index>(selection.stride.at(i));
-            order.at(i) = static_cast<tensorstore::DimensionIndex>(selection.logical_to_stored.at(i));
+            order.at(i) = static_cast<tensorstore::DimensionIndex>(selection.destination_to_stored.at(i));
         }
 
-        // Slice in stored order, then move the stored dimensions into logical order. Both are index
-        // transforms, so TensorStore composes them into the one copy the read already performs.
+        // Slice in stored order, then move the stored dimensions into the destination's order. Both
+        // are index transforms, so TensorStore composes them into the one copy the read already
+        // performs.
         auto sliced = store | tensorstore::AllDims().TranslateSizedInterval(start, count, stride);
         if (!sliced.ok()) {
             return Error{ErrorCode::invalid_argument,

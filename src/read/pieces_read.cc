@@ -37,7 +37,7 @@ struct CheckedRequest {
 // read that answered two of them would be a read that had not checked.
 Result<CheckedRequest> CheckRead(const ImageDescriptor& descriptor, const ReadRequest& request,
                                  std::size_t destination_size, const ReadControl& control) {
-    auto selection = zarr::BuildSelection(descriptor, request);
+    auto selection = zarr::BuildSelection(descriptor, request, zarr::DestinationOrder::logical);
     if (!selection) {
         return selection.error();
     }
@@ -88,7 +88,7 @@ Result<std::size_t> ReadInPieces(const ReadableImage& image, const ReadRequest& 
             range.start = request.axes.at(plan.axis).start + (begin * range.stride);
             range.count = end - begin;
         }
-        auto piece_selection = zarr::BuildSelection(descriptor, piece);
+        auto piece_selection = zarr::BuildSelection(descriptor, piece, zarr::DestinationOrder::logical);
         if (!piece_selection) {
             return piece_selection.error();
         }

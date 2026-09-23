@@ -150,8 +150,8 @@ public:
     // `std::uint8_t` is a flag, one byte an element, true meaning a good pixel. Instantiated for
     // those two in store.cc and for nothing else.
     template <typename T>
-    Result<void> ReadPixelsInto(std::string_view node, const zarr::PixelSelection& selection, T* destination,
-                                std::size_t destination_elements, const ReadControl& control) const;
+    Result<void> ReadPixelsInto(std::string_view node, const zarr::PixelSelection& selection,
+                                BufferView<T> destination, const ReadControl& control) const;
 
 private:
     Result<std::filesystem::path> ResolveArrayDirectory(std::string_view node) const;

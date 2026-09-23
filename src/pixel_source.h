@@ -12,7 +12,6 @@
 
 #include "zarr/pixel_selection.h"
 
-#include <cstddef>
 #include <cstdint>
 
 namespace carta::zarr::internal {
@@ -31,6 +30,13 @@ namespace carta::zarr::internal {
  * Consulted once per slab or once per piece, so the indirect call is paid per megabyte of pixels
  * rather than per pixel. That is the whole reason it can be an interface at all while a visitor
  * cannot: see ADR 0005.
+ *
+ * `destination` is what the caller has to write into, from where this read's first element lands
+ * to the end of the caller's buffer -- not the selection's size restated. A source writes the
+ * selection's elements into the front of it and nothing past them, and refuses a destination too
+ * short to hold them before writing any. The length used to cross as a separate count that every
+ * caller worked out from the selection it was passing, so the check against it compared the
+ * selection with itself and could never catch the caller's mistake it was there for.
  */
 class PixelSource {
 public:
@@ -41,12 +47,12 @@ public:
     PixelSource& operator=(PixelSource&&) = delete;
     virtual ~PixelSource() = default;
 
-    virtual Result<void> ReadPixels(const zarr::PixelSelection& selection, float* destination,
-                                    std::size_t elements, const ReadControl& control) const = 0;
+    virtual Result<void> ReadPixels(const zarr::PixelSelection& selection, BufferView<float> destination,
+                                    const ReadControl& control) const = 0;
     // Only called when the caller has established that the image has a flag and that this read
     // applies it. A source that has none may report not_found rather than serve zeroes.
-    virtual Result<void> ReadMask(const zarr::PixelSelection& selection, std::uint8_t* destination,
-                                  std::size_t elements, const ReadControl& control) const = 0;
+    virtual Result<void> ReadMask(const zarr::PixelSelection& selection, BufferView<std::uint8_t> destination,
+                                  const ReadControl& control) const = 0;
 };
 
 }  // namespace carta::zarr::internal

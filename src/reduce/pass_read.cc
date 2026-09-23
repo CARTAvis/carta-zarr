@@ -47,13 +47,15 @@ Result<Slab> ReadSlab(const PixelSource& source, const PassPlan& plan, const Rea
     const auto elements = static_cast<std::size_t>(selection.value().elements());
 
     buffers.pixels.resize(elements);
-    if (auto read = source.ReadPixels(selection.value(), buffers.pixels.data(), buffers.pixels.size(), options.control);
+    if (auto read =
+            source.ReadPixels(selection.value(), {buffers.pixels.data(), buffers.pixels.size()}, options.control);
         !read) {
         return read.error();
     }
     if (plan.apply_mask) {
         buffers.mask.resize(elements);
-        if (auto read = source.ReadMask(selection.value(), buffers.mask.data(), buffers.mask.size(), options.control);
+        if (auto read =
+                source.ReadMask(selection.value(), {buffers.mask.data(), buffers.mask.size()}, options.control);
             !read) {
             return read.error();
         }

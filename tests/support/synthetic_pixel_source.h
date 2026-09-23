@@ -69,38 +69,39 @@ public:
     }
 
     carta::zarr::Result<void> ReadPixels(const carta::zarr::internal::zarr::PixelSelection& selection,
-                                         float* destination, std::size_t elements,
+                                         carta::zarr::BufferView<float> destination,
                                          const carta::zarr::ReadControl&) const override {
         ++_pixel_reads;
+        _pixel_destinations.push_back(destination.size);
         if (_fail_at != 0 && _pixel_reads == _fail_at) {
             return carta::zarr::Error{_fail_code, "The synthetic source was told to fail here", "SKY"};
         }
         Record(selection);
         if (_has_constant) {
             const std::uint64_t total = selection.elements();
-            if (total != elements) {
-                return carta::zarr::Error{carta::zarr::ErrorCode::invalid_argument,
-                                          "The selection and the destination disagree about size", "SKY"};
+            if (auto fits = Fits(total, destination.size); !fits) {
+                return fits;
             }
             _elements += total;
-            std::fill(destination, destination + elements, _constant);
+            std::fill(destination.data, destination.data + total, _constant);
             return carta::zarr::Result<void>{};
         }
-        return Fill(selection, elements, [&](const std::vector<std::uint64_t>& logical, std::size_t at) {
-            destination[at] = _formula(logical);
+        return Fill(selection, destination.size, [&](const std::vector<std::uint64_t>& logical, std::size_t at) {
+            destination.data[at] = _formula(logical);
         });
     }
 
     carta::zarr::Result<void> ReadMask(const carta::zarr::internal::zarr::PixelSelection& selection,
-                                       std::uint8_t* destination, std::size_t elements,
+                                       carta::zarr::BufferView<std::uint8_t> destination,
                                        const carta::zarr::ReadControl&) const override {
         ++_mask_reads;
+        _mask_destinations.push_back(destination.size);
         if (_mask_fail_at != 0 && _mask_reads == _mask_fail_at) {
             return carta::zarr::Error{_mask_fail_code, "The synthetic source was told to fail this flag read",
                                       "FLAG"};
         }
-        return Fill(selection, elements, [&](const std::vector<std::uint64_t>& logical, std::size_t at) {
-            destination[at] = _flags && !_flags(logical) ? 0 : 1;
+        return Fill(selection, destination.size, [&](const std::vector<std::uint64_t>& logical, std::size_t at) {
+            destination.data[at] = _flags && !_flags(logical) ? 0 : 1;
         });
     }
 
@@ -111,6 +112,15 @@ public:
     }
     std::uint64_t mask_reads() const {
         return _mask_reads;
+    }
+    // How long a destination each read was handed, in the order they were asked. What a caller
+    // hands across the seam is its own buffer, so this is what says whether it handed that or
+    // restated the selection's size -- the one mistake a check at the seam cannot see from inside.
+    const std::vector<std::size_t>& pixel_destinations() const {
+        return _pixel_destinations;
+    }
+    const std::vector<std::size_t>& mask_destinations() const {
+        return _mask_destinations;
     }
     std::uint64_t elements_read() const {
         return _elements;
@@ -151,16 +161,26 @@ private:
         return strides;
     }
 
+    // The seam's guard, as the TensorStore reader has one: the destination is the caller's, and this
+    // writes through it as far as the selection reaches. Longer than the selection is the ordinary
+    // case -- a piece is handed the rest of the caller's buffer -- so only shorter is refused. This
+    // used to demand the two be equal, which held only because every caller passed the selection's
+    // own size as the destination's.
+    static carta::zarr::Result<void> Fits(std::uint64_t total, std::size_t destination_elements) {
+        if (total > destination_elements) {
+            return carta::zarr::Error{carta::zarr::ErrorCode::invalid_argument, "Destination buffer is too small",
+                                      "SKY"};
+        }
+        return carta::zarr::Result<void>{};
+    }
+
     template <typename Write>
     carta::zarr::Result<void> Fill(const carta::zarr::internal::zarr::PixelSelection& selection,
-                                   std::size_t elements, Write&& write) const {
+                                   std::size_t destination_elements, Write&& write) const {
         const auto rank = selection.count().size();
-        // The seam's guard, as the TensorStore reader has one: the destination is the caller's, and
-        // this writes through it as far as the selection reaches.
         const std::uint64_t total = selection.elements();
-        if (total != elements) {
-            return carta::zarr::Error{carta::zarr::ErrorCode::invalid_argument,
-                                      "The selection and the destination disagree about size", "SKY"};
+        if (auto fits = Fits(total, destination_elements); !fits) {
+            return fits;
         }
         _elements += total;
 
@@ -240,6 +260,8 @@ private:
     mutable std::uint64_t _pixel_reads = 0;
     mutable std::uint64_t _mask_reads = 0;
     mutable std::uint64_t _elements = 0;
+    mutable std::vector<std::size_t> _pixel_destinations;
+    mutable std::vector<std::size_t> _mask_destinations;
     mutable std::map<std::vector<std::uint64_t>, std::uint64_t> _chunk_hits;
 };
 

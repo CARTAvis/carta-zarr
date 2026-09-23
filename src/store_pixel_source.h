@@ -22,14 +22,14 @@ public:
     StorePixelSource(const Store& store, const ImageDescriptor& descriptor)
         : _store(&store), _descriptor(&descriptor) {}
 
-    Result<void> ReadPixels(const zarr::PixelSelection& selection, float* destination, std::size_t elements,
+    Result<void> ReadPixels(const zarr::PixelSelection& selection, BufferView<float> destination,
                             const ReadControl& control) const override {
-        return _store->ReadPixelsInto(_descriptor->id, selection, destination, elements, control);
+        return _store->ReadPixelsInto(_descriptor->id, selection, destination, control);
     }
 
-    Result<void> ReadMask(const zarr::PixelSelection& selection, std::uint8_t* destination,
-                          std::size_t elements, const ReadControl& control) const override {
-        return _store->ReadPixelsInto(_descriptor->pixel_mask_id, selection, destination, elements, control);
+    Result<void> ReadMask(const zarr::PixelSelection& selection, BufferView<std::uint8_t> destination,
+                          const ReadControl& control) const override {
+        return _store->ReadPixelsInto(_descriptor->pixel_mask_id, selection, destination, control);
     }
 
 private:

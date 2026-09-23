@@ -64,7 +64,7 @@ Result<std::size_t> ReadInPieces(const ReadableImage& image, const ReadRequest& 
     // piece is actually read through is built per piece below.
     const auto elements = checked.value().elements();
 
-    const bool apply_mask = options.apply_pixel_mask && descriptor.has_pixel_mask;
+    const bool apply_mask = AppliesPixelMask(options, descriptor);
     const PiecePlan plan = PlanPieces(descriptor, geometry, request, options, static_cast<bool>(progress), elements, apply_mask);
 
     std::vector<std::uint8_t> mask;

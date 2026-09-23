@@ -7,17 +7,30 @@
 #ifndef CARTA_ZARR_SRC_PIXEL_MASK_H_
 #define CARTA_ZARR_SRC_PIXEL_MASK_H_
 
+#include "carta-zarr/descriptor.h"
+#include "carta-zarr/read.h"
+
 #include <cstddef>
 #include <cstdint>
 #include <limits>
 
 namespace carta::zarr::internal {
 
+// Whether a read of this image folds its pixel mask into the pixels: when the image has one, unless
+// the caller declined it.
+//
+// Stated here, beside what folding it in means, for the reason that is stated once: Image::Read and
+// the pass both ask it, and a read that disagreed with a reduction about which pixels exist is the
+// one failure neither reports. They asked it in two places, each writing out the same conjunction.
+inline bool AppliesPixelMask(const ReadOptions& options, const ImageDescriptor& descriptor) noexcept {
+    return options.apply_pixel_mask && descriptor.has_pixel_mask;
+}
+
 /**
  * Drop every pixel its mask excludes, by replacing it with NaN.
  *
  * What a byte of a pixel mask means belongs to the schema profile, which is also what chose the
- * flag variable the bytes came from -- see DeterminePixelMask in schema/xradio/image.cc. The rule
+ * flag variable the bytes came from -- see DetermineFlag in schema/xradio/flag.h. The rule
  * is stated once here rather than at each place that reads pixels, so that a profile disagreeing
  * about it has one line to change instead of a search to run. XRADIO writes a flag whose true means
  * the pixel is good, so a zero byte is the pixel to drop.

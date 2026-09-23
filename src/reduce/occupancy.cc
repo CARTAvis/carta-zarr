@@ -9,6 +9,8 @@
 
 #include "occupancy.h"
 
+#include "chunk_blocks.h"
+
 #include <algorithm>
 #include <limits>
 
@@ -35,6 +37,8 @@ Result<Occupancy> Occupancy::Of(const RegionMask* regions, std::size_t region_co
     const bool swap_spatial = fastest_spatial_axis == AxisRole::spatial_y;
 
     Occupancy occupancy;
+    occupancy._chunk_u = chunk_u;
+    occupancy._chunk_v = chunk_v;
     occupancy._regions.reserve(region_count);
     for (std::size_t i = 0; i < region_count; ++i) {
         const auto& given = regions[i];
@@ -276,6 +280,67 @@ Result<Occupancy> Occupancy::Of(const RegionMask* regions, std::size_t region_co
     }
 
     return occupancy;
+}
+
+std::vector<OccupiedFootprint> Occupancy::Footprints(std::uint64_t chunks_per_read) const {
+    std::vector<OccupiedFootprint> footprints;
+    for (std::uint64_t row = 0; row < _rows;) {
+        const auto& runs = _runs_per_row.at(static_cast<std::size_t>(row));
+        if (runs.empty()) {
+            ++row;
+            continue;
+        }
+
+        // Rows below that repeat this row's runs exactly are read with it, so that a solid rectangle
+        // becomes a few large requests while a diagonal stays one chunk per row -- as many rows as a
+        // read affords at the width of the widest run in them.
+        std::uint64_t widest = 0;
+        for (const auto& run : runs) {
+            widest = std::max(widest, run.last - run.first + 1);
+        }
+        const std::uint64_t band_limit = UnitsAffordable(chunks_per_read, widest);
+        std::uint64_t band_end = row + 1;
+        while (band_end < _rows && (band_end - row) < band_limit &&
+               _runs_per_row.at(static_cast<std::size_t>(band_end)) == runs) {
+            ++band_end;
+        }
+        const std::uint64_t band_rows = band_end - row;
+
+        const std::uint64_t chunk_cv_begin = _chunk_cv0 + row;
+        const std::uint64_t chunk_cv_end = _chunk_cv0 + band_end;
+        const std::uint64_t v_begin = std::max(_v0, chunk_cv_begin * _chunk_v);
+        const std::uint64_t v_end = std::min(_v1, chunk_cv_end * _chunk_v);
+
+        // A run wider than a read is read in pieces, not in one request. Without this the smallest
+        // request is a whole chunk row of the region: 157 chunks of a 80000-pixel-wide region is
+        // 628 MiB, ten times the budget it was supposed to respect, and nothing to report or cancel
+        // from until all of it lands.
+        const std::uint64_t segment_limit = UnitsAffordable(chunks_per_read, band_rows);
+        for (const auto& whole : runs) {
+            for (std::uint64_t first = whole.first; first <= whole.last;) {
+                const std::uint64_t width = std::min(segment_limit, whole.last - first + 1);
+
+                OccupiedFootprint footprint;
+                footprint.chunk_cv_begin = chunk_cv_begin;
+                footprint.chunk_cv_end = chunk_cv_end;
+                footprint.chunk_cu_begin = _chunk_cu0 + first;
+                footprint.chunk_cu_end = footprint.chunk_cu_begin + width;
+
+                const std::uint64_t u_begin = std::max(_u0, footprint.chunk_cu_begin * _chunk_u);
+                const std::uint64_t u_end = std::min(_u1, footprint.chunk_cu_end * _chunk_u);
+                footprint.slab.u_start = u_begin;
+                footprint.slab.u_count = u_end - u_begin;
+                footprint.slab.v_start = v_begin;
+                footprint.slab.v_count = v_end - v_begin;
+                footprint.slab.chunks = width * band_rows;
+                footprints.push_back(footprint);
+
+                first += width;
+            }
+        }
+        row = band_end;
+    }
+    return footprints;
 }
 
 }  // namespace carta::zarr::internal

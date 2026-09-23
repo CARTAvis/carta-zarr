@@ -160,6 +160,14 @@ image and touches one chunk per row. Decided from each region's own mask or runs
 and read for the whole of the pass that follows.
 _Avoid_: bucket, index, incidence, coverage, bounding box
 
+**Footprint**:
+One rectangle of chunks a pass reads along the spectrum, a slab at a time: small enough that one
+layer of it fits in a read, and counted in the chunks it occupies, which is what progress is measured
+in. A whole-plane pass cuts its footprints as bands of the plane; a reduction's are cut by its
+occupancy from the chunk runs its regions touch, so a diagonal cut is read as one chunk per row
+rather than as its bounding box.
+_Avoid_: tile, window, block, rectangle
+
 **Piece**:
 One chunk-aligned part of an ordinary read, cut along the slowest-varying axis the request selects
 more than one element of. A read is always made of pieces; an unsplit one is a single piece covering

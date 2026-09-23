@@ -11,6 +11,8 @@
 #include "carta-zarr/reduce.h"
 #include "carta-zarr/result.h"
 
+#include "reduce/footprint.h"
+
 #include <cstddef>
 #include <cstdint>
 #include <string>
@@ -70,6 +72,23 @@ struct RegionRefs {
 };
 
 /**
+ * One footprint of a reduction: what the walk reads, and the chunks it spans.
+ *
+ * The chunks are what the accumulation looks regions up by, and the slab is what the walk is handed.
+ * They describe one rectangle, and used to be written out twice beside each other -- a SlabFootprint
+ * for the walk and a second struct of the same bounds for the accumulation -- because the walk's type
+ * has no use for chunk coordinates and the accumulation could not do without them.
+ */
+struct OccupiedFootprint {
+    SlabFootprint slab;
+    // The chunk cells the footprint spans, half-open, in the chunk grid's own coordinates.
+    std::uint64_t chunk_cu_begin = 0;
+    std::uint64_t chunk_cu_end = 0;
+    std::uint64_t chunk_cv_begin = 0;
+    std::uint64_t chunk_cv_end = 0;
+};
+
+/**
  * Which chunks a set of regions occupies, and which of them touch each one.
  *
  * Occupies rather than covers: the bounding box of a thin cut laid along the diagonal is the whole
@@ -106,20 +125,31 @@ public:
         return _regions;
     }
 
-    // The occupied runs of each chunk row, which is what the walk reads instead of the bounding box.
-    const std::vector<std::vector<ColumnRun>>& runs_per_row() const noexcept {
-        return _runs_per_row;
-    }
-
     // The chunks one spectral layer of the whole region set occupies. Zero when the regions select
     // nothing at all, which a mask of zeroes does.
     std::uint64_t LayerChunks() const noexcept {
         return _layer_chunks;
     }
 
-    std::size_t Cell(std::uint64_t chunk_cu, std::uint64_t chunk_cv) const noexcept {
-        return static_cast<std::size_t>(((chunk_cv - _chunk_cv0) * _columns) + (chunk_cu - _chunk_cu0));
-    }
+    /**
+     * What a reduction reads: the occupied chunk runs, cut into footprints one read can decode.
+     *
+     * Rows below one that repeat its runs exactly are read with it, so that a solid rectangle becomes
+     * a few large requests while a diagonal stays one chunk per row; and a run wider than a read is
+     * cut into pieces a read can hold. Each footprint is clamped to the regions' own pixels, and counts
+     * the chunks it occupies in one spectral layer -- which is what the walk sizes its slabs by and
+     * counts its progress in.
+     *
+     * Formed here rather than by the reduction because every step of it is a question about this
+     * index: which rows repeat, how wide a run is, where the bounding box ends. Asked from outside,
+     * that took eight accessors onto the representation and a second copy of the footprint's bounds.
+     *
+     * Takes the budget as the one number it needs -- how many chunks a read may decode, zero when a
+     * single chunk is more than the budget -- rather than a PassPlan, for the reason Of takes a chunk
+     * shape rather than one. It does not depend on which channels are being read, so a reduction
+     * forms these once and walks them for every block it emits.
+     */
+    std::vector<OccupiedFootprint> Footprints(std::uint64_t chunks_per_read) const;
 
     // The regions touching one chunk. Read once per chunk cell by the accumulation, so it is inline
     // and does nothing but two lookups.
@@ -140,21 +170,19 @@ public:
         return _entries;
     }
 
-    // The union bounding box of every region, in pixels of the walk's own axes, and the chunk grid
-    // covering it. The band walk clamps its footprints against these.
-    std::uint64_t u0() const noexcept { return _u0; }
-    std::uint64_t v0() const noexcept { return _v0; }
-    std::uint64_t u1() const noexcept { return _u1; }
-    std::uint64_t v1() const noexcept { return _v1; }
-    std::uint64_t chunk_cu0() const noexcept { return _chunk_cu0; }
-    std::uint64_t chunk_cv0() const noexcept { return _chunk_cv0; }
-    std::uint64_t columns() const noexcept { return _columns; }
-    std::uint64_t rows() const noexcept { return _rows; }
-
 private:
     Occupancy() = default;
 
+    std::size_t Cell(std::uint64_t chunk_cu, std::uint64_t chunk_cv) const noexcept {
+        return static_cast<std::size_t>(((chunk_cv - _chunk_cv0) * _columns) + (chunk_cu - _chunk_cu0));
+    }
+
     std::vector<PlacedRegion> _regions;
+    // The chunk shape the grid is cut by, kept because a footprint is clamped in pixels.
+    std::uint64_t _chunk_u = 1;
+    std::uint64_t _chunk_v = 1;
+    // The union bounding box of every region, in pixels of the walk's own axes, half-open, and the
+    // chunk grid covering it.
     std::uint64_t _u0 = 0;
     std::uint64_t _v0 = 0;
     std::uint64_t _u1 = 0;
@@ -165,6 +193,8 @@ private:
     std::uint64_t _rows = 0;
     std::vector<std::uint64_t> _offsets;
     std::vector<std::uint32_t> _entries;
+    // The occupied runs of each chunk row, which is what footprints are cut from instead of the
+    // bounding box.
     std::vector<std::vector<ColumnRun>> _runs_per_row;
     std::uint64_t _layer_chunks = 0;
 };

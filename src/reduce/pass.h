@@ -11,6 +11,7 @@
 #include "carta-zarr/result.h"
 
 #include "chunk_blocks.h"
+#include "reduce/footprint.h"
 #include "pixel_source.h"
 #include "axis_map.h"
 #include "reduce/plane_selection.h"
@@ -149,12 +150,24 @@ public:
     }
 
 
-    // How many units of `chunks_per_unit` chunks one read's budget affords. Never zero: a budget
-    // smaller than a single unit still reads one, because a chunk is the smallest thing that can be
-    // decoded and refusing to read is the worse answer.
+    // How many chunks one read may decode: the budget in the units everything else here counts in.
+    // Zero when the budget is smaller than a single chunk, which UnitsAffordable floors at one.
+    //
+    // Public because it is the whole of the budget a reader of the occupancy needs, and handing that
+    // over as one number rather than a PassPlan keeps the occupancy testable with nothing linked
+    // behind it -- ADR 0006.
+    std::uint64_t ChunksPerRead() const noexcept {
+        return slab_budget_bytes / std::max<std::uint64_t>(1, chunk_bytes);
+    }
+
+    // How many units of `chunks_per_unit` chunks one read's budget affords -- the rule in
+    // chunk_blocks.h, asked with this plan's budget.
+    //
+    // A unit is at least one chunk. The one caller that can mean none -- a region set occupying
+    // nothing -- says so itself, in EmitChannels; this used to answer it with the budget's byte
+    // count standing in for a count of units.
     std::uint64_t UnitsAffordable(std::uint64_t chunks_per_unit) const {
-        return std::max<std::uint64_t>(
-            1, slab_budget_bytes / std::max<std::uint64_t>(1, chunks_per_unit * chunk_bytes));
+        return ::carta::zarr::internal::UnitsAffordable(ChunksPerRead(), chunks_per_unit);
     }
 
     // How many channels one slab may hold when its spatial footprint occupies `footprint_chunks`
@@ -243,29 +256,13 @@ inline void SampledRange(std::uint64_t begin, std::uint64_t end, std::uint64_t s
 }
 
 /**
- * One spatial footprint a run of slabs is read over, in the pass's own axes.
- *
- * `chunks` is what that footprint occupies in one chunk of the spectral axis, and it is doing two
- * jobs: it sizes the slab, because the budget is over chunk data rather than over the pixels kept,
- * and it is the unit progress is counted in. A caller that gets it wrong reads the right pixels and
- * reports a bar that lies.
- */
-struct SlabFootprint {
-    std::uint64_t u_start = 0;
-    std::uint64_t u_count = 0;
-    std::uint64_t u_stride = 1;
-    std::uint64_t v_start = 0;
-    std::uint64_t v_count = 0;
-    std::uint64_t v_stride = 1;
-    std::uint64_t chunks = 1;
-};
-
-/**
  * Walks one spatial footprint along the spectrum, a slab at a time.
  *
- * Which footprints to visit is the caller's: a whole-plane pass bands the plane, and a reduction
- * cuts the chunk runs its regions occupy. Those two are genuinely different walks and stay that
- * way. What they had in common was everything inside one footprint -- how deep a slab goes, where
+ * Which footprints to visit is not the walk's. A whole-plane pass bands the plane itself; a
+ * reduction's come from its occupancy, which cuts the chunk runs its regions occupy -- see
+ * Occupancy::Footprints. Those two are genuinely different walks and stay that way: joining them
+ * into one traversal would make the plane's bands a special case of a region set, for a caller that
+ * has no regions. What they had in common was everything inside one footprint -- how deep a slab goes, where
  * it is cut so that no decode serves two slabs, when the caller is told what it has, where
  * cancellation is checked, and how progress is counted -- and that was written out twice, in full,
  * with the subtlety intact in both copies: `reads_done` guards the report so that a footprint taken

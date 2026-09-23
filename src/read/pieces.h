@@ -14,32 +14,25 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <vector>
 
 namespace carta::zarr::internal {
 
 /**
- * How one ordinary read is cut into pieces. See CONTEXT.md for what a piece is.
+ * One piece of an ordinary read. See CONTEXT.md for what a piece is.
  *
- * A read that is not split is described here as one piece covering everything, so that the loop
- * reading it is the same loop either way and there are not two paths to keep in agreement.
+ * What to read -- the caller's request, narrowed along the axis the read is cut on -- and where in the
+ * destination it lands. A piece fills the destination from `first_element` for as many elements as
+ * its request selects, and the pieces of a read fill it end to end, so the finished part is always a
+ * prefix.
  */
-struct PiecePlan {
-    // Whether the read is cut at all. False means one piece, and then `axis` and `chunk` say
-    // nothing.
-    bool split = false;
-    std::size_t axis = 0;
-    // Units of `axis` the read covers, and how many destination elements one such unit is worth.
-    // Unsplit, that is one unit worth the whole destination.
-    std::uint64_t units = 1;
-    std::uint64_t elements_per_unit = 0;
-    // Units one piece should cover, and the chunk extent along `axis` that the end of a piece is
-    // rounded out to.
-    std::uint64_t units_per_piece = 1;
-    std::uint64_t chunk = 0;
+struct Piece {
+    ReadRequest request;
+    std::uint64_t first_element = 0;
 };
 
 /**
- * Decide how to cut a read.
+ * Cut a read into pieces.
  *
  * Pure: it reaches no further than the descriptor, the geometry and what the caller asked for, so
  * the strategy is checkable without a store, a transport or a directory tree.
@@ -48,15 +41,19 @@ struct PiecePlan {
  * to report progress to is one -- `watching` says whether there is, which is the whole of what this
  * ever asked about the callback. A stated memory ceiling is the other: it says how much the read may
  * hold at once, and splitting to fit is a better answer than refusing to read at all. A read with
- * neither reason, or with no axis selecting more than one element, is one piece.
+ * neither reason, or with no axis selecting more than one element, is one piece covering everything,
+ * so that the loop reading it is the same loop either way.
  *
- * `elements` is what the whole read will produce, and `apply_mask` says whether a flag is decoded
- * beside the pixels -- both halves of the sizing count it, because a budget divided by a per-piece
- * cost that ignores the flag would size pieces against a cost the read does not have.
+ * Where to cut, how much one piece may cover, and where its end is rounded out to a chunk boundary
+ * all happen here. They used to be handed to the one caller as a plan to carry out -- the cut axis,
+ * the unit count, the elements per unit, the chunk extent -- and the caller did the arithmetic,
+ * rewrote each piece's range and worked out where it landed. Whether the flag is decoded beside the
+ * pixels, which the sizing counts, is asked of AppliesPixelMask rather than of the caller.
+ *
+ * The request has been checked against the descriptor already: it is a selection of this image.
  */
-PiecePlan PlanPieces(const ImageDescriptor& descriptor, const ChunkGeometry& geometry,
-                     const ReadRequest& request, const ReadOptions& options, bool watching,
-                     std::uint64_t elements, bool apply_mask);
+std::vector<Piece> PlanPieces(const ImageDescriptor& descriptor, const ChunkGeometry& geometry,
+                              const ReadRequest& request, const ReadOptions& options, bool watching);
 
 /**
  * Read a densely packed float32 result, one piece at a time.

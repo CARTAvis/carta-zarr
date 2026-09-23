@@ -29,7 +29,7 @@ using carta::zarr::ImageDescriptor;
 using carta::zarr::Range;
 using carta::zarr::ReadOptions;
 using carta::zarr::ReadRequest;
-using carta::zarr::internal::PiecePlan;
+using carta::zarr::internal::Piece;
 using carta::zarr::internal::PlanPieces;
 
 using carta::zarr::testing::Require;
@@ -83,9 +83,37 @@ std::uint64_t ElementCount(const ReadRequest& request) {
     return elements;
 }
 
-PiecePlan Plan(const ImageDescriptor& descriptor, const ChunkGeometry& geometry, const ReadRequest& request,
-               const ReadOptions& options, bool apply_mask = false, bool watching = false) {
-    return PlanPieces(descriptor, geometry, request, options, watching, ElementCount(request), apply_mask);
+std::vector<Piece> Pieces(const ImageDescriptor& descriptor, const ChunkGeometry& geometry,
+                          const ReadRequest& request, const ReadOptions& options, bool watching = false) {
+    return PlanPieces(descriptor, geometry, request, options, watching);
+}
+
+bool SameRange(const Range& a, const Range& b) {
+    return a.start == b.start && a.count == b.count && a.stride == b.stride;
+}
+
+// The axes on which a piece's request differs from the whole read's.
+std::vector<std::size_t> CutAxes(const Piece& piece, const ReadRequest& whole) {
+    std::vector<std::size_t> cut;
+    for (std::size_t i = 0; i < whole.axes.size(); ++i) {
+        if (!SameRange(piece.request.axes.at(i), whole.axes.at(i))) {
+            cut.push_back(i);
+        }
+    }
+    return cut;
+}
+
+// The pieces fill the destination end to end, each starting where the one before it stopped and the
+// last stopping at the end -- which is what makes the finished part a prefix, and what a progress
+// report counts.
+void RequireTheyFillTheDestination(const std::vector<Piece>& pieces, const ReadRequest& whole,
+                                   const std::string& what) {
+    std::uint64_t filled = 0;
+    for (const auto& piece : pieces) {
+        Require(piece.first_element == filled, what + ": a piece did not start where the one before it stopped");
+        filled += ElementCount(piece.request);
+    }
+    Require(filled == ElementCount(whole), what + ": the pieces did not fill the destination");
 }
 
 // A read nobody is watching and nobody has put a ceiling on is issued exactly as it was asked for.
@@ -96,45 +124,73 @@ void TestAnUnconstrainedReadIsOnePiece() {
     const auto geometry = MakeGeometry(32, 64, 1);
     const auto request = WholeImage(image);
 
-    const auto plan = Plan(image, geometry, request, {});
-    Require(!plan.split, "a read with no reason to be cut was cut");
-    Require(plan.units == 1, "an unsplit read should be one unit");
-    Require(plan.elements_per_unit == ElementCount(request), "that one unit should be the whole destination");
+    const auto pieces = Pieces(image, geometry, request, {});
+    Require(pieces.size() == 1, "a read with no reason to be cut was cut");
+    Require(CutAxes(pieces.front(), request).empty() && pieces.front().first_element == 0,
+            "an uncut read should be one piece covering everything");
 }
 
 // Either reason on its own is enough. The memory ceiling is the half that used to be ignored unless
 // a progress callback came with it, which meant a caller who said how much memory the read could
 // have and did not care to watch was refused instead of served.
+//
+// A watched read is cut to the library's own budget, so it takes one larger than that budget to show:
+// 8192 planes of 64 x 64 float32 is 128 MiB against 64. Planning allocates nothing, so the size costs
+// nothing here. The same read unwatched and unbounded is one piece, which is the difference watching
+// makes.
 void TestEitherReasonCutsTheRead() {
+    const auto large = MakeImage(64, 64, 8192);
+    const auto large_geometry = MakeGeometry(32, 64, 1);
+    const auto large_request = WholeImage(large);
+    Require(Pieces(large, large_geometry, large_request, ReadOptions{}).size() == 1,
+            "a read nobody watches and nothing bounds was cut");
+    const auto watched = Pieces(large, large_geometry, large_request, ReadOptions{}, /*watching=*/true);
+    Require(watched.size() > 1, "a watched read larger than the budget was not cut");
+    RequireTheyFillTheDestination(watched, large_request, "a watched cut");
+
     const auto image = MakeImage(64, 64, 8);
-    const auto geometry = MakeGeometry(32, 64, 1);
-    const auto request = WholeImage(image);
-
-    Require(Plan(image, geometry, request, ReadOptions{}, false, /*watching=*/true).split,
-            "a watched read was not cut");
-
     ReadOptions bounded;
     bounded.temporary_memory_limit_bytes = 4096;
-    Require(Plan(image, geometry, request, bounded).split, "a read with a memory ceiling was not cut");
+    Require(Pieces(image, MakeGeometry(32, 64, 1), WholeImage(image), bounded).size() > 1,
+            "a read with a memory ceiling was not cut");
 }
 
 // The cut goes on the slowest-varying axis that selects more than one element, because the
 // destination is dense with axis 0 fastest and that is the only axis whose pieces extend a prefix.
 void TestTheCutGoesOnTheSlowestSelectedAxis() {
     const auto image = MakeImage(64, 64, 8);
-    const auto geometry = MakeGeometry(32, 64, 1);
-    // Axes 3 and 4 are degenerate here, so the spectrum at index 2 is the slowest one selected.
-    const auto plan = Plan(image, geometry, WholeImage(image), ReadOptions{}, false, /*watching=*/true);
-    Require(plan.split && plan.axis == 2, "the cut should have gone on the spectral axis");
-    Require(plan.units == 8, "the plan should cover every channel");
-    Require(plan.elements_per_unit == 64 * 64, "one channel is worth a plane of the destination");
+    // Chunks of 32 x 16, so one plane is eight of them, 16 KiB, and one row of chunks along m is two.
+    const auto geometry = MakeGeometry(32, 16, 1);
+    const auto request = WholeImage(image);
+    // Axes 3 and 4 are degenerate here, so the spectrum at index 2 is the slowest one selected. A
+    // ceiling of one plane makes each channel a piece.
+    ReadOptions a_plane;
+    a_plane.temporary_memory_limit_bytes = 64 * 64 * sizeof(float);
+    const auto pieces = Pieces(image, geometry, request, a_plane);
+    Require(pieces.size() == 8, "a ceiling of one plane did not make a piece of each channel");
+    for (const auto& piece : pieces) {
+        Require(CutAxes(piece, request) == std::vector<std::size_t>{2},
+                "the cut should have gone on the spectral axis and nowhere else");
+        // One channel is worth a plane of the destination.
+        Require(piece.first_element == piece.request.axes.at(2).start * 64 * 64,
+                "a piece of the spectrum did not land a plane per channel in");
+    }
+    RequireTheyFillTheDestination(pieces, request, "a spectrum cut");
 
-    // Narrow the spectrum to one channel and the only axis left with more than one element is m.
-    auto one_channel = WholeImage(image);
+    // Narrow the spectrum to one channel and the only axis left with more than one element is m. A
+    // ceiling of one row of chunks makes each sixteen rows a piece.
+    auto one_channel = request;
     one_channel.axes.at(2) = Range{0, 1, 1};
-    const auto narrowed = Plan(image, geometry, one_channel, ReadOptions{}, false, /*watching=*/true);
-    Require(narrowed.split && narrowed.axis == 1, "with one channel the cut should move to m");
-    Require(narrowed.elements_per_unit == 64, "one m is worth a row of the destination");
+    ReadOptions a_row_of_chunks;
+    a_row_of_chunks.temporary_memory_limit_bytes = 2 * 32 * 16 * sizeof(float);
+    const auto narrowed = Pieces(image, geometry, one_channel, a_row_of_chunks);
+    Require(narrowed.size() == 4, "a ceiling of one row of chunks did not cut the plane into four");
+    for (const auto& piece : narrowed) {
+        Require(CutAxes(piece, one_channel) == std::vector<std::size_t>{1},
+                "with one channel the cut should move to m and nowhere else");
+        Require(piece.first_element == piece.request.axes.at(1).start * 64, "one m is worth a row of the destination");
+    }
+    RequireTheyFillTheDestination(narrowed, one_channel, "a plane cut");
 }
 
 // A request that selects a single element of every axis has nowhere to be cut, so it is one piece
@@ -147,12 +203,12 @@ void TestAReadWithNowhereToCutIsOnePiece() {
 
     ReadOptions bounded;
     bounded.temporary_memory_limit_bytes = 1;
-    Require(!Plan(image, geometry, single, bounded, false, /*watching=*/true).split,
+    Require(Pieces(image, geometry, single, bounded, /*watching=*/true).size() == 1,
             "a single-element read has nowhere to be cut");
 }
 
 // A piece is measured in chunks, not in elements: the budget buys whole chunks along the cut axis
-// because asking for part of one decodes all of it anyway.
+// because asking for part of one decodes all of it anyway -- so a piece ends on a chunk boundary.
 void TestATighterCeilingBuysFewerChunks() {
     const auto image = MakeImage(64, 64, 32);
     const auto geometry = MakeGeometry(64, 64, 4);
@@ -163,11 +219,51 @@ void TestATighterCeilingBuysFewerChunks() {
     ReadOptions tight;
     tight.temporary_memory_limit_bytes = 64 * 64 * 4 * sizeof(float);
 
-    const auto wide = Plan(image, geometry, request, generous);
-    const auto narrow = Plan(image, geometry, request, tight);
-    Require(wide.chunk == 4 && narrow.chunk == 4, "the plan should report the chunk extent along the cut axis");
-    Require(narrow.units_per_piece < wide.units_per_piece, "a tighter ceiling should buy a smaller piece");
-    Require(narrow.units_per_piece >= 1, "a piece is never smaller than one unit");
+    const auto wide = Pieces(image, geometry, request, generous);
+    const auto narrow = Pieces(image, geometry, request, tight);
+    Require(narrow.size() > wide.size(), "a tighter ceiling should buy smaller pieces");
+    for (const auto* pieces : {&wide, &narrow}) {
+        for (const auto& piece : *pieces) {
+            const auto& range = piece.request.axes.at(2);
+            Require(range.start % 4 == 0 && (range.start + range.count == 32 || range.count % 4 == 0),
+                    "a piece did not begin and end on a chunk boundary of the spectrum");
+        }
+        RequireTheyFillTheDestination(*pieces, request, "a budgeted cut");
+    }
+}
+
+// Where a piece ends is the arithmetic that most needed moving: the end is rounded to a chunk
+// boundary so that no chunk is decoded by two pieces -- the last element one piece reads and the
+// first the next one reads never share a chunk.
+//
+// It takes a request that does not begin on a chunk boundary to show. Starting at zero, a piece a
+// whole number of chunks long ends on a boundary without being moved there, and cutting at the naive
+// end passes every other test in this repository.
+void TestNoChunkIsReadByTwoPieces() {
+    const auto image = MakeImage(64, 64, 32);
+    const auto geometry = MakeGeometry(64, 64, 4);
+    ReadOptions tight;
+    tight.temporary_memory_limit_bytes = 64 * 64 * 4 * sizeof(float);
+
+    const auto check = [&](const Range& spectrum, const std::string& what) {
+        auto request = WholeImage(image);
+        request.axes.at(2) = spectrum;
+        const auto pieces = Pieces(image, geometry, request, tight);
+        Require(pieces.size() > 1, what + " under a one-chunk budget was not cut");
+        for (std::size_t i = 0; i + 1 < pieces.size(); ++i) {
+            const auto& here = pieces.at(i).request.axes.at(2);
+            const auto& next = pieces.at(i + 1).request.axes.at(2);
+            Require(here.stride == spectrum.stride && next.stride == spectrum.stride,
+                    what + ": a piece lost the request's stride");
+            const auto last = here.start + ((here.count - 1) * here.stride);
+            Require(last / 4 < next.start / 4, what + ": two pieces read from one chunk of the spectrum");
+            Require(next.start == last + here.stride, what + ": a piece skipped or repeated a selected channel");
+        }
+        RequireTheyFillTheDestination(pieces, request, what);
+    };
+
+    check(Range{2, 28, 1}, "a read starting mid-chunk");
+    check(Range{1, 15, 2}, "a strided read");  // channels 1, 3, ..., 29
 }
 
 // The flag is decoded beside the pixels, so a read that will apply it costs more per chunk and the
@@ -178,15 +274,16 @@ void TestApplyingTheFlagCostsTheBudget() {
     const auto geometry = MakeGeometry(64, 64, 1);
     const auto request = WholeImage(image);
 
-    ReadOptions options;
-    options.temporary_memory_limit_bytes = 64 * 64 * sizeof(float) * 6;
+    ReadOptions declined;
+    declined.temporary_memory_limit_bytes = 64 * 64 * sizeof(float) * 6;
+    declined.apply_pixel_mask = false;
+    ReadOptions applied = declined;
+    applied.apply_pixel_mask = true;
 
-    const auto without = Plan(image, geometry, request, options, /*apply_mask=*/false);
-    const auto with = Plan(image, geometry, request, options, /*apply_mask=*/true);
-    Require(with.units_per_piece <= without.units_per_piece,
+    const auto without = Pieces(image, geometry, request, declined);
+    const auto with = Pieces(image, geometry, request, applied);
+    Require(with.size() > without.size(),
             "a read that also decodes the flag cannot afford as much of the spectrum per piece");
-    Require(with.units_per_piece < without.units_per_piece,
-            "with this budget the flag should cost at least one channel of the piece");
 }
 
 }  // namespace
@@ -198,6 +295,7 @@ int main() {
         TestTheCutGoesOnTheSlowestSelectedAxis();
         TestAReadWithNowhereToCutIsOnePiece();
         TestATighterCeilingBuysFewerChunks();
+        TestNoChunkIsReadByTwoPieces();
         TestApplyingTheFlagCostsTheBudget();
     } catch (const std::exception& error) {
         std::cerr << "piece plan test failed: " << error.what() << "\n";

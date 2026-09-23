@@ -204,3 +204,12 @@ the branch where nothing matched, so a store of nothing but complex variables is
 unrecognised with no reason attached, although `InspectImages` says in a comment that the discovery
 diagnostics explain it. The promotion rule above rescues the malformed half of that case and leaves
 the capability half exactly as it is.
+
+*Since decided:* `ProbeStore` now keeps what the profile said when it did not match, so that store is
+refused with the profile's own reason ("Complex sky-plane variables are not openable") instead of
+"No built-in schema profile matched the Zarr store". Only diagnostics the profile produced are kept
+-- a store with nothing in it the profile recognised still carries none, and falls back to the
+generic message -- and `schema_id` stays empty, as `ProbeResult` promises for a kind that is not a
+match. The kind itself does not change: the store is still one this library is not for. With a
+second profile, the first to say anything would be the one heard, the same rule the invalid branch
+already follows.

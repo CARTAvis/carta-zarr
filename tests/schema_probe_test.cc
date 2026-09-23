@@ -246,6 +246,24 @@ void TestOpenSaysWhyItRefused(const std::filesystem::path& root) {
     Require(!not_ours && not_ours.error().code == ErrorCode::unsupported_schema,
             "an unclaimed Zarr store was not reported as an unsupported schema");
     Require(!not_ours.error().message.empty(), "an unclaimed Zarr store was refused without a message");
+    Require(carta::zarr::Probe(unclaimed.string()).diagnostics.empty(),
+            "an unclaimed Zarr store was reported with a diagnostic nothing produced");
+
+    // Zarr that no profile claims either, but whose only image the profile recognised and will not
+    // open. That is a reason, and the caller is told it rather than that nothing matched.
+    const auto complex = root / "complex";
+    CreateValidStore(complex);
+    auto complex_sky = SkyArray();
+    complex_sky.replace(complex_sky.find("float32"), std::string("float32").size(), "complex64");
+    Write(complex / "SKY" / "zarr.json", complex_sky);
+    const auto unopenable = carta::zarr::Probe(complex.string());
+    Require(unopenable.kind == ProbeKind::zarr_without_supported_schema && !unopenable.diagnostics.empty(),
+            "a store of complex images did not probe as unsupported with the reason attached");
+    const auto refused = carta::zarr::Dataset::Open(context.value(), complex.string());
+    Require(!refused && refused.error().code == ErrorCode::unsupported_schema,
+            "a store of complex images was not reported as an unsupported schema");
+    Require(refused.error().message == "Complex sky-plane variables are not openable",
+            "Dataset::Open did not say why a store of complex images was refused: " + refused.error().message);
 
     // A store this profile claims and then finds malformed. Here the probe does have something to
     // say, and it is what the caller must be told.

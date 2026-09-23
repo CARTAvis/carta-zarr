@@ -28,14 +28,6 @@ bool HasAllAxes(const zarr_metadata::ArrayMetadata& metadata, const std::array<s
     });
 }
 
-// A node that says it is a group, asked only once parsing it as an array has already failed. Read
-// from the node's own document rather than from the message that parse produced, which says "Zarr
-// node is not an array" for a group and for several other things that are not one.
-bool IsGroup(const Store& store, std::string_view node) {
-    const auto& metadata = store.ReadNodeMetadata(node);
-    return metadata && metadata.value().is_object() && metadata.value().value("node_type", "") == "group";
-}
-
 // A dataset stores each coordinate once and every image references it by dimension name, so an
 // image whose own extent disagrees with the coordinate it names cannot be described with it -- it
 // would be reported with another image's coordinate vector, three channels' worth over seven
@@ -64,24 +56,33 @@ std::optional<Diagnostic> DisagreementWithCoordinates(const Store& store,
 
 }  // namespace
 
-NodeQualification QualifyNode(const Store& store, std::string_view node) {
-    const auto& metadata = store.ReadArrayMetadata(node);
+NodeQualification QualifyNode(const Store& store, const NodeEntry& entry) {
+    const std::string& node = entry.name;
+    // A group is a node in the hierarchy like any other, and nothing is wrong with it. Passed over,
+    // the way everything else that is not an image is passed over.
+    if (entry.kind == NodeKind::group) {
+        return NodeQualification{};
+    }
+
+    // Said rather than passed over, because this is where a node leaves the listing: nothing here
+    // knows whether it was an image, a coordinate or something else in the directory, so a store
+    // whose sky variable lands here reports no images at all. Without this, that reads as a store
+    // this profile does not recognise, with nothing to say which node went missing.
+    //
+    // Not a refusal. A malformed node elsewhere in a store does not stop the images that parsed from
+    // opening.
+    //
+    // Two codes, because they are two different things to say. unreadable_array is a node that said it
+    // was an array and whose metadata will not parse as one; unrecognised_node is a node that did not
+    // say what it was -- a document that would not parse, or a node_type Zarr does not define -- and
+    // calling that an array would be a guess.
+    if (entry.kind == NodeKind::unrecognised) {
+        return NodeQualification{false, false, Diagnostic{"unrecognised_node", entry.reason->message, node}, true};
+    }
+    const auto& metadata = *entry.array;
     if (!metadata) {
-        if (IsGroup(store, node)) {
-            // A group is a node in the hierarchy like any other, and nothing is wrong with it: it
-            // failed to parse as an array because it never claimed to be one. Passed over, the way
-            // everything else that is not an image is passed over.
-            return NodeQualification{};
-        }
-        // Said rather than passed over, because this is where a node leaves the listing: nothing
-        // here knows whether it was an image, a coordinate or something else in the directory, so a
-        // store whose sky variable lands here reports no images at all. Without this, that reads as
-        // a store this profile does not recognise, with nothing to say which node went missing.
-        //
-        // Not a refusal. A malformed array elsewhere in a store does not stop the images that
-        // parsed from opening.
-        return NodeQualification{false, false,
-                                 Diagnostic{"unreadable_array", metadata.error().message, std::string(node)}, true};
+        return NodeQualification{false, false, Diagnostic{"unreadable_array", metadata.error().message, node},
+                                 true};
     }
 
     const auto& array = metadata.value();
@@ -118,15 +119,16 @@ Result<void> RequireQualified(const Store& store, std::string_view image_id) {
     // is a read-only view, and its listing is the snapshot a dataset's images were enumerated from;
     // a node written beside them afterwards is not one of them, and reading it by name would reach
     // it. What a listing offers and what will open are the same set in both directions.
-    const auto& nodes = store.ListNodes();
-    if (!nodes) {
-        return nodes.error();
+    const auto& inventory = store.Inventory();
+    if (!inventory) {
+        return inventory.error();
     }
-    if (std::find(nodes.value().begin(), nodes.value().end(), image_id) == nodes.value().end()) {
+    const auto* entry = store.FindNode(image_id);
+    if (entry == nullptr) {
         return Error{ErrorCode::not_found, "Image variable was not found", std::string(image_id)};
     }
 
-    const auto qualified = QualifyNode(store, image_id);
+    const auto qualified = QualifyNode(store, *entry);
     if (qualified.openable) {
         return {};
     }
@@ -140,7 +142,7 @@ Result<void> RequireQualified(const Store& store, std::string_view image_id) {
     if (qualified.diagnostic) {
         // The node is there and will not parse. It says what is wrong with it rather than being
         // reported as a name the dataset does not have.
-        return store.ReadArrayMetadata(image_id).error();
+        return entry->kind == NodeKind::array ? entry->array->error() : *entry->reason;
     }
 
     // Not an image, and nothing wrong with it: the flag beside one, the coordinate under it, a beam

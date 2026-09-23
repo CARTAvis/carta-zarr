@@ -6,7 +6,7 @@
 
 // What the filesystem transport says is in a store.
 //
-// Nothing pinned this. Store::ListNodes sorts and de-duplicates whatever comes back, so a
+// Nothing pinned this. Store::Inventory sorts and de-duplicates whatever comes back, so a
 // transport that named a node twice, or walked into a million chunk files to find nothing, looked
 // exactly like one that did neither. These assert the listing as the transport hands it over,
 // before that sort has a chance to tidy it.

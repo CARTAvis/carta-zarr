@@ -65,10 +65,11 @@ struct NodeQualification {
     bool malformed = false;
 };
 
-// Asked of every node a listing hands back. A node that will not parse as an array is one of the
-// answers rather than a failure to arrive at one, and telling a group apart from a broken array
-// takes a second look at the node, so this reads the store rather than being handed a parse.
-NodeQualification QualifyNode(const Store& store, std::string_view node);
+// Asked of every entry the store's inventory holds. What the node is, and whether an array's
+// metadata parsed, the inventory has already decided; a node that will not parse is one of the
+// answers here rather than a failure to arrive at one. The Store is for the coordinates an image
+// names, which are other nodes.
+NodeQualification QualifyNode(const Store& store, const NodeEntry& entry);
 
 // The precondition of describing an image, as the error a caller should report when it is not met.
 //

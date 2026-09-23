@@ -21,8 +21,11 @@
 #include <cstdint>
 #include <map>
 #include <memory>
+#include <optional>
 #include <string>
+#include <string_view>
 #include <utility>
+#include <vector>
 
 namespace carta::zarr::internal {
 
@@ -32,15 +35,45 @@ namespace zarr {
 struct PixelSelection;
 }
 
+// What a node of the hierarchy is, as its own document says.
+enum class NodeKind {
+    group,
+    array,
+    // A document that would not say: one that would not parse at all, one that is not an object, or
+    // one whose node_type is missing, not a string, or something Zarr does not define.
+    unrecognised,
+};
+
+/**
+ * One node of the hierarchy: its canonical name, what it is, and -- for an array -- its metadata as
+ * the store parsed it.
+ *
+ * The parse is carried rather than left to be asked for because whether an array's metadata parses
+ * is the one fact its callers disagree about what to do with, and each of them used to rebuild it on
+ * its own: one read node_type out of the document, one parsed and then looked again to see whether
+ * the failure was a group, one parsed everything and ignored the answer.
+ */
+struct NodeEntry {
+    std::string name;
+    NodeKind kind = NodeKind::unrecognised;
+    // The array's metadata, parsed or refused, as the store holds it -- the object ReadArrayMetadata
+    // hands back, so it lives as long as the store does. Null unless kind is array: a group is never
+    // parsed as one.
+    const Result<zarr::ArrayMetadata>* array = nullptr;
+    // Why the node is unrecognised. Absent unless it is.
+    std::optional<Error> reason;
+};
+
 // Everything a Store remembers for the lifetime of its read-only view.
 //
 // Each table carries its own lock, and that is load-bearing rather than incidental: a Memo holds its
 // lock across the computation, and these computations nest -- reading array metadata reads node
-// metadata, listing nodes reads each node's metadata. One shared lock would deadlock. The nesting
-// forms a DAG, and a reader added later must not add an edge back:
+// metadata, taking the inventory reads every node's metadata and parses every array's. One shared
+// lock would deadlock. The nesting forms a DAG, and a reader added later must not add an edge back:
 //
 //     string_arrays ---> array_metadata ---> node_metadata ---> transport
-//     listed_nodes ------------------------> node_metadata ---> transport
+//     inventory -------> array_metadata
+//     inventory ---------------------------> node_metadata
 //     double_arrays -------------------------------------------> transport
 //
 // These locks are not the store's concurrency story. Descriptor construction is serialized a level
@@ -51,7 +84,7 @@ struct PixelSelection;
 struct StoreCaches {
     Memo<std::string, Result<nlohmann::json>> node_metadata;
     Memo<std::string, Result<zarr::ArrayMetadata>> array_metadata;
-    Lazy<Result<std::vector<std::string>>> listed_nodes;
+    Lazy<Result<std::vector<NodeEntry>>> inventory;
     Memo<std::string, Result<std::vector<double>>> double_arrays;
     Memo<std::string, Result<std::vector<std::string>>> string_arrays;
 };
@@ -80,9 +113,23 @@ public:
     // the store is, and a caller that wants its own copy says so.
     const Result<nlohmann::json>& ReadNodeMetadata(std::string_view node) const;
     const Result<zarr::ArrayMetadata>& ReadArrayMetadata(std::string_view node) const;
-    // Every node in the hierarchy, sorted, each one's metadata read and parsed. The names are what a
-    // caller walks; what a node holds it asks for by name, which is already in hand by then.
-    const Result<std::vector<std::string>>& ListNodes() const;
+    // Every node in the hierarchy, by canonical name and sorted: what each one is, and for an array,
+    // its metadata parsed. Read once for the life of the store, which is what makes a dataset's
+    // listing a snapshot -- a node written afterwards is not in it.
+    //
+    // What a caller does with a node that is not a usable array is its own business, and the callers
+    // differ on purpose. Image discovery diagnoses an array whose metadata will not parse, because it
+    // may have been an image. Flag selection passes over one, because a mask candidate that cannot be
+    // read is simply not the mask. The declared size refuses one, because a total that leaves out an
+    // array it knows is there is a wrong total -- and counts neither a group nor a node it does not
+    // recognise, because neither is an array. Three policies about one fact; this is where the fact
+    // is decided, once.
+    const Result<std::vector<NodeEntry>>& Inventory() const;
+    // One node's entry by canonical name, or null when the inventory holds no such node -- and null
+    // as well when the hierarchy could not be taken at all, so a caller that must tell those apart
+    // asks Inventory() first. Another spelling of the name is not looked up: a caller holding a
+    // node's name got it from here.
+    const NodeEntry* FindNode(std::string_view name) const;
     // Values in C order, flattened. The rank is in the node's ArrayMetadata; ArrayView addresses
     // them by dimension name rather than by offset.
     Result<std::vector<double>> ReadNumericArray(std::string_view node) const;

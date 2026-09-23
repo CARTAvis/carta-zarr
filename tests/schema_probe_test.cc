@@ -597,6 +597,28 @@ void TestADisagreeingImageIsRefusedThroughTheDataset(const std::filesystem::path
             "the reason the listing carried did not reach a consumer opening the image");
 }
 
+// The same through the facade, which is where a consumer meets it: a dataset holding one stray
+// document that will not parse opens, says which node it could not read, and opens its image. It
+// used to be a dataset that did not open at all.
+void TestADatasetWithAnUnparseableNodeStillOpens(const std::filesystem::path& root) {
+    CreateValidStore(root);
+    Write(root / "JUNK" / "zarr.json", "{not valid json");
+
+    const auto context = carta::zarr::Context::Create();
+    Require(static_cast<bool>(context), "Context::Create failed for an unparseable node");
+    const auto dataset = carta::zarr::Dataset::Open(context.value(), root.string());
+    Require(static_cast<bool>(dataset),
+            "a dataset holding one unparseable node did not open" +
+                (dataset ? std::string{} : ": " + dataset.error().message));
+
+    const auto& said = dataset.value().descriptor().diagnostics;
+    const auto junk = std::find_if(said.begin(), said.end(), [](const carta::zarr::Diagnostic& diagnostic) {
+        return diagnostic.code == "unrecognised_node" && diagnostic.node_path.find("JUNK") != std::string::npos;
+    });
+    Require(junk != said.end(), "the dataset opened without saying which node it could not read");
+    Require(static_cast<bool>(dataset.value().OpenImage("SKY")), "the image beside an unparseable node did not open");
+}
+
 // A node name is a relative path, and "./MASK_0" names the same node as "MASK_0". Two rules decide
 // that and they disagree: Store::NormalizeNodeName accepts a "." component, and
 // Transport::ArrayDirectory refuses one. So an image declaring its flag with that spelling describes
@@ -817,6 +839,7 @@ int main() {
         TestCoordinateCompletion(root / "coordinates");
         TestNonDoubleCoordinates(root / "float32-coordinates");
         TestADisagreeingImageIsRefusedThroughTheDataset(root / "coordinate-disagreement");
+        TestADatasetWithAnUnparseableNodeStillOpens(root / "unparseable-node");
         TestDiscoveryIgnoresNameAllowlist(root / "unlisted-image");
         TestMetadataCache(root / "metadata-cache");
         TestDiscoveryDoesNotDescendIntoArrayChunks(root / "array-chunks");

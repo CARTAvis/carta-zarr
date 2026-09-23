@@ -523,6 +523,141 @@ void TestConsolidatedMetadataDiscovery() {
             "a store without consolidated metadata has to read its children");
 }
 
+// A consolidated key is filed under the canonical name of the node it describes. A block is entitled
+// to spell a node "./SKY" -- it names the node SKY -- and filed under that spelling the copy was
+// never found by a read of "SKY": the node was read from the transport regardless, cached twice,
+// and listed as "./SKY". That is an image id no reader asks for, and since openability is decided
+// against the listing, SKY could not be opened by its own name.
+void TestAConsolidatedKeyIsFiledUnderItsCanonicalName() {
+    auto nodes = ConsolidatedStore();
+    auto& root = nodes[""];
+    const auto key = root.find("\"SKY\":");
+    Require(key != std::string::npos, "the consolidated fixture has no SKY entry to respell");
+    root.replace(key, 6, "\"./SKY\":");
+
+    auto transport = MakeInMemoryTransport(nodes);
+    auto store = carta::zarr::internal::OpenStore(transport);
+    Require(static_cast<bool>(store), "a consolidated key spelled with ./ was refused");
+    const auto discovery = XradioProfile().Discover(store.value());
+    Require(static_cast<bool>(discovery), "discovery failed over a respelled consolidated key");
+    Require(ImageIds(discovery.value().images) == std::vector<std::string>{"SKY"},
+            "the image was listed under the spelling the block used rather than under its name");
+    Require(transport->nodes_read() == std::set<std::string>{""},
+            "the node was read again although the consolidated copy described it");
+}
+
+// Two ways a consolidated block can be wrong about itself, and both refuse the store. For a store
+// that consolidated its metadata the block is the whole listing, so a key passed over would be a
+// variable missing from the dataset without a word said about it.
+void TestAConsolidatedBlockThatMisnamesItsNodesIsRefused() {
+    // A key that no node path can be.
+    auto escaping = ConsolidatedStore();
+    auto& escaping_root = escaping[""];
+    escaping_root.replace(escaping_root.find("\"SKY\":"), 6, "\"../SKY\":");
+    const auto outside = Open(escaping);
+    Require(!outside && outside.error().code == ErrorCode::invalid_metadata,
+            "a consolidated key naming a path outside the store was accepted");
+
+    // One node under two spellings. Which document won used to depend on the order the object was
+    // walked in.
+    auto doubled = ConsolidatedStore();
+    auto& doubled_root = doubled[""];
+    doubled_root.insert(doubled_root.find("\"SKY\":"), "\"./SKY\":" + SkyArray() + ",");
+    const auto twice = Open(doubled);
+    Require(!twice && twice.error().code == ErrorCode::invalid_metadata,
+            "a consolidated block listing one node twice was accepted");
+}
+
+// The inventory decides once what each node is. Its callers used to decide it three ways -- one read
+// node_type out of the document, one parsed every node and looked again when a parse failed, one
+// parsed every node and ignored the answer -- and agreed only where the three happened to coincide.
+void TestTheInventorySaysWhatEachNodeIs() {
+    using carta::zarr::internal::NodeKind;
+    auto nodes = CompleteStore();
+    nodes["SUBDIR"] = RootGroup(false);
+    // Says it is an array, and is not one: no shape.
+    nodes["BROKEN"] = R"({"zarr_format":3,"node_type":"array","data_type":"float32"})";
+    nodes["ODD"] = R"({"zarr_format":3,"node_type":"manifest"})";
+    // Present and not a string. Asked for as a string with a default, it threw rather than answered,
+    // and the whole discovery went with it.
+    nodes["NUMBERED"] = R"({"zarr_format":3,"node_type":3})";
+
+    auto store = Open(nodes);
+    Require(static_cast<bool>(store), "the inventory store failed to open");
+    const auto& inventory = store.value().Inventory();
+    Require(static_cast<bool>(inventory), "the inventory could not be taken");
+
+    const auto find = [&](const std::string& name) {
+        const auto* entry = store.value().FindNode(name);
+        Require(entry != nullptr, "the inventory has no entry for " + name);
+        return entry;
+    };
+
+    const auto* sky = find("SKY");
+    Require(sky->kind == NodeKind::array && sky->array != nullptr && static_cast<bool>(*sky->array) && !sky->reason,
+            "an array was not carried with its parsed metadata");
+    const auto* group = find("SUBDIR");
+    Require(group->kind == NodeKind::group && group->array == nullptr && !group->reason,
+            "a group was parsed as an array, or given a reason to be something else");
+    const auto* broken = find("BROKEN");
+    Require(broken->kind == NodeKind::array && broken->array != nullptr && !*broken->array,
+            "an array whose metadata does not parse was not carried with its refusal");
+    for (const std::string name : {"ODD", "NUMBERED"}) {
+        const auto* entry = find(name);
+        Require(entry->kind == NodeKind::unrecognised && entry->array == nullptr && entry->reason.has_value(),
+                "a node that does not say it is a group or an array was not unrecognised: " + name);
+    }
+
+    // Sorted by name, which is the order discovery's diagnostics come out in.
+    Require(std::is_sorted(inventory.value().begin(), inventory.value().end(),
+                           [](const auto& left, const auto& right) { return left.name < right.name; }),
+            "the inventory was not sorted by name");
+    // A name is looked up as it was handed out. Another spelling of it is a name nobody was given.
+    Require(store.value().FindNode("./SKY") == nullptr, "a respelled name was looked up as the node");
+    Require(store.value().FindNode("NOPE") == nullptr, "a node the store does not hold was found");
+
+    Require(static_cast<bool>(XradioProfile().Discover(store.value())),
+            "discovery could not walk a store holding a node whose node_type is not a string");
+}
+
+// A node whose document will not parse is diagnosed, not refused. CONTEXT.md says so of a node whose
+// metadata would not parse -- the rest of the dataset is still readable -- and the listing used to
+// refuse the whole hierarchy over one, so a stray broken document beside a perfectly good image
+// closed the dataset.
+void TestANodeThatWillNotParseIsDiagnosedNotRefused() {
+    auto nodes = CompleteStore();
+    nodes["JUNK"] = "{not valid json";
+    nodes["ODD"] = R"({"zarr_format":3,"node_type":"manifest"})";
+
+    Require(Probe(nodes).kind == SchemaMatchKind::match,
+            "a document that will not parse refused a store whose image is fine");
+
+    auto store = Open(nodes);
+    Require(static_cast<bool>(store), "the store holding an unparseable node failed to open");
+    const auto discovery = XradioProfile().Discover(store.value());
+    Require(static_cast<bool>(discovery), "discovery refused a store holding an unparseable node");
+    Require(OpenableImageIds(discovery.value().images) == std::vector<std::string>{"SKY"},
+            "the image beside an unparseable node was not openable");
+
+    // Neither said what it was, and both say so under the one code for that. Neither is called an
+    // array, because neither claimed to be one.
+    const auto& said = discovery.value().diagnostics;
+    const auto code_for = [&](const std::string& node) {
+        const auto found = std::find_if(said.begin(), said.end(),
+                                        [&](const auto& diagnostic) { return diagnostic.node_path == node; });
+        return found == said.end() ? std::string{} : found->code;
+    };
+    Require(code_for("JUNK") == "unrecognised_node", "a document that will not parse was not diagnosed as such");
+    Require(code_for("ODD") == "unrecognised_node", "a node_type Zarr does not define was not diagnosed as such");
+    Require(!HasDiagnostic(said, "unreadable_array"), "a node that never said it was an array was called one");
+
+    // The declared size counts the arrays it can see, and a node it cannot read is not one of them.
+    const auto size = carta::zarr::internal::DatasetSizeBytes(store.value(),
+                                                              std::chrono::steady_clock::now() +
+                                                                  std::chrono::seconds(5));
+    Require(size && size.value().bytes == 592, "an unparseable node left the dataset without a declared size");
+}
+
 // The report latches: once a requirement is unmet, later ones are no-ops. A store with two faults
 // is therefore diagnosed once, by the first fault reached -- the behaviour a probe had when every
 // check returned early, now stated somewhere rather than emerging from the control flow.
@@ -698,6 +833,10 @@ int main() {
         TestOneRuleDecidesWhatDatasetIsOpenable();
         TestDefaultImageSkipsUnopenablePreferredImage();
         TestConsolidatedMetadataDiscovery();
+        TestAConsolidatedKeyIsFiledUnderItsCanonicalName();
+        TestAConsolidatedBlockThatMisnamesItsNodesIsRefused();
+        TestTheInventorySaysWhatEachNodeIs();
+        TestANodeThatWillNotParseIsDiagnosedNotRefused();
         TestADeclaredFlagIsBinding();
         TestAmbiguousFlagsSelectNone();
         TestStoreRejections();

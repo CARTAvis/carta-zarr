@@ -11,7 +11,6 @@
 
 #include "read/pieces.h"
 
-#include "chunk_blocks.h"
 #include "pixel_mask.h"
 #include "zarr/pixel_selection.h"
 
@@ -65,28 +64,16 @@ Result<std::size_t> ReadInPieces(const ReadableImage& image, const ReadRequest& 
     const auto elements = checked.value().elements();
 
     const bool apply_mask = AppliesPixelMask(options, descriptor);
-    const PiecePlan plan = PlanPieces(descriptor, geometry, request, options, static_cast<bool>(progress), elements, apply_mask);
+    const auto pieces = PlanPieces(descriptor, geometry, request, options, static_cast<bool>(progress));
 
     std::vector<std::uint8_t> mask;
-    for (std::uint64_t begin = 0; begin < plan.units;) {
-        const std::uint64_t end =
-            plan.split ? AlignedBlockEnd(begin, plan.units_per_piece, plan.units,
-                                         request.axes.at(plan.axis).start, request.axes.at(plan.axis).stride,
-                                         plan.chunk)
-                       : plan.units;
-
-        ReadRequest piece = request;
-        if (plan.split) {
-            auto& range = piece.axes.at(plan.axis);
-            range.start = request.axes.at(plan.axis).start + (begin * range.stride);
-            range.count = end - begin;
-        }
-        auto piece_selection = zarr::BuildSelection(descriptor, piece, zarr::DestinationOrder::logical);
+    for (const auto& piece : pieces) {
+        auto piece_selection = zarr::BuildSelection(descriptor, piece.request, zarr::DestinationOrder::logical);
         if (!piece_selection) {
             return piece_selection.error();
         }
-        const auto piece_elements = static_cast<std::size_t>((end - begin) * plan.elements_per_unit);
-        float* piece_pixels = destination.data + (begin * plan.elements_per_unit);
+        const auto piece_elements = static_cast<std::size_t>(piece_selection.value().elements());
+        float* piece_pixels = destination.data + piece.first_element;
 
         if (apply_mask) {
             // The limit bounds a piece, and a read that is not split is one piece, so a request that
@@ -115,9 +102,8 @@ Result<std::size_t> ReadInPieces(const ReadableImage& image, const ReadRequest& 
             ApplyPixelMask(piece_pixels, mask.data(), piece_elements);
         }
 
-        begin = end;
-        if (progress && !progress(static_cast<std::size_t>(begin * plan.elements_per_unit),
-                                                  static_cast<std::size_t>(elements))) {
+        const auto finished = static_cast<std::size_t>(piece.first_element + piece_elements);
+        if (progress && !progress(finished, static_cast<std::size_t>(elements))) {
             return Error{ErrorCode::cancelled, "The read was cancelled by its progress callback",
                          descriptor.id};
         }

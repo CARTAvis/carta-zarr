@@ -14,9 +14,11 @@
 #include "read/pieces.h"
 
 #include "chunk_blocks.h"
+#include "pixel_mask.h"
 
 #include <algorithm>
 #include <optional>
+#include <utility>
 
 namespace carta::zarr::internal {
 namespace {
@@ -61,36 +63,45 @@ std::uint64_t UnitsPerPiece(const ImageDescriptor& descriptor, const ReadRequest
 
 }  // namespace
 
-PiecePlan PlanPieces(const ImageDescriptor& descriptor, const ChunkGeometry& geometry,
-                     const ReadRequest& request, const ReadOptions& options, bool watching,
-                     std::uint64_t elements, bool apply_mask) {
-    PiecePlan plan;
-    plan.units = 1;
-    plan.elements_per_unit = elements;
-
+std::vector<Piece> PlanPieces(const ImageDescriptor& descriptor, const ChunkGeometry& geometry,
+                              const ReadRequest& request, const ReadOptions& options, bool watching) {
     const auto axis = SlowestSelectedAxis(request);
     if (!axis || (!watching && options.temporary_memory_limit_bytes == 0)) {
-        return plan;
+        return {Piece{request, 0}};
     }
-
-    plan.split = true;
-    plan.axis = *axis;
-    plan.units = request.axes.at(*axis).count;
-    plan.elements_per_unit = 1;
-    for (std::size_t i = 0; i < *axis; ++i) {
-        plan.elements_per_unit *= request.axes.at(i).count;
-    }
-    plan.chunk = *axis < geometry.chunk_shape.size() ? geometry.chunk_shape.at(*axis) : 0;
 
     // The flag is decoded beside the pixels when this read will apply it, so both halves of the
     // sizing count it: the budget the library chooses for itself, and the per-row cost that budget
     // is divided by. Counting it in one and not the other would size pieces against a cost the read
     // does not have.
+    const bool apply_mask = AppliesPixelMask(options, descriptor);
     const auto chunk_bytes = DecodedChunkBytes(descriptor, geometry, apply_mask);
     const auto budget = options.temporary_memory_limit_bytes != 0 ? options.temporary_memory_limit_bytes
                                                                   : DefaultReadBytes(chunk_bytes);
-    plan.units_per_piece = UnitsPerPiece(descriptor, request, geometry, *axis, budget, apply_mask);
-    return plan;
+    const auto units_per_piece = UnitsPerPiece(descriptor, request, geometry, *axis, budget, apply_mask);
+    const auto chunk = *axis < geometry.chunk_shape.size() ? geometry.chunk_shape.at(*axis) : 0;
+
+    // Every axis faster than the cut is whole in every piece, so one unit of the cut axis is worth
+    // their product of the destination -- and a piece of units [begin, end) fills that many times
+    // [begin, end) of it, which is what keeps the finished part a prefix.
+    std::uint64_t elements_per_unit = 1;
+    for (std::size_t i = 0; i < *axis; ++i) {
+        elements_per_unit *= request.axes.at(i).count;
+    }
+
+    const auto& cut = request.axes.at(*axis);
+    std::vector<Piece> pieces;
+    for (std::uint64_t begin = 0; begin < cut.count;) {
+        // Rounded out to a chunk boundary, so that no chunk is decoded by two pieces.
+        const std::uint64_t end = AlignedBlockEnd(begin, units_per_piece, cut.count, cut.start, cut.stride, chunk);
+        Piece piece{request, begin * elements_per_unit};
+        auto& range = piece.request.axes.at(*axis);
+        range.start = cut.start + (begin * cut.stride);
+        range.count = end - begin;
+        pieces.push_back(std::move(piece));
+        begin = end;
+    }
+    return pieces;
 }
 
 }  // namespace carta::zarr::internal

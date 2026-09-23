@@ -265,9 +265,9 @@ const Result<zarr::ArrayMetadata>& Store::ReadArrayMetadata(std::string_view nod
     });
 }
 
-const Result<std::vector<std::string>>& Store::ListNodes() const {
-    using Listing = Result<std::vector<std::string>>;
-    return _caches->listed_nodes.GetOrCompute([&]() -> Listing {
+const Result<std::vector<NodeEntry>>& Store::Inventory() const {
+    using Listing = Result<std::vector<NodeEntry>>;
+    return _caches->inventory.GetOrCompute([&]() -> Listing {
         std::vector<std::string> node_names;
         // The one place the copy is taken as the whole truth rather than as a first look. Listing
         // is what consolidated metadata exists to avoid -- on a store reached over a network,
@@ -301,16 +301,51 @@ const Result<std::vector<std::string>>& Store::ListNodes() const {
         std::sort(node_names.begin(), node_names.end());
         node_names.erase(std::unique(node_names.begin(), node_names.end()), node_names.end());
 
-        // Every node is read here, so a listing either accounts for the whole hierarchy or reports
-        // why it cannot. What each one holds stays in the node metadata table, where a caller
-        // walking these names asks for it by name.
-        for (const auto& node : node_names) {
-            if (const auto& metadata = ReadNodeMetadata(node); !metadata) {
+        // Every node is read here, so an inventory either accounts for the whole hierarchy or
+        // reports why it cannot.
+        std::vector<NodeEntry> entries;
+        entries.reserve(node_names.size());
+        for (auto& node : node_names) {
+            const auto& metadata = ReadNodeMetadata(node);
+            if (!metadata) {
                 return metadata.error();
             }
+            NodeEntry entry{std::move(node), NodeKind::unrecognised, nullptr, std::nullopt};
+
+            // Looked up rather than taken with a default, because a node_type that is present and
+            // not a string is a document that does not say what it is -- and asking for it as a
+            // string would throw rather than answer.
+            const auto& document = metadata.value();
+            const auto declared = document.find("node_type");
+            const std::string node_type =
+                declared != document.end() && declared->is_string() ? declared->get<std::string>() : std::string{};
+
+            if (node_type == "group") {
+                entry.kind = NodeKind::group;
+            } else if (node_type == "array") {
+                entry.kind = NodeKind::array;
+                entry.array = &ReadArrayMetadata(entry.name);
+            } else {
+                entry.reason = Error{ErrorCode::invalid_metadata, "Zarr node is neither a group nor an array",
+                                     entry.name};
+            }
+            entries.push_back(std::move(entry));
         }
-        return node_names;
+        return entries;
     });
+}
+
+const NodeEntry* Store::FindNode(std::string_view name) const {
+    const auto& inventory = Inventory();
+    if (!inventory) {
+        return nullptr;
+    }
+    const auto& entries = inventory.value();
+    const auto found = std::lower_bound(entries.begin(), entries.end(), name,
+                                        [](const NodeEntry& entry, std::string_view wanted) {
+                                            return std::string_view(entry.name) < wanted;
+                                        });
+    return found != entries.end() && found->name == name ? &*found : nullptr;
 }
 
 Result<std::vector<double>> Store::ReadNumericArray(std::string_view node) const {

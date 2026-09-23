@@ -568,6 +568,58 @@ void TestAConsolidatedBlockThatMisnamesItsNodesIsRefused() {
             "a consolidated block listing one node twice was accepted");
 }
 
+// The inventory decides once what each node is. Its callers used to decide it three ways -- one read
+// node_type out of the document, one parsed every node and looked again when a parse failed, one
+// parsed every node and ignored the answer -- and agreed only where the three happened to coincide.
+void TestTheInventorySaysWhatEachNodeIs() {
+    using carta::zarr::internal::NodeKind;
+    auto nodes = CompleteStore();
+    nodes["SUBDIR"] = RootGroup(false);
+    // Says it is an array, and is not one: no shape.
+    nodes["BROKEN"] = R"({"zarr_format":3,"node_type":"array","data_type":"float32"})";
+    nodes["ODD"] = R"({"zarr_format":3,"node_type":"manifest"})";
+    // Present and not a string. Asked for as a string with a default, it threw rather than answered,
+    // and the whole discovery went with it.
+    nodes["NUMBERED"] = R"({"zarr_format":3,"node_type":3})";
+
+    auto store = Open(nodes);
+    Require(static_cast<bool>(store), "the inventory store failed to open");
+    const auto& inventory = store.value().Inventory();
+    Require(static_cast<bool>(inventory), "the inventory could not be taken");
+
+    const auto find = [&](const std::string& name) {
+        const auto* entry = store.value().FindNode(name);
+        Require(entry != nullptr, "the inventory has no entry for " + name);
+        return entry;
+    };
+
+    const auto* sky = find("SKY");
+    Require(sky->kind == NodeKind::array && sky->array != nullptr && static_cast<bool>(*sky->array) && !sky->reason,
+            "an array was not carried with its parsed metadata");
+    const auto* group = find("SUBDIR");
+    Require(group->kind == NodeKind::group && group->array == nullptr && !group->reason,
+            "a group was parsed as an array, or given a reason to be something else");
+    const auto* broken = find("BROKEN");
+    Require(broken->kind == NodeKind::array && broken->array != nullptr && !*broken->array,
+            "an array whose metadata does not parse was not carried with its refusal");
+    for (const std::string name : {"ODD", "NUMBERED"}) {
+        const auto* entry = find(name);
+        Require(entry->kind == NodeKind::unrecognised && entry->array == nullptr && entry->reason.has_value(),
+                "a node that does not say it is a group or an array was not unrecognised: " + name);
+    }
+
+    // Sorted by name, which is the order discovery's diagnostics come out in.
+    Require(std::is_sorted(inventory.value().begin(), inventory.value().end(),
+                           [](const auto& left, const auto& right) { return left.name < right.name; }),
+            "the inventory was not sorted by name");
+    // A name is looked up as it was handed out. Another spelling of it is a name nobody was given.
+    Require(store.value().FindNode("./SKY") == nullptr, "a respelled name was looked up as the node");
+    Require(store.value().FindNode("NOPE") == nullptr, "a node the store does not hold was found");
+
+    Require(static_cast<bool>(XradioProfile().Discover(store.value())),
+            "discovery could not walk a store holding a node whose node_type is not a string");
+}
+
 // The report latches: once a requirement is unmet, later ones are no-ops. A store with two faults
 // is therefore diagnosed once, by the first fault reached -- the behaviour a probe had when every
 // check returned early, now stated somewhere rather than emerging from the control flow.
@@ -745,6 +797,7 @@ int main() {
         TestConsolidatedMetadataDiscovery();
         TestAConsolidatedKeyIsFiledUnderItsCanonicalName();
         TestAConsolidatedBlockThatMisnamesItsNodesIsRefused();
+        TestTheInventorySaysWhatEachNodeIs();
         TestADeclaredFlagIsBinding();
         TestAmbiguousFlagsSelectNone();
         TestStoreRejections();

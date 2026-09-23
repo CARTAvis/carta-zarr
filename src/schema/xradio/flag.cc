@@ -27,19 +27,20 @@ Result<std::string> DetermineFlag(const Store& store, const zarr::ArrayMetadata&
         return declared;
     }
 
-    const auto& nodes = store.ListNodes();
-    if (!nodes) {
-        return nodes.error();
+    const auto& inventory = store.Inventory();
+    if (!inventory) {
+        return inventory.error();
     }
     std::vector<std::string> matching_flags;
-    for (const auto& node : nodes.value()) {
-        const auto& flag_array = store.ReadArrayMetadata(node);
-        // Nothing declared one, so this is a guess from the metadata alone. A variable that does not
-        // match exactly is simply not this image's mask, which is not an error in the store.
-        if (!flag_array || !RequireUsableFlag(flag_array.value(), image, node)) {
+    for (const auto& entry : inventory.value()) {
+        // Nothing declared one, so this is a guess from the metadata alone. A node that is not an
+        // array, or whose metadata will not parse, or that does not match exactly, is simply not
+        // this image's mask -- which is not an error in the store, and not this module's to report.
+        if (entry.kind != NodeKind::array || !*entry.array ||
+            !RequireUsableFlag(entry.array->value(), image, entry.name)) {
             continue;
         }
-        matching_flags.push_back(node);
+        matching_flags.push_back(entry.name);
     }
     if (matching_flags.size() == 1) {
         return matching_flags.front();

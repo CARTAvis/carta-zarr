@@ -56,21 +56,24 @@ Result<std::uint64_t> ElementSizeBytes(const zarr::ArrayMetadata& metadata, std:
 // be read. See ADR 0008.
 
 Result<std::uint64_t> TotalArraySizeBytes(const Store& store) {
-    const auto& nodes_result = store.ListNodes();
-    if (!nodes_result) {
-        return nodes_result.error();
+    const auto& inventory = store.Inventory();
+    if (!inventory) {
+        return inventory.error();
     }
 
     std::uint64_t total_bytes = 0;
     std::size_t array_count = 0;
-    for (const auto& node : nodes_result.value()) {
-        const auto& metadata = store.ReadNodeMetadata(node);
-        if (!metadata || !metadata.value().is_object() || metadata.value().value("node_type", "") != "array") {
+    for (const auto& entry : inventory.value()) {
+        // A group holds no array data, and neither does a node that does not say it is an array.
+        if (entry.kind != NodeKind::array) {
             continue;
         }
         ++array_count;
 
-        const auto& array_metadata_result = store.ReadArrayMetadata(node);
+        // An array this total knows is there and cannot size makes the total wrong rather than
+        // smaller, so it refuses instead of leaving the array out.
+        const auto& node = entry.name;
+        const auto& array_metadata_result = *entry.array;
         if (!array_metadata_result) {
             return array_metadata_result.error();
         }

@@ -184,15 +184,15 @@ struct Discovered {
 // deciding whether the store matches means enumerating it, and the answer to both questions comes
 // back together so that nothing has to enumerate twice or cache the result.
 Result<Discovered> DiscoverImages(const Store& store) {
-    const auto& nodes = store.ListNodes();
-    if (!nodes) {
-        return nodes.error();
+    const auto& inventory = store.Inventory();
+    if (!inventory) {
+        return inventory.error();
     }
 
     Discovered found;
     ImageDiscovery& result = found.discovery;
-    for (const auto& node : nodes.value()) {
-        auto qualified = QualifyNode(store, node);
+    for (const auto& entry : inventory.value()) {
+        auto qualified = QualifyNode(store, entry);
         if (qualified.diagnostic) {
             if (qualified.malformed && !found.first_malformation) {
                 found.first_malformation = result.diagnostics.size();
@@ -206,7 +206,7 @@ Result<Discovered> DiscoverImages(const Store& store) {
         if (qualified.diagnostic) {
             said.push_back(std::move(*qualified.diagnostic));
         }
-        result.images.push_back(ImageEntry{node, qualified.openable, std::move(said)});
+        result.images.push_back(ImageEntry{entry.name, qualified.openable, std::move(said)});
     }
 
     const auto sort_images = [](std::vector<ImageEntry>& images) {

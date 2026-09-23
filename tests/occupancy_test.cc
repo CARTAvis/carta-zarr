@@ -15,10 +15,13 @@
 
 #include "reduce/occupancy.h"
 
+#include <algorithm>
 #include <cstdint>
 #include <cstdio>
 #include <exception>
+#include <limits>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "support/check.h"
@@ -49,16 +52,35 @@ Occupancy Built(const std::vector<RegionMask>& regions, std::uint64_t chunk_u, s
     return std::move(built.value());
 }
 
-// The cells of the grid that at least one region occupies, as "cu,cv" pairs, read back through
-// RegionsTouching rather than through the index that holds them.
+// A read that could decode every chunk there is, so that no footprint is cut. Cutting changes a
+// footprint's shape and never what the footprints cover between them.
+constexpr std::uint64_t kUnbounded = std::numeric_limits<std::uint64_t>::max();
+
+// The chunk cells the occupancy's footprints cover, as "cu,cv" pairs in row order -- what a reduction
+// reads, rather than the representation it is read from.
+//
+// Checked against the index on the way: every covered cell is one the index has regions for, and
+// between them the covered cells hold every incidence the index does. So the runs the footprints are
+// cut from and the index the accumulation looks regions up in describe one set of chunks.
 std::string Occupied(const Occupancy& occupancy) {
-    std::string text;
-    for (std::uint64_t cv = 0; cv < occupancy.rows(); ++cv) {
-        for (std::uint64_t cu = 0; cu < occupancy.columns(); ++cu) {
-            if (occupancy.RegionsTouching(occupancy.chunk_cu0() + cu, occupancy.chunk_cv0() + cv).size > 0) {
-                text += (text.empty() ? "" : " ") + std::to_string(cu) + "," + std::to_string(cv);
+    std::vector<std::pair<std::uint64_t, std::uint64_t>> cells;
+    std::size_t incidences = 0;
+    for (const auto& footprint : occupancy.Footprints(kUnbounded)) {
+        for (auto cv = footprint.chunk_cv_begin; cv < footprint.chunk_cv_end; ++cv) {
+            for (auto cu = footprint.chunk_cu_begin; cu < footprint.chunk_cu_end; ++cu) {
+                const auto touching = occupancy.RegionsTouching(cu, cv).size;
+                Require(touching > 0, "a footprint covered a chunk no region touches");
+                incidences += touching;
+                cells.emplace_back(cv, cu);
             }
         }
+    }
+    Require(incidences == occupancy.entries().size(), "the index holds incidences outside every footprint");
+
+    std::sort(cells.begin(), cells.end());
+    std::string text;
+    for (const auto& [cv, cu] : cells) {
+        text += (text.empty() ? "" : " ") + std::to_string(cu) + "," + std::to_string(cv);
     }
     return text;
 }
@@ -82,10 +104,15 @@ void TestABoxOccupiesEveryChunkItsBoundingBoxTouches() {
     // no mask to narrow either.
     const auto occupancy = Built({Box(2, 3, 6, 5)}, 4, 4);
 
-    Require(occupancy.columns() == 2 && occupancy.rows() == 2, "the chunk grid was not 2 x 2");
-    Require(occupancy.u0() == 2 && occupancy.u1() == 8 && occupancy.v0() == 3 && occupancy.v1() == 8,
-            "the bounding box was not the region's own");
     Require(Occupied(occupancy) == "0,0 1,0 0,1 1,1", "a box did not occupy its whole bounding box");
+
+    // Read as one footprint, clamped to the region's own pixels rather than to the chunks around them.
+    const auto footprints = occupancy.Footprints(kUnbounded);
+    Require(footprints.size() == 1, "a box whose rows are alike was not read as one footprint");
+    const auto& slab = footprints.front().slab;
+    Require(slab.u_start == 2 && slab.u_count == 6 && slab.v_start == 3 && slab.v_count == 5,
+            "the footprint was not clamped to the region's own pixels");
+    Require(slab.chunks == 4, "a 2 x 2 footprint did not count four chunks");
     Require(occupancy.LayerChunks() == 4, "a 2 x 2 box did not report four chunks in a layer");
 }
 
@@ -114,9 +141,10 @@ void TestAMaskNarrowsTheOccupancyBelowTheBoundingBox() {
 
     const auto occupancy = Built({region}, 4, 4);
 
-    Require(occupancy.columns() == 4 && occupancy.rows() == 4, "the bounding box was not four chunks square");
     Require(Occupied(occupancy) == "0,0 1,1 2,2 3,3", "the mask did not narrow the occupancy to the diagonal");
     Require(occupancy.LayerChunks() == 4, "a diagonal did not report one chunk per row");
+    // No two rows of a diagonal are alike, so none is read with another, whatever a read affords.
+    Require(occupancy.Footprints(kUnbounded).size() == 4, "a diagonal was read in bands of unlike rows");
 }
 
 void TestRunsAndARasterSayTheSameThing() {
@@ -179,14 +207,57 @@ void TestAMaskThatSelectsNothingOccupiesNothing() {
 
     const auto occupancy = Built({region}, 4, 4);
 
-    Require(occupancy.columns() == 4 && occupancy.rows() == 4,
-            "a region that selects nothing still has the bounding box it was given");
     Require(occupancy.entries().empty(), "a mask of zeroes produced incidences");
     Require(Occupied(occupancy).empty(), "a mask of zeroes occupied a chunk");
     Require(occupancy.LayerChunks() == 0, "a mask of zeroes did not report an empty layer");
-    for (const auto& runs : occupancy.runs_per_row()) {
-        Require(runs.empty(), "a mask of zeroes produced a column run");
+    Require(occupancy.Footprints(1).empty(), "a mask of zeroes gave a reduction something to read");
+}
+
+// Rows that occupy the same chunk columns are read together, as many of them as a read affords, so
+// that a solid rectangle is a few large requests rather than one per chunk row.
+void TestAlikeRowsAreReadTogether() {
+    // 16 x 16 pixels over 4 x 4 chunks: four rows of four, every one alike.
+    const auto occupancy = Built({Box(0, 0, 16, 16)}, 4, 4);
+
+    const auto whole = occupancy.Footprints(kUnbounded);
+    Require(whole.size() == 1 && whole.front().slab.chunks == 16,
+            "a solid rectangle a read can hold was not read as one footprint");
+
+    // A read of eight chunks holds two rows of four.
+    const auto halves = occupancy.Footprints(8);
+    Require(halves.size() == 2, "a read of eight chunks did not take the rectangle two rows at a time");
+    for (const auto& footprint : halves) {
+        Require(footprint.chunk_cv_end - footprint.chunk_cv_begin == 2 && footprint.slab.chunks == 8,
+                "a band of two rows of four did not count eight chunks");
     }
+}
+
+// No footprint is more than one read can decode. A run wider than that is cut, rather than read in
+// one request -- which is what a region 80000 pixels wide once did, asking for 157 chunks, 628 MiB,
+// ten times the budget, with nothing to report or cancel from until it landed.
+void TestNoFootprintIsMoreThanOneRead() {
+    const auto occupancy = Built({Box(0, 0, 16, 16)}, 4, 4);
+
+    for (const std::uint64_t per_read : {std::uint64_t{0}, std::uint64_t{1}, std::uint64_t{2}, std::uint64_t{3},
+                                         std::uint64_t{5}, std::uint64_t{16}}) {
+        const auto footprints = occupancy.Footprints(per_read);
+        std::uint64_t covered = 0;
+        for (const auto& footprint : footprints) {
+            // A read smaller than a chunk still reads one: a chunk is the least that can be decoded.
+            Require(footprint.slab.chunks <= std::max<std::uint64_t>(1, per_read),
+                    "a footprint was more than one read can decode, at " + std::to_string(per_read));
+            const auto cells = (footprint.chunk_cu_end - footprint.chunk_cu_begin) *
+                               (footprint.chunk_cv_end - footprint.chunk_cv_begin);
+            Require(footprint.slab.chunks == cells, "a footprint did not count the chunks it spans");
+            covered += cells;
+        }
+        Require(covered == occupancy.LayerChunks(),
+                "cutting footprints to a read changed what they cover, at " + std::to_string(per_read));
+    }
+
+    // Two chunks a read: each row of four is cut in two.
+    const auto cut = occupancy.Footprints(2);
+    Require(cut.size() == 8, "four rows of four chunks were not cut into eight pieces of two");
 }
 
 void TestRunsAlongTheOtherAxisAreRefused() {
@@ -229,6 +300,8 @@ int main() {
         TestRunsAndARasterSayTheSameThing();
         TestTheIncidencesOfOneChunkAreContiguousAndInRegionOrder();
         TestAMaskThatSelectsNothingOccupiesNothing();
+        TestAlikeRowsAreReadTogether();
+        TestNoFootprintIsMoreThanOneRead();
         TestRunsAlongTheOtherAxisAreRefused();
         TestAGridTooLargeToIndexIsRefused();
     } catch (const std::exception& error) {

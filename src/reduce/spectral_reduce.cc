@@ -121,22 +121,6 @@ void AccumulateRow(const float* row, std::uint64_t stride, std::uint64_t count, 
     totals.largest = std::max(totals.largest, largest);
 }
 
-// The chunk cells and pixel bounds of one spatial footprint.
-//
-// Everything else the accumulation needs belongs to the reduction, so this is the whole of what
-// changes from one footprint to the next -- and the whole reason the accumulation had to be written
-// inside the loop that cuts them.
-struct FootprintBounds {
-    std::uint64_t chunk_cv_begin = 0;
-    std::uint64_t chunk_cv_end = 0;
-    std::uint64_t chunk_cu_begin = 0;
-    std::uint64_t chunk_cu_end = 0;
-    std::uint64_t u_begin = 0;
-    std::uint64_t u_end = 0;
-    std::uint64_t v_begin = 0;
-    std::uint64_t v_end = 0;
-};
-
 }  // namespace
 
 Result<void> ReduceSpectral(const ReadableImage& image, const SpectralReduceRequest& request,
@@ -178,7 +162,9 @@ Result<void> ReduceSpectral(const ReadableImage& image, const SpectralReduceRequ
     }
     const auto& occupancy = occupancy_result.value();
     const auto& regions = occupancy.regions();
-    const auto& runs_per_row = occupancy.runs_per_row();
+    // What the reduction reads, cut once against the plan's budget. They do not depend on which
+    // channels a block covers, so every block walks the same ones.
+    const auto footprints = occupancy.Footprints(plan.ChunksPerRead());
 
     // The requested statistics, in the one order a block reports them.
     std::vector<Statistic> statistics;
@@ -232,7 +218,6 @@ Result<void> ReduceSpectral(const ReadableImage& image, const SpectralReduceRequ
     // finished block goes, and this one is named in the same function as the caller's SpectralSink.
     std::vector<double> partials;
     SlabWalk walk(source, plan, options);
-    std::vector<ColumnRun> segments;
     // The accumulator's current shape, which is the length of the block being filled. Set by the
     // reset below and read by everything that indexes into it, including the strides a block reports.
     std::size_t statistic_stride = 0;
@@ -294,15 +279,15 @@ Result<void> ReduceSpectral(const ReadableImage& image, const SpectralReduceRequ
     // used, so that the accumulation is the same text it has been since it stopped doing its own
     // reading. It stays a lambda passed as a template parameter, never a std::function: the
     // per-pixel loop inlines through it. ADR 0005.
-    const auto accumulate_slab = [&](const FootprintBounds& footprint_bounds, const Slab& slab) {
-        const std::uint64_t chunk_cv_begin = footprint_bounds.chunk_cv_begin;
-        const std::uint64_t chunk_cv_end = footprint_bounds.chunk_cv_end;
-        const std::uint64_t chunk_cu_begin = footprint_bounds.chunk_cu_begin;
-        const std::uint64_t chunk_cu_end = footprint_bounds.chunk_cu_end;
-        const std::uint64_t u_begin = footprint_bounds.u_begin;
-        const std::uint64_t u_end = footprint_bounds.u_end;
-        const std::uint64_t v_begin = footprint_bounds.v_begin;
-        const std::uint64_t v_end = footprint_bounds.v_end;
+    const auto accumulate_slab = [&](const OccupiedFootprint& footprint, const Slab& slab) {
+        const std::uint64_t chunk_cv_begin = footprint.chunk_cv_begin;
+        const std::uint64_t chunk_cv_end = footprint.chunk_cv_end;
+        const std::uint64_t chunk_cu_begin = footprint.chunk_cu_begin;
+        const std::uint64_t chunk_cu_end = footprint.chunk_cu_end;
+        const std::uint64_t u_begin = footprint.slab.u_start;
+        const std::uint64_t u_end = footprint.slab.u_start + footprint.slab.u_count;
+        const std::uint64_t v_begin = footprint.slab.v_start;
+        const std::uint64_t v_end = footprint.slab.v_start + footprint.slab.v_count;
 
         // Into locals so that the accumulation below is the text it was when this
         // function did its own reading.
@@ -508,82 +493,17 @@ Result<void> ReduceSpectral(const ReadableImage& image, const SpectralReduceRequ
         }
     };
 
-    // Which chunk runs this block's regions occupy, cut into bands of identical rows and then into
-    // segments a budget wide. Two footprints of the same block share `reads_done`, so a block taken
-    // in a single read still reports once -- at the end, through the emitter.
+    // Every footprint the regions occupy, as the occupancy cut them. Two footprints of the same block
+    // share `reads_done`, so a block taken in a single read still reports once -- at the end, through
+    // the emitter.
     const auto walk_block = [&](EmitBlock& block, const auto& report) -> Result<void> {
-        for (std::uint64_t row = 0; row < occupancy.rows();) {
-            const auto& runs = runs_per_row.at(static_cast<std::size_t>(row));
-            if (runs.empty()) {
-                ++row;
-                continue;
+        for (const auto& footprint : footprints) {
+            const auto walked =
+                walk.Over(footprint.slab, block.begin, block.end, block.reads_done, block.chunks_done, report,
+                          [&](const Slab& slab) { accumulate_slab(footprint, slab); });
+            if (!walked) {
+                return walked.error();
             }
-
-            // Rows below that repeat this row's runs exactly are read with it, so that a solid
-            // rectangle becomes a few large requests while a diagonal stays one chunk per row.
-            std::uint64_t widest = 0;
-            for (const auto& run : runs) {
-                widest = std::max(widest, run.last - run.first + 1);
-            }
-            const std::uint64_t band_limit = plan.UnitsAffordable(widest);
-            std::uint64_t band_end = row + 1;
-            while (band_end < occupancy.rows() && (band_end - row) < band_limit &&
-                   runs_per_row.at(static_cast<std::size_t>(band_end)) == runs) {
-                ++band_end;
-            }
-
-            const std::uint64_t chunk_cv_begin = occupancy.chunk_cv0() + row;
-            const std::uint64_t chunk_cv_end = occupancy.chunk_cv0() + band_end;
-            const std::uint64_t v_begin = std::max(occupancy.v0(), chunk_cv_begin * plan.chunk_v);
-            const std::uint64_t v_end = std::min(occupancy.v1(), chunk_cv_end * plan.chunk_v);
-
-            // A run wider than the budget is read in pieces, not in one request. Without this the
-            // smallest request is a whole chunk row of the region: 157 chunks of a 80000-pixel-wide
-            // region is 628 MiB, ten times the budget it was supposed to respect, and nothing to
-            // report or cancel from until all of it lands.
-            const std::uint64_t band_rows = std::max<std::uint64_t>(1, band_end - row);
-            const std::uint64_t segment_limit = plan.UnitsAffordable(band_rows);
-            segments.clear();
-            for (const auto& whole : runs) {
-                for (std::uint64_t first = whole.first; first <= whole.last;) {
-                    const std::uint64_t width = std::min(segment_limit, whole.last - first + 1);
-                    segments.push_back(ColumnRun{first, first + width - 1});
-                    first += width;
-                }
-            }
-
-            for (const auto& run : segments) {
-                const std::uint64_t chunk_cu_begin = occupancy.chunk_cu0() + run.first;
-                const std::uint64_t chunk_cu_end = occupancy.chunk_cu0() + run.last + 1;
-                const std::uint64_t u_begin = std::max(occupancy.u0(), chunk_cu_begin * plan.chunk_u);
-                const std::uint64_t u_end = std::min(occupancy.u1(), chunk_cu_end * plan.chunk_u);
-                const std::uint64_t run_chunks =
-                    std::max<std::uint64_t>(1, (run.last - run.first + 1) * (band_end - row));
-                SlabFootprint footprint;
-                footprint.u_start = u_begin;
-                footprint.u_count = u_end - u_begin;
-                footprint.v_start = v_begin;
-                footprint.v_count = v_end - v_begin;
-                footprint.chunks = run_chunks;
-
-                FootprintBounds bounds;
-                bounds.chunk_cv_begin = chunk_cv_begin;
-                bounds.chunk_cv_end = chunk_cv_end;
-                bounds.chunk_cu_begin = chunk_cu_begin;
-                bounds.chunk_cu_end = chunk_cu_end;
-                bounds.u_begin = u_begin;
-                bounds.u_end = u_end;
-                bounds.v_begin = v_begin;
-                bounds.v_end = v_end;
-
-                const auto walked =
-                    walk.Over(footprint, block.begin, block.end, block.reads_done, block.chunks_done, report,
-                              [&](const Slab& slab) { accumulate_slab(bounds, slab); });
-                if (!walked) {
-                    return walked.error();
-                }
-            }
-            row = band_end;
         }
         return {};
     };

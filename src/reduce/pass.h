@@ -258,9 +258,11 @@ inline void SampledRange(std::uint64_t begin, std::uint64_t end, std::uint64_t s
 /**
  * Walks one spatial footprint along the spectrum, a slab at a time.
  *
- * Which footprints to visit is the caller's: a whole-plane pass bands the plane, and a reduction
- * cuts the chunk runs its regions occupy. Those two are genuinely different walks and stay that
- * way. What they had in common was everything inside one footprint -- how deep a slab goes, where
+ * Which footprints to visit is not the walk's. A whole-plane pass bands the plane itself; a
+ * reduction's come from its occupancy, which cuts the chunk runs its regions occupy -- see
+ * Occupancy::Footprints. Those two are genuinely different walks and stay that way: joining them
+ * into one traversal would make the plane's bands a special case of a region set, for a caller that
+ * has no regions. What they had in common was everything inside one footprint -- how deep a slab goes, where
  * it is cut so that no decode serves two slabs, when the caller is told what it has, where
  * cancellation is checked, and how progress is counted -- and that was written out twice, in full,
  * with the subtlety intact in both copies: `reads_done` guards the report so that a footprint taken

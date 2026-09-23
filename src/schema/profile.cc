@@ -91,15 +91,24 @@ Result<ProbeResult> ProbeStore(const Store& store) {
     // is what a cache inside Store was there to hide.
     std::vector<SchemaInspection> matches;
     std::vector<SchemaProbeResult> invalid;
+    // What a profile that did not match had to say about the store anyway: a store of nothing but
+    // complex or aperture-plane variables is one the profile recognised the images of and will not
+    // open, and that is the reason to give, not "nothing matched". A profile that found nothing it
+    // knew says nothing, so a store this library is simply not for still carries no diagnostic.
+    // The first profile to say anything is the one heard, as the first invalid one is below.
+    std::vector<Diagnostic> unmatched;
     for (const auto& entry : SchemaProfile::BuiltIn()) {
         auto inspection = entry.inspect(store);
         if (!inspection) {
             return inspection.error();
         }
-        if (inspection.value().probe.kind == SchemaMatchKind::match) {
+        auto& probe = inspection.value().probe;
+        if (probe.kind == SchemaMatchKind::match) {
             matches.push_back(std::move(inspection.value()));
-        } else if (inspection.value().probe.kind == SchemaMatchKind::invalid) {
-            invalid.push_back(std::move(inspection.value().probe));
+        } else if (probe.kind == SchemaMatchKind::invalid) {
+            invalid.push_back(std::move(probe));
+        } else if (unmatched.empty()) {
+            unmatched = std::move(probe.diagnostics);
         }
     }
 
@@ -127,7 +136,10 @@ Result<ProbeResult> ProbeStore(const Store& store) {
         result.schema_version = invalid_result.schema_version;
         result.diagnostics = invalid_result.diagnostics;
     } else {
+        // Diagnostics alone, as ProbeResult promises for this kind: naming the schema would say the
+        // store is one, which is what not matching denies.
         result.kind = ProbeKind::zarr_without_supported_schema;
+        result.diagnostics = std::move(unmatched);
     }
     return result;
 }

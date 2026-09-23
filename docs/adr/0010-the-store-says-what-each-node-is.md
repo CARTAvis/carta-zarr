@@ -129,4 +129,5 @@ For the store's own references it holds only because the first read of a name is
 life of the store.
 
 **Diagnostics dropped on `no_match`.** Unchanged from ADR 0009: a store of nothing but unsupported
-variables is still reported as unrecognised with no reason attached.
+variables is still reported as unrecognised with no reason attached. *Since decided* -- see the
+same entry in ADR 0009: the reason is carried now, and the kind is unchanged.

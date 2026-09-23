@@ -192,6 +192,46 @@ void TestNonMatch() {
     Require(static_cast<bool>(probe), "ProbeStore reported an error for a valid non-XRADIO group");
     Require(probe.value().kind == ProbeKind::zarr_without_supported_schema,
             "a valid non-XRADIO group was not reported as an unsupported schema");
+    // Nothing in it looked like an image, so the profile has nothing to say about it either.
+    Require(probe.value().diagnostics.empty() && probe.value().schema_id.empty(),
+            "a store with nothing the profile recognised was reported with the profile's say-so");
+}
+
+// A store whose only images are ones this library does not open is still one no profile matched,
+// and the reason is the profile's own: it recognised the images and refused them. That reason used
+// to be dropped on the way out of ProbeStore, so the refusal a consumer saw was "no profile matched"
+// with nothing to say which variable, or why.
+void TestNothingOpenableSaysWhy() {
+    using carta::zarr::internal::ProbeStore;
+    using carta::zarr::internal::RequireOpenableDataset;
+
+    const auto refused = [](std::map<std::string, std::string> nodes, const std::string& code,
+                            const std::string& message) {
+        auto store = Open(std::move(nodes));
+        Require(static_cast<bool>(store), "the unopenable store failed to open");
+        const auto probe = ProbeStore(store.value());
+        Require(static_cast<bool>(probe), "ProbeStore reported an error for a well-formed store");
+        Require(probe.value().kind == ProbeKind::zarr_without_supported_schema,
+                "a store of variables this library does not open was not reported as unsupported");
+        // Diagnostics alone: naming the schema would say the store is one.
+        Require(probe.value().schema_id.empty(), "an unmatched store was attributed to a schema");
+        Require(HasDiagnostic(probe.value().diagnostics, code) && probe.value().diagnostics.front().node_path == "SKY",
+                "an unmatched store lost the reason its images were refused");
+
+        const auto openable = RequireOpenableDataset(probe.value(), "/tmp/store");
+        Require(!openable && openable.error().code == ErrorCode::unsupported_schema,
+                "a store of variables this library does not open was not refused as an unsupported schema");
+        Require(openable.error().message == message,
+                "the refusal did not carry the profile's reason: " + openable.error().message);
+    };
+
+    auto complex = CompleteStore();
+    complex["SKY"] = SkyArray("complex64");
+    refused(complex, "unsupported_data_type", "Complex sky-plane variables are not openable");
+
+    auto aperture = CompleteStore();
+    aperture["SKY"] = SkyArray("float32", "{}", R"(["time","frequency","polarization","u","v"])");
+    refused(aperture, "unsupported_coordinate_plane", "Aperture-plane variables are not openable");
 }
 
 void TestMissingCoordinateIsInvalid() {
@@ -818,6 +858,7 @@ int main() {
         TestCompleteStoreMatches();
         TestDatasetWithoutSkyMatches();
         TestNonMatch();
+        TestNothingOpenableSaysWhy();
         TestMissingCoordinateIsInvalid();
         TestCoordinateShapeMismatchIsInvalid();
         TestCoordinateDataTypeIsChecked();

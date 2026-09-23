@@ -61,6 +61,17 @@ inline std::uint64_t DefaultReadBytes(std::uint64_t chunk_bytes) {
 }
 
 // Elements in one chunk of this image.
+// How many units of `chunks_per_unit` chunks a read that may decode `chunks_per_read` chunks affords.
+// Never zero: a budget smaller than a single unit still reads one, because a chunk is the smallest
+// thing that can be decoded and refusing to read is the worse answer.
+//
+// A unit is at least one chunk; one of none is read as one. A free function rather than only the
+// pass plan's, because the occupancy asks it too, and it takes the one number rather than the plan
+// so that the occupancy can ask it with nothing linked behind it -- ADR 0006.
+inline std::uint64_t UnitsAffordable(std::uint64_t chunks_per_read, std::uint64_t chunks_per_unit) {
+    return std::max<std::uint64_t>(1, chunks_per_read / std::max<std::uint64_t>(1, chunks_per_unit));
+}
+
 inline std::uint64_t ChunkElements(const ChunkGeometry& geometry) {
     std::uint64_t elements = 1;
     for (const auto length : geometry.chunk_shape) {

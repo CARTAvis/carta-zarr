@@ -199,6 +199,21 @@ void TestABandIsNeverEmpty() {
     Require(plan.SlabChannels(plan.layer_chunks) >= 1, "and a slab at least one channel");
 }
 
+// A region set that occupies no chunk at all -- a mask of zeroes -- costs nothing per layer, so
+// nothing spatial bounds how many channels one emitted block holds. The budget used to answer "how
+// many units of no chunks" with its own byte count, which is large enough to look right until the
+// budget is smaller than the spectrum: here it is one byte, and the block was two channels.
+void TestARegionSetOccupyingNothingBoundsNoBlock() {
+    const auto image = MakeImage(512, 520, 32);
+    const auto geometry = MakeGeometry(256, 260, 2, AxisRole::spatial_y);
+    ReadOptions tiny;
+    tiny.temporary_memory_limit_bytes = 1;
+    const auto plan = Plan(image, geometry, Range{0, 32, 1}, tiny);
+    Require(plan.EmitChannels(0, 8, 0) == 32, "a block over no chunks was bounded by the read budget");
+    // Anything that does occupy a chunk is still held to the read budget, which affords one layer.
+    Require(plan.EmitChannels(1, 8, 0) == 2, "a block over one chunk was not held to one chunk layer");
+}
+
 // Sampling of zero would select nothing and divide by nothing; the plan floors it at one.
 void TestSamplingFloorsAtOne() {
     const auto image = MakeImage(512, 520, 32);
@@ -441,6 +456,7 @@ int main() {
         TestASlabIsCountedInChunksOfTheSpectralAxis();
         TestALayerIsCountedInWholeChunks();
         TestABandIsNeverEmpty();
+        TestARegionSetOccupyingNothingBoundsNoBlock();
         TestSamplingFloorsAtOne();
         TestSampledRangePicksTheMultiplesInside();
         TestEachChunkIsReadOnce();

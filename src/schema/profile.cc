@@ -76,7 +76,7 @@ Result<ImageDiscovery> SchemaProfile::Discover(const Store& store) const {
     return std::move(inspection.value().discovery);
 }
 
-Result<ImageDescriptor> SchemaProfile::Describe(const Store& store, std::string_view image_id) const {
+Result<DescribedImage> SchemaProfile::Describe(const Store& store, std::string_view image_id) const {
     return _entry->describe(store, image_id);
 }
 

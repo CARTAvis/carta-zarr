@@ -17,6 +17,7 @@
 // order is not the logical one -- needed a directory tree to reach while it lived there.
 
 #include "carta-zarr/descriptor.h"
+#include "zarr/storage_layout.h"
 
 #include <cstddef>
 #include <cstdint>
@@ -31,7 +32,7 @@ namespace carta::zarr::internal {
 // Said with `at` rather than filled in. Falling back to the axis length is what this used to do, and
 // it turned "no layout here" into a geometry claiming one chunk covers the whole image -- a lie a
 // consumer cannot tell from an image that really is stored that way.
-inline ChunkGeometry BuildChunkGeometry(const ImageDescriptor& descriptor, const StorageLayout& layout) {
+inline ChunkGeometry BuildChunkGeometry(const ImageDescriptor& descriptor, const zarr::StorageLayout& layout) {
     ChunkGeometry geometry;
     geometry.sharded = layout.sharded;
     geometry.compressor = layout.compressor;

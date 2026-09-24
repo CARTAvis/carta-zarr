@@ -278,7 +278,7 @@ Result<SchemaInspection> InspectImages(const Store& store) {
     return finish(report.ok() ? SchemaMatchKind::match : SchemaMatchKind::invalid);
 }
 
-Result<ImageDescriptor> DescribeImage(const Store& store, std::string_view image_id) {
+Result<DescribedImage> DescribeImage(const Store& store, std::string_view image_id) {
     // Asked rather than decided again. This used to classify the variable itself, on a weaker rule
     // than the one the listing was built with -- l and m rather than the whole axis set -- so the
     // two could disagree about what an image is.
@@ -364,7 +364,7 @@ Result<ImageDescriptor> DescribeImage(const Store& store, std::string_view image
     // Read from the metadata already in hand rather than asked of the store again, and assigned
     // unconditionally: every array ParseArrayMetadata accepted has a layout, so there is no failure
     // here to handle and no absence to represent.
-    descriptor.storage = zarr_metadata::ParseStorageLayout(image);
+    const auto layout = zarr_metadata::ParseStorageLayout(image);
 
     auto pixel_mask = DetermineFlag(store, image, image_id, descriptor.diagnostics);
     if (!pixel_mask) {
@@ -373,7 +373,8 @@ Result<ImageDescriptor> DescribeImage(const Store& store, std::string_view image
     descriptor.pixel_mask_id = pixel_mask.value();
     descriptor.has_pixel_mask = !descriptor.pixel_mask_id.empty();
 
-    return descriptor;
+    auto geometry = BuildChunkGeometry(descriptor, layout);
+    return DescribedImage{std::move(descriptor), std::move(geometry)};
 }
 
 Result<std::vector<Beam>> ReadBeams(const Store& store, std::string_view image_id) {

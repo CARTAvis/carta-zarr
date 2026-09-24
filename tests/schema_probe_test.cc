@@ -382,12 +382,14 @@ void TestReferenceFixture() {
                 desc.temporal->scale == "UTC" && desc.temporal->format == "UNIX",
             "time coordinate values or attributes were not preserved");
 
-    // The generator writes SKY as unsharded zstd chunks of (1, 1, 1, 2, 5) in stored axis order.
-    Require(!desc.storage.sharded, "reference fixture was reported as sharded");
-    Require(desc.storage.shard_shape.empty(), "unsharded reference fixture reported a shard shape");
-    Require((desc.storage.chunk_shape == std::vector<std::uint64_t>{1, 1, 1, 2, 5}),
+    // The generator writes SKY as unsharded zstd chunks of (1, 1, 1, 2, 5) in stored axis order,
+    // which is (2, 5, 1, 1, 1) in the logical order the geometry reports.
+    const auto& geometry = image.value().chunk_geometry();
+    Require(!geometry.sharded, "reference fixture was reported as sharded");
+    Require((geometry.shard_shape == geometry.chunk_shape), "an unsharded image's shard is its chunk");
+    Require((geometry.chunk_shape == std::vector<std::uint64_t>{2, 5, 1, 1, 1}),
             "reference fixture chunk shape changed");
-    Require(desc.storage.compressor == "zstd", "reference fixture compressor was not reported as zstd");
+    Require(geometry.compressor == "zstd", "reference fixture compressor was not reported as zstd");
 
     const auto beams = image.value().ReadBeams();
     if (!beams) {
@@ -794,12 +796,14 @@ void TestShardedStorageLayout(const std::filesystem::path& root) {
     const auto image = dataset.value().OpenImage("SKY");
     Require(static_cast<bool>(image), "OpenImage failed for the sharded store");
 
-    const auto& storage = image.value().descriptor().storage;
-    Require(storage.sharded, "sharded store was not reported as sharded");
-    Require((storage.shard_shape == std::vector<std::uint64_t>{1, 3, 2, 4, 5}), "shard shape was not reported");
-    Require((storage.chunk_shape == std::vector<std::uint64_t>{1, 1, 1, 2, 5}),
+    // In logical order: stored (time, frequency, polarization, l, m) becomes (l, m, frequency,
+    // polarization, time).
+    const auto& geometry = image.value().chunk_geometry();
+    Require(geometry.sharded, "sharded store was not reported as sharded");
+    Require((geometry.shard_shape == std::vector<std::uint64_t>{4, 5, 3, 2, 1}), "shard shape was not reported");
+    Require((geometry.chunk_shape == std::vector<std::uint64_t>{2, 5, 1, 1, 1}),
             "inner chunk shape was not taken from the sharding codec");
-    Require(storage.compressor == "blosc", "compressor inside the sharding codec was not reported");
+    Require(geometry.compressor == "blosc", "compressor inside the sharding codec was not reported");
 }
 
 }  // namespace

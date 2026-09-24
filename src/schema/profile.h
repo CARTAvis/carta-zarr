@@ -8,6 +8,7 @@
 #define CARTA_ZARR_SRC_SCHEMA_PROFILE_H_
 
 #include "../store.h"
+#include "chunk_geometry.h"
 
 #include <optional>
 #include <string>
@@ -15,6 +16,14 @@
 #include <vector>
 
 namespace carta::zarr::internal {
+
+// One image as a profile describes it: what a consumer is told about it, and the geometry its reads
+// and reductions are cut by. Made together because the geometry is the image's stored layout put into
+// the descriptor's logical order, and the layout is read only while the image is being described.
+struct DescribedImage {
+    ImageDescriptor descriptor;
+    ChunkGeometry geometry;
+};
 
 // What every built-in profile made of one store, as ProbeStore reports it: whether one of them
 // describes it, and if so the dataset it describes.
@@ -102,7 +111,7 @@ public:
     // its own precondition now, against the one variable it was handed rather than by enumerating
     // the store, so there is no longer a caller that has established it first and none that has to
     // be told to.
-    Result<ImageDescriptor> Describe(const Store& store, std::string_view image_id) const;
+    Result<DescribedImage> Describe(const Store& store, std::string_view image_id) const;
     // Asks nothing about openability, deliberately: an Image handle exists only for a variable
     // Dataset::OpenImage already opened, so there is nothing left here to establish.
     Result<std::vector<Beam>> ReadBeams(const Store& store, std::string_view image_id) const;
@@ -111,7 +120,7 @@ private:
     struct Entry {
         SchemaId id;
         Result<SchemaInspection> (*inspect)(const Store&);
-        Result<ImageDescriptor> (*describe)(const Store&, std::string_view);
+        Result<DescribedImage> (*describe)(const Store&, std::string_view);
         Result<std::vector<Beam>> (*read_beams)(const Store&, std::string_view);
     };
 

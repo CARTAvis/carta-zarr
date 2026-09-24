@@ -26,7 +26,7 @@
 namespace {
 
 using carta::zarr::ErrorCode;
-using carta::zarr::StorageLayout;
+using carta::zarr::internal::zarr::StorageLayout;
 using carta::zarr::internal::zarr::ArrayMetadata;
 using carta::zarr::internal::zarr::ParseArrayMetadata;
 using carta::zarr::internal::zarr::ParseStorageLayout;

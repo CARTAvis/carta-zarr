@@ -10,7 +10,6 @@
 #include "readable_image.h"
 #include "reduce/plane_histogram.h"
 #include "reduce/spectral_reduce.h"
-#include "schema/chunk_geometry.h"
 #include "schema/profile.h"
 #include "store.h"
 #include "store_pixel_source.h"
@@ -243,7 +242,7 @@ public:
     internal::SchemaProfile profile;
     std::shared_ptr<internal::Store> store;
     mutable std::mutex mutex;
-    mutable std::unordered_map<std::string, ImageDescriptor> image_descriptors;
+    mutable std::unordered_map<std::string, internal::DescribedImage> image_descriptors;
 };
 
 Dataset::Dataset(std::shared_ptr<Impl> impl) : _impl(std::move(impl)) {}
@@ -309,12 +308,9 @@ Result<Image> Dataset::OpenImage(std::string_view image_id) const {
         }
         std::scoped_lock const lock(_impl->mutex);
         const std::string image_name(image_id);
-        const auto make_image = [&](const ImageDescriptor& descriptor) {
-            // The descriptor already carries the stored layout; the geometry is that layout permuted
-            // into logical order, so it is derived here rather than read again.
-            return Image{std::make_shared<Image::Impl>(
-                _impl->context, _impl->location, _impl->profile, _impl->store, descriptor,
-                internal::BuildChunkGeometry(descriptor, descriptor.storage))};
+        const auto make_image = [&](const internal::DescribedImage& described) {
+            return Image{std::make_shared<Image::Impl>(_impl->context, _impl->location, _impl->profile,
+                                                      _impl->store, described.descriptor, described.geometry)};
         };
         const auto cached = _impl->image_descriptors.find(image_name);
         if (cached != _impl->image_descriptors.end()) {

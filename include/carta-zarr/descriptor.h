@@ -171,13 +171,6 @@ struct ObservationInfo {
     std::optional<std::array<double, 3>> observatory_position;  // OBSGEO-X, Y, Z (meters)
 };
 
-struct StorageLayout {
-    std::vector<std::uint64_t> chunk_shape;
-    std::vector<std::uint64_t> shard_shape;
-    std::string compressor;
-    bool sharded = false;
-};
-
 // The read geometry of one image, reported in the logical axis order of ImageDescriptor::axes so
 // that a consumer never has to undo the stored order itself.
 //
@@ -257,10 +250,6 @@ struct ImageDescriptor {
     std::optional<PolarizationCoordinate> polarization;
     std::optional<TemporalCoordinate> temporal;
     std::optional<ObservationInfo> observation;
-    // Always present. Every array this library opens declared a chunk grid it could read, so there
-    // is no image whose layout is unknown -- one whose sharding codec does not describe its chunks
-    // is refused rather than opened with the question left open.
-    StorageLayout storage;
     std::vector<Diagnostic> diagnostics;
 };
 

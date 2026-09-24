@@ -50,6 +50,7 @@ add_library(carta_zarr SHARED
     src/read/pieces.cc
     src/read/pieces_read.cc
     src/reduce/occupancy.cc
+    src/reduce/region_runs.cc
     src/reduce/pass.cc
     src/reduce/pass_read.cc
     src/reduce/plane_histogram.cc
@@ -402,6 +403,12 @@ if(CARTA_ZARR_BUILD_TESTS AND BUILD_TESTING)
         TEST_NAME carta-zarr-statistic-slots
         SOURCES tests/statistic_slots_test.cc)
 
+    # A region's raster turned into the runs a reduction walks, checked against the obvious encoder
+    # the library avoids. Compiled against the encoder alone.
+    carta_zarr_add_test(carta_zarr_region_runs_tests INTERNAL
+        TEST_NAME carta-zarr-region-runs
+        SOURCES tests/region_runs_test.cc src/reduce/region_runs.cc)
+
     # A whole reduction against pixels that were never written down. This target links no Store and
     # no TensorStore, which is the seam the pass's PixelSource exists to create: the oracle is the
     # formula the pixels come from, so the image can be whatever size the question needs rather than
@@ -411,6 +418,7 @@ if(CARTA_ZARR_BUILD_TESTS AND BUILD_TESTING)
         SOURCES
             tests/reduce_synthetic_test.cc
             src/reduce/occupancy.cc
+            src/reduce/region_runs.cc
             src/reduce/plane_histogram.cc
             src/reduce/spectral_reduce.cc
             src/work_pool.cc
@@ -428,7 +436,7 @@ if(CARTA_ZARR_BUILD_TESTS AND BUILD_TESTING)
     # before this, and two of their refusals were reachable from nothing at all.
     carta_zarr_add_test(carta_zarr_occupancy_tests INTERNAL
         TEST_NAME carta-zarr-occupancy
-        SOURCES tests/occupancy_test.cc src/reduce/occupancy.cc)
+        SOURCES tests/occupancy_test.cc src/reduce/occupancy.cc src/reduce/region_runs.cc)
 
     # What a pixel selection is: a descriptor and a request in, a selection out. It was reached only
     # through reads that checked their answers, so a selection that was right about which pixels and

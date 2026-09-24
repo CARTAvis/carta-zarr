@@ -12,6 +12,7 @@
 #include "carta-zarr/result.h"
 
 #include "reduce/footprint.h"
+#include "reduce/region_runs.h"
 
 #include <cstddef>
 #include <cstdint>
@@ -37,8 +38,10 @@ struct PlacedRegion {
     const std::uint8_t* mask = nullptr;
     std::uint64_t mask_u_stride = 1;
     std::uint64_t mask_v_stride = 1;
-    // Runs along u, indexed by v. Null unless the caller supplied runs; Occupancy::Of refuses a
-    // region whose runs go the other way, so anything that reaches here already runs along u.
+    // Runs along u, indexed by v: the caller's, or made by Occupancy::Of from the raster and owned by
+    // it. Null for a region that is its whole box, and for a raster too fragmented to be worth them,
+    // which is then read through `mask`. Occupancy::Of refuses a caller's runs that go the other way,
+    // so anything that reaches here already runs along u.
     const std::uint32_t* runs = nullptr;
     const std::uint64_t* run_offsets = nullptr;
 };
@@ -114,6 +117,10 @@ public:
     // Reports invalid_argument for a region whose runs go along the axis the store does not vary
     // fastest, and for a region set touching more chunks than one reduction can index.
     //
+    // A region given as a raster without runs is turned into runs here, along u, so that the walk
+    // takes the unmasked loop for it and its chunks are found from the runs; see region_runs.h. That
+    // is one pass over the raster per call, about 2 ms for a 7763x4742 bounding box.
+    //
     // Assumes at least one region: an empty set is refused a step earlier, where the rest of the
     // request is checked.
     static Result<Occupancy> Of(const RegionMask* regions, std::size_t region_count, std::uint64_t chunk_u,
@@ -170,6 +177,13 @@ public:
         return _entries;
     }
 
+    // The regions point into the runs this made, so it moves and is never copied.
+    Occupancy(Occupancy&&) noexcept = default;
+    Occupancy& operator=(Occupancy&&) noexcept = default;
+    Occupancy(const Occupancy&) = delete;
+    Occupancy& operator=(const Occupancy&) = delete;
+    ~Occupancy() = default;
+
 private:
     Occupancy() = default;
 
@@ -178,6 +192,9 @@ private:
     }
 
     std::vector<PlacedRegion> _regions;
+    // The runs made from rasters, which PlacedRegion points into. Moving the vector moves each one's
+    // storage along with it, so the pointers survive a move of the Occupancy.
+    std::vector<RegionRuns> _made_runs;
     // The chunk shape the grid is cut by, kept because a footprint is clamped in pixels.
     std::uint64_t _chunk_u = 1;
     std::uint64_t _chunk_v = 1;

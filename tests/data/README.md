@@ -21,7 +21,10 @@ probe and descriptor tests. It carries shared coordinate, Stokes, storage, beam,
 consolidated-metadata examples. Its spectrum is intentionally nonuniform. `SKY` itself has no
 chunk files because all of its values equal the fill value, so pixel-read tests will need a fixture
 with non-fill data. `images/zarr/xradio/legacy` retains an earlier XRADIO layout to verify image
-discovery and validation across the compatibility baseline.
+discovery and validation across the compatibility baseline. `images/zarr/xradio/time_axis` is the
+same dataset with two times rather than one: valid, and every image in it openable here, but not
+something CARTA displays, so the backend uses it to check that it does not list an image it would
+refuse to open. This library's own time > 1 case is a store its tests write.
 
 These fixtures were moved from `carta-backend` (`test/data/`) and must keep the same layouts so the
 extracted library preserves the backend's compatibility baseline. zarr-python emits its expected

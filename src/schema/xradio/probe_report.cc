@@ -165,14 +165,6 @@ bool ProbeReport::RequireCoordinateSystem(const nlohmann::json& root_attributes)
     return true;
 }
 
-std::string ProbeReport::InvalidMessage() const {
-    std::string message = "XRADIO " + _profile_name + " metadata is invalid";
-    if (!_diagnostics.empty()) {
-        message += ": " + _diagnostics.front().message;
-    }
-    return message;
-}
-
 Result<SchemaProbeResult> ProbeReport::Finish(SchemaMatchKind kind, std::string schema_version) const {
     if (_error) {
         return *_error;

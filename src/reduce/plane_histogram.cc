@@ -164,13 +164,12 @@ Result<void> ComputeHistogram(const ReadableImage& image, const HistogramRequest
             }
 
             std::fill(partials.begin(), partials.begin() + static_cast<std::ptrdiff_t>(tasks * bins), 0);
-            const std::uint64_t rows_per_task = (v_count + tasks - 1) / tasks;
             workers.Run(tasks, [&](std::size_t task, std::size_t) {
-                const std::uint64_t v_first = static_cast<std::uint64_t>(task) * rows_per_task;
-                if (v_first >= v_count) {
+                const auto rows = TaskRows(task, tasks, v_count);
+                if (rows.first == rows.last) {
                     return;
                 }
-                bin_rows(v_first, std::min(v_first + rows_per_task, v_count), partials.data() + (task * bins));
+                bin_rows(rows.first, rows.last, partials.data() + (task * bins));
             });
             // Integer counts, so this sum is the serial loop's answer exactly -- which is what
             // lets histogram_test keep comparing against an oracle rather than a tolerance.
@@ -394,16 +393,15 @@ Result<CubeHistogramResult> ComputeCubeHistogram(const ReadableImage& image,
                 return;
             }
 
-            const std::uint64_t rows_per_task = (rows + tasks - 1) / tasks;
             // By task, not by worker: the cap above can leave fewer accumulators than the pool has
             // workers, and a task is the thing there is one accumulator for. Two tasks never run at
             // once on the same accumulator because there are never more tasks than accumulators.
             workers.Run(tasks, [&](std::size_t task, std::size_t) {
-                const std::uint64_t first = static_cast<std::uint64_t>(task) * rows_per_task;
-                if (first >= rows) {
+                const auto share = TaskRows(task, tasks, rows);
+                if (share.first == share.last) {
                     return;
                 }
-                take_rows(first, std::min(first + rows_per_task, rows), accumulators[task]);
+                take_rows(share.first, share.last, accumulators[task]);
             });
         });
     if (!walked) {

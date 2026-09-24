@@ -148,4 +148,10 @@ std::size_t PlanRowTasks(std::uint64_t row_pixels, std::uint64_t rows, std::size
         std::min<std::uint64_t>({static_cast<std::uint64_t>(max_tasks), affordable, rows}));
 }
 
+RowRange TaskRows(std::size_t task, std::size_t tasks, std::uint64_t rows) {
+    const std::uint64_t per_task = (rows + tasks - 1) / tasks;
+    const std::uint64_t first = static_cast<std::uint64_t>(task) * per_task;
+    return RowRange{std::min(first, rows), std::min(first + per_task, rows)};
+}
+
 }  // namespace carta::zarr::internal

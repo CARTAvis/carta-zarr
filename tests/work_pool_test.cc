@@ -6,9 +6,10 @@
 
 // The library's own worker threads, and the rule that decides whether to wake them.
 //
-// This is the only concurrency carta-zarr owns, and the pixel fixtures are far too small to reach
-// it -- PlanRowTasks answers 1 for a plane of twenty pixels, which is the correct answer and also
-// means the reductions' own tests never run the parallel path. So it is tested here directly.
+// This is the only concurrency carta-zarr owns, and the committed pixel fixtures are far too small
+// to reach it -- PlanRowTasks answers 1 for a plane of twenty pixels, which is the correct answer.
+// reduce_synthetic_test reaches the reductions' parallel paths with planes made up for the purpose;
+// the pool itself, and the rules that decide how it is used, are tested here directly.
 
 #include "work_pool.h"
 
@@ -28,6 +29,7 @@
 namespace {
 
 using carta::zarr::internal::PlanRowTasks;
+using carta::zarr::internal::TaskRows;
 using carta::zarr::internal::WorkPool;
 
 using carta::zarr::testing::Require;
@@ -184,27 +186,35 @@ void TheSplitRuleIsConservative() {
     Require(PlanRowTasks(256, 512, 28, 1U << 16U) == 2, "131072 pixels should give two tasks");
 }
 
-// What the histogram does with the plan: contiguous pieces that cover every row exactly once.
+// What the histograms do with the plan: contiguous pieces, in task order, that cover every row
+// exactly once. Asked of TaskRows, which is what they call, rather than of a copy of its arithmetic.
 void RowRangesCoverEveryRowOnce() {
     for (std::uint64_t rows : {std::uint64_t{1}, std::uint64_t{7}, std::uint64_t{28}, std::uint64_t{7763}}) {
-        const std::size_t tasks = PlanRowTasks(1U << 20U, rows, 28, 1U << 16U);
-        Require(tasks >= 1, "a plan of zero tasks for a non-empty plane");
-        std::vector<int> seen(rows, 0);
-        const std::uint64_t rows_per_task = (rows + tasks - 1) / tasks;
-        for (std::size_t task = 0; task < tasks; ++task) {
-            const std::uint64_t first = static_cast<std::uint64_t>(task) * rows_per_task;
-            if (first >= rows) {
-                continue;
+        for (const std::size_t tasks : {std::size_t{1}, std::size_t{3}, PlanRowTasks(1U << 20U, rows, 28, 1U << 16U)}) {
+            Require(tasks >= 1, "a plan of zero tasks for a non-empty plane");
+            std::vector<int> seen(rows, 0);
+            std::uint64_t next = 0;
+            for (std::size_t task = 0; task < tasks; ++task) {
+                const auto range = TaskRows(task, tasks, rows);
+                Require(range.first <= range.last && range.last <= rows, "a range stays inside the plane");
+                if (range.first == range.last) {
+                    continue;
+                }
+                Require(range.first == next, "ranges follow one another in task order");
+                next = range.last;
+                for (std::uint64_t row = range.first; row < range.last; ++row) {
+                    ++seen[row];
+                }
             }
-            for (std::uint64_t row = first; row < std::min(first + rows_per_task, rows); ++row) {
-                ++seen[row];
+            Require(next == rows, "the last range ends at the last row");
+            for (std::uint64_t row = 0; row < rows; ++row) {
+                Require(seen[row] == 1, "row " + std::to_string(row) + " of " + std::to_string(rows) +
+                                            " was covered " + std::to_string(seen[row]) + " times");
             }
-        }
-        for (std::uint64_t row = 0; row < rows; ++row) {
-            Require(seen[row] == 1, "row " + std::to_string(row) + " of " + std::to_string(rows) +
-                                        " was covered " + std::to_string(seen[row]) + " times");
         }
     }
+    // More tasks than rows leaves the ones past the end with nothing, not with a row past the end.
+    Require(TaskRows(4, 5, 3).first == TaskRows(4, 5, 3).last, "a task past the last row is empty");
 }
 
 }  // namespace

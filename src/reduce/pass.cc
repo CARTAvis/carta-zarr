@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
 
-#include "reduce/pass.h"
+#include "reduce/pass_plan.h"
 
 #include "pixel_mask.h"
 #include "reduce/tuning.h"

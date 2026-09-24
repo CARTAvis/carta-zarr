@@ -9,7 +9,7 @@
 
 #include "carta-zarr/result.h"
 
-#include "reduce/pass.h"
+#include "reduce/pass_plan.h"
 
 #include <algorithm>
 #include <cstddef>

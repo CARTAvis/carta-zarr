@@ -7,7 +7,7 @@
 #ifndef CARTA_ZARR_TESTS_SUPPORT_SYNTHETIC_SLAB_SOURCE_H_
 #define CARTA_ZARR_TESTS_SUPPORT_SYNTHETIC_SLAB_SOURCE_H_
 
-#include "reduce/pass.h"
+#include "pixel_source.h"
 
 #include <algorithm>
 #include <cstdint>

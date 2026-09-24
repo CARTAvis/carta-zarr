@@ -11,7 +11,7 @@
 // Everything under src/reduce/ then compiles without one, which is what lets a reduction be run and
 // timed against pixels that were never written down.
 
-#include "reduce/pass.h"
+#include "pixel_source.h"
 #include "store.h"
 
 namespace carta::zarr::internal {

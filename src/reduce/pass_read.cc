@@ -17,8 +17,11 @@
 
 namespace carta::zarr::internal {
 
-Result<Slab> ReadSlab(const PixelSource& source, const PassPlan& plan, const ReadOptions& options,
-                      const SlabRequest& request, SlabBuffers& buffers) {
+Result<Slab> SlabWalk::ReadSlab(const SlabRequest& request) {
+    const auto& source = _source;
+    const auto& plan = _plan;
+    const auto& options = _options;
+    auto& buffers = _buffers;
     const auto& descriptor = *plan.descriptor;
     const auto rank = descriptor.axes.size();
     const Range spectral = plan.planes.spectral;

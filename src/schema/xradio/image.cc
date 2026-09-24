@@ -278,7 +278,46 @@ Result<SchemaInspection> InspectImages(const Store& store) {
     return finish(report.ok() ? SchemaMatchKind::match : SchemaMatchKind::invalid);
 }
 
+namespace {
+
+Result<CoordinateValues> ReadCoordinateValues(const Store& store) {
+    CoordinateValues values;
+    const std::pair<std::string_view, std::vector<double>*> numeric[]{
+        {"l", &values.l}, {"m", &values.m}, {"frequency", &values.frequency}, {"time", &values.time}};
+    for (const auto& [name, into] : numeric) {
+        auto read = ReadNumericCoordinate(store, name);
+        if (!read) {
+            return read.error();
+        }
+        *into = std::move(read.value());
+    }
+    if (store.ReadNodeMetadata("polarization")) {
+        auto labels = store.ReadStringArray1D("polarization");
+        if (!labels) {
+            return labels.error();
+        }
+        values.polarization = std::move(labels.value());
+    }
+    return values;
+}
+
+}  // namespace
+
 Result<DescribedImage> DescribeImage(const Store& store, std::string_view image_id) {
+    // Refused on its metadata before any value is read, so that an image this profile will not open
+    // is reported as that rather than as whatever reading its coordinates ran into.
+    if (auto qualified = RequireQualified(store, image_id); !qualified) {
+        return qualified.error();
+    }
+    auto values = ReadCoordinateValues(store);
+    if (!values) {
+        return values.error();
+    }
+    return DescribeImageFrom(store, image_id, values.value());
+}
+
+Result<DescribedImage> DescribeImageFrom(const Store& store, std::string_view image_id,
+                                         const CoordinateValues& values) {
     // Asked rather than decided again. This used to classify the variable itself, on a weaker rule
     // than the one the listing was built with -- l and m rather than the whole axis set -- so the
     // two could disagree about what an image is.
@@ -306,55 +345,25 @@ Result<DescribedImage> DescribeImage(const Store& store, std::string_view image_
     descriptor.data_groups = FindDataGroups(root_attrs, image_id);
     descriptor.axes = DescribeAxes(store, image);
 
-    std::vector<double> l_values;
-    std::vector<double> m_values;
-    std::vector<double> frequency_values;
-    std::vector<double> time_values;
-    auto l_result = ReadNumericCoordinate(store, "l");
-    if (!l_result) {
-        return l_result.error();
-    }
-    l_values = std::move(l_result.value());
-    auto m_result = ReadNumericCoordinate(store, "m");
-    if (!m_result) {
-        return m_result.error();
-    }
-    m_values = std::move(m_result.value());
-
     // A direction axis is linear by construction, so its increment is reported even when the samples
     // are not evenly spaced; the fit says so in a diagnostic rather than withholding the value.
-    if (auto direction = DescribeDirection(root_attrs, l_values, m_values, descriptor.diagnostics); direction) {
+    if (auto direction = DescribeDirection(root_attrs, values.l, values.m, descriptor.diagnostics); direction) {
         descriptor.direction = std::move(direction);
     }
 
-    auto frequency_result = ReadNumericCoordinate(store, "frequency");
-    if (!frequency_result) {
-        return frequency_result.error();
-    }
-    frequency_values = std::move(frequency_result.value());
     // Absent because the image has none -- a continuum image has no frequency coordinate -- not
     // because describing it failed. Same for the temporal one below.
-    if (auto spectral = DescribeSpectralCoordinate(store, frequency_values, descriptor); spectral) {
+    if (auto spectral = DescribeSpectralCoordinate(store, values.frequency, descriptor); spectral) {
         descriptor.spectral = std::move(spectral);
     }
 
-    const auto& polarization_metadata = store.ReadNodeMetadata("polarization");
-    if (polarization_metadata) {
-        auto pol_labels = store.ReadStringArray1D("polarization");
-        if (!pol_labels) {
-            return pol_labels.error();
-        }
+    if (values.polarization) {
         PolarizationCoordinate pol;
-        pol.labels = std::move(pol_labels.value());
+        pol.labels = *values.polarization;
         descriptor.polarization = std::move(pol);
     }
 
-    auto time_result = ReadNumericCoordinate(store, "time");
-    if (!time_result) {
-        return time_result.error();
-    }
-    time_values = std::move(time_result.value());
-    if (auto temporal = DescribeTemporalCoordinate(store, std::move(time_values)); temporal) {
+    if (auto temporal = DescribeTemporalCoordinate(store, values.time); temporal) {
         descriptor.temporal = std::move(temporal);
     }
 

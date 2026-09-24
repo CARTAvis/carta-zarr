@@ -286,30 +286,25 @@ struct SpectralTotals {
     double max = std::numeric_limits<double>::quiet_NaN();
 };
 
+namespace internal {
+class StatisticSlots;
+}  // namespace internal
+
 // One contiguous run of channels, for every region and every requested statistic.
 //
 // Read it through Series, Totals and Carries. The values are owned by the library and are valid
-// only for the duration of the call.
+// only for the duration of the call. How they are laid out is the library's alone, which is why
+// only the library can fill one in.
 //
 // min and max are reported as NaN for a channel whose region contributed no finite pixel, since
 // there is no such thing as the smallest value of nothing. sum and sum_sq are zero in that case,
 // which is what they are worth, and num_pixels is zero -- so a caller deriving a mean sees the
 // division it must not perform.
-//
-// The fields from values to statistic_count describe the buffer's layout directly, [region]
-// [statistic][channel]. They are going away: every caller that walked them was working out again
-// what the accessors already say, and the layout is the library's to change.
 struct SpectralBlock {
     // Index into the request's spectral selection, not an image channel: the image channel is
     // planes.spectral.start + (first_channel + i) * planes.spectral.stride.
     std::uint64_t first_channel = 0;
     std::uint64_t channel_count = 0;
-    const double* values = nullptr;
-    std::size_t value_count = 0;
-    std::size_t region_stride = 0;
-    std::size_t statistic_stride = 0;
-    const Statistic* statistics = nullptr;
-    std::size_t statistic_count = 0;
     // Whether these values are final. A reduction whose block spans more than one read hands the
     // block over as it fills, so that a caller has something to show and somewhere to stop long
     // before the last pixel of the block is read. The same channels arrive again, refined, and a
@@ -327,8 +322,8 @@ struct SpectralBlock {
     // Whether the block carries every statistic in `wanted`. The empty set is always carried.
     bool Carries(StatisticSet wanted) const noexcept {
         StatisticSet carried = 0;
-        for (std::size_t slot = 0; slot < statistic_count; ++slot) {
-            carried |= static_cast<StatisticSet>(statistics[slot]);
+        for (std::size_t slot = 0; slot < _statistic_count; ++slot) {
+            carried |= static_cast<StatisticSet>(_statistics[slot]);
         }
         return (wanted & ~carried) == 0;
     }
@@ -339,9 +334,9 @@ struct SpectralBlock {
     // mistake in the caller, not a statistic that is absent, and is not answered as one.
     const double* Series(std::size_t region, Statistic statistic) const noexcept {
         assert(region < region_count);
-        for (std::size_t slot = 0; slot < statistic_count; ++slot) {
-            if (statistics[slot] == statistic) {
-                return values + (region * region_stride) + (slot * statistic_stride);
+        for (std::size_t slot = 0; slot < _statistic_count; ++slot) {
+            if (_statistics[slot] == statistic) {
+                return _values + (region * _region_stride) + (slot * channel_count);
             }
         }
         return nullptr;
@@ -366,6 +361,14 @@ struct SpectralBlock {
         at(Statistic::max, totals.max);
         return totals;
     }
+
+private:
+    friend class internal::StatisticSlots;
+
+    const double* _values = nullptr;
+    std::size_t _region_stride = 0;
+    const Statistic* _statistics = nullptr;
+    std::size_t _statistic_count = 0;
 };
 
 // Called once per block, on the thread that called ReduceSpectral. Returning false cancels the

@@ -191,12 +191,10 @@ public:
         block.first_channel = first_channel;
         block.channel_count = _channels;
         block.region_count = _regions;
-        block.values = _values.data();
-        block.value_count = _values.size();
-        block.region_stride = _region_stride;
-        block.statistic_stride = _channels;
-        block.statistics = _layout.statistics();
-        block.statistic_count = _layout.count();
+        block._values = _values.data();
+        block._region_stride = _region_stride;
+        block._statistics = _layout.statistics();
+        block._statistic_count = _layout.count();
         block.complete = complete;
         block.completeness = completeness;
         const bool keep_going = sink(block);

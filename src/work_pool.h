@@ -118,6 +118,19 @@ private:
 std::size_t PlanRowTasks(std::uint64_t row_pixels, std::uint64_t rows, std::size_t max_tasks,
                          std::uint64_t least_pixels);
 
+// The rows [first, last) that task `task` of `tasks` takes, when `rows` rows are cut into contiguous
+// pieces in task order. Every row is in exactly one piece; a task past the last row gets an empty
+// one, first == last, rather than a row that is not there. `tasks` is at least one.
+//
+// One rule rather than a copy per caller, because where the pieces fall decides the order a task
+// adds up its rows in -- so a caller that cut them differently would agree with the others on
+// everything but the last bits of a floating-point sum.
+struct RowRange {
+    std::uint64_t first = 0;
+    std::uint64_t last = 0;
+};
+RowRange TaskRows(std::size_t task, std::size_t tasks, std::uint64_t rows);
+
 }  // namespace carta::zarr::internal
 
 #endif  // CARTA_ZARR_SRC_WORK_POOL_H_

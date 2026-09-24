@@ -3,12 +3,13 @@
 A **pass** is one ordered visit to every chunk an image read covers, shared by every reduction that
 wants those pixels. Two things about its shape look like accidents of implementation and are not,
 so they are recorded here: the visitor is a template parameter rather than a virtual interface or a
-`std::function`, and the accumulators it hands out are keyed by worker rather than by task.
+`std::function`, and there is one accumulator per task, with the split capped by what the
+accumulators cost rather than by how many workers the pool has.
 
 Both are the kind of thing a later reading would tidy up. A pass that took a `Visitor&` interface
-would be easier to describe, and an accumulator keyed by task would be easier to reason about than
-one keyed by a worker index the pool happens to expose. Each of those changes costs a measured
-amount of time, and neither cost is visible in a Debug build or in any test this repository runs.
+would be easier to describe, and a split that used every worker in the pool would look like the
+point of having one. Each of those changes costs a measured amount of time, and neither cost is
+visible in a Debug build or in any test this repository runs.
 
 ## The visitor is a template parameter
 

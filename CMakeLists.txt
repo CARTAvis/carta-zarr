@@ -395,6 +395,13 @@ if(CARTA_ZARR_BUILD_TESTS AND BUILD_TESTING)
         SOURCES tests/block_emit_test.cc src/reduce/pass.cc
         LIBRARIES nlohmann_json::nlohmann_json)
 
+    # The layout a spectral reduction accumulates in, and the block it hands over. Header-only and
+    # compiled against nothing: which slot a statistic lands in and what an untouched extremum is
+    # reported as are questions about doubles in a buffer, not about pixels.
+    carta_zarr_add_test(carta_zarr_statistic_slots_tests INTERNAL
+        TEST_NAME carta-zarr-statistic-slots
+        SOURCES tests/statistic_slots_test.cc)
+
     # A whole reduction against pixels that were never written down. This target links no Store and
     # no TensorStore, which is the seam the pass's PixelSource exists to create: the oracle is the
     # formula the pixels come from, so the image can be whatever size the question needs rather than

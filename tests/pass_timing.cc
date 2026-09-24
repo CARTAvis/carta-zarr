@@ -148,17 +148,35 @@ int main(int argc, char** argv) {
         {0, 0, x, y, nullptr},
         {x / 4, y / 4, x / 2, y / 2, nullptr},
     };
-    const auto reduce = TimeIt(repeats, [&]() -> std::string {
-        carta::zarr::SpectralReduceRequest request;
-        request.planes.spectral = {0, channels, 1};
-        request.regions = regions.data();
-        request.region_count = regions.size();
-        request.statistics = carta::zarr::Statistic::num_pixels | carta::zarr::Statistic::nan_count |
-                             carta::zarr::Statistic::sum | carta::zarr::Statistic::sum_sq |
-                             carta::zarr::Statistic::min | carta::zarr::Statistic::max;
-        const auto outcome = sky.ReduceSpectral(request, [](const carta::zarr::SpectralBlock&) { return true; });
-        return outcome ? std::string{} : outcome.error().message;
-    });
+    const auto reduce_over = [&](const std::vector<carta::zarr::RegionMask>& over) {
+        return TimeIt(repeats, [&]() -> std::string {
+            carta::zarr::SpectralReduceRequest request;
+            request.planes.spectral = {0, channels, 1};
+            request.regions = over.data();
+            request.region_count = over.size();
+            request.statistics = carta::zarr::Statistic::num_pixels | carta::zarr::Statistic::nan_count |
+                                 carta::zarr::Statistic::sum | carta::zarr::Statistic::sum_sq |
+                                 carta::zarr::Statistic::min | carta::zarr::Statistic::max;
+            const auto outcome = sky.ReduceSpectral(request, [](const carta::zarr::SpectralBlock&) { return true; });
+            return outcome ? std::string{} : outcome.error().message;
+        });
+    };
+    const auto reduce = reduce_over(regions);
+
+    // The whole plane as one region: the case ADR 0005's figures are for.
+    const auto reduce_whole = reduce_over({regions.front()});
+
+    // Sixty-four one-pixel strips, half of them along x and half along y. The per-pixel loop is the
+    // same as above; what this grows is the work done once per row of a region -- folding a row's
+    // totals into its slots, above all -- which two large regions hardly exercise. A region's rows
+    // run along whichever spatial axis the store varies fastest, so taking both orientations makes
+    // half the strips a row per pixel whichever axis that is.
+    std::vector<carta::zarr::RegionMask> boxes;
+    for (std::uint64_t i = 0; i < 32; ++i) {
+        boxes.push_back({(i * x) / 32, 0, 1, y, nullptr});
+        boxes.push_back({0, (i * y) / 32, x, 1, nullptr});
+    }
+    const auto reduce_boxes = reduce_over(boxes);
 
     const auto histogram = TimeIt(repeats, [&]() -> std::string {
         carta::zarr::HistogramRequest request;
@@ -180,9 +198,11 @@ int main(int argc, char** argv) {
 
     Report("Read", read);
     Report("ReduceSpectral", reduce);
+    Report("ReduceSpectral x1", reduce_whole);
+    Report("ReduceSpectral x64", reduce_boxes);
     Report("ComputeHistogram", histogram);
     Report("ComputeCubeHistogram", cube);
 
-    const bool all_ok = read.ok && reduce.ok && histogram.ok && cube.ok;
+    const bool all_ok = read.ok && reduce.ok && reduce_whole.ok && reduce_boxes.ok && histogram.ok && cube.ok;
     return all_ok ? 0 : 1;
 }

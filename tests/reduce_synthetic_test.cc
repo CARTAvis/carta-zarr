@@ -210,16 +210,13 @@ void TestASpectralReductionAgreesWithTheFormula() {
                 return true;
             }
             for (std::size_t r = 0; r < regions.size(); ++r) {
-                for (std::size_t slot = 0; slot < block.statistic_count; ++slot) {
-                    const double* from =
-                        block.values + (r * block.region_stride) + (slot * block.statistic_stride);
-                    auto* into = block.statistics[slot] == carta::zarr::Statistic::num_pixels ? &pixels
-                                 : block.statistics[slot] == carta::zarr::Statistic::sum      ? &sums
-                                 : block.statistics[slot] == carta::zarr::Statistic::min      ? &minima
-                                                                                             : &maxima;
-                    for (std::uint64_t c = 0; c < block.channel_count; ++c) {
-                        into->at((r * kZ) + block.first_channel + c) = from[c];
-                    }
+                for (std::uint64_t c = 0; c < block.channel_count; ++c) {
+                    const auto totals = block.Totals(r, c);
+                    const auto at = (r * kZ) + block.first_channel + c;
+                    pixels.at(at) = totals.num_pixels;
+                    sums.at(at) = totals.sum;
+                    minima.at(at) = totals.min;
+                    maxima.at(at) = totals.max;
                 }
             }
             return true;
@@ -330,12 +327,11 @@ void TestAMaskedRegionReadsOnlyTheChunksItOccupies() {
                 if (!block.complete) {
                     return true;
                 }
-                for (std::size_t slot = 0; slot < block.statistic_count; ++slot) {
-                    const double* from = block.values + (slot * block.statistic_stride);
-                    auto* into = block.statistics[slot] == carta::zarr::Statistic::sum ? &sums : &counts;
-                    for (std::uint64_t c = 0; c < block.channel_count; ++c) {
-                        into->at(block.first_channel + c) = from[c];
-                    }
+                const double* block_sums = block.Series(0, carta::zarr::Statistic::sum);
+                const double* block_counts = block.Series(0, carta::zarr::Statistic::num_pixels);
+                for (std::uint64_t c = 0; c < block.channel_count; ++c) {
+                    sums.at(block.first_channel + c) = block_sums[c];
+                    counts.at(block.first_channel + c) = block_counts[c];
                 }
                 return true;
             }, options);

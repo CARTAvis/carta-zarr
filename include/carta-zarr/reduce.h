@@ -95,24 +95,19 @@ struct RegionMask {
     std::uint64_t y_start = 0;
     std::uint64_t width = 0;
     std::uint64_t height = 0;
+    // A raster is all a region needs. The reduction turns it into runs along whichever spatial axis
+    // the store varies fastest, in one pass over it -- about 2 ms for a 7763x4742 bounding box -- so
+    // that it finds the chunks a region occupies from the runs, and accumulates every run with the
+    // loop an unmasked region uses. A raster too fragmented to be worth runs is read as a raster.
     const std::uint8_t* mask = nullptr;
-    // The same selection in run-length form, which is what the walk would rather have.
+    // The same selection in run-length form, made by the caller. No longer needed: the reduction
+    // makes these itself from `mask`, and these fields are going away.
     //
     // Row r of the bounding box owns the runs at indices [row_run_offsets[r], row_run_offsets[r+1]),
     // and run k is the half-open column range [row_runs[2k], row_runs[2k+1]) in bounding box
     // columns. Runs within a row are disjoint and ascending. Pass both arrays or neither; they must
-    // stay valid for the same time the mask would.
-    //
-    // Two things come of it, and the second is the reason. A raster says which chunks a region
-    // occupies only after every byte of it has been read, and a thin region laid along a diagonal
-    // is tens of megabytes of raster for a band a thousandth of its size; runs say the same thing
-    // in a pass over the runs. And every pixel of a run is selected, so the per-pixel test that
-    // stops the accumulation loop from vectorising is not needed at all -- a run is accumulated by
-    // the same code an unmasked region uses.
-    //
-    // These describe the selection; `mask` is not read when they are given, and need not be passed.
-    // Runs that do not say what the raster would say are not detected: the walk cannot afford to
-    // check, which is the whole point of taking them.
+    // stay valid for the same time the mask would. `mask` is not read when they are given, and runs
+    // that do not say what the raster would say are not detected.
     const std::uint32_t* row_runs = nullptr;
     const std::uint64_t* row_run_offsets = nullptr;
     // Which spatial axis the runs run along, and therefore what "row" means above.

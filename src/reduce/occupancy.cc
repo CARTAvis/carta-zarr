@@ -13,6 +13,7 @@
 
 #include <algorithm>
 #include <limits>
+#include <utility>
 
 namespace carta::zarr::internal {
 namespace {
@@ -68,6 +69,17 @@ Result<Occupancy> Occupancy::Of(const RegionMask* regions, std::size_t region_co
         region.mask_v_stride = swap_spatial ? 1 : given.width;
         region.runs = given.row_runs;
         region.run_offsets = given.row_run_offsets;
+        // A raster without runs is given them, along u: which axis that is was the caller's to know
+        // once, and is not any more. The raster stays beside them for a fragmented one, which comes
+        // back refused and is read as the raster it is.
+        if (given.row_runs == nullptr && given.mask != nullptr) {
+            RegionRuns made;
+            if (RunsAlongU(given.mask, given.width, given.height, !swap_spatial, made)) {
+                occupancy._made_runs.push_back(std::move(made));
+                region.runs = occupancy._made_runs.back().runs.data();
+                region.run_offsets = occupancy._made_runs.back().offsets.data();
+            }
+        }
         occupancy._regions.push_back(region);
     }
 

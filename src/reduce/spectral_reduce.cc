@@ -69,9 +69,11 @@ Result<void> ValidateRequest(const ImageDescriptor& descriptor, const AxisMap& a
 // The per-pixel loop, written so that a compiler can vectorise it.
 //
 // Both template parameters are loop invariants that used to be runtime tests, and each one on its
-// own was enough to stop vectorisation: the x stride is 1 for every image whose fastest logical
-// axis is x, which is every XRADIO image, but the compiler cannot know that and pays a multiply per
-// pixel for the possibility; and a mask that most regions do not have cost a branch per pixel.
+// own was enough to stop vectorisation: the u stride is 1 for every image, since the walk runs
+// along the axis the store varies fastest, but the compiler cannot know that and pays a multiply
+// per pixel for the possibility; and a mask cost a branch per pixel. Only a raster too fragmented to
+// be worth runs still takes that branch -- every other masked region reaches here as runs, which
+// Occupancy::Of makes when the caller did not.
 //
 // The finiteness test is branchless for the same reason. A non-finite value contributes zero to the
 // sums and its own identity to the extrema, which is exactly what excluding it means, so there is

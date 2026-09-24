@@ -175,6 +175,47 @@ void TestRunsAndARasterSayTheSameThing() {
             "runs and a raster disagreed about how many chunks a layer occupies");
 }
 
+// A region given as a raster alone reaches the walk as runs along u, whichever axis that is, so that
+// the accumulation takes the loop an unmasked region uses. The diagonal is block-symmetric, so its
+// runs are the same either way: line l holds the one run [4 * (l / 4), 4 * (l / 4) + 4).
+void TestARasterReachesTheWalkAsRuns() {
+    const auto raster = DiagonalRaster(16, 16, 4);
+    auto region = Box(0, 0, 16, 16);
+    region.mask = raster.data();
+
+    for (const auto fastest : {AxisRole::spatial_x, AxisRole::spatial_y}) {
+        const auto occupancy = Built({region}, 4, 4, fastest);
+        const auto& placed = occupancy.regions().at(0);
+        Require(placed.runs != nullptr && placed.run_offsets != nullptr, "a raster was not turned into runs");
+        for (std::uint64_t line = 0; line < 16; ++line) {
+            Require(placed.run_offsets[line + 1] - placed.run_offsets[line] == 1, "a diagonal line is one run");
+            const auto k = placed.run_offsets[line];
+            Require(placed.runs[2 * k] == 4 * (line / 4) && placed.runs[(2 * k) + 1] == (4 * (line / 4)) + 4,
+                    "line " + std::to_string(line) + " holds the wrong run");
+        }
+        Require(Occupied(occupancy) == "0,0 1,1 2,2 3,3", "the runs did not narrow the occupancy to the diagonal");
+    }
+}
+
+// A raster too fragmented to be worth runs is read as the raster it is, and occupies what it did.
+void TestAFragmentedRasterStaysARaster() {
+    std::vector<std::uint8_t> board(16 * 16, 0);
+    for (std::uint64_t y = 0; y < 16; ++y) {
+        for (std::uint64_t x = 0; x < 16; ++x) {
+            board.at(static_cast<std::size_t>((y * 16) + x)) = (x + y) % 2 == 0 ? 1 : 0;
+        }
+    }
+    auto region = Box(0, 0, 16, 16);
+    region.mask = board.data();
+
+    for (const auto fastest : {AxisRole::spatial_x, AxisRole::spatial_y}) {
+        const auto occupancy = Built({region}, 4, 4, fastest);
+        const auto& placed = occupancy.regions().at(0);
+        Require(placed.runs == nullptr && placed.mask == board.data(), "a checkerboard was not left a raster");
+        Require(occupancy.LayerChunks() == 16, "a checkerboard touches every chunk of its box");
+    }
+}
+
 void TestTheIncidencesOfOneChunkAreContiguousAndInRegionOrder() {
     // Three regions over one 8 x 8 chunk grid of 4 x 4 chunks. Region 0 covers everything, region 1
     // the top-left chunk, region 2 the bottom-right one. The counting sort is what puts 0 before 1
@@ -298,6 +339,8 @@ int main() {
         TestThePlacementFollowsTheFastestSpatialAxis();
         TestAMaskNarrowsTheOccupancyBelowTheBoundingBox();
         TestRunsAndARasterSayTheSameThing();
+        TestARasterReachesTheWalkAsRuns();
+        TestAFragmentedRasterStaysARaster();
         TestTheIncidencesOfOneChunkAreContiguousAndInRegionOrder();
         TestAMaskThatSelectsNothingOccupiesNothing();
         TestAlikeRowsAreReadTogether();

@@ -176,8 +176,15 @@ def add_consolidated_metadata(path: Path) -> None:
 
 
 def generate_xradio_fixture(
-    path: Path, *, typed: bool, consolidated: bool, uniform_beams: bool = False
+    path: Path, *, typed: bool, consolidated: bool, uniform_beams: bool = False, times: int = 1
 ) -> None:
+    """The multi-image XRADIO reference dataset.
+
+    `times` is the length of the dataset's time coordinate, and so of every image in it: the
+    coordinate is the dataset's, and an image's extent along an axis must be its coordinate's. More
+    than one is a valid dataset that CARTA does not display, which is what the backend has to list
+    without offering an image it would then refuse to open.
+    """
     root = zarr.open_group(store=path, mode="w", zarr_format=3)
     root.attrs.update(
         {
@@ -204,7 +211,7 @@ def generate_xradio_fixture(
             }
         )
 
-    sky_shape = (1, 3, 2, 4, 5)
+    sky_shape = (times, 3, 2, 4, 5)
     create_numeric_array(
         path / "SKY",
         np.zeros(sky_shape, dtype=np.float32),
@@ -247,7 +254,7 @@ def generate_xradio_fixture(
     )
     create_numeric_array(
         path / "time",
-        np.asarray([1.6e9], dtype=np.float64),
+        np.asarray([1.6e9 + (60.0 * index) for index in range(times)], dtype=np.float64),
         dimension_names=("time",),
         attributes={"units": "s", "scale": "utc", "format": "unix"},
     )
@@ -273,15 +280,15 @@ def generate_xradio_fixture(
     # "multiple beams" reconciles them -- ImageMoments convolves the whole cube to a common
     # beam first -- and doing that to planes that already agree costs a full copy of the cube
     # for no change.
-    beam_values = np.zeros((1, 3, 2, 3), dtype=np.float64)
+    beam_values = np.zeros((times, 3, 2, 3), dtype=np.float64)
     for channel in range(3):
         for stokes in range(2):
             if uniform_beams:
                 major = 2.0e-5
-                beam_values[0, channel, stokes] = (major / 2.0, 0.1, major)
+                beam_values[:, channel, stokes] = (major / 2.0, 0.1, major)
             else:
                 major = 2.0e-5 + (channel * 1.0e-6) + (stokes * 1.0e-7)
-                beam_values[0, channel, stokes] = (major / 2.0, 0.1 + channel * 0.01, major)
+                beam_values[:, channel, stokes] = (major / 2.0, 0.1 + channel * 0.01, major)
     create_numeric_array(
         path / "BEAM",
         beam_values,
@@ -613,6 +620,7 @@ def main() -> None:
         "xradio/pixels",
         "xradio/pixels_l_fastest",
         "xradio/pixels_wide",
+        "xradio/time_axis",
     ):
         shutil.rmtree(OUTPUT_DIR / owned, ignore_errors=True)
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
@@ -625,6 +633,7 @@ def main() -> None:
     generate_pixel_fixture(OUTPUT_DIR / "xradio" / "pixels")
     generate_pixel_fixture(OUTPUT_DIR / "xradio" / "pixels_l_fastest", l_fastest=True)
     generate_wide_pixel_fixture(OUTPUT_DIR / "xradio" / "pixels_wide")
+    generate_xradio_fixture(OUTPUT_DIR / "xradio" / "time_axis", typed=True, consolidated=True, times=2)
 
 
 if __name__ == "__main__":

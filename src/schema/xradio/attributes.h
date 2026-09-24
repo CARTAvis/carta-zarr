@@ -41,10 +41,6 @@ inline std::string Upper(std::string value) {
     return value;
 }
 
-inline bool HasAttribute(const nlohmann::json& attributes, std::string_view name) {
-    return attributes.is_object() && attributes.contains(name);
-}
-
 inline std::string AttributeString(const nlohmann::json& attributes, std::string_view name) {
     if (attributes.is_object() && attributes.contains(name) && attributes.at(name).is_string()) {
         return attributes.at(name).get<std::string>();

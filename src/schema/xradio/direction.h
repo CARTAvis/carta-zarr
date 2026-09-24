@@ -8,6 +8,7 @@
 #define CARTA_ZARR_SRC_SCHEMA_XRADIO_DIRECTION_H_
 
 #include "carta-zarr/descriptor.h"
+#include "carta-zarr/result.h"
 
 #include <nlohmann/json.hpp>
 
@@ -15,6 +16,23 @@
 #include <vector>
 
 namespace carta::zarr::internal::xradio {
+
+/**
+ * What the root's coordinate_system_info says: everything in a DirectionCoordinate but the two
+ * things the l and m samples decide, the increment and the reference pixel.
+ *
+ * The one reading of that attribute. The probe asks it whether to accept a store and the description
+ * asks it what to report, and each used to read the attribute its own way: the probe refused a
+ * projection that was missing, a pole that was not two numbers, a matrix that was not two by two,
+ * while the description filled in a default for each -- a leniency nothing could reach, because the
+ * probe had already refused. And the probe looked only when the attribute was there, so a store
+ * without one opened with a projection of "" and a reference of (0, 0), which read as answers.
+ *
+ * Every XRADIO writes it, so a store without it, or with one missing any of those four, is
+ * malformed: invalid_metadata, naming the attribute. What may be absent is the reference frame, the
+ * equinox and the projection parameters, which leave their fields empty.
+ */
+Result<DirectionCoordinate> ReadCoordinateSystem(const nlohmann::json& root_attributes);
 
 /**
  * The direction coordinate an image dataset's root attributes and its l and m samples describe.
@@ -30,10 +48,10 @@ namespace carta::zarr::internal::xradio {
  * number -- is checkable without a store, a transport or a directory tree. It was file-local inside
  * a 779-line translation unit before, and none of those was.
  */
-std::optional<DirectionCoordinate> DescribeDirection(const nlohmann::json& root_attributes,
-                                                     const std::vector<double>& l_values,
-                                                     const std::vector<double>& m_values,
-                                                     std::vector<Diagnostic>& diagnostics);
+Result<DirectionCoordinate> DescribeDirection(const nlohmann::json& root_attributes,
+                                              const std::vector<double>& l_values,
+                                              const std::vector<double>& m_values,
+                                              std::vector<Diagnostic>& diagnostics);
 
 }  // namespace carta::zarr::internal::xradio
 

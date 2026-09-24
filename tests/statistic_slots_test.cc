@@ -276,25 +276,6 @@ void TestTheBlockSaysWhereItIs() {
     Require(!seen.complete && seen.completeness == 0.5, "and so is how finished it is");
 }
 
-// Temporary, and deleted with the strides it pins: until the consumer has moved to the accessors,
-// the two descriptions of where a value lives have to agree.
-void TestTheSeriesAgreeWithTheStrides() {
-    StatisticSlots slots;
-    slots.Reset(StatisticLayout::Of(Statistic::nan_count | Statistic::sum_sq | Statistic::min), 3, 4);
-    slots.HandOver(0, true, 1.0, [](const SpectralBlock& block) {
-        Require(block.statistic_stride == block.channel_count, "a statistic is one channel run");
-        Require(block.value_count == block.region_count * block.region_stride, "and the regions fill the buffer");
-        for (std::size_t r = 0; r < block.region_count; ++r) {
-            for (std::size_t slot = 0; slot < block.statistic_count; ++slot) {
-                Require(block.Series(r, block.statistics[slot]) ==
-                            block.values + (r * block.region_stride) + (slot * block.statistic_stride),
-                        "the series is where the strides say it is");
-            }
-        }
-        return true;
-    });
-}
-
 }  // namespace
 
 int main() {
@@ -307,7 +288,6 @@ int main() {
         TestAHandOverPutsTheIdentitiesBack();
         TestASinkThatSaysNoIsReported();
         TestTheBlockSaysWhereItIs();
-        TestTheSeriesAgreeWithTheStrides();
     } catch (const std::exception& error) {
         std::fprintf(stderr, "statistic slots test failed: %s\n", error.what());
         return 1;

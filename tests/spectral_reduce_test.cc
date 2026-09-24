@@ -11,6 +11,7 @@
 
 #include <carta-zarr/carta_zarr.h>
 
+#include <array>
 #include <cmath>
 #include <cstdint>
 #include <filesystem>
@@ -107,32 +108,46 @@ Totals Expected(const carta::zarr::RegionMask& region, std::uint64_t frequency, 
     return totals;
 }
 
+constexpr std::array<carta::zarr::Statistic, 6> kEveryStatistic{
+    carta::zarr::Statistic::num_pixels, carta::zarr::Statistic::nan_count, carta::zarr::Statistic::sum,
+    carta::zarr::Statistic::sum_sq,     carta::zarr::Statistic::min,       carta::zarr::Statistic::max};
+
 carta::zarr::StatisticSet AllStatistics() {
     return carta::zarr::Statistic::num_pixels | carta::zarr::Statistic::nan_count |
            carta::zarr::Statistic::sum | carta::zarr::Statistic::sum_sq | carta::zarr::Statistic::min |
            carta::zarr::Statistic::max;
 }
 
-// One reduction, flattened into [region][statistic][channel] over the whole spectral selection, so
-// that a test can compare values without also re-implementing the block bookkeeping.
+// One reduction, gathered into one record per region and channel over the whole spectral selection,
+// so that a test can compare values without also re-implementing the block bookkeeping.
 struct Collected {
     std::size_t region_count = 0;
     std::size_t channel_count = 0;
-    std::vector<carta::zarr::Statistic> statistics;
-    std::vector<double> values;
+    // Which statistics the blocks carried.
+    carta::zarr::StatisticSet carried = 0;
+    std::vector<carta::zarr::SpectralTotals> totals;  // [region][channel]
     std::vector<std::uint64_t> block_lengths;
 
     double At(std::size_t region, carta::zarr::Statistic statistic, std::size_t channel) const {
-        std::size_t slot = statistics.size();
-        for (std::size_t i = 0; i < statistics.size(); ++i) {
-            if (statistics.at(i) == statistic) {
-                slot = i;
-            }
-        }
-        if (slot == statistics.size()) {
+        if (!carta::zarr::Contains(carried, statistic)) {
             throw std::runtime_error("the block did not report the requested statistic");
         }
-        return values.at(((region * statistics.size()) + slot) * channel_count + channel);
+        const auto& at = totals.at((region * channel_count) + channel);
+        switch (statistic) {
+            case carta::zarr::Statistic::num_pixels:
+                return at.num_pixels;
+            case carta::zarr::Statistic::nan_count:
+                return at.nan_count;
+            case carta::zarr::Statistic::sum:
+                return at.sum;
+            case carta::zarr::Statistic::sum_sq:
+                return at.sum_sq;
+            case carta::zarr::Statistic::min:
+                return at.min;
+            case carta::zarr::Statistic::max:
+                return at.max;
+        }
+        throw std::runtime_error("not a statistic");
     }
 
     // What each unfinished hand-over of a block said region 0 had counted so far, against the
@@ -149,35 +164,30 @@ Collected Collect(const carta::zarr::Image& sky, const carta::zarr::SpectralRedu
     const auto result = sky.ReduceSpectral(request, [&](const carta::zarr::SpectralBlock& block) {
         Require(block.first_channel == next_channel, "blocks should tile the spectral selection in order");
         Require(block.channel_count > 0, "a block should carry at least one channel");
-        Require(block.value_count ==
-                    collected.region_count * block.statistic_count * static_cast<std::size_t>(block.channel_count),
-                "a block's value count should match its strides");
+        Require(block.region_count == collected.region_count, "a block should report every region");
         if (!block.complete) {
             Require(block.completeness > 0.0 && block.completeness < 1.0,
                     "an unfinished block should report a fraction of itself");
-            for (std::size_t s = 0; s < block.statistic_count; ++s) {
-                if (block.statistics[s] == carta::zarr::Statistic::num_pixels) {
-                    collected.partial_counts.emplace_back(
-                        block.first_channel, block.values[s * block.statistic_stride]);
-                }
+            if (const double* counts = block.Series(0, carta::zarr::Statistic::num_pixels)) {
+                collected.partial_counts.emplace_back(block.first_channel, counts[0]);
             }
             return true;
         }
         Require(block.completeness == 1.0, "a finished block is all of itself");
         next_channel += block.channel_count;
         collected.block_lengths.push_back(block.channel_count);
-        if (collected.statistics.empty()) {
-            collected.statistics.assign(block.statistics, block.statistics + block.statistic_count);
-            collected.values.assign(collected.region_count * block.statistic_count * collected.channel_count, 0.0);
+        if (collected.totals.empty()) {
+            for (const auto statistic : kEveryStatistic) {
+                if (block.Carries(statistic)) {
+                    collected.carried |= static_cast<carta::zarr::StatisticSet>(statistic);
+                }
+            }
+            collected.totals.resize(collected.region_count * collected.channel_count);
         }
         for (std::size_t r = 0; r < collected.region_count; ++r) {
-            for (std::size_t s = 0; s < block.statistic_count; ++s) {
-                for (std::uint64_t c = 0; c < block.channel_count; ++c) {
-                    const double value =
-                        block.values[(r * block.region_stride) + (s * block.statistic_stride) + c];
-                    collected.values.at(((r * block.statistic_count) + s) * collected.channel_count +
-                                        static_cast<std::size_t>(block.first_channel + c)) = value;
-                }
+            for (std::uint64_t c = 0; c < block.channel_count; ++c) {
+                collected.totals.at((r * collected.channel_count) +
+                                    static_cast<std::size_t>(block.first_channel + c)) = block.Totals(r, c);
             }
         }
         return true;
@@ -231,7 +241,7 @@ void TestRegionsSpanningChunks(const carta::zarr::Image& sky) {
         {3, 4, 1, 1, nullptr},    // a single pixel, which is what a cursor profile asks for
     };
     const auto collected = Collect(sky, WholeSpectrum(regions, 0));
-    Require(collected.statistics.size() == 6, "all six statistics should be reported");
+    Require(collected.carried == AllStatistics(), "all six statistics should be reported");
     CheckAgainstOracle(collected, regions, 0, "spanning");
 }
 
@@ -274,17 +284,14 @@ void TestRasterMaskAndNullMaskAgree(const carta::zarr::Image& sky) {
     }
 }
 
-// The statistics a caller did not ask for must not appear, and the ones they did must arrive in the
-// order the block declares rather than the order they were named.
+// The statistics a caller did not ask for must not appear, and the ones they did must.
 void TestOnlyRequestedStatisticsAreReported(const carta::zarr::Image& sky) {
     const std::vector<carta::zarr::RegionMask> regions{{0, 0, kL, kM, nullptr}};
     auto request = WholeSpectrum(regions, 0);
     request.statistics = carta::zarr::Statistic::sum | carta::zarr::Statistic::num_pixels;
     const auto collected = Collect(sky, request);
-    Require(collected.statistics.size() == 2, "only the two requested statistics should be reported");
-    Require(collected.statistics.at(0) == carta::zarr::Statistic::num_pixels &&
-                collected.statistics.at(1) == carta::zarr::Statistic::sum,
-            "a block reports statistics in the library's order, not the caller's");
+    Require(collected.carried == (carta::zarr::Statistic::sum | carta::zarr::Statistic::num_pixels),
+            "only the two requested statistics should be reported");
     for (std::uint64_t f = 0; f < kFrequency; ++f) {
         RequireClose(collected.At(0, carta::zarr::Statistic::sum, f), Expected(regions.at(0), f, 0).sum,
                      "sum over the whole plane");
@@ -439,10 +446,13 @@ void TestRunsSelectTheSamePixelsAsTheRaster(const carta::zarr::Image& sky) {
     const auto from_raster = Collect(sky, WholeSpectrum(by_raster, 0));
     const auto from_runs = Collect(sky, WholeSpectrum(by_runs, 0));
     CheckAgainstOracle(from_raster, by_raster, 0, "raster");
-    Require(from_raster.values.size() == from_runs.values.size(), "both forms should report the same shape");
-    for (std::size_t i = 0; i < from_raster.values.size(); ++i) {
-        RequireClose(from_runs.values.at(i), from_raster.values.at(i),
-                     "runs and raster should select the same pixels at value " + std::to_string(i));
+    Require(from_raster.carried == from_runs.carried && from_raster.totals.size() == from_runs.totals.size(),
+            "both forms should report the same shape");
+    for (std::size_t i = 0; i < from_raster.totals.size(); ++i) {
+        for (const auto statistic : kEveryStatistic) {
+            RequireClose(from_runs.At(0, statistic, i), from_raster.At(0, statistic, i),
+                         "runs and raster should select the same pixels at channel " + std::to_string(i));
+        }
     }
 }
 

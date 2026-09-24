@@ -18,9 +18,11 @@
 #include "carta-zarr/read.h"
 
 #include <array>
+#include <cassert>
 #include <cstddef>
 #include <cstdint>
 #include <functional>
+#include <limits>
 #include <vector>
 
 namespace carta::zarr {
@@ -269,16 +271,34 @@ struct SpectralReduceRequest {
     std::uint32_t emit_every_channels = 0;
 };
 
+// The accumulated statistics of one region at one channel.
+//
+// A statistic the block does not carry reads as though nothing had been counted: zero for the counts
+// and sums, NaN for the extrema. That is also exactly what a channel whose region caught no finite
+// pixel reports, so a caller deriving a mean from these sees the division it must not perform either
+// way. A caller that has to tell "not asked for" from "nothing there" asks the block, with Carries.
+struct SpectralTotals {
+    double num_pixels = 0.0;
+    double nan_count = 0.0;
+    double sum = 0.0;
+    double sum_sq = 0.0;
+    double min = std::numeric_limits<double>::quiet_NaN();
+    double max = std::numeric_limits<double>::quiet_NaN();
+};
+
 // One contiguous run of channels, for every region and every requested statistic.
 //
-// values is laid out [region][statistic][channel] and is owned by the library; it is valid only for
-// the duration of the call. statistics lists the statistics in the order they appear, so a caller
-// never has to reconstruct the slot order from the requested set.
+// Read it through Series, Totals and Carries. The values are owned by the library and are valid
+// only for the duration of the call.
 //
 // min and max are reported as NaN for a channel whose region contributed no finite pixel, since
 // there is no such thing as the smallest value of nothing. sum and sum_sq are zero in that case,
 // which is what they are worth, and num_pixels is zero -- so a caller deriving a mean sees the
 // division it must not perform.
+//
+// The fields from values to statistic_count describe the buffer's layout directly, [region]
+// [statistic][channel]. They are going away: every caller that walked them was working out again
+// what the accessors already say, and the layout is the library's to change.
 struct SpectralBlock {
     // Index into the request's spectral selection, not an image channel: the image channel is
     // planes.spectral.start + (first_channel + i) * planes.spectral.stride.
@@ -301,6 +321,51 @@ struct SpectralBlock {
     bool complete = true;
     // The fraction of this block's chunks that are in the values, in [0, 1]. One when complete.
     double completeness = 1.0;
+    // How many regions the block reports, which is how many the request gave.
+    std::size_t region_count = 0;
+
+    // Whether the block carries every statistic in `wanted`. The empty set is always carried.
+    bool Carries(StatisticSet wanted) const noexcept {
+        StatisticSet carried = 0;
+        for (std::size_t slot = 0; slot < statistic_count; ++slot) {
+            carried |= static_cast<StatisticSet>(statistics[slot]);
+        }
+        return (wanted & ~carried) == 0;
+    }
+    bool Carries(Statistic wanted) const noexcept { return Carries(static_cast<StatisticSet>(wanted)); }
+
+    // One region's channel_count values of one statistic, in channel order, or nullptr when the block
+    // does not carry that statistic. nullptr means nothing else: a region past region_count is a
+    // mistake in the caller, not a statistic that is absent, and is not answered as one.
+    const double* Series(std::size_t region, Statistic statistic) const noexcept {
+        assert(region < region_count);
+        for (std::size_t slot = 0; slot < statistic_count; ++slot) {
+            if (statistics[slot] == statistic) {
+                return values + (region * region_stride) + (slot * statistic_stride);
+            }
+        }
+        return nullptr;
+    }
+
+    // Every statistic of one region at one channel of this block, counted from first_channel. A
+    // statistic the block does not carry reads as SpectralTotals says. The same preconditions as
+    // Series, and channel < channel_count.
+    SpectralTotals Totals(std::size_t region, std::uint64_t channel) const noexcept {
+        assert(region < region_count && channel < channel_count);
+        SpectralTotals totals;
+        const auto at = [&](Statistic statistic, double& into) {
+            if (const double* series = Series(region, statistic)) {
+                into = series[channel];
+            }
+        };
+        at(Statistic::num_pixels, totals.num_pixels);
+        at(Statistic::nan_count, totals.nan_count);
+        at(Statistic::sum, totals.sum);
+        at(Statistic::sum_sq, totals.sum_sq);
+        at(Statistic::min, totals.min);
+        at(Statistic::max, totals.max);
+        return totals;
+    }
 };
 
 // Called once per block, on the thread that called ReduceSpectral. Returning false cancels the

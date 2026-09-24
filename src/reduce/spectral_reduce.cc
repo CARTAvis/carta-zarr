@@ -13,10 +13,11 @@
 #include "reduce/occupancy.h"
 #include "reduce/pass.h"
 #include "reduce/plane_selection.h"
+#include "reduce/statistic_slots.h"
 #include "zarr/pixel_selection.h"
 
 #include <algorithm>
-#include <array>
+#include <cassert>
 #include <cmath>
 #include <cstdint>
 #include <limits>
@@ -64,17 +65,6 @@ Result<void> ValidateRequest(const ImageDescriptor& descriptor, const AxisMap& a
 
     return {};
 }
-
-// One row of one region inside one chunk, accumulated in registers so that the per-pixel loop never
-// asks which statistics were requested. The merge into the output happens once per row.
-struct RowTotals {
-    std::uint64_t good = 0;
-    std::uint64_t bad = 0;
-    double sum = 0.0;
-    double sum_sq = 0.0;
-    double smallest = kInfinity;
-    double largest = -kInfinity;
-};
 
 // The per-pixel loop, written so that a compiler can vectorise it.
 //
@@ -167,22 +157,7 @@ Result<void> ReduceSpectral(const ReadableImage& image, const SpectralReduceRequ
     const auto footprints = occupancy.Footprints(plan.ChunksPerRead());
 
     // The requested statistics, in the one order a block reports them.
-    std::vector<Statistic> statistics;
-    std::array<int, kStatisticOrder.size()> slot_of{};
-    slot_of.fill(-1);
-    for (std::size_t i = 0; i < kStatisticOrder.size(); ++i) {
-        if (Contains(request.statistics, kStatisticOrder.at(i))) {
-            slot_of.at(i) = static_cast<int>(statistics.size());
-            statistics.push_back(kStatisticOrder.at(i));
-        }
-    }
-    const std::size_t statistic_count = statistics.size();
-    const int slot_num_pixels = slot_of.at(0);
-    const int slot_nan_count = slot_of.at(1);
-    const int slot_sum = slot_of.at(2);
-    const int slot_sum_sq = slot_of.at(3);
-    const int slot_min = slot_of.at(4);
-    const int slot_max = slot_of.at(5);
+    const auto layout = StatisticLayout::Of(request.statistics);
 
     // The budget is over the chunk data a slab decodes, not the pixels it keeps. A one-pixel region
     // asks for almost nothing and still decodes an entire chunk per chunk it touches, so sizing by
@@ -207,67 +182,18 @@ Result<void> ReduceSpectral(const ReadableImage& image, const SpectralReduceRequ
     // Emitting only at the end instead, which is what a zero used to mean, is silent for as long as
     // the whole reduction takes. One layer of a 7763x4742 image is 160 MiB and 70 ms; a thousand
     // channels of it is a minute of work with no partial answer and nowhere to cancel.
-    const std::size_t bytes_per_channel = request.region_count * statistic_count * sizeof(double);
-
-    const BlockEmitter emitter(plan, layer_chunks, bytes_per_channel, request.emit_every_channels,
+    const BlockEmitter emitter(plan, layer_chunks, layout.BytesPerChannel(request.region_count),
+                               request.emit_every_channels,
                                "The spectral reduction was cancelled by its sink");
 
-    std::vector<double> accumulator;
+    StatisticSlots accumulator;
     // One private accumulator per task, reused across slabs. See the dispatch below. "Partials" as
     // in the plane histogram, and deliberately not "sinks": a sink in this library is where a
     // finished block goes, and this one is named in the same function as the caller's SpectralSink.
-    std::vector<double> partials;
+    std::vector<StatisticSlots> partials;
     SlabWalk walk(source, plan, options);
-    // The accumulator's current shape, which is the length of the block being filled. Set by the
-    // reset below and read by everything that indexes into it, including the strides a block reports.
-    std::size_t statistic_stride = 0;
-    std::size_t region_stride = 0;
 
-    // An extremum nothing contributed to is still its identity, which is the one value it must
-    // not be reported as. Finding those needs no extra bookkeeping: a finite pixel can never
-    // leave an infinity behind, so only the untouched entries are still infinite -- and by the
-    // same argument the NaN that replaced one is the only NaN there, so the identity can be put
-    // back when the walk is not finished with it.
-    const auto settle_extrema = [&](bool report, std::size_t length) {
-        for (std::size_t r = 0; r < request.region_count; ++r) {
-            for (const int slot : {slot_min, slot_max}) {
-                if (slot < 0) {
-                    continue;
-                }
-                const double identity = slot == slot_min ? kInfinity : -kInfinity;
-                auto* base = accumulator.data() + (r * region_stride) +
-                             (static_cast<std::size_t>(slot) * statistic_stride);
-                for (std::size_t c = 0; c < length; ++c) {
-                    if (report) {
-                        if (std::isinf(base[c])) {
-                            base[c] = std::numeric_limits<double>::quiet_NaN();
-                        }
-                    } else if (std::isnan(base[c])) {
-                        base[c] = identity;
-                    }
-                }
-            }
-        }
-    };
-
-    const auto reset_block = [&](std::uint64_t length) {
-        statistic_stride = static_cast<std::size_t>(length);
-        region_stride = statistic_count * statistic_stride;
-
-        accumulator.assign(request.region_count * region_stride, 0.0);
-        for (std::size_t r = 0; r < request.region_count; ++r) {
-            if (slot_min >= 0) {
-                auto* base = accumulator.data() + (r * region_stride) +
-                             (static_cast<std::size_t>(slot_min) * statistic_stride);
-                std::fill(base, base + statistic_stride, kInfinity);
-            }
-            if (slot_max >= 0) {
-                auto* base = accumulator.data() + (r * region_stride) +
-                             (static_cast<std::size_t>(slot_max) * statistic_stride);
-                std::fill(base, base + statistic_stride, -kInfinity);
-            }
-        }
-    };
+    const auto reset_block = [&](std::uint64_t length) { accumulator.Reset(layout, request.region_count, length); };
 
     // One read's worth of pixels, accumulated into the block's own totals.
     //
@@ -301,17 +227,15 @@ Result<void> ReduceSpectral(const ReadableImage& image, const SpectralReduceRequ
         const std::uint64_t cu_span = chunk_cu_end - chunk_cu_begin;
         const std::uint64_t cells = std::max<std::uint64_t>(1, cv_span * cu_span);
         const std::uint64_t units = slab_length * cells;
-        const std::size_t partial_region_stride =
-            statistic_count * static_cast<std::size_t>(slab_length);
-        const std::size_t partial_stride =
-            std::max<std::size_t>(1, request.region_count * partial_region_stride);
+        const std::size_t partial_bytes = std::max<std::size_t>(
+            1, layout.BytesPerChannel(request.region_count) * static_cast<std::size_t>(slab_length));
 
-        // One (channel, chunk cell) unit of the accumulation, into a private partial
-        // laid out [region][statistic][channel within this slab]. Private because two
-        // units of the same channel can touch the same region -- a region wider than a
-        // chunk spans several cells -- so they would otherwise be adding to one double.
+        // One (channel, chunk cell) unit of the accumulation, into a private partial the
+        // length of this slab. Private because two units of the same channel can touch the
+        // same region -- a region wider than a chunk spans several cells -- so they would
+        // otherwise be adding to one double.
         const auto accumulate_unit = [&](std::uint64_t channel, std::uint64_t cell_cv,
-                                         std::uint64_t cell_cu, double* partial) {
+                                         std::uint64_t cell_cu, StatisticSlots& partial) {
             const float* plane = slab_pixels + (channel * stride_z);
 
             const std::uint64_t chunk_cv = cell_cv;
@@ -339,7 +263,6 @@ Result<void> ReduceSpectral(const ReadableImage& image, const SpectralReduceRequ
                     continue;
                 }
 
-                double* out = partial + (r * partial_region_stride);
                 for (std::uint64_t y = rv0; y < rv1; ++y) {
                     RowTotals totals;
                     if (region.runs != nullptr) {
@@ -398,28 +321,7 @@ Result<void> ReduceSpectral(const ReadableImage& image, const SpectralReduceRequ
                         }
                     }
 
-                    if (slot_num_pixels >= 0) {
-                        out[(static_cast<std::size_t>(slot_num_pixels) * slab_length) + channel] += static_cast<double>(totals.good);
-                    }
-                    if (slot_nan_count >= 0) {
-                        out[(static_cast<std::size_t>(slot_nan_count) * slab_length) + channel] += static_cast<double>(totals.bad);
-                    }
-                    if (slot_sum >= 0) {
-                        out[(static_cast<std::size_t>(slot_sum) * slab_length) + channel] += totals.sum;
-                    }
-                    if (slot_sum_sq >= 0) {
-                        out[(static_cast<std::size_t>(slot_sum_sq) * slab_length) + channel] += totals.sum_sq;
-                    }
-                    if (slot_min >= 0) {
-                        double& current =
-                            out[(static_cast<std::size_t>(slot_min) * slab_length) + channel];
-                        current = std::min(current, totals.smallest);
-                    }
-                    if (slot_max >= 0) {
-                        double& current =
-                            out[(static_cast<std::size_t>(slot_max) * slab_length) + channel];
-                        current = std::max(current, totals.largest);
-                    }
+                    partial.Fold(r, channel, totals);
                 }
             }
         };
@@ -436,30 +338,20 @@ Result<void> ReduceSpectral(const ReadableImage& image, const SpectralReduceRequ
         // once per slab. Capped so that a reduction over thousands of regions does not
         // spend more on the split than on the pixels.
         constexpr std::size_t kSpectralPartialBudgetBytes = 16U << 20U;
-        const std::size_t tasks_by_memory =
-            std::max<std::size_t>(1, kSpectralPartialBudgetBytes / (partial_stride * sizeof(double)));
+        const std::size_t tasks_by_memory = std::max<std::size_t>(1, kSpectralPartialBudgetBytes / partial_bytes);
         const std::size_t max_tasks = std::min(workers.size(), tasks_by_memory);
         const std::size_t tasks =
             PlanRowTasks(plan.chunk_u * plan.chunk_v, units, max_tasks, kLeastPixelsPerTask);
 
-        partials.assign(tasks * partial_stride, 0.0);
+        if (partials.size() < tasks) {
+            partials.resize(tasks);
+        }
         for (std::size_t task = 0; task < tasks; ++task) {
-            for (std::size_t r = 0; r < request.region_count; ++r) {
-                double* base =
-                    partials.data() + (task * partial_stride) + (r * partial_region_stride);
-                if (slot_min >= 0) {
-                    auto* from = base + (static_cast<std::size_t>(slot_min) * slab_length);
-                    std::fill(from, from + slab_length, kInfinity);
-                }
-                if (slot_max >= 0) {
-                    auto* from = base + (static_cast<std::size_t>(slot_max) * slab_length);
-                    std::fill(from, from + slab_length, -kInfinity);
-                }
-            }
+            partials.at(task).Reset(layout, request.region_count, slab_length);
         }
 
         workers.Run(tasks, [&](std::size_t task, std::size_t) {
-            double* partial = partials.data() + (task * partial_stride);
+            StatisticSlots& partial = partials.at(task);
             for (std::uint64_t unit = task; unit < units; unit += tasks) {
                 const std::uint64_t channel = unit / cells;
                 const std::uint64_t cell = unit % cells;
@@ -468,29 +360,7 @@ Result<void> ReduceSpectral(const ReadableImage& image, const SpectralReduceRequ
             }
         });
 
-        for (std::size_t task = 0; task < tasks; ++task) {
-            const double* partial = partials.data() + (task * partial_stride);
-            for (std::size_t r = 0; r < request.region_count; ++r) {
-                for (std::size_t slot = 0; slot < statistic_count; ++slot) {
-                    const double* from =
-                        partial + (r * partial_region_stride) + (slot * slab_length);
-                    double* to = accumulator.data() + (r * region_stride) +
-                                 (slot * statistic_stride) +
-                                 static_cast<std::size_t>(slab.first_channel.index);
-                    const bool is_min = slot_min >= 0 && slot == static_cast<std::size_t>(slot_min);
-                    const bool is_max = slot_max >= 0 && slot == static_cast<std::size_t>(slot_max);
-                    for (std::uint64_t channel = 0; channel < slab_length; ++channel) {
-                        if (is_min) {
-                            to[channel] = std::min(to[channel], from[channel]);
-                        } else if (is_max) {
-                            to[channel] = std::max(to[channel], from[channel]);
-                        } else {
-                            to[channel] += from[channel];
-                        }
-                    }
-                }
-            }
-        }
+        accumulator.MergeInOrder(partials.data(), tasks, slab.first_channel.index);
     };
 
     // Every footprint the regions occupy, as the occupancy cut them. Two footprints of the same block
@@ -508,26 +378,11 @@ Result<void> ReduceSpectral(const ReadableImage& image, const SpectralReduceRequ
         return {};
     };
 
-    const auto hand_over = [&](SelectionChannel first_channel, std::uint64_t length, bool complete,
+    // Out of the type and into the public block, which is the one place it happens.
+    const auto hand_over = [&](SelectionChannel first_channel, [[maybe_unused]] std::uint64_t length, bool complete,
                                double completeness) {
-        settle_extrema(true, static_cast<std::size_t>(length));
-        SpectralBlock block;
-        // Out of the type and into the public block, which is the one place it happens.
-        block.first_channel = first_channel.index;
-        block.channel_count = length;
-        block.values = accumulator.data();
-        block.value_count = accumulator.size();
-        block.region_stride = region_stride;
-        block.statistic_stride = statistic_stride;
-        block.statistics = statistics.data();
-        block.statistic_count = statistic_count;
-        block.complete = complete;
-        block.completeness = completeness;
-        const bool keep_going = sink(block);
-        if (!complete) {
-            settle_extrema(false, static_cast<std::size_t>(length));
-        }
-        return keep_going;
+        assert(length == accumulator.channels());
+        return accumulator.HandOver(first_channel.index, complete, completeness, sink);
     };
 
     return emitter.Over(reset_block, walk_block, hand_over);

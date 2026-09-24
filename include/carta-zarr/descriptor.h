@@ -29,13 +29,6 @@ struct Diagnostic {
     std::string node_path;
 };
 
-enum class ProbeKind {
-    not_zarr,
-    zarr_without_supported_schema,
-    supported_dataset,
-    invalid_dataset,
-};
-
 using SchemaId = std::string;
 
 inline constexpr std::string_view kXradioImageSchema = "xradio.image";
@@ -59,8 +52,6 @@ struct ImageEntry {
     std::vector<Diagnostic> diagnostics;
 };
 
-struct ProbeOptions {};
-
 // What this library knows about an image dataset without opening any image in it: which schema
 // profile describes it, which variables in it are images, and whatever that profile had to say about
 // a store it nonetheless accepted.
@@ -70,18 +61,6 @@ struct DatasetDescriptor {
     std::vector<ImageEntry> images;
     std::optional<std::string> default_image_id;
     std::vector<Diagnostic> diagnostics;
-};
-
-// A probe answers one more question than a descriptor does -- whether there is a dataset here at all
-// -- and otherwise reports exactly what Dataset::descriptor() reports for the same location. Saying
-// that with the type rather than by copying five fields is what keeps the two answers level: a field
-// added to DatasetDescriptor reaches both by construction.
-//
-// The inherited fields are filled to the extent the kind allows. A supported_dataset fills them all;
-// an invalid_dataset names the schema it failed to be and says why in diagnostics; anything else
-// carries diagnostics alone.
-struct ProbeResult : DatasetDescriptor {
-    ProbeKind kind = ProbeKind::not_zarr;
 };
 
 struct OpenOptions {

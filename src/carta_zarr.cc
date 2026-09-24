@@ -39,20 +39,13 @@ namespace {
 // It is the only try in this file. Three entry points used to write their own beside the twelve
 // that went through here, with fallback codes of their own, so whether one caught was a question you
 // answered by reading to the end of it.
-template <typename Function, typename OnThrow>
-auto GuardedWith(Function&& function, OnThrow&& on_throw) -> decltype(function()) {
+template <typename Function>
+auto Guarded(ErrorCode code, std::string node, Function&& function) -> decltype(function()) {
     try {
         return function();
     } catch (const std::exception& error) {
-        return on_throw(error);
-    }
-}
-
-template <typename Function>
-auto Guarded(ErrorCode code, std::string node, Function&& function) -> decltype(function()) {
-    return GuardedWith(std::forward<Function>(function), [&](const std::exception& error) {
         return Error{code, error.what(), std::move(node)};
-    });
+    }
 }
 
 // Everything an Image entry point does before it has something to read from: name the node so a
@@ -348,42 +341,6 @@ Result<Image> Dataset::OpenImage(std::string_view image_id) const {
         auto [inserted, _] = _impl->image_descriptors.emplace(image_name, std::move(image_descriptor.value()));
         return make_image(inserted->second);
     });
-}
-
-ProbeResult Probe(std::string_view location, const ProbeOptions&) {
-    // The guard that does not report an Error, because a probe answers with a ProbeResult whatever
-    // happens: "not a Zarr store" is an answer rather than a failure. A throw becomes a diagnostic,
-    // and that is the only way this differs from every other entry point here.
-    const auto as_diagnostic = [](const auto& failure) {
-        return Diagnostic{internal::zarr::ErrorCodeName(failure.code), failure.message, failure.node_path};
-    };
-    return GuardedWith(
-        [&]() -> ProbeResult {
-            auto store_result = internal::OpenStore(location);
-            if (!store_result) {
-                const auto& failure = store_result.error();
-                ProbeResult result;
-                result.kind = failure.code == ErrorCode::invalid_metadata || failure.code == ErrorCode::io_error
-                                  ? ProbeKind::invalid_dataset
-                                  : ProbeKind::not_zarr;
-                result.diagnostics.push_back(as_diagnostic(failure));
-                return result;
-            }
-            auto probe_result = internal::ProbeStore(store_result.value());
-            if (!probe_result) {
-                ProbeResult result;
-                result.kind = ProbeKind::invalid_dataset;
-                result.diagnostics.push_back(as_diagnostic(probe_result.error()));
-                return result;
-            }
-            return probe_result.value();
-        },
-        [&](const std::exception& error) {
-            ProbeResult result;
-            result.kind = ProbeKind::invalid_dataset;
-            result.diagnostics.push_back(Diagnostic{"exception", error.what(), std::string(location)});
-            return result;
-        });
 }
 
 Result<SchemaProbeResult> ProbeSchema(std::string_view location, std::string_view schema_id) {

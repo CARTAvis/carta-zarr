@@ -7,6 +7,8 @@
 #include <carta-zarr/carta_zarr.h>
 
 int main() {
-    const auto probe = carta::zarr::Probe(".");
-    return probe.kind == carta::zarr::ProbeKind::not_zarr ? 0 : 1;
+    // The build directory is not an image dataset. Whether it reads as no match or as a store that
+    // cannot be read at all, the call has reached the installed library and answered.
+    const auto probe = carta::zarr::ProbeSchema(".", carta::zarr::kXradioImageSchema);
+    return !probe || probe.value().kind == carta::zarr::SchemaMatchKind::no_match ? 0 : 1;
 }

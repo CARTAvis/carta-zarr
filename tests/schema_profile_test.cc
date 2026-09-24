@@ -35,7 +35,7 @@
 namespace {
 
 using carta::zarr::ErrorCode;
-using carta::zarr::ProbeKind;
+using carta::zarr::internal::ProbeKind;
 using carta::zarr::SchemaMatchKind;
 using carta::zarr::internal::xradio::DetermineFlag;
 using carta::zarr::testing::MakeInMemoryTransport;
@@ -459,8 +459,8 @@ void TestOneRuleDecidesWhatDatasetIsOpenable() {
 
     // Nothing matched. Not an error about the file's contents: this library is not for it.
     {
-        carta::zarr::ProbeResult probe;
-        probe.kind = carta::zarr::ProbeKind::zarr_without_supported_schema;
+        carta::zarr::internal::ProbeResult probe;
+        probe.kind = ProbeKind::zarr_without_supported_schema;
         const auto openable = RequireOpenableDataset(probe, "/tmp/store");
         Require(!openable && openable.error().code == ErrorCode::unsupported_schema,
                 "an unmatched store should be refused as an unsupported schema");
@@ -468,8 +468,8 @@ void TestOneRuleDecidesWhatDatasetIsOpenable() {
 
     // Something matched and was malformed. A different answer, and a consumer acts on it.
     {
-        carta::zarr::ProbeResult probe;
-        probe.kind = carta::zarr::ProbeKind::invalid_dataset;
+        carta::zarr::internal::ProbeResult probe;
+        probe.kind = ProbeKind::invalid_dataset;
         probe.diagnostics.push_back(carta::zarr::Diagnostic{"missing_coordinate", "frequency is missing", "SKY"});
         const auto openable = RequireOpenableDataset(probe, "/tmp/store");
         Require(!openable && openable.error().code == ErrorCode::invalid_metadata,
@@ -480,8 +480,8 @@ void TestOneRuleDecidesWhatDatasetIsOpenable() {
 
     // A probe that had nothing to say falls back rather than reporting an empty message.
     {
-        carta::zarr::ProbeResult probe;
-        probe.kind = carta::zarr::ProbeKind::not_zarr;
+        carta::zarr::internal::ProbeResult probe;
+        probe.kind = ProbeKind::zarr_without_supported_schema;
         const auto openable = RequireOpenableDataset(probe, "/tmp/store");
         Require(!openable && !openable.error().message.empty(), "a silent probe still needs a message");
     }
@@ -489,8 +489,8 @@ void TestOneRuleDecidesWhatDatasetIsOpenable() {
     // A profile matched a store with nothing openable in it. The profile is not refusing, so there
     // are no diagnostics; opening it would hand back a dataset a consumer can do nothing with.
     {
-        carta::zarr::ProbeResult probe;
-        probe.kind = carta::zarr::ProbeKind::supported_dataset;
+        carta::zarr::internal::ProbeResult probe;
+        probe.kind = ProbeKind::supported_dataset;
         const auto openable = RequireOpenableDataset(probe, "/tmp/store");
         Require(!openable && openable.error().code == ErrorCode::invalid_metadata,
                 "a matched store with no images should be refused");
@@ -498,8 +498,8 @@ void TestOneRuleDecidesWhatDatasetIsOpenable() {
 
     // And the one case that opens.
     {
-        carta::zarr::ProbeResult probe;
-        probe.kind = carta::zarr::ProbeKind::supported_dataset;
+        carta::zarr::internal::ProbeResult probe;
+        probe.kind = ProbeKind::supported_dataset;
         probe.images.push_back(carta::zarr::ImageEntry{});
         Require(static_cast<bool>(RequireOpenableDataset(probe, "/tmp/store")),
                 "a matched store with an image should open");

@@ -160,8 +160,6 @@ private:
     std::shared_ptr<Impl> _impl;
 };
 
-CARTA_ZARR_EXPORT ProbeResult Probe(std::string_view location, const ProbeOptions& options = {});
-
 // Ask one named schema profile about a location. The answer is its SchemaMatchKind -- matched, did
 // not match, or matched something malformed -- and an Error only when the store could not be read
 // at all.

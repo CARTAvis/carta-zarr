@@ -16,6 +16,26 @@
 
 namespace carta::zarr::internal {
 
+// What every built-in profile made of one store, as ProbeStore reports it: whether one of them
+// describes it, and if so the dataset it describes.
+enum class ProbeKind {
+    zarr_without_supported_schema,
+    supported_dataset,
+    invalid_dataset,
+};
+
+// A probe answers one more question than a descriptor does -- whether a profile describes the store
+// at all -- and otherwise is exactly what Dataset::descriptor() reports, which Dataset::Open takes
+// from it by move. Saying that with the type rather than by copying the fields is what keeps the two
+// level: a field added to DatasetDescriptor reaches both by construction.
+//
+// The inherited fields are filled to the extent the kind allows. A supported_dataset fills them all;
+// an invalid_dataset names the schema it failed to be and says why in diagnostics; anything else
+// carries diagnostics alone.
+struct ProbeResult : DatasetDescriptor {
+    ProbeKind kind = ProbeKind::zarr_without_supported_schema;
+};
+
 // Which variables of a store a schema profile will open, and what it had to say about the ones it
 // would not. Defined here rather than in store.h because it is a statement about images, and a
 // Store deals in nodes and arrays; it used to sit down there only so that a cache down there could

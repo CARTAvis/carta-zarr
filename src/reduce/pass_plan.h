@@ -109,12 +109,18 @@ public:
     // a second place for it to be got wrong.
     bool SwapsSpatial() const noexcept { return axis_u == map.y; }
 
-    // How many chunks along the spectrum a run of `channels` selected channels covers.
+    // How many chunks along the spectrum the selected channels [begin, end) touch.
     //
     // A walk counts its progress in chunks, and the spectral axis is the one where a selection's
-    // stride makes that not simply a division. Six call sites wrote this out; they disagreed about
-    // nothing, which is the argument for saying it once rather than the argument for leaving it.
-    std::uint64_t ChunksFor(std::uint64_t channels) const { return (channels + _least_channels - 1) / _least_channels; }
+    // stride makes that not simply a division. It is asked of the run rather than of its length: a
+    // run that starts part-way into one chunk and ends part-way into another touches a chunk more
+    // than its length divides into. The walk's slabs end on chunk boundaries and each counts what it
+    // touched, so a total taken from the length alone came up short, and progress went past one with
+    // a read still to come.
+    std::uint64_t ChunksTouched(SelectionChannel begin, SelectionChannel end) const {
+        return ::carta::zarr::internal::ChunksTouched(planes.spectral.start + (begin.index * planes.spectral.stride),
+                                                      end - begin, planes.spectral.stride, _chunk_depth);
+    }
 
     // How many chunks one read may decode: the budget in the units everything else here counts in.
     // Zero when the budget is smaller than a single chunk, which UnitsAffordable floors at one.
@@ -166,8 +172,8 @@ private:
 
     // Steps towards the answers above rather than answers themselves, and the two a caller used to
     // divide by itself: the chunk-count rule was written out in six places and the slab-sizing rule
-    // in two. Nothing asserts either directly -- what a test has to say about _least_channels it
-    // says through ChunksFor, which is the question a caller actually asks.
+    // in two. Nothing asserts either directly -- what a test has to say about them it says through
+    // SlabChannels and ChunksTouched, which are the questions a caller actually asks.
     std::uint64_t _chunk_depth = 1;
     std::uint64_t _least_channels = 1;
 };

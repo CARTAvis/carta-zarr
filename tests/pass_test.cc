@@ -155,16 +155,19 @@ void TestTheCallersCeilingWins() {
 }
 
 // How many selected channels one chunk of the spectral axis holds is what keeps a slab from ending
-// inside a chunk and making one decode serve two slabs. Asked as ChunksFor, which is the question a
-// walk actually puts to the plan: n channels is one chunk, and one more than that is two.
+// inside a chunk and making one decode serve two slabs. Asked as ChunksTouched, which is the question
+// a walk actually puts to the plan: n channels from the start is one chunk, and one more is two.
 void TestASlabIsCountedInChunksOfTheSpectralAxis() {
     const auto image = MakeImage(512, 520, 64);
     const auto geometry = MakeGeometry(256, 260, 8, AxisRole::spatial_y);
 
     const auto holds = [&](const Range& spectral, std::uint64_t channels, const std::string& what) {
         const auto plan = Plan(image, geometry, spectral, ReadOptions{});
-        Require(plan.ChunksFor(channels) == 1, what + ": that many channels is one chunk");
-        Require(plan.ChunksFor(channels + 1) == 2, what + ": one more than that is two");
+        using carta::zarr::internal::SelectionChannel;
+        Require(plan.ChunksTouched(SelectionChannel{0}, SelectionChannel{channels}) == 1,
+                what + ": that many channels is one chunk");
+        Require(plan.ChunksTouched(SelectionChannel{0}, SelectionChannel{channels + 1}) == 2,
+                what + ": one more than that is two");
     };
 
     holds(Range{0, 64, 1}, 8, "eight channels to a chunk, read every one");

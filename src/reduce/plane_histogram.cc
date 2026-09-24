@@ -236,7 +236,8 @@ Result<CubeHistogramResult> ComputeCubeHistogram(const ReadableImage& image,
 
     const auto plan = PlanPass(descriptor, geometry, map, planes, request.spatial_sample, options);
     const std::uint64_t total_chunks =
-        std::max<std::uint64_t>(1, plan.layer_chunks * plan.ChunksFor(planes.count()));
+        std::max<std::uint64_t>(
+            1, plan.layer_chunks * plan.ChunksTouched(SelectionChannel{0}, SelectionChannel{planes.count()}));
 
     // One accumulator per task, which is safe because the split below never asks for more tasks than
     // there are accumulators, so no two bodies ever hold the same one at once. See the split itself

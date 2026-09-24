@@ -470,6 +470,80 @@ void TestACubeHistogramSplitAcrossWorkers() {
             "four provisional histograms re-aggregated onto one grid still hold every pixel");
 }
 
+// Progress is a count of chunks read against a count of chunks to read, and the two are worked out
+// in different places: the walk adds up what each read covered, the total is taken once over the
+// whole run. Every report is made before a read that is still to come, so none of them may say the
+// whole run is done.
+//
+// Each spectral selection below starts off a chunk boundary or steps across one, which is where a
+// count taken over the whole run and a sum taken read by read can disagree. A one-byte budget makes
+// every chunk layer its own read, so there are reports to look at.
+void TestProgressNeverClaimsTheWholeRunBeforeItsLastRead() {
+    constexpr std::uint64_t kSide = 8;
+    constexpr std::uint64_t kDepth = 24;
+    const auto image = MakeImage(kSide, kSide, kDepth);
+    const auto geometry = MakeGeometry(4, 4, 4);
+    SyntheticPixelSource source(image, geometry, Value);
+    WorkPool workers(1);
+    const auto readable = Readable(source, image, geometry, workers);
+
+    ReadOptions options;
+    options.temporary_memory_limit_bytes = 1;
+
+    // Run to the end, and stopped short of it: a run whose ends both fall inside a chunk is the one
+    // that covers a chunk more than its length suggests.
+    const Range runs[]{{0, 24, 1}, {1, 23, 1}, {1, 8, 1}, {3, 6, 1},
+                       {0, 8, 3}, {1, 8, 3}, {3, 7, 3}, {1, 4, 3}, {0, 3, 9}};
+    std::string wrong;
+    for (const auto& spectral : runs) {
+        const auto start = spectral.start;
+        const auto stride = spectral.stride;
+        const auto count = spectral.count;
+        const std::string which = " (start " + std::to_string(start) + ", count " +
+                                  std::to_string(count) + ", stride " + std::to_string(stride) + ")";
+
+        carta::zarr::CubeHistogramRequest cube;
+        cube.planes.spectral = spectral;
+        cube.bins = 16;
+        std::vector<double> reported;
+        cube.progress = [&](const carta::zarr::CubeHistogramProgress& update) {
+            reported.push_back(update.progress);
+            return true;
+        };
+        const auto histogram = carta::zarr::internal::ComputeCubeHistogram(readable, cube, options);
+        Require(static_cast<bool>(histogram), "the cube histogram failed" + which);
+        Require(!reported.empty(), "a one-byte budget should make the cube histogram report" + which);
+        for (const double progress : reported) {
+            if (progress >= 1.0) {
+                wrong += "\n  a cube histogram reported " + std::to_string(progress) +
+                         " with a read still to come" + which;
+                break;
+            }
+        }
+
+        // One block for the whole run, so that a block is several reads.
+        const carta::zarr::RegionMask whole{0, 0, kSide, kSide, nullptr};
+        carta::zarr::SpectralReduceRequest reduce;
+        reduce.planes.spectral = spectral;
+        reduce.regions = &whole;
+        reduce.region_count = 1;
+        reduce.statistics = static_cast<carta::zarr::StatisticSet>(carta::zarr::Statistic::sum);
+        reduce.emit_every_channels = static_cast<std::uint32_t>(count);
+        const auto reduced = carta::zarr::internal::ReduceSpectral(
+            readable, reduce,
+            [&](const carta::zarr::SpectralBlock& block) {
+                if (!block.complete && block.completeness >= 1.0) {
+                    wrong += "\n  an unfinished block claimed " + std::to_string(block.completeness) +
+                             " of itself" + which;
+                }
+                return true;
+            },
+            options);
+        Require(static_cast<bool>(reduced), "the spectral reduction failed" + which);
+    }
+    Require(wrong.empty(), "progress ran ahead of the reads:" + wrong);
+}
+
 }  // namespace
 
 int main() {
@@ -479,6 +553,7 @@ int main() {
         TestAMaskedRegionReadsOnlyTheChunksItOccupies();
         TestAPlaneHistogramSplitAcrossWorkers();
         TestACubeHistogramSplitAcrossWorkers();
+        TestProgressNeverClaimsTheWholeRunBeforeItsLastRead();
     } catch (const std::exception& error) {
         std::fprintf(stderr, "reduce synthetic test failed: %s\n", error.what());
         return 1;

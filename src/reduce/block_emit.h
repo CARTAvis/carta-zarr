@@ -125,7 +125,7 @@ public:
             // What the completeness of a part-filled block is a fraction of. Never zero: a block
             // holds at least one channel, so it covers at least one chunk.
             const std::uint64_t chunks_total =
-                std::max<std::uint64_t>(1, _layer_chunks * _plan->ChunksFor(block.length()));
+                std::max<std::uint64_t>(1, _layer_chunks * _plan->ChunksTouched(block.begin, block.end));
 
             const auto deliver = [&](bool complete) -> Result<void> {
                 const double completeness =

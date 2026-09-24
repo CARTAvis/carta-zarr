@@ -182,6 +182,17 @@ void OverRowRanges(WorkPool& workers, std::uint64_t row_pixels, std::uint64_t ro
 
 **必須是 template，不能是 `std::function`** — 理由同 ADR 0005。上表那些常數則提到 `reduce/tuning.h`，那正是 tuning.h 存在的用途。
 
+**更正（2026-09-17 `2fabd85`；2026-09-24 再檢一次）**：上面把三處讀成同一個形狀，其實不是。
+
+- spectral 用跨步分配 units（`unit = task; unit += tasks`），兩個 histogram 則是連續的 row 區塊。
+- cube histogram 的 accumulator 跨 slab 存活，既不歸零也不逐次 merge；只有另外兩處是「歸零 → Run → 依序合併」。
+- 三處在單一 task 時的做法各不相同：plane 直接寫進 `counts`，cube 寫進 `front()`，spectral 刻意仍然經過 partial，以保住單一 task 逐 bit 相同的承諾。
+- 上限計算看似同一條公式，但三個預算各答不同的問題：記憶體、記憶體（每個 slab 重算），以及 ADR 0005 量過的 cache。未來的調整只會落在其中一處，所以它不是同一條規則。
+
+2026-09-24 用 design-it-twice 重新評估了一次 `FoldInPartials`（四種 interface），結論相同：真正重複的只有約 25–30 行，包成 envelope 之後只剩下一堆 hook 與 policy。唯一通過 deletion test 的是連續 row 區塊的切法，它原本抄了三份（兩個 histogram 各一份、`work_pool_test` 一份，而且 test 驗的是它自己那份）。現在收成 `work_pool.h` 的 `TaskRows`。
+
+之後又用 Release 版 `pass_timing` 量了 spectral 的跨步分配。在 31×19 個 cell 的 askap plane 上，10 thread 時它比連續切分慢 5–13%，4 thread 時沒有差別，而且在任何情況下都沒有比較快。所以 spectral 也改用 `TaskRows`（`9b09f6c`）。上面第一點描述的是改之前的狀態。
+
 ### 2.4 `nlohmann::json` 的成員探測樣板
 
 > **狀態：已套用**。`ObjectMember` 更名為 `Member`，新增 `MemberObject`／`MemberArray`／`MemberNumber`；

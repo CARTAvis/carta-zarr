@@ -147,34 +147,6 @@ void TestAMaskNarrowsTheOccupancyBelowTheBoundingBox() {
     Require(occupancy.Footprints(kUnbounded).size() == 4, "a diagonal was read in bands of unlike rows");
 }
 
-void TestRunsAndARasterSayTheSameThing() {
-    const auto raster = DiagonalRaster(16, 16, 4);
-    auto rastered = Box(0, 0, 16, 16);
-    rastered.mask = raster.data();
-
-    // The same selection as runs: row y holds the one run [4 * (y / 4), 4 * (y / 4) + 4).
-    std::vector<std::uint32_t> runs;
-    std::vector<std::uint64_t> offsets{0};
-    for (std::uint64_t y = 0; y < 16; ++y) {
-        runs.push_back(static_cast<std::uint32_t>(4 * (y / 4)));
-        runs.push_back(static_cast<std::uint32_t>((4 * (y / 4)) + 4));
-        offsets.push_back(runs.size() / 2);
-    }
-    auto run_length = Box(0, 0, 16, 16);
-    run_length.row_runs = runs.data();
-    run_length.row_run_offsets = offsets.data();
-
-    const auto from_raster = Built({rastered}, 4, 4);
-    const auto from_runs = Built({run_length}, 4, 4);
-
-    Require(Occupied(from_raster) == Occupied(from_runs),
-            "runs and a raster describing one selection disagreed about the chunks it occupies");
-    Require(from_raster.offsets() == from_runs.offsets() && from_raster.entries() == from_runs.entries(),
-            "runs and a raster reached different indexes for one selection");
-    Require(from_raster.LayerChunks() == from_runs.LayerChunks(),
-            "runs and a raster disagreed about how many chunks a layer occupies");
-}
-
 // A region given as a raster alone reaches the walk as runs along u, whichever axis that is, so that
 // the accumulation takes the loop an unmasked region uses. The diagonal is block-symmetric, so its
 // runs are the same either way: line l holds the one run [4 * (l / 4), 4 * (l / 4) + 4).
@@ -301,20 +273,6 @@ void TestNoFootprintIsMoreThanOneRead() {
     Require(cut.size() == 8, "four rows of four chunks were not cut into eight pieces of two");
 }
 
-void TestRunsAlongTheOtherAxisAreRefused() {
-    std::vector<std::uint32_t> runs{0, 4};
-    std::vector<std::uint64_t> offsets{0, 1, 1, 1, 1};
-    auto region = Box(0, 0, 4, 4);
-    region.row_runs = runs.data();
-    region.row_run_offsets = offsets.data();
-    region.run_axis = AxisRole::spatial_y;
-
-    const std::vector<RegionMask> regions{region};
-    const auto refused = Occupancy::Of(regions.data(), regions.size(), 4, 4, AxisRole::spatial_x, "TEST");
-    Require(!refused && refused.error().code == ErrorCode::invalid_argument,
-            "runs along the axis the store does not vary fastest were accepted");
-}
-
 // kMaxChunkIncidences, the other refusal, is not here, and the measurement is why: the smallest
 // input that trips it is 64 regions over a 1024 x 1024 chunk grid plus one more, which took 2.06 s
 // and 815 MB of resident memory to reach the check. The refusal exists to stop an allocation
@@ -338,14 +296,12 @@ int main() {
         TestABoxOccupiesEveryChunkItsBoundingBoxTouches();
         TestThePlacementFollowsTheFastestSpatialAxis();
         TestAMaskNarrowsTheOccupancyBelowTheBoundingBox();
-        TestRunsAndARasterSayTheSameThing();
         TestARasterReachesTheWalkAsRuns();
         TestAFragmentedRasterStaysARaster();
         TestTheIncidencesOfOneChunkAreContiguousAndInRegionOrder();
         TestAMaskThatSelectsNothingOccupiesNothing();
         TestAlikeRowsAreReadTogether();
         TestNoFootprintIsMoreThanOneRead();
-        TestRunsAlongTheOtherAxisAreRefused();
         TestAGridTooLargeToIndexIsRefused();
     } catch (const std::exception& error) {
         std::fprintf(stderr, "occupancy test failed: %s\n", error.what());

@@ -38,10 +38,9 @@ struct PlacedRegion {
     const std::uint8_t* mask = nullptr;
     std::uint64_t mask_u_stride = 1;
     std::uint64_t mask_v_stride = 1;
-    // Runs along u, indexed by v: the caller's, or made by Occupancy::Of from the raster and owned by
-    // it. Null for a region that is its whole box, and for a raster too fragmented to be worth them,
-    // which is then read through `mask`. Occupancy::Of refuses a caller's runs that go the other way,
-    // so anything that reaches here already runs along u.
+    // Runs along u, indexed by v, made by Occupancy::Of from the raster and owned by it. Null for a
+    // region that is its whole box, and for a raster too fragmented to be worth them, which is then
+    // read through `mask`.
     const std::uint32_t* runs = nullptr;
     const std::uint64_t* run_offsets = nullptr;
 };
@@ -96,8 +95,8 @@ struct OccupiedFootprint {
  *
  * Occupies rather than covers: the bounding box of a thin cut laid along the diagonal is the whole
  * image, while the cut touches one chunk per row. Bucketing by the box would read every chunk to
- * reach the band, so the region's own mask or runs decide instead -- one pass over bytes the caller
- * already holds, against the chunks they would otherwise stand for.
+ * reach the band, so the region's own mask decides instead -- one pass over bytes the caller already
+ * holds, against the chunks they would otherwise stand for.
  *
  * Built once per reduction and read for the whole of it. Without it the walk is chunks x regions
  * intersection tests -- 6.5 x 10^8 for a WSU diagonal -- which would put the region count back on
@@ -105,8 +104,7 @@ struct OccupiedFootprint {
  *
  * It takes the caller's regions in the caller's own x and y, because placing them onto the walk's
  * axes is part of the same question: which axis the store varies fastest is what decides both where
- * a region lands and whether its runs are the kind worth taking. Said in one place, a PlacedRegion
- * that exists is one whose runs have been agreed to.
+ * a region lands and which way the runs made from its raster lie.
  *
  * Takes chunk_u, chunk_v and the fastest spatial axis rather than a PassPlan, because those are
  * what the question is about and what a test can stand up with nothing linked behind it -- ADR 0006,
@@ -114,10 +112,9 @@ struct OccupiedFootprint {
  */
 class Occupancy {
 public:
-    // Reports invalid_argument for a region whose runs go along the axis the store does not vary
-    // fastest, and for a region set touching more chunks than one reduction can index.
+    // Reports invalid_argument for a region set touching more chunks than one reduction can index.
     //
-    // A region given as a raster without runs is turned into runs here, along u, so that the walk
+    // A region's raster is turned into runs here, along u, so that the walk
     // takes the unmasked loop for it and its chunks are found from the runs; see region_runs.h. That
     // is one pass over the raster per call, about 2 ms for a 7763x4742 bounding box.
     //

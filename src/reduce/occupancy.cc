@@ -43,21 +43,6 @@ Result<Occupancy> Occupancy::Of(const RegionMask* regions, std::size_t region_co
     occupancy._regions.reserve(region_count);
     for (std::size_t i = 0; i < region_count; ++i) {
         const auto& given = regions[i];
-        // Runs are worth taking because their pixels are contiguous in the destination, and they
-        // are contiguous only along the axis the store varies fastest. Reading them with a stride
-        // would be slower than the raster they replaced, so this is refused rather than absorbed.
-        //
-        // Refused here rather than beside the rest of the request checks, because the placement
-        // below is what the agreement is about: a PlacedRegion carrying runs is one whose runs this
-        // reduction has agreed run along u.
-        if (given.row_runs != nullptr && given.run_axis != fastest_spatial_axis) {
-            return Error{ErrorCode::invalid_argument,
-                         "Region " + std::to_string(i) +
-                             " supplies runs along the axis this image does not vary fastest; see "
-                             "ChunkGeometry::fastest_spatial_axis",
-                         node};
-        }
-
         // The raster keeps whatever order the caller wrote it in; only the steps through it change.
         PlacedRegion region;
         region.u_start = swap_spatial ? given.y_start : given.x_start;
@@ -67,12 +52,10 @@ Result<Occupancy> Occupancy::Of(const RegionMask* regions, std::size_t region_co
         region.mask = given.mask;
         region.mask_u_stride = swap_spatial ? given.width : 1;
         region.mask_v_stride = swap_spatial ? 1 : given.width;
-        region.runs = given.row_runs;
-        region.run_offsets = given.row_run_offsets;
-        // A raster without runs is given them, along u: which axis that is was the caller's to know
-        // once, and is not any more. The raster stays beside them for a fragmented one, which comes
-        // back refused and is read as the raster it is.
-        if (given.row_runs == nullptr && given.mask != nullptr) {
+        // A raster is given runs, along u: which axis that is was the caller's to know once, and is
+        // not any more. The raster stays beside them for a fragmented one, which comes back refused
+        // and is read as the raster it is.
+        if (given.mask != nullptr) {
             RegionRuns made;
             if (RunsAlongU(given.mask, given.width, given.height, !swap_spatial, made)) {
                 occupancy._made_runs.push_back(std::move(made));

@@ -57,10 +57,6 @@ Result<void> ValidateRequest(const ImageDescriptor& descriptor, const AxisMap& a
             return Error{ErrorCode::invalid_argument,
                          "Region " + std::to_string(i) + " falls outside the image", node};
         }
-        if ((region.row_runs == nullptr) != (region.row_run_offsets == nullptr)) {
-            return Error{ErrorCode::invalid_argument,
-                         "Region " + std::to_string(i) + " supplies one run array without the other", node};
-        }
     }
 
     return {};

@@ -365,95 +365,23 @@ void TestAnUnfinishedBlockIsHandedOver(const carta::zarr::Image& sky) {
     CheckAgainstOracle(collected, regions, 0, "handed over as it filled");
 }
 
-// The run-length form of a raster, which is what a caller is expected to hand over and what the
-// backend derives from casacore's mask. Written the obvious way on purpose: it is the reference the
-// library's own use of the runs is checked against.
-struct Runs {
-    std::vector<std::uint32_t> runs;
-    std::vector<std::uint64_t> offsets;
-};
-
-// `along_y` walks columns instead of rows, which is what an image whose store varies fastest along
-// m needs: the runs have to lie along the axis the pixels are contiguous in.
-Runs RunsOf(const std::vector<std::uint8_t>& raster, std::uint64_t width, std::uint64_t height, bool along_y) {
-    const std::uint64_t outer = along_y ? width : height;
-    const std::uint64_t inner = along_y ? height : width;
-    const auto at = [&](std::uint64_t o, std::uint64_t i) {
-        const auto x = along_y ? o : i;
-        const auto y = along_y ? i : o;
-        return raster.at(static_cast<std::size_t>((y * width) + x));
-    };
-    Runs out;
-    out.offsets.push_back(0);
-    for (std::uint64_t o = 0; o < outer; ++o) {
-        std::uint64_t i = 0;
-        while (i < inner) {
-            while (i < inner && at(o, i) == 0) {
-                ++i;
-            }
-            if (i == inner) {
-                break;
-            }
-            const auto begin = static_cast<std::uint32_t>(i);
-            while (i < inner && at(o, i) != 0) {
-                ++i;
-            }
-            out.runs.push_back(begin);
-            out.runs.push_back(static_cast<std::uint32_t>(i));
-        }
-        out.offsets.push_back(out.runs.size() / 2);
-    }
-    return out;
-}
-
-// Fill in a region's runs the way the image requires them.
-void Attach(carta::zarr::RegionMask& region, const Runs& runs, carta::zarr::AxisRole axis) {
-    region.row_runs = runs.runs.data();
-    region.row_run_offsets = runs.offsets.data();
-    region.run_axis = axis;
-}
-
-// Runs are the selection when they are given, and they have to select what the raster would. The
-// pattern here is chosen so that a row is two runs with a hole between them, a row is no runs at
-// all, and a run crosses the chunk boundary at l = 2 -- the three shapes a wrong index or a wrong
-// clip would get away with on a solid rectangle.
-void TestRunsSelectTheSamePixelsAsTheRaster(const carta::zarr::Image& sky) {
+// A masked region with the shapes a wrong index or a wrong clip would get away with on a solid
+// rectangle: a line with two runs and a hole between them, a line with none, and a run crossing the
+// chunk boundary at l = 2 -- along both axes, since the reduction lays its runs along whichever one
+// the store varies fastest, and this runs over a fixture of each. Whether the reduction reads it as
+// runs or, this small, as the raster it is, is its own business: what is checked is the pixels.
+void TestAMaskWithHolesMatchesTheOracle(const carta::zarr::Image& sky) {
     std::vector<std::uint8_t> raster(static_cast<std::size_t>(kL) * static_cast<std::size_t>(kM), 0);
     for (std::uint64_t y = 0; y < kM; ++y) {
         for (std::uint64_t x = 0; x < kL; ++x) {
-            // Row 2 and column 1 are cleared so that whichever way the runs have to lie, one of
-            // them is empty.
+            // Row 2 and column 1 are cleared so that whichever way the lines lie, one of them is
+            // empty.
             const bool set = y != 2 && x != 1 && ((x + (2 * y)) % 3) != 0;
             raster.at(static_cast<std::size_t>((y * kL) + x)) = set ? 1 : 0;
         }
     }
-    const auto axis = sky.chunk_geometry().fastest_spatial_axis;
-    const auto runs = RunsOf(raster, kL, kM, axis == carta::zarr::AxisRole::spatial_y);
-    std::size_t empty_rows = 0;
-    std::size_t split_rows = 0;
-    for (std::size_t r = 0; r + 1 < runs.offsets.size(); ++r) {
-        const auto count = runs.offsets.at(r + 1) - runs.offsets.at(r);
-        empty_rows += count == 0 ? 1 : 0;
-        split_rows += count > 1 ? 1 : 0;
-    }
-    Require(empty_rows > 0, "the pattern should leave one line of the region empty");
-    Require(split_rows > 0, "the pattern should leave one line split by a hole");
-
-    const std::vector<carta::zarr::RegionMask> by_raster{{0, 0, kL, kM, raster.data()}};
-    std::vector<carta::zarr::RegionMask> by_runs{{0, 0, kL, kM, nullptr}};
-    Attach(by_runs.at(0), runs, axis);
-
-    const auto from_raster = Collect(sky, WholeSpectrum(by_raster, 0));
-    const auto from_runs = Collect(sky, WholeSpectrum(by_runs, 0));
-    CheckAgainstOracle(from_raster, by_raster, 0, "raster");
-    Require(from_raster.carried == from_runs.carried && from_raster.totals.size() == from_runs.totals.size(),
-            "both forms should report the same shape");
-    for (std::size_t i = 0; i < from_raster.totals.size(); ++i) {
-        for (const auto statistic : kEveryStatistic) {
-            RequireClose(from_runs.At(0, statistic, i), from_raster.At(0, statistic, i),
-                         "runs and raster should select the same pixels at channel " + std::to_string(i));
-        }
-    }
+    const std::vector<carta::zarr::RegionMask> regions{{0, 0, kL, kM, raster.data()}};
+    CheckAgainstOracle(Collect(sky, WholeSpectrum(regions, 0)), regions, 0, "a mask with holes");
 }
 
 // Where the chunk-pruning cases went.
@@ -467,7 +395,7 @@ void TestRunsSelectTheSamePixelsAsTheRaster(const carta::zarr::Image& sky) {
 // The claim is now made twice, in the two halves it was always two claims: carta-zarr-occupancy
 // asserts the index over a 4 x 4 chunk grid, and carta-zarr-reduce-synthetic asks the pixel source
 // how many chunks it was actually given -- sixteen against four, and it says which. What stays here
-// is what needs a real store: TestRunsSelectTheSamePixelsAsTheRaster still checks a masked region's
+// is what needs a real store: TestAMaskWithHolesMatchesTheOracle still checks a masked region's
 // statistics against the oracle through the public interface.
 
 void TestABigRegionIsEmittedALayerAtATime(const carta::zarr::Image& sky) {
@@ -643,7 +571,7 @@ int main() {
             TestEmitGranularityIsReported(sky);
             TestABigRegionIsEmittedALayerAtATime(sky);
             TestAnUnfinishedBlockIsHandedOver(sky);
-            TestRunsSelectTheSamePixelsAsTheRaster(sky);
+            TestAMaskWithHolesMatchesTheOracle(sky);
             TestSinkCancels(sky);
             TestRejectedRequests(sky);
         } catch (const std::exception& error) {

@@ -100,27 +100,6 @@ struct RegionMask {
     // that it finds the chunks a region occupies from the runs, and accumulates every run with the
     // loop an unmasked region uses. A raster too fragmented to be worth runs is read as a raster.
     const std::uint8_t* mask = nullptr;
-    // The same selection in run-length form, made by the caller. No longer needed: the reduction
-    // makes these itself from `mask`, and these fields are going away.
-    //
-    // Row r of the bounding box owns the runs at indices [row_run_offsets[r], row_run_offsets[r+1]),
-    // and run k is the half-open column range [row_runs[2k], row_runs[2k+1]) in bounding box
-    // columns. Runs within a row are disjoint and ascending. Pass both arrays or neither; they must
-    // stay valid for the same time the mask would. `mask` is not read when they are given, and runs
-    // that do not say what the raster would say are not detected.
-    const std::uint32_t* row_runs = nullptr;
-    const std::uint64_t* row_run_offsets = nullptr;
-    // Which spatial axis the runs run along, and therefore what "row" means above.
-    //
-    // spatial_x is the ordinary reading: row r is the r-th row of the bounding box and a run is a
-    // range of columns. spatial_y transposes that: row r is the r-th column and a run is a range of
-    // rows.
-    //
-    // It has to be said because it has to match ChunkGeometry::fastest_spatial_axis -- runs are
-    // worth taking because their pixels are contiguous in the destination, and they are only
-    // contiguous along the axis the store varies fastest. A reduction refuses runs along the other
-    // one rather than quietly reading them with a stride.
-    AxisRole run_axis = AxisRole::spatial_x;
 };
 
 // One plane histogram request: bin every pixel of each plane over a fixed range.

@@ -214,8 +214,8 @@ struct ChunkGeometry {
     // 2048x2048x16 image and differing only in whether l or m is written last, a whole-plane
     // spectral profile took 172.3 ms against 130.3 with zstd and 139.7 against 94.5 uncompressed.
     //
-    // So the walk follows the store rather than the other way round, and a region that describes
-    // itself as runs must run them along this axis. See RegionMask::run_axis.
+    // So the walk follows the store rather than the other way round, and the runs a reduction makes
+    // from a region's raster lie along this axis.
     AxisRole fastest_spatial_axis = AxisRole::spatial_x;
     std::vector<std::uint64_t> chunk_shape;
     std::vector<std::uint64_t> shard_shape;

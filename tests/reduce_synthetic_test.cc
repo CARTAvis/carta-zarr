@@ -281,16 +281,6 @@ void TestAMaskedRegionReadsOnlyTheChunksItOccupies() {
         }
     }
 
-    // The same selection as runs. This image varies y fastest, so a run is a range of rows and the
-    // r-th of them belongs to column r -- see RegionMask::run_axis.
-    std::vector<std::uint32_t> runs;
-    std::vector<std::uint64_t> run_offsets{0};
-    for (std::uint64_t x = 0; x < kSide; ++x) {
-        runs.push_back(static_cast<std::uint32_t>(kChunk * (x / kChunk)));
-        runs.push_back(static_cast<std::uint32_t>((kChunk * (x / kChunk)) + kChunk));
-        run_offsets.push_back(runs.size() / 2);
-    }
-
     // What the diagonal comes to, from the formula the pixels come from.
     std::vector<double> expected_sum(kChannels, 0.0);
     std::vector<double> expected_count(kChannels, 0.0);
@@ -354,14 +344,10 @@ void TestAMaskedRegionReadsOnlyTheChunksItOccupies() {
                 std::string(described) + ": a chunk was decoded more than once");
     };
 
+    // This image varies y fastest, so the runs the reduction makes from the raster are ranges of
+    // rows, one line per column -- the case that used to cost a column walk down the raster.
     carta::zarr::RegionMask rastered{0, 0, kSide, kSide, raster.data()};
     reduce(rastered, "as a raster");
-
-    carta::zarr::RegionMask run_length{0, 0, kSide, kSide, nullptr};
-    run_length.row_runs = runs.data();
-    run_length.row_run_offsets = run_offsets.data();
-    run_length.run_axis = AxisRole::spatial_y;
-    reduce(run_length, "as runs");
 }
 
 // The same counts whether the plane is binned in place or in four pieces that are added up.

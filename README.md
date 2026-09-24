@@ -62,8 +62,10 @@ std::vector<float> pixels(512 * 512);
 auto written = image.value().Read(request, {pixels.data(), pixels.size()});
 ```
 
-`carta::zarr::IsXradioImage(path)` answers the "can this library open it?" question on its own, and
-`Probe` reports what a path is without opening anything.
+`carta::zarr::ProbeSchema(path, carta::zarr::kXradioImageSchema)` answers "is this an image dataset
+this library reads?" without opening an image: a `SchemaMatchKind` of match, no match, or a match
+that is malformed. `Dataset::Open` lists the images in one, and `ImageEntry::openable` says which of
+them will open.
 
 ### What the API promises
 
@@ -75,15 +77,17 @@ auto written = image.value().Read(request, {pixels.data(), pixels.size()});
   fastest; `AxisDescriptor::storage_index` says where each one lives on disk.
 - **Pixels come back as `float32`**, converted during the read rather than materialised in their
   stored type first. Reductions accumulate and report in `double`.
-- **Pixel masks are applied by default.** An image with a flag variable reads a masked pixel as NaN;
-  `ReadOptions::apply_pixel_mask` turns that off, and `ReadPixelMask` returns the mask itself as one
-  byte per pixel. A declared mask must be boolean and carry the image's own dimensions in order, or
-  the image does not open.
-- **Reads are cancellable.** `ReadOptions` carries a cancellation callback, a deadline, a progress
-  callback, and a ceiling on the temporary memory a request may hold.
+- **Pixel masks are applied by default.** An image with a flag variable reads a masked pixel as NaN,
+  so a consumer that wants the mask reads it as finiteness; `ReadOptions::apply_pixel_mask` turns
+  that off. A declared mask must be boolean and carry the image's own dimensions in order, or the
+  image does not open.
+- **Reads are cancellable.** `ReadOptions::control` carries a cancellation callback, a deadline and
+  a cache policy, which every read and reduction honours; `ReadOptions` adds a ceiling on the
+  temporary memory a request may hold. A read's progress is an argument of `Image::Read`, and a
+  reduction's arrives with its blocks.
 - **Threading**: `Context`, `Dataset` and `Image` handles may be shared and read from several
-  threads at once. Reductions running concurrently share one worker pool and are serialised inside
-  it, so they are safe but do not run in parallel with each other.
+  threads at once. Reductions running concurrently share one worker pool, which runs one read's
+  arithmetic at a time: two reductions interleave read by read rather than running side by side.
 
 ## Documentation
 

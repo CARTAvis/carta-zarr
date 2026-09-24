@@ -66,7 +66,7 @@ void WriteUtf32(const std::filesystem::path& path, const std::vector<std::string
     Require(static_cast<bool>(output), "Unable to finish writing " + path.string());
 }
 
-bool HasDiagnostic(const std::vector<carta::zarr::Diagnostic>& diagnostics, const std::string& code) {
+bool HasDiagnostic(const std::vector<carta::zarr::Diagnostic>& diagnostics, carta::zarr::DiagnosticCode code) {
     return std::any_of(diagnostics.begin(), diagnostics.end(),
                        [&](const auto& diagnostic) { return diagnostic.code == code; });
 }
@@ -350,9 +350,10 @@ void TestReferenceFixture() {
         Require(!dataset.value().OpenImage(coordinate),
                 std::string("optional coordinate ") + coordinate + " was openable as an image");
     }
-    Require(HasDiagnostic(dataset.value().descriptor().diagnostics, "unsupported_coordinate_plane"),
+    Require(HasDiagnostic(dataset.value().descriptor().diagnostics,
+                          carta::zarr::DiagnosticCode::unsupported_coordinate_plane),
             "aperture-plane diagnostic was not reported");
-    Require(HasDiagnostic(dataset.value().descriptor().diagnostics, "unsupported_data_type"),
+    Require(HasDiagnostic(dataset.value().descriptor().diagnostics, carta::zarr::DiagnosticCode::unsupported_data_type),
             "complex-dtype diagnostic was not reported");
     Require(desc.direction.has_value(), "DirectionCoordinate missing in reference fixture");
     Require(desc.direction->projection_parameters == std::vector<double>{0.25, -0.5},
@@ -373,7 +374,7 @@ void TestReferenceFixture() {
             "nonuniform spectral coordinates incorrectly exposed a linear description");
     // Withholding the linear description is not enough on its own: the consumer has to know it must
     // build a tabular axis, so the reason is reported rather than left silent.
-    Require(HasDiagnostic(desc.diagnostics, "nonuniform_axis"),
+    Require(HasDiagnostic(desc.diagnostics, carta::zarr::DiagnosticCode::nonuniform_axis),
             "nonuniform spectral coordinates did not report why they carry no linear description");
     Require(desc.polarization.has_value(), "PolarizationCoordinate missing in reference fixture");
     Require(!desc.polarization->labels.empty(), "Polarization labels empty in reference fixture");
@@ -508,7 +509,8 @@ void TestCoordinateCompletion(const std::filesystem::path& root) {
     Require(static_cast<bool>(inexact_dataset), "inexact coordinate dataset did not open");
     const auto inexact_image = inexact_dataset.value().OpenImage("SKY");
     Require(static_cast<bool>(inexact_image), "inexact coordinate image did not open");
-    Require(HasDiagnostic(inexact_image.value().descriptor().diagnostics, "inexact_reference_pixel"),
+    Require(HasDiagnostic(inexact_image.value().descriptor().diagnostics,
+                          carta::zarr::DiagnosticCode::inexact_reference_pixel),
             "inexact direction reference pixel did not produce a diagnostic");
     Require(inexact_image.value().descriptor().direction->reference_pixel.at(0) == 4.0,
             "inexact direction reference pixel did not use linear extrapolation");
@@ -596,7 +598,8 @@ void TestADatasetWithAnUnparseableNodeStillOpens(const std::filesystem::path& ro
 
     const auto& said = dataset.value().descriptor().diagnostics;
     const auto junk = std::find_if(said.begin(), said.end(), [](const carta::zarr::Diagnostic& diagnostic) {
-        return diagnostic.code == "unrecognised_node" && diagnostic.node_path.find("JUNK") != std::string::npos;
+        return diagnostic.code == carta::zarr::DiagnosticCode::unrecognised_node &&
+               diagnostic.node_path.find("JUNK") != std::string::npos;
     });
     Require(junk != said.end(), "the dataset opened without saying which node it could not read");
     Require(static_cast<bool>(dataset.value().OpenImage("SKY")), "the image beside an unparseable node did not open");
@@ -679,7 +682,7 @@ void TestAShardingCodecThatDescribesNoChunks(const std::filesystem::path& root) 
 
     const auto said = std::find_if(probe.value().diagnostics.begin(), probe.value().diagnostics.end(),
                                    [](const carta::zarr::Diagnostic& diagnostic) {
-                                       return diagnostic.code == "unreadable_array";
+                                       return diagnostic.code == carta::zarr::DiagnosticCode::unreadable_array;
                                    });
     Require(said != probe.value().diagnostics.end(),
             "the store lost its image without saying which node or why");

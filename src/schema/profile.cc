@@ -114,13 +114,11 @@ Result<ProbeResult> ProbeStore(const Store& store) {
 
     if (matches.size() > 1) {
         // Unreachable while BuiltIn holds one entry, and the only thing here that a second profile
-        // turns on. The code name comes from the enumerator rather than from a literal beside it so
-        // that the two cannot drift apart in the meantime -- ErrorCode::ambiguous_schema is not
-        // emitted anywhere yet, because this answers with a ProbeResult rather than an Error.
+        // turns on. ErrorCode::ambiguous_schema is not emitted anywhere yet, because this answers
+        // with a ProbeResult rather than an Error.
         result.kind = ProbeKind::invalid_dataset;
-        result.diagnostics.push_back(Diagnostic{zarr::ErrorCodeName(ErrorCode::ambiguous_schema),
-                                                "More than one built-in schema profile matched the Zarr store",
-                                                {}});
+        result.diagnostics.push_back(Diagnostic{
+            DiagnosticCode::ambiguous_schema, "More than one built-in schema profile matched the Zarr store", {}});
     } else if (matches.size() == 1) {
         auto& match = matches.front();
         result.kind = ProbeKind::supported_dataset;

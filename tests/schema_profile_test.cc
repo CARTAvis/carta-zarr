@@ -42,9 +42,9 @@ using carta::zarr::testing::MakeInMemoryTransport;
 
 using carta::zarr::testing::Require;
 
-bool HasDiagnostic(const carta::zarr::SchemaProbeResult& probe, const std::string& code);
+bool HasDiagnostic(const carta::zarr::SchemaProbeResult& probe, carta::zarr::DiagnosticCode code);
 
-bool HasDiagnostic(const std::vector<carta::zarr::Diagnostic>& diagnostics, const std::string& code) {
+bool HasDiagnostic(const std::vector<carta::zarr::Diagnostic>& diagnostics, carta::zarr::DiagnosticCode code) {
     for (const auto& diagnostic : diagnostics) {
         if (diagnostic.code == code) {
             return true;
@@ -53,7 +53,7 @@ bool HasDiagnostic(const std::vector<carta::zarr::Diagnostic>& diagnostics, cons
     return false;
 }
 
-bool HasDiagnostic(const carta::zarr::SchemaProbeResult& probe, const std::string& code) {
+bool HasDiagnostic(const carta::zarr::SchemaProbeResult& probe, carta::zarr::DiagnosticCode code) {
     return HasDiagnostic(probe.diagnostics, code);
 }
 
@@ -205,7 +205,7 @@ void TestNothingOpenableSaysWhy() {
     using carta::zarr::internal::ProbeStore;
     using carta::zarr::internal::RequireOpenableDataset;
 
-    const auto refused = [](std::map<std::string, std::string> nodes, const std::string& code,
+    const auto refused = [](std::map<std::string, std::string> nodes, carta::zarr::DiagnosticCode code,
                             const std::string& message) {
         auto store = Open(std::move(nodes));
         Require(static_cast<bool>(store), "the unopenable store failed to open");
@@ -227,11 +227,13 @@ void TestNothingOpenableSaysWhy() {
 
     auto complex = CompleteStore();
     complex["SKY"] = SkyArray("complex64");
-    refused(complex, "unsupported_data_type", "Complex sky-plane variables are not openable");
+    refused(complex, carta::zarr::DiagnosticCode::unsupported_data_type,
+            "Complex sky-plane variables are not openable");
 
     auto aperture = CompleteStore();
     aperture["SKY"] = SkyArray("float32", "{}", R"(["time","frequency","polarization","u","v"])");
-    refused(aperture, "unsupported_coordinate_plane", "Aperture-plane variables are not openable");
+    refused(aperture, carta::zarr::DiagnosticCode::unsupported_coordinate_plane,
+            "Aperture-plane variables are not openable");
 }
 
 void TestMissingCoordinateIsInvalid() {
@@ -240,7 +242,8 @@ void TestMissingCoordinateIsInvalid() {
     const auto probe = Probe(nodes);
     Require(probe.kind == SchemaMatchKind::invalid,
             "an image dataset missing its time coordinate was not reported as invalid");
-    Require(HasDiagnostic(probe.diagnostics, "invalid_metadata"), "the missing coordinate produced no diagnostic");
+    Require(HasDiagnostic(probe.diagnostics, carta::zarr::DiagnosticCode::invalid_metadata),
+            "the missing coordinate produced no diagnostic");
 }
 
 void TestCoordinateShapeMismatchIsInvalid() {
@@ -256,7 +259,7 @@ void TestCoordinateDataTypeIsChecked() {
     nodes["polarization"] = PolarizationArray("\"float64\"");
     const auto probe = Probe(nodes);
     Require(probe.kind == SchemaMatchKind::invalid, "a numeric polarization coordinate was accepted");
-    Require(HasDiagnostic(probe.diagnostics, "unsupported_data_type"),
+    Require(HasDiagnostic(probe.diagnostics, carta::zarr::DiagnosticCode::unsupported_data_type),
             "the polarization data type produced no diagnostic");
 }
 
@@ -305,9 +308,9 @@ void TestDiscoveryClassifiesVariables() {
     Require(OpenableImageIds(discovery.value().images) == std::vector<std::string>{"SKY", "MODEL"},
             "discovery did not restrict the openable images to real sky-plane variables");
     Require(discovery.value().default_image_id == "SKY", "discovery did not select the default openable image");
-    Require(HasDiagnostic(discovery.value().diagnostics, "unsupported_coordinate_plane"),
+    Require(HasDiagnostic(discovery.value().diagnostics, carta::zarr::DiagnosticCode::unsupported_coordinate_plane),
             "the aperture-plane variable produced no diagnostic");
-    Require(HasDiagnostic(discovery.value().diagnostics, "unsupported_data_type"),
+    Require(HasDiagnostic(discovery.value().diagnostics, carta::zarr::DiagnosticCode::unsupported_data_type),
             "the complex variable produced no diagnostic");
 }
 
@@ -396,7 +399,7 @@ void TestANestedGroupIsNotABrokenArray() {
     const auto profile = XradioProfile();
     const auto discovery = profile.Discover(store.value());
     Require(static_cast<bool>(discovery), "discovery failed on the nested-group store");
-    Require(!HasDiagnostic(discovery.value().diagnostics, "unreadable_array"),
+    Require(!HasDiagnostic(discovery.value().diagnostics, carta::zarr::DiagnosticCode::unreadable_array),
             "a valid group was diagnosed as an array that could not be read");
     Require(ImageIds(discovery.value().images) == std::vector<std::string>{"SKY"},
             "a group was listed among the dataset's images");
@@ -470,7 +473,8 @@ void TestOneRuleDecidesWhatDatasetIsOpenable() {
     {
         carta::zarr::internal::ProbeResult probe;
         probe.kind = ProbeKind::invalid_dataset;
-        probe.diagnostics.push_back(carta::zarr::Diagnostic{"missing_coordinate", "frequency is missing", "SKY"});
+        probe.diagnostics.push_back(
+            carta::zarr::Diagnostic{carta::zarr::DiagnosticCode::invalid_metadata, "frequency is missing", "SKY"});
         const auto openable = RequireOpenableDataset(probe, "/tmp/store");
         Require(!openable && openable.error().code == ErrorCode::invalid_metadata,
                 "a malformed store should be refused as invalid metadata");
@@ -521,7 +525,7 @@ void TestDefaultImageSkipsUnopenablePreferredImage() {
     const auto sky = std::find_if(discovery.value().images.begin(), discovery.value().images.end(),
                                   [](const auto& image) { return image.id == "SKY"; });
     Require(sky != discovery.value().images.end() && !sky->openable &&
-                HasDiagnostic(sky->diagnostics, "unsupported_data_type"),
+                HasDiagnostic(sky->diagnostics, carta::zarr::DiagnosticCode::unsupported_data_type),
             "the unopenable image did not carry its capability diagnostic");
 }
 
@@ -682,14 +686,17 @@ void TestANodeThatWillNotParseIsDiagnosedNotRefused() {
     // Neither said what it was, and both say so under the one code for that. Neither is called an
     // array, because neither claimed to be one.
     const auto& said = discovery.value().diagnostics;
-    const auto code_for = [&](const std::string& node) {
-        const auto found = std::find_if(said.begin(), said.end(),
-                                        [&](const auto& diagnostic) { return diagnostic.node_path == node; });
-        return found == said.end() ? std::string{} : found->code;
+    const auto said_of = [&](const std::string& node, carta::zarr::DiagnosticCode code) {
+        return std::any_of(said.begin(), said.end(), [&](const auto& diagnostic) {
+            return diagnostic.node_path == node && diagnostic.code == code;
+        });
     };
-    Require(code_for("JUNK") == "unrecognised_node", "a document that will not parse was not diagnosed as such");
-    Require(code_for("ODD") == "unrecognised_node", "a node_type Zarr does not define was not diagnosed as such");
-    Require(!HasDiagnostic(said, "unreadable_array"), "a node that never said it was an array was called one");
+    Require(said_of("JUNK", carta::zarr::DiagnosticCode::unrecognised_node),
+            "a document that will not parse was not diagnosed as such");
+    Require(said_of("ODD", carta::zarr::DiagnosticCode::unrecognised_node),
+            "a node_type Zarr does not define was not diagnosed as such");
+    Require(!HasDiagnostic(said, carta::zarr::DiagnosticCode::unreadable_array),
+            "a node that never said it was an array was called one");
 
     // The declared size counts the arrays it can see, and a node it cannot read is not one of them.
     const auto size = carta::zarr::internal::DatasetSizeBytes(store.value(),
@@ -715,7 +722,8 @@ void TestFirstFaultIsTheOnlyDiagnostic() {
     Require(probe.diagnostics.size() == 1, "the report diagnosed more than the first unmet requirement");
     Require(probe.diagnostics.front().node_path == "frequency",
             "the diagnostic did not come from the first requirement checked");
-    Require(!HasDiagnostic(probe, "unsupported_data_type"), "a requirement after the first failure was still checked");
+    Require(!HasDiagnostic(probe, carta::zarr::DiagnosticCode::unsupported_data_type),
+            "a requirement after the first failure was still checked");
 }
 
 // Store-level rejections, reported before any profile is consulted.
@@ -773,7 +781,8 @@ void TestAmbiguousFlagsSelectNone() {
     auto chosen = DetermineFlag(store.value(), image.value(), "SKY", diagnostics);
     Require(static_cast<bool>(chosen), "ambiguous flags reported an error rather than no mask");
     Require(chosen.value().empty(), "ambiguous flags selected a pixel mask");
-    Require(HasDiagnostic(diagnostics, "ambiguous_pixel_mask"), "ambiguous flags did not produce a diagnostic");
+    Require(HasDiagnostic(diagnostics, carta::zarr::DiagnosticCode::ambiguous_pixel_mask),
+            "ambiguous flags did not produce a diagnostic");
 
     // One candidate is not ambiguous: the same store with FLAG_2 removed selects FLAG_1.
     nodes.erase("FLAG_2");

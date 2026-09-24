@@ -50,11 +50,6 @@ public:
     // A node's metadata must have parsed.
     bool RequireArrayMetadata(const Result<zarr::ArrayMetadata>& metadata, std::string_view node);
 
-    // A requirement the caller checked itself. Diagnosing without latching is the one way to get
-    // this class wrong -- a probe that says what is broken and then reports a match -- so there is
-    // no way to add a diagnostic that does not also stop the probe.
-    bool RequireThat(bool condition, std::string code, std::string message, std::string node_path);
-
     // Findings that are not failures: what discovery observed while listing a store's variables.
     void SetDiagnostics(std::vector<Diagnostic> diagnostics);
 
@@ -67,8 +62,8 @@ public:
     Result<SchemaProbeResult> Finish(SchemaMatchKind kind, std::string schema_version) const;
 
 private:
-    void AddDiagnostic(std::string code, std::string message, std::string node_path = {});
-    bool Fail(std::string code, std::string message, std::string node_path);
+    void AddDiagnostic(DiagnosticCode code, std::string message, std::string node_path = {});
+    bool Fail(DiagnosticCode code, std::string message, std::string node_path);
 
     // ProbeReport borrows the store for its short-lived probing operation.
     const Store* _store;

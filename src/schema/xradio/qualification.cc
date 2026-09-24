@@ -46,7 +46,7 @@ std::optional<Diagnostic> DisagreementWithCoordinates(const Store& store,
             continue;
         }
         if (coordinate.value().shape.size() != 1 || coordinate.value().shape.front() != image.shape.at(axis)) {
-            return Diagnostic{"invalid_metadata",
+            return Diagnostic{DiagnosticCode::invalid_metadata,
                               "Image dimension '" + name + "' is not the length of the coordinate of that name",
                               std::string(node)};
         }
@@ -77,12 +77,13 @@ NodeQualification QualifyNode(const Store& store, const NodeEntry& entry) {
     // say what it was -- a document that would not parse, or a node_type Zarr does not define -- and
     // calling that an array would be a guess.
     if (entry.kind == NodeKind::unrecognised) {
-        return NodeQualification{false, false, Diagnostic{"unrecognised_node", entry.reason->message, node}, true};
+        return NodeQualification{false, false,
+                                 Diagnostic{DiagnosticCode::unrecognised_node, entry.reason->message, node}, true};
     }
     const auto& metadata = *entry.array;
     if (!metadata) {
-        return NodeQualification{false, false, Diagnostic{"unreadable_array", metadata.error().message, node},
-                                 true};
+        return NodeQualification{false, false,
+                                 Diagnostic{DiagnosticCode::unreadable_array, metadata.error().message, node}, true};
     }
 
     const auto& array = metadata.value();
@@ -92,10 +93,10 @@ NodeQualification QualifyNode(const Store& store, const NodeEntry& entry) {
 
     if (HasAllAxes(array, kSkyAxes)) {
         if (!zarr_metadata::IsRealDataType(array.data_type)) {
-            return NodeQualification{
-                true, false,
-                Diagnostic{"unsupported_data_type", "Complex sky-plane variables are not openable", std::string(node)},
-                false};
+            return NodeQualification{true, false,
+                                     Diagnostic{DiagnosticCode::unsupported_data_type,
+                                                "Complex sky-plane variables are not openable", std::string(node)},
+                                     false};
         }
         if (auto disagreement = DisagreementWithCoordinates(store, array, node); disagreement) {
             return NodeQualification{true, false, std::move(disagreement), true};
@@ -105,7 +106,7 @@ NodeQualification QualifyNode(const Store& store, const NodeEntry& entry) {
 
     if (HasAllAxes(array, kApertureAxes)) {
         return NodeQualification{true, false,
-                                 Diagnostic{"unsupported_coordinate_plane",
+                                 Diagnostic{DiagnosticCode::unsupported_coordinate_plane,
                                             "Aperture-plane variables are not openable", std::string(node)},
                                  false};
     }

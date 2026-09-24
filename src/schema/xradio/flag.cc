@@ -46,7 +46,7 @@ Result<std::string> DetermineFlag(const Store& store, const zarr::ArrayMetadata&
         return matching_flags.front();
     }
     if (matching_flags.size() > 1) {
-        diagnostics.push_back(Diagnostic{"ambiguous_pixel_mask",
+        diagnostics.push_back(Diagnostic{DiagnosticCode::ambiguous_pixel_mask,
                                          "More than one flag variable matches the image; no pixel mask was selected",
                                          std::string(image_id)});
     }

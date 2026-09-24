@@ -55,9 +55,6 @@ public:
 
     const std::vector<Diagnostic>& diagnostics() const noexcept;
 
-    // The message for a caller reporting this probe's failure as an error rather than a diagnostic.
-    std::string InvalidMessage() const;
-
     // Yields the probe result, or the read error if one stopped the probe.
     Result<SchemaProbeResult> Finish(SchemaMatchKind kind, std::string schema_version) const;
 

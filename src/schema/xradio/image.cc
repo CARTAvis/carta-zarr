@@ -271,9 +271,9 @@ Result<SchemaInspection> InspectImages(const Store& store) {
     const auto& array_result = store.ReadArrayMetadata(first_image);
     if (report.RequireArrayMetadata(array_result, first_image)) {
         RequirePresentCoordinates(report, array_result.value());
-        if (report.ok() && HasAttribute(root_attributes, "coordinate_system_info")) {
-            report.RequireCoordinateSystem(root_attributes);
-        }
+        // Unconditionally: every XRADIO writes it, so a store without it is malformed rather than a
+        // store with no direction to report.
+        report.RequireCoordinateSystem(root_attributes);
     }
     return finish(report.ok() ? SchemaMatchKind::match : SchemaMatchKind::invalid);
 }
@@ -347,9 +347,11 @@ Result<DescribedImage> DescribeImageFrom(const Store& store, std::string_view im
 
     // A direction axis is linear by construction, so its increment is reported even when the samples
     // are not evenly spaced; the fit says so in a diagnostic rather than withholding the value.
-    if (auto direction = DescribeDirection(root_attrs, values.l, values.m, descriptor.diagnostics); direction) {
-        descriptor.direction = std::move(direction);
+    auto direction = DescribeDirection(root_attrs, values.l, values.m, descriptor.diagnostics);
+    if (!direction) {
+        return direction.error();
     }
+    descriptor.direction = std::move(direction.value());
 
     // Absent because the image has none -- a continuum image has no frequency coordinate -- not
     // because describing it failed. Same for the temporal one below.

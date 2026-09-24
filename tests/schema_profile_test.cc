@@ -271,6 +271,18 @@ void TestMalformedCoordinateSystemIsInvalid() {
     Require(probe.kind == SchemaMatchKind::invalid, "malformed coordinate_system_info was accepted");
 }
 
+// Every XRADIO writes coordinate_system_info, so a store without it is malformed too. The probe
+// used to look only when it was there, and such a store opened with a direction of "" at (0, 0).
+void TestAMissingCoordinateSystemIsInvalid() {
+    auto nodes = CompleteStore();
+    nodes[""] = RootGroup(false);
+    const auto probe = Probe(nodes);
+    Require(probe.kind == SchemaMatchKind::invalid, "a store with no coordinate_system_info was accepted");
+    Require(!probe.diagnostics.empty() &&
+                probe.diagnostics.front().node_path == "/attributes/coordinate_system_info",
+            "the refusal should name the attribute that is missing");
+}
+
 // Discovery only recognizes complete image planes. An incomplete SKY-only store is simply a
 // non-match because it offers no complete image plane.
 void TestIncompleteImageIsNotMatch() {
@@ -937,6 +949,7 @@ int main() {
         TestCoordinateShapeMismatchIsInvalid();
         TestCoordinateDataTypeIsChecked();
         TestMalformedCoordinateSystemIsInvalid();
+        TestAMissingCoordinateSystemIsInvalid();
         TestFirstFaultIsTheOnlyDiagnostic();
         TestIncompleteImageIsNotMatch();
         TestDiscoveryClassifiesVariables();

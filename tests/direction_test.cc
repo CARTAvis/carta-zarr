@@ -45,13 +45,26 @@ nlohmann::json Root(nlohmann::json coordinate_system) {
     return nlohmann::json{{"type", "image_dataset"}, {"coordinate_system_info", std::move(coordinate_system)}};
 }
 
-DirectionCoordinate Describe(const nlohmann::json& coordinate_system,
-                             const std::vector<double>& l = kSamples,
+// Everything coordinate_system_info must say, and nothing it may leave out.
+nlohmann::json Complete() {
+    return {{"projection", "SIN"},
+            {"reference_direction", {{"data", {0.0, 0.0}}}},
+            {"native_pole_direction", {{"data", {0.0, M_PI / 2.0}}}},
+            {"pixel_coordinate_transformation_matrix", {{1.0, 0.0}, {0.0, 1.0}}}};
+}
+
+// A complete coordinate system with `changes` written over it.
+DirectionCoordinate Describe(const nlohmann::json& changes, const std::vector<double>& l = kSamples,
                              const std::vector<double>& m = kSamples) {
+    auto coordinate_system = Complete();
+    if (!changes.is_null()) {  // `{}` arrives as null rather than as an empty object
+        coordinate_system.update(changes);
+    }
     std::vector<Diagnostic> diagnostics;
     auto direction = DescribeDirection(Root(coordinate_system), l, m, diagnostics);
-    Require(direction.has_value(), "a direction coordinate was expected");
-    return *direction;
+    Require(static_cast<bool>(direction),
+            "a direction coordinate was expected: " + (direction ? "" : direction.error().message));
+    return direction.value();
 }
 
 // The matrix that was never read back. Every fixture writes the identity, so a transposed copy is
@@ -67,17 +80,37 @@ void TestTheTransformationMatrixKeepsItsShape() {
     Require(Near(direction.transformation_matrix.at(1).at(1), 0.6), "element (1, 1)");
 }
 
-// Absent, or the wrong shape, leaves the identity rather than a half-filled matrix.
-void TestAMalformedMatrixLeavesTheIdentity() {
+// What every XRADIO writes is required, and one missing or malformed is refused rather than filled
+// in. This used to leave the identity for a bad matrix and "" for a missing projection -- a
+// leniency the probe made unreachable by refusing first, and that hid a store with no coordinate
+// system at all, which the probe did not look at.
+void TestAnIncompleteCoordinateSystemIsRefused() {
+    const auto refused = [](const nlohmann::json& root, const std::string& what) {
+        const auto read = carta::zarr::internal::xradio::ReadCoordinateSystem(root);
+        Require(!read, what + " was accepted");
+        Require(read.error().code == carta::zarr::ErrorCode::invalid_metadata, what + ": not invalid_metadata");
+        Require(read.error().node_path == "/attributes/coordinate_system_info", what + ": names another node");
+    };
+    refused(nlohmann::json{{"type", "image_dataset"}}, "a root with no coordinate system");
+    refused(Root("not an object"), "a coordinate system that is not an object");
+    for (const auto* const field :
+         {"projection", "reference_direction", "native_pole_direction", "pixel_coordinate_transformation_matrix"}) {
+        auto without = Complete();
+        without.erase(field);
+        refused(Root(without), std::string("a coordinate system without ") + field);
+    }
     for (const auto& matrix : {nlohmann::json{{1.0, 2.0, 3.0}}, nlohmann::json{"not a matrix"},
                                nlohmann::json{{"a", "b"}, {"c", "d"}}}) {
-        const auto direction = Describe({{"pixel_coordinate_transformation_matrix", matrix}});
-        Require(Near(direction.transformation_matrix.at(0).at(0), 1.0) &&
-                    Near(direction.transformation_matrix.at(0).at(1), 0.0) &&
-                    Near(direction.transformation_matrix.at(1).at(0), 0.0) &&
-                    Near(direction.transformation_matrix.at(1).at(1), 1.0),
-                "a matrix that is not two by two of numbers should leave the identity alone");
+        auto malformed = Complete();
+        malformed["pixel_coordinate_transformation_matrix"] = matrix;
+        refused(Root(malformed), "a matrix that is not two by two of numbers");
     }
+    auto empty_projection = Complete();
+    empty_projection["projection"] = "";
+    refused(Root(empty_projection), "an empty projection");
+    auto short_pole = Complete();
+    short_pole["native_pole_direction"] = {{"data", {0.0}}};
+    refused(Root(short_pole), "a one-value native pole");
 }
 
 // XRADIO writes radians; the descriptor reports degrees. Three separate places convert, and all
@@ -129,9 +162,9 @@ void TestProjectionParametersAreCarried() {
 void TestAnUnevenAxisReportsAnIncrementAndADiagnostic() {
     const std::vector<double> uneven{0.0, 1.0e-4, 2.5e-4, 3.0e-4};
     std::vector<Diagnostic> diagnostics;
-    const auto direction = DescribeDirection(Root({{"projection", "SIN"}}), uneven, kSamples, diagnostics);
-    Require(direction.has_value(), "an uneven axis still describes a direction");
-    Require(Near(direction->increment.at(0), 1.0e-4 * kRadToDeg), "with an increment in degrees");
+    const auto direction = DescribeDirection(Root(Complete()), uneven, kSamples, diagnostics);
+    Require(static_cast<bool>(direction), "an uneven axis still describes a direction");
+    Require(Near(direction.value().increment.at(0), 1.0e-4 * kRadToDeg), "with an increment in degrees");
     bool said_so = false;
     for (const auto& diagnostic : diagnostics) {
         said_so = said_so || diagnostic.code == carta::zarr::DiagnosticCode::nonuniform_axis;
@@ -139,14 +172,12 @@ void TestAnUnevenAxisReportsAnIncrementAndADiagnostic() {
     Require(said_so, "and a diagnostic saying the samples were not evenly spaced");
 }
 
-// Nothing to describe at all.
-void TestNothingToDescribe() {
-    std::vector<Diagnostic> diagnostics;
-    const nlohmann::json bare{{"type", "image_dataset"}};
-    Require(!DescribeDirection(bare, {}, {}, diagnostics).has_value(),
-            "no coordinate system and no samples describes no direction");
-    Require(DescribeDirection(bare, kSamples, kSamples, diagnostics).has_value(),
-            "samples alone still describe the pixel grid, even with no coordinate system");
+// What may be left out leaves its field empty rather than refusing the store.
+void TestTheOptionalPartsMayBeLeftOut() {
+    const auto direction = Describe({});
+    Require(direction.reference_frame.empty(), "no frame written, none reported");
+    Require(!direction.equinox.has_value(), "no equinox written, none reported");
+    Require(direction.projection_parameters.empty(), "no projection parameters written, none reported");
 }
 
 }  // namespace
@@ -154,13 +185,13 @@ void TestNothingToDescribe() {
 int main() {
     try {
         TestTheTransformationMatrixKeepsItsShape();
-        TestAMalformedMatrixLeavesTheIdentity();
+        TestAnIncompleteCoordinateSystemIsRefused();
         TestRadiansBecomeDegrees();
         TestEquinoxIsReadInEveryFormXradioWrites();
         TestTheFrameAndProjectionAreUpperCased();
         TestProjectionParametersAreCarried();
         TestAnUnevenAxisReportsAnIncrementAndADiagnostic();
-        TestNothingToDescribe();
+        TestTheOptionalPartsMayBeLeftOut();
         std::cout << "carta-zarr direction tests passed\n";
         return 0;
     } catch (const std::exception& error) {

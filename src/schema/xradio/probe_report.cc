@@ -6,6 +6,8 @@
 
 #include "probe_report.h"
 
+#include "direction.h"
+
 #include <utility>
 
 namespace carta::zarr::internal::xradio {
@@ -135,32 +137,9 @@ bool ProbeReport::RequireCoordinateSystem(const nlohmann::json& root_attributes)
     if (!ok()) {
         return false;
     }
-    const std::string node = "/attributes/coordinate_system_info";
-    if (!root_attributes.is_object() || !root_attributes.contains("coordinate_system_info") ||
-        !root_attributes.at("coordinate_system_info").is_object()) {
-        return Fail(DiagnosticCode::invalid_metadata, "XRADIO requires coordinate_system_info metadata", node);
-    }
-    const auto& coordinate = root_attributes.at("coordinate_system_info");
-    if (!coordinate.contains("projection") || !coordinate.at("projection").is_string() ||
-        coordinate.at("projection").get<std::string>().empty()) {
-        return Fail(DiagnosticCode::invalid_metadata, "coordinate_system_info requires a projection", node);
-    }
-    if (!coordinate.contains("reference_direction") || !coordinate.at("reference_direction").is_object() ||
-        !coordinate.at("reference_direction").contains("data") ||
-        !zarr_metadata::IsNumericVector(coordinate.at("reference_direction").at("data"), 2)) {
-        return Fail(DiagnosticCode::invalid_metadata, "coordinate_system_info requires a two-value reference direction",
-                    node);
-    }
-    if (!coordinate.contains("native_pole_direction") || !coordinate.at("native_pole_direction").is_object() ||
-        !coordinate.at("native_pole_direction").contains("data") ||
-        !zarr_metadata::IsNumericVector(coordinate.at("native_pole_direction").at("data"), 2)) {
-        return Fail(DiagnosticCode::invalid_metadata,
-                    "coordinate_system_info requires a two-value native pole direction", node);
-    }
-    if (!coordinate.contains("pixel_coordinate_transformation_matrix") ||
-        !zarr_metadata::IsNumericMatrix(coordinate.at("pixel_coordinate_transformation_matrix"), 2, 2)) {
-        return Fail(DiagnosticCode::invalid_metadata,
-                    "coordinate_system_info requires a 2x2 pixel transformation matrix", node);
+    // Read the way the description reads it, so that what is accepted here is what is reported.
+    if (auto read = ReadCoordinateSystem(root_attributes); !read) {
+        return Fail(DiagnosticCode::invalid_metadata, read.error().message, read.error().node_path);
     }
     return true;
 }

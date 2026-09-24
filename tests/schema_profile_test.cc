@@ -17,6 +17,7 @@
 
 #include "schema/profile.h"
 #include "schema/xradio/flag.h"
+#include "schema/xradio/image.h"
 #include "store.h"
 
 #include "support/check.h"
@@ -860,6 +861,70 @@ void TestSizeRefusesAStoreWithNoArrays() {
             "a store holding no arrays was given a size");
 }
 
+// Every rule that turns metadata and coordinate values into a descriptor, reached with the values
+// handed in. This build reads no values, so while describing an image read its own, everything
+// below was reachable only from a store written to disk -- and the image_type fallback and the time
+// axis's scale and format were not reached at all.
+void TestADescriptionIsBuiltFromTheValuesItIsGiven() {
+    using carta::zarr::internal::xradio::CoordinateValues;
+    using carta::zarr::internal::xradio::DescribeImageFrom;
+
+    auto nodes = CompleteStore();
+    nodes["frequency"] = NumericArray("[3]", R"(["frequency"])", "float64",
+                                      R"({"units":"Hz","reference_frequency":{"data":1.402e9,"attrs":{"observer":"lsrk"}},
+                                          "rest_frequency":{"data":1.420405751e9}})");
+    nodes["time"] = NumericArray("[1]", R"(["time"])", "float64", R"({"units":"s","scale":"utc","format":"unix"})");
+    auto store = Open(nodes);
+    Require(static_cast<bool>(store), "the in-memory store failed to open");
+
+    CoordinateValues values;
+    values.l = {-0.001, 0.0, 0.001, 0.002};
+    values.m = {-0.002, -0.001, 0.0, 0.001, 0.002};
+    values.frequency = {1.4e9, 1.401e9, 1.402e9};
+    values.time = {1.6e9};
+    values.polarization = std::vector<std::string>{"I", "Q"};
+
+    const auto described = DescribeImageFrom(store.value(), "SKY", values);
+    Require(static_cast<bool>(described),
+            "an image with its values in hand should be described: " + (described ? "" : described.error().message));
+    const auto& descriptor = described.value().descriptor;
+
+    Require(descriptor.direction && descriptor.direction->projection == "SIN", "the direction comes from the root");
+    Require(descriptor.spectral.has_value(), "three channels make a spectral coordinate");
+    const auto& spectral = *descriptor.spectral;
+    Require(spectral.channel_frequencies == values.frequency, "the channels are the values handed in");
+    Require(spectral.system == "LSRK", "the frame is the reference frequency's observer, uppercased");
+    Require(spectral.reference_value && *spectral.reference_value == 1.402e9,
+            "the reference is the frequency named, not the first channel");
+    Require(spectral.reference_pixel && *spectral.reference_pixel == 3.0,
+            "and its pixel is that channel's, counted from one");
+    Require(spectral.rest_frequency && *spectral.rest_frequency == 1.420405751e9, "the rest frequency is read");
+
+    Require(descriptor.polarization && descriptor.polarization->labels == *values.polarization,
+            "the polarization labels are the ones handed in");
+    Require(descriptor.temporal.has_value(), "a time value makes a temporal coordinate");
+    Require(descriptor.temporal->values == values.time, "the times are the values handed in");
+    Require(descriptor.temporal->scale == "UTC" && descriptor.temporal->format == "UNIX",
+            "the time's scale and format come from its attributes, uppercased");
+}
+
+// XRADIO writes an image's role on its own "type" attribute. The v2 schema's "image_type" is read
+// only when "type" says nothing -- and "flag" says nothing an image can be.
+void TestARoleNotSpelledAsTypeFallsBackToImageType() {
+    using carta::zarr::internal::xradio::CoordinateValues;
+    using carta::zarr::internal::xradio::DescribeImageFrom;
+
+    auto nodes = CompleteStore();
+    nodes["SKY"] = SkyArray("float32", R"({"units":"Jy/beam","image_type":"residual"})");
+    auto store = Open(nodes);
+    Require(static_cast<bool>(store), "the in-memory store failed to open");
+
+    const auto described = DescribeImageFrom(store.value(), "SKY", CoordinateValues{});
+    Require(static_cast<bool>(described), "an image with no values handed in is still described");
+    Require(described.value().descriptor.image_role == "residual",
+            "with no type attribute the role is image_type's, got '" + described.value().descriptor.image_role + "'");
+}
+
 }  // namespace
 
 int main() {
@@ -892,6 +957,8 @@ int main() {
         TestStoreRejections();
         TestSizeFallsBackWhenTheStoreCannotBeMeasured();
         TestSizeRefusesAStoreWithNoArrays();
+        TestADescriptionIsBuiltFromTheValuesItIsGiven();
+        TestARoleNotSpelledAsTypeFallsBackToImageType();
         std::cout << "carta-zarr schema profile tests passed\n";
         return 0;
     } catch (const std::exception& error) {

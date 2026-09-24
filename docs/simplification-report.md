@@ -274,6 +274,8 @@ for (auto cy = cy0; cy <= cy1; ++cy) {
 
 ### 3.3 `DescribeImage` 的座標讀取：宣告與使用分離
 
+> **狀態：已由更大的改動取代**（2026-09-24）。座標值的讀取移到 `ReadCoordinateValues`，組 descriptor 的規則移到 `DescribeImageFrom`，後者接收讀好的值；那四個先宣告後使用的 vector 已不存在。理由見 `image.h` 上 `DescribeImageFrom` 的註解（ADR 0006 的規則）。
+
 [src/schema/xradio/image.cc:348-394](src/schema/xradio/image.cc:348)：四個 `std::vector<double>` 在函式中段一次宣告完，然後各自在下面十幾行後才被 `std::move` 賦值。`time_values` 從宣告到使用隔了 45 行，而且只被用一次。
 
 改成在使用處宣告即可：

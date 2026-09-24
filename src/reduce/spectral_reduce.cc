@@ -328,8 +328,9 @@ Result<void> ReduceSpectral(const ReadableImage& image, const SpectralReduceRequ
 
         // The unit order is the order the nested loops used to run in -- channel, then
         // chunk row, then chunk column -- so a single task reproduces the old sums bit
-        // for bit. Several tasks do not: each one sums its own units and the partials
-        // are added in task order, which is deterministic but a different association.
+        // for bit. Several tasks do not: each one sums its own contiguous run of units
+        // and the partials are added in task order, which is deterministic but a
+        // different association.
         // The statistics are doubles over as many as 5x10^11 values, and partial sums
         // are if anything the more accurate arrangement; the tests compare to 1e-9
         // relative for exactly this reason, and the counts and extrema are unaffected
@@ -350,9 +351,14 @@ Result<void> ReduceSpectral(const ReadableImage& image, const SpectralReduceRequ
             partials.at(task).Reset(layout, request.region_count, slab_length);
         }
 
+        // Contiguous runs of units, cut the way the histograms cut their rows. They were
+        // dealt out round-robin once, for no recorded reason, and that measured slower
+        // rather than better balanced: on a 7763x4742 plane of 31x19 chunk cells, 5-13%
+        // slower at ten threads and no different at four, and never measurably faster.
         workers.Run(tasks, [&](std::size_t task, std::size_t) {
             StatisticSlots& partial = partials.at(task);
-            for (std::uint64_t unit = task; unit < units; unit += tasks) {
+            const auto share = TaskRows(task, tasks, units);
+            for (std::uint64_t unit = share.first; unit < share.last; ++unit) {
                 const std::uint64_t channel = unit / cells;
                 const std::uint64_t cell = unit % cells;
                 accumulate_unit(channel, chunk_cv_begin + (cell / cu_span),

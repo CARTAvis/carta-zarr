@@ -116,22 +116,4 @@ Result<std::size_t> ReadInPieces(const ReadableImage& image, const ReadRequest& 
     return static_cast<std::size_t>(elements);
 }
 
-Result<std::size_t> ReadPixelMask(const ReadableImage& image, const ReadRequest& request,
-                                  BufferView<std::uint8_t> destination, const ReadControl& control) {
-    const auto& descriptor = image.descriptor();
-    if (!descriptor.has_pixel_mask) {
-        return Error{ErrorCode::not_found, "This image has no pixel mask", descriptor.id};
-    }
-
-    const auto checked = CheckRead(descriptor, request, destination.size, control);
-    if (!checked) {
-        return checked.error();
-    }
-    const auto elements = checked.value().elements();
-    if (auto read = image.source().ReadMask(checked.value(), destination, control); !read) {
-        return read.error();
-    }
-    return static_cast<std::size_t>(elements);
-}
-
 }  // namespace carta::zarr::internal

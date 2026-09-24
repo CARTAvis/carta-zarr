@@ -160,73 +160,12 @@ void TestSubsetAndStride(const carta::zarr::Image& sky) {
     }
 }
 
-void TestPixelMask(const carta::zarr::Image& sky) {
+// The flag is not read on its own: it reaches a caller as NaN in the pixels it marks, which is how
+// CARTA reports a masked pixel anyway. The descriptor still says there is one, and which it is.
+void TestMaskFusion(const carta::zarr::Image& sky) {
     Require(sky.descriptor().has_pixel_mask, "the fixture image declares a flag variable");
     Require(sky.descriptor().pixel_mask_id == "FLAG", "the pixel mask should name the flag variable");
 
-    const auto request = WholeImage(sky.descriptor());
-    std::vector<std::uint8_t> mask(kL * kM * kFrequency * kPolarization * kTime);
-    const auto read = sky.ReadPixelMask(request, {mask.data(), mask.size()});
-    Require(static_cast<bool>(read), "reading the pixel mask failed");
-    Require(read.value() == mask.size(), "the mask read reported the wrong element count");
-
-    for (std::uint64_t p = 0; p < kPolarization; ++p) {
-        for (std::uint64_t f = 0; f < kFrequency; ++f) {
-            for (std::uint64_t m = 0; m < kM; ++m) {
-                for (std::uint64_t l = 0; l < kL; ++l) {
-                    const std::uint8_t byte = mask.at(LogicalOffset(l, m, f, p));
-                    const std::string where = "at l=" + std::to_string(l) + " m=" + std::to_string(m);
-                    // The mask arrives as bytes the caller owns, converted from the boolean the
-                    // store holds. A byte that is neither 0 nor 1 would mean the bytes were written
-                    // as some other type through this buffer.
-                    Require(byte == 0 || byte == 1, "a mask byte should be exactly 0 or 1 " + where);
-                    Require((byte != 0) == ExpectedFlag(l, m), "wrong mask value " + where);
-                }
-            }
-        }
-    }
-}
-
-// A mask read takes the same controls an ordinary read does. It used to take none at all, so a
-// caller with a cancellation token or a deadline had no way to hand them over and a long mask read
-// could not be stopped.
-void TestMaskReadTakesTheSameControls(const carta::zarr::Image& sky) {
-    const auto request = WholeImage(sky.descriptor());
-    const std::size_t elements = kL * kM * kFrequency * kPolarization * kTime;
-    std::vector<std::uint8_t> mask(elements, 0xEE);
-
-    carta::zarr::ReadControl cancelled;
-    cancelled.cancellation_requested = [] { return true; };
-    const auto stopped = sky.ReadPixelMask(request, {mask.data(), mask.size()}, cancelled);
-    Require(!stopped && stopped.error().code == carta::zarr::ErrorCode::cancelled,
-            "a cancelled mask read was not rejected");
-    Require(std::all_of(mask.begin(), mask.end(), [](std::uint8_t byte) { return byte == 0xEE; }),
-            "a cancelled mask read wrote to its destination");
-
-    carta::zarr::ReadControl expired;
-    expired.deadline = std::chrono::steady_clock::now() - std::chrono::milliseconds(1);
-    const auto too_late = sky.ReadPixelMask(request, {mask.data(), mask.size()}, expired);
-    Require(!too_late && too_late.error().code == carta::zarr::ErrorCode::cancelled,
-            "a mask read past its deadline was not rejected");
-
-    // The cache policy reaches the store, and choosing it cannot change the answer. Compared
-    // against the default rather than against a recorded one, so this stays true if the fixture
-    // changes.
-    std::vector<std::uint8_t> inherited(elements, 0);
-    Require(static_cast<bool>(sky.ReadPixelMask(request, {inherited.data(), inherited.size()})),
-            "the reference mask read failed");
-
-    carta::zarr::ReadControl bypassing;
-    bypassing.cache_policy = carta::zarr::CachePolicy::bypass;
-    std::vector<std::uint8_t> bypassed(elements, 0);
-    const auto bypass_read = sky.ReadPixelMask(request, {bypassed.data(), bypassed.size()}, bypassing);
-    Require(static_cast<bool>(bypass_read),
-            "a mask read bypassing the cache failed" +
-                (bypass_read ? std::string{} : ": " + bypass_read.error().message));
-    Require(bypassed == inherited, "bypassing the cache changed the mask");
-}
-
-void TestMaskFusion(const carta::zarr::Image& sky) {
     const auto request = WholeImage(sky.descriptor());
     std::vector<float> pixels(kL * kM * kFrequency * kPolarization * kTime);
     // Masking is the default, so this is the plain two-argument read.
@@ -535,8 +474,6 @@ int main() {
             TestAxesAndGeometry(sky);
             TestWholeImage(sky);
             TestSubsetAndStride(sky);
-            TestPixelMask(sky);
-            TestMaskReadTakesTheSameControls(sky);
             TestMaskFusion(sky);
             TestRejectedRequests(sky);
             TestReadControls(sky);

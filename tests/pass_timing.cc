@@ -178,10 +178,8 @@ int main(int argc, char** argv) {
     }
     const auto reduce_boxes = reduce_over(boxes);
 
-    // One ellipse filling the plane, which is what a masked region is: once with runs made here
-    // beforehand -- what a caller that keeps them between calls hands over -- and once as the raster
-    // alone, which the reduction has to turn into runs itself on every call. The difference between
-    // the two is what a caller gives up by not keeping its own.
+    // One ellipse filling the plane, which is what a masked region is. The reduction turns its
+    // raster into runs on every call; this is what that costs against the unmasked cases above.
     std::vector<std::uint8_t> ellipse(x * y, 0);
     for (std::uint64_t row = 0; row < y; ++row) {
         for (std::uint64_t column = 0; column < x; ++column) {
@@ -190,36 +188,7 @@ int main(int argc, char** argv) {
             ellipse.at((row * x) + column) = (dx * dx) + (dy * dy) <= 1.0 ? 1 : 0;
         }
     }
-    const auto fastest = sky.chunk_geometry().fastest_spatial_axis;
-    const bool along_y = fastest == carta::zarr::AxisRole::spatial_y;
-    std::vector<std::uint32_t> runs;
-    std::vector<std::uint64_t> run_offsets{0};
-    for (std::uint64_t line = 0; line < (along_y ? x : y); ++line) {
-        const std::uint64_t length = along_y ? y : x;
-        const auto at = [&](std::uint64_t i) {
-            return ellipse.at(along_y ? (i * x) + line : (line * x) + i) != 0;
-        };
-        for (std::uint64_t i = 0; i < length;) {
-            if (!at(i)) {
-                ++i;
-                continue;
-            }
-            const auto begin = i;
-            while (i < length && at(i)) {
-                ++i;
-            }
-            runs.push_back(static_cast<std::uint32_t>(begin));
-            runs.push_back(static_cast<std::uint32_t>(i));
-        }
-        run_offsets.push_back(runs.size() / 2);
-    }
-    carta::zarr::RegionMask as_raster{0, 0, x, y, ellipse.data()};
-    carta::zarr::RegionMask as_runs = as_raster;
-    as_runs.row_runs = runs.data();
-    as_runs.row_run_offsets = run_offsets.data();
-    as_runs.run_axis = fastest;
-    const auto reduce_runs = reduce_over({as_runs});
-    const auto reduce_raster = reduce_over({as_raster});
+    const auto reduce_masked = reduce_over({carta::zarr::RegionMask{0, 0, x, y, ellipse.data()}});
 
     const auto histogram = TimeIt(repeats, [&]() -> std::string {
         carta::zarr::HistogramRequest request;
@@ -243,12 +212,11 @@ int main(int argc, char** argv) {
     Report("ReduceSpectral", reduce);
     Report("ReduceSpectral x1", reduce_whole);
     Report("ReduceSpectral x64", reduce_boxes);
-    Report("ReduceSpectral runs", reduce_runs);
-    Report("ReduceSpectral raster", reduce_raster);
+    Report("ReduceSpectral masked", reduce_masked);
     Report("ComputeHistogram", histogram);
     Report("ComputeCubeHistogram", cube);
 
-    const bool all_ok = read.ok && reduce.ok && reduce_whole.ok && reduce_boxes.ok && reduce_runs.ok &&
-                        reduce_raster.ok && histogram.ok && cube.ok;
+    const bool all_ok = read.ok && reduce.ok && reduce_whole.ok && reduce_boxes.ok && reduce_masked.ok &&
+                        histogram.ok && cube.ok;
     return all_ok ? 0 : 1;
 }

@@ -33,7 +33,7 @@ bool Near(double left, double right) {
     return std::abs(left - right) <= 1.0e-9 * std::max({1.0, std::abs(left), std::abs(right)});
 }
 
-bool HasDiagnostic(const LinearAxisFit& fit, const std::string& code) {
+bool HasDiagnostic(const LinearAxisFit& fit, carta::zarr::DiagnosticCode code) {
     for (const auto& diagnostic : fit.diagnostics) {
         if (diagnostic.code == code) {
             return true;
@@ -66,7 +66,8 @@ void TestTangentPointReference() {
 // No sample lands on the reference value, so the reference pixel is extrapolated and said to be.
 void TestInexactReferencePixel() {
     const auto fit = FitLinearAxis({-0.003, -0.002, -0.001, -0.0005}, std::nullopt, "l");
-    Require(HasDiagnostic(fit, "inexact_reference_pixel"), "an extrapolated reference pixel was not diagnosed");
+    Require(HasDiagnostic(fit, carta::zarr::DiagnosticCode::inexact_reference_pixel),
+            "an extrapolated reference pixel was not diagnosed");
     // Spacing is 0.001 from the first pair, and 0.0 lies three increments past -0.003.
     Require(fit.reference_pixel && Near(*fit.reference_pixel, 4.0), "reference pixel was not linearly extrapolated");
     Require(fit.uniform == false, "samples with a changing spacing were reported as uniform");
@@ -76,7 +77,8 @@ void TestInexactReferencePixel() {
 void TestNonUniformIsReported() {
     const auto fit = FitLinearAxis({1.4e9, 1.401e9, 1.403e9}, 1.4e9, "frequency");
     Require(!fit.uniform, "unevenly spaced samples were reported as uniform");
-    Require(HasDiagnostic(fit, "nonuniform_axis"), "unevenly spaced samples were not diagnosed");
+    Require(HasDiagnostic(fit, carta::zarr::DiagnosticCode::nonuniform_axis),
+            "unevenly spaced samples were not diagnosed");
     Require(fit.increment && Near(*fit.increment, 1.0e6), "increment was not taken from the first pair");
     Require(fit.reference_pixel && Near(*fit.reference_pixel, 1.0), "reference pixel was not located");
 }
@@ -85,7 +87,8 @@ void TestNonUniformIsReported() {
 void TestTwoSamplesAreUniform() {
     const auto fit = FitLinearAxis({10.0, 20.0}, 10.0, "frequency");
     Require(fit.uniform, "a two-sample axis was not reported as uniform");
-    Require(!HasDiagnostic(fit, "nonuniform_axis"), "a two-sample axis was diagnosed as uneven");
+    Require(!HasDiagnostic(fit, carta::zarr::DiagnosticCode::nonuniform_axis),
+            "a two-sample axis was diagnosed as uneven");
 }
 
 // Degenerate axes are not the unevenly sampled axis the diagnostic is about, so they stay silent.
@@ -125,7 +128,7 @@ void TestDescendingAxis() {
 // would still have passed while l and m reached the consumer wrong by a factor of 57.3.
 
 template <typename Fit>
-bool Diagnosed(const Fit& fit, const std::string& code) {
+bool Diagnosed(const Fit& fit, carta::zarr::DiagnosticCode code) {
     for (const auto& diagnostic : fit.diagnostics) {
         if (diagnostic.code == code) {
             return true;
@@ -156,7 +159,8 @@ void TestADirectionAxisKeepsAnUnevenIncrement() {
     const auto fit = FitDirectionAxis(cosines, "m");
     Require(fit.increment.has_value(), "an uneven direction axis still reports an increment");
     Require(Near(*fit.increment, 1.0e-4 * kRadToDeg), "and it is the first pair's spacing, in degrees");
-    Require(Diagnosed(fit, "nonuniform_axis"), "and it says the samples were not evenly spaced");
+    Require(Diagnosed(fit, carta::zarr::DiagnosticCode::nonuniform_axis),
+            "and it says the samples were not evenly spaced");
 }
 
 // A direction axis is linear by construction, so one that cannot be described linearly is a store
@@ -167,21 +171,23 @@ void TestADirectionAxisKeepsAnUnevenIncrement() {
 void TestADegenerateDirectionAxisSaysSo() {
     const auto one = FitDirectionAxis({1.0e-4}, "l");
     Require(!one.increment && !one.reference_pixel, "a single sample describes no axis");
-    Require(Diagnosed(one, "degenerate_axis"), "and it should say so");
+    Require(Diagnosed(one, carta::zarr::DiagnosticCode::degenerate_axis), "and it should say so");
 
     Require(!FitDirectionAxis({}, "l").increment, "and neither does none");
-    Require(Diagnosed(FitDirectionAxis({}, "l"), "degenerate_axis"), "which is the same answer");
+    Require(Diagnosed(FitDirectionAxis({}, "l"), carta::zarr::DiagnosticCode::degenerate_axis),
+            "which is the same answer");
 
     // Two samples that are the same: the increment is reported as the zero it is, but there is no
     // reference pixel to go with it, so this is the same non-answer wearing a number.
     const auto flat = FitDirectionAxis({1.0e-4, 1.0e-4}, "m");
     Require(!flat.reference_pixel, "a zero increment locates no reference pixel");
-    Require(Diagnosed(flat, "degenerate_axis"), "and that is worth saying too");
+    Require(Diagnosed(flat, carta::zarr::DiagnosticCode::degenerate_axis), "and that is worth saying too");
 
     // An axis that is merely uneven is not degenerate: it has a linear description and says it is an
     // approximation. The two must not be confused.
     const auto uneven = FitDirectionAxis({0.0, 1.0e-4, 2.5e-4, 3.0e-4}, "l");
-    Require(!Diagnosed(uneven, "degenerate_axis"), "an uneven axis is described, not refused");
+    Require(!Diagnosed(uneven, carta::zarr::DiagnosticCode::degenerate_axis),
+            "an uneven axis is described, not refused");
 }
 
 // The opposite rule: unevenly spaced channels get no linear description at all, because a consumer
@@ -191,8 +197,9 @@ void TestASpectralAxisWithholdsWhatItCannotDescribe() {
     const auto fit = FitSpectralAxis(channels, 1.0e9, "frequency");
     Require(!fit.increment && !fit.reference_pixel && !fit.reference_value,
             "an unevenly spaced spectral axis reports no linear description");
-    Require(Diagnosed(fit, "nonuniform_axis"), "it keeps the reason, which says to build a tabular axis");
-    Require(!Diagnosed(fit, "inexact_reference_pixel"),
+    Require(Diagnosed(fit, carta::zarr::DiagnosticCode::nonuniform_axis),
+            "it keeps the reason, which says to build a tabular axis");
+    Require(!Diagnosed(fit, carta::zarr::DiagnosticCode::inexact_reference_pixel),
             "and drops the one describing a reference pixel the consumer never receives");
 }
 
@@ -201,10 +208,12 @@ void TestASpectralAxisWithholdsWhatItCannotDescribe() {
 void TestTheDroppedDiagnosticWasReallyThere() {
     const std::vector<double> channels{1.0e9, 1.001e9, 1.0035e9, 1.004e9};
     const auto underneath = FitLinearAxis(channels, 1.0005e9, "frequency");
-    Require(HasDiagnostic(underneath, "nonuniform_axis") && HasDiagnostic(underneath, "inexact_reference_pixel"),
+    Require(HasDiagnostic(underneath, carta::zarr::DiagnosticCode::nonuniform_axis) &&
+                HasDiagnostic(underneath, carta::zarr::DiagnosticCode::inexact_reference_pixel),
             "the fit underneath raises both, which is what makes the filter above a decision");
     const auto fit = FitSpectralAxis(channels, 1.0005e9, "frequency");
-    Require(fit.diagnostics.size() == 1 && Diagnosed(fit, "nonuniform_axis"), "only one of them survives");
+    Require(fit.diagnostics.size() == 1 && Diagnosed(fit, carta::zarr::DiagnosticCode::nonuniform_axis),
+            "only one of them survives");
 }
 
 void TestAnEvenSpectralAxisKeepsItsDescription() {

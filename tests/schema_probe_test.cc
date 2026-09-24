@@ -23,7 +23,6 @@
 namespace {
 
 using carta::zarr::ErrorCode;
-using carta::zarr::ProbeKind;
 using carta::zarr::SchemaMatchKind;
 
 using carta::zarr::testing::Require;
@@ -67,7 +66,7 @@ void WriteUtf32(const std::filesystem::path& path, const std::vector<std::string
     Require(static_cast<bool>(output), "Unable to finish writing " + path.string());
 }
 
-bool HasDiagnostic(const std::vector<carta::zarr::Diagnostic>& diagnostics, const std::string& code) {
+bool HasDiagnostic(const std::vector<carta::zarr::Diagnostic>& diagnostics, carta::zarr::DiagnosticCode code) {
     return std::any_of(diagnostics.begin(), diagnostics.end(),
                        [&](const auto& diagnostic) { return diagnostic.code == code; });
 }
@@ -219,16 +218,12 @@ void TestNonMatchAndInvalid(const std::filesystem::path& root) {
     const auto non_match = carta::zarr::ProbeSchema(root.string(), carta::zarr::kXradioImageSchema);
     Require(non_match && non_match.value().kind == SchemaMatchKind::no_match,
             "valid non-XRADIO Zarr was not a non-match");
-    Require(carta::zarr::Probe(root.string()).kind == ProbeKind::zarr_without_supported_schema,
-            "Probe did not report a valid unsupported schema");
 
     CreateValidStore(root);
     std::filesystem::remove(root / "time" / "zarr.json");
     const auto invalid = carta::zarr::ProbeSchema(root.string(), carta::zarr::kXradioImageSchema);
     Require(invalid && invalid.value().kind == SchemaMatchKind::invalid,
             "metadata-incomplete XRADIO-like store was not reported as an invalid match");
-    Require(carta::zarr::Probe(root.string()).kind == ProbeKind::invalid_dataset,
-            "Probe did not report invalid XRADIO-like metadata");
 }
 
 // A store Dataset::Open refuses must say why it refused. The probe has already worked the reason
@@ -246,7 +241,8 @@ void TestOpenSaysWhyItRefused(const std::filesystem::path& root) {
     Require(!not_ours && not_ours.error().code == ErrorCode::unsupported_schema,
             "an unclaimed Zarr store was not reported as an unsupported schema");
     Require(!not_ours.error().message.empty(), "an unclaimed Zarr store was refused without a message");
-    Require(carta::zarr::Probe(unclaimed.string()).diagnostics.empty(),
+    const auto unclaimed_probe = carta::zarr::ProbeSchema(unclaimed.string(), carta::zarr::kXradioImageSchema);
+    Require(unclaimed_probe && unclaimed_probe.value().diagnostics.empty(),
             "an unclaimed Zarr store was reported with a diagnostic nothing produced");
 
     // Zarr that no profile claims either, but whose only image the profile recognised and will not
@@ -256,9 +252,6 @@ void TestOpenSaysWhyItRefused(const std::filesystem::path& root) {
     auto complex_sky = SkyArray();
     complex_sky.replace(complex_sky.find("float32"), std::string("float32").size(), "complex64");
     Write(complex / "SKY" / "zarr.json", complex_sky);
-    const auto unopenable = carta::zarr::Probe(complex.string());
-    Require(unopenable.kind == ProbeKind::zarr_without_supported_schema && !unopenable.diagnostics.empty(),
-            "a store of complex images did not probe as unsupported with the reason attached");
     const auto refused = carta::zarr::Dataset::Open(context.value(), complex.string());
     Require(!refused && refused.error().code == ErrorCode::unsupported_schema,
             "a store of complex images was not reported as an unsupported schema");
@@ -270,45 +263,15 @@ void TestOpenSaysWhyItRefused(const std::filesystem::path& root) {
     const auto malformed = root / "malformed";
     CreateValidStore(malformed);
     std::filesystem::remove(malformed / "time" / "zarr.json");
-    const auto probe = carta::zarr::Probe(malformed.string());
-    Require(probe.kind == ProbeKind::invalid_dataset && !probe.diagnostics.empty(),
+    const auto probe = carta::zarr::ProbeSchema(malformed.string(), carta::zarr::kXradioImageSchema);
+    Require(probe && probe.value().kind == SchemaMatchKind::invalid && !probe.value().diagnostics.empty(),
             "the malformed store did not probe as invalid with a diagnostic");
     const auto opened = carta::zarr::Dataset::Open(context.value(), malformed.string());
     Require(!opened && opened.error().code == ErrorCode::invalid_metadata,
             "a malformed store was not reported as invalid metadata");
-    Require(opened.error().message == probe.diagnostics.front().message,
+    Require(opened.error().message == probe.value().diagnostics.front().message,
             "Dataset::Open replaced the probe's diagnostic with a message of its own: " +
                 opened.error().message);
-}
-
-// Probing a path and opening it must describe the same dataset. They no longer can disagree by
-// construction -- ProbeResult is a DatasetDescriptor -- but the two are filled on different code
-// paths, so this pins that Dataset::Open still hands on what the probe found rather than
-// reconstructing some of it. What it cannot catch is a field added to DatasetDescriptor that neither
-// side fills; the type is what covers that.
-void TestProbingAndOpeningDescribeTheSameDataset(const std::filesystem::path& root) {
-    CreateValidStore(root);
-    const auto probe = carta::zarr::Probe(root.string());
-    Require(probe.kind == ProbeKind::supported_dataset, "the valid store did not probe as supported");
-
-    const auto context = carta::zarr::Context::Create();
-    const auto dataset = carta::zarr::Dataset::Open(context.value(), root.string());
-    Require(static_cast<bool>(dataset), "Dataset::Open failed on the store it had just probed");
-    const auto& opened = dataset.value().descriptor();
-
-    Require(opened.schema_id == probe.schema_id, "the probe and the open disagree about the schema");
-    Require(opened.schema_version == probe.schema_version, "the probe and the open disagree about the version");
-    Require(opened.default_image_id == probe.default_image_id, "they disagree about the default image");
-    Require(ImageIds(opened.images) == ImageIds(probe.images), "they disagree about which images exist");
-    Require(opened.images.size() == probe.images.size(), "they disagree about how many images exist");
-    for (std::size_t i = 0; i < opened.images.size(); ++i) {
-        Require(opened.images.at(i).openable == probe.images.at(i).openable,
-                "they disagree about whether " + opened.images.at(i).id + " is openable");
-        Require(opened.images.at(i).diagnostics.size() == probe.images.at(i).diagnostics.size(),
-                "they disagree about what was diagnosed for " + opened.images.at(i).id);
-    }
-    Require(opened.diagnostics.size() == probe.diagnostics.size(),
-            "they disagree about what was diagnosed for the dataset");
 }
 
 void TestMissingAndUnsupported(const std::filesystem::path& root) {
@@ -387,9 +350,10 @@ void TestReferenceFixture() {
         Require(!dataset.value().OpenImage(coordinate),
                 std::string("optional coordinate ") + coordinate + " was openable as an image");
     }
-    Require(HasDiagnostic(dataset.value().descriptor().diagnostics, "unsupported_coordinate_plane"),
+    Require(HasDiagnostic(dataset.value().descriptor().diagnostics,
+                          carta::zarr::DiagnosticCode::unsupported_coordinate_plane),
             "aperture-plane diagnostic was not reported");
-    Require(HasDiagnostic(dataset.value().descriptor().diagnostics, "unsupported_data_type"),
+    Require(HasDiagnostic(dataset.value().descriptor().diagnostics, carta::zarr::DiagnosticCode::unsupported_data_type),
             "complex-dtype diagnostic was not reported");
     Require(desc.direction.has_value(), "DirectionCoordinate missing in reference fixture");
     Require(desc.direction->projection_parameters == std::vector<double>{0.25, -0.5},
@@ -410,7 +374,7 @@ void TestReferenceFixture() {
             "nonuniform spectral coordinates incorrectly exposed a linear description");
     // Withholding the linear description is not enough on its own: the consumer has to know it must
     // build a tabular axis, so the reason is reported rather than left silent.
-    Require(HasDiagnostic(desc.diagnostics, "nonuniform_axis"),
+    Require(HasDiagnostic(desc.diagnostics, carta::zarr::DiagnosticCode::nonuniform_axis),
             "nonuniform spectral coordinates did not report why they carry no linear description");
     Require(desc.polarization.has_value(), "PolarizationCoordinate missing in reference fixture");
     Require(!desc.polarization->labels.empty(), "Polarization labels empty in reference fixture");
@@ -419,12 +383,14 @@ void TestReferenceFixture() {
                 desc.temporal->scale == "UTC" && desc.temporal->format == "UNIX",
             "time coordinate values or attributes were not preserved");
 
-    // The generator writes SKY as unsharded zstd chunks of (1, 1, 1, 2, 5) in stored axis order.
-    Require(!desc.storage.sharded, "reference fixture was reported as sharded");
-    Require(desc.storage.shard_shape.empty(), "unsharded reference fixture reported a shard shape");
-    Require((desc.storage.chunk_shape == std::vector<std::uint64_t>{1, 1, 1, 2, 5}),
+    // The generator writes SKY as unsharded zstd chunks of (1, 1, 1, 2, 5) in stored axis order,
+    // which is (2, 5, 1, 1, 1) in the logical order the geometry reports.
+    const auto& geometry = image.value().chunk_geometry();
+    Require(!geometry.sharded, "reference fixture was reported as sharded");
+    Require((geometry.shard_shape == geometry.chunk_shape), "an unsharded image's shard is its chunk");
+    Require((geometry.chunk_shape == std::vector<std::uint64_t>{2, 5, 1, 1, 1}),
             "reference fixture chunk shape changed");
-    Require(desc.storage.compressor == "zstd", "reference fixture compressor was not reported as zstd");
+    Require(geometry.compressor == "zstd", "reference fixture compressor was not reported as zstd");
 
     const auto beams = image.value().ReadBeams();
     if (!beams) {
@@ -543,7 +509,8 @@ void TestCoordinateCompletion(const std::filesystem::path& root) {
     Require(static_cast<bool>(inexact_dataset), "inexact coordinate dataset did not open");
     const auto inexact_image = inexact_dataset.value().OpenImage("SKY");
     Require(static_cast<bool>(inexact_image), "inexact coordinate image did not open");
-    Require(HasDiagnostic(inexact_image.value().descriptor().diagnostics, "inexact_reference_pixel"),
+    Require(HasDiagnostic(inexact_image.value().descriptor().diagnostics,
+                          carta::zarr::DiagnosticCode::inexact_reference_pixel),
             "inexact direction reference pixel did not produce a diagnostic");
     Require(inexact_image.value().descriptor().direction->reference_pixel.at(0) == 4.0,
             "inexact direction reference pixel did not use linear extrapolation");
@@ -631,7 +598,8 @@ void TestADatasetWithAnUnparseableNodeStillOpens(const std::filesystem::path& ro
 
     const auto& said = dataset.value().descriptor().diagnostics;
     const auto junk = std::find_if(said.begin(), said.end(), [](const carta::zarr::Diagnostic& diagnostic) {
-        return diagnostic.code == "unrecognised_node" && diagnostic.node_path.find("JUNK") != std::string::npos;
+        return diagnostic.code == carta::zarr::DiagnosticCode::unrecognised_node &&
+               diagnostic.node_path.find("JUNK") != std::string::npos;
     });
     Require(junk != said.end(), "the dataset opened without saying which node it could not read");
     Require(static_cast<bool>(dataset.value().OpenImage("SKY")), "the image beside an unparseable node did not open");
@@ -714,7 +682,7 @@ void TestAShardingCodecThatDescribesNoChunks(const std::filesystem::path& root) 
 
     const auto said = std::find_if(probe.value().diagnostics.begin(), probe.value().diagnostics.end(),
                                    [](const carta::zarr::Diagnostic& diagnostic) {
-                                       return diagnostic.code == "unreadable_array";
+                                       return diagnostic.code == carta::zarr::DiagnosticCode::unreadable_array;
                                    });
     Require(said != probe.value().diagnostics.end(),
             "the store lost its image without saying which node or why");
@@ -807,8 +775,6 @@ void TestImageDatasetMissingTimeCoordinate(const std::filesystem::path& root) {
     const auto matched = carta::zarr::ProbeSchema(root.string(), carta::zarr::kXradioImageSchema);
     Require(matched && matched.value().kind == SchemaMatchKind::invalid,
             "an image dataset missing its time coordinate was not reported as an invalid match");
-    Require(carta::zarr::Probe(root.string()).kind == ProbeKind::invalid_dataset,
-            "Probe did not report the missing time coordinate as an invalid dataset");
 }
 
 void TestShardedStorageLayout(const std::filesystem::path& root) {
@@ -833,12 +799,14 @@ void TestShardedStorageLayout(const std::filesystem::path& root) {
     const auto image = dataset.value().OpenImage("SKY");
     Require(static_cast<bool>(image), "OpenImage failed for the sharded store");
 
-    const auto& storage = image.value().descriptor().storage;
-    Require(storage.sharded, "sharded store was not reported as sharded");
-    Require((storage.shard_shape == std::vector<std::uint64_t>{1, 3, 2, 4, 5}), "shard shape was not reported");
-    Require((storage.chunk_shape == std::vector<std::uint64_t>{1, 1, 1, 2, 5}),
+    // In logical order: stored (time, frequency, polarization, l, m) becomes (l, m, frequency,
+    // polarization, time).
+    const auto& geometry = image.value().chunk_geometry();
+    Require(geometry.sharded, "sharded store was not reported as sharded");
+    Require((geometry.shard_shape == std::vector<std::uint64_t>{4, 5, 3, 2, 1}), "shard shape was not reported");
+    Require((geometry.chunk_shape == std::vector<std::uint64_t>{2, 5, 1, 1, 1}),
             "inner chunk shape was not taken from the sharding codec");
-    Require(storage.compressor == "blosc", "compressor inside the sharding codec was not reported");
+    Require(geometry.compressor == "blosc", "compressor inside the sharding codec was not reported");
 }
 
 }  // namespace
@@ -853,7 +821,6 @@ int main() {
         TestNonMatchAndInvalid(root / "classification");
         TestMissingAndUnsupported(root);
         TestOpenSaysWhyItRefused(root / "refusal");
-        TestProbingAndOpeningDescribeTheSameDataset(root / "probe-open-agree");
         TestCoordinateCompletion(root / "coordinates");
         TestNonDoubleCoordinates(root / "float32-coordinates");
         TestADisagreeingImageIsRefusedThroughTheDataset(root / "coordinate-disagreement");

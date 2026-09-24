@@ -26,7 +26,7 @@ namespace {
 
 using carta::zarr::AxisRole;
 using carta::zarr::ImageDescriptor;
-using carta::zarr::StorageLayout;
+using carta::zarr::internal::zarr::StorageLayout;
 using carta::zarr::internal::BuildChunkGeometry;
 
 using carta::zarr::testing::Require;

@@ -10,7 +10,6 @@
 #include "readable_image.h"
 #include "reduce/plane_histogram.h"
 #include "reduce/spectral_reduce.h"
-#include "schema/chunk_geometry.h"
 #include "schema/profile.h"
 #include "store.h"
 #include "store_pixel_source.h"
@@ -39,20 +38,13 @@ namespace {
 // It is the only try in this file. Three entry points used to write their own beside the twelve
 // that went through here, with fallback codes of their own, so whether one caught was a question you
 // answered by reading to the end of it.
-template <typename Function, typename OnThrow>
-auto GuardedWith(Function&& function, OnThrow&& on_throw) -> decltype(function()) {
+template <typename Function>
+auto Guarded(ErrorCode code, std::string node, Function&& function) -> decltype(function()) {
     try {
         return function();
     } catch (const std::exception& error) {
-        return on_throw(error);
-    }
-}
-
-template <typename Function>
-auto Guarded(ErrorCode code, std::string node, Function&& function) -> decltype(function()) {
-    return GuardedWith(std::forward<Function>(function), [&](const std::exception& error) {
         return Error{code, error.what(), std::move(node)};
-    });
+    }
 }
 
 // Everything an Image entry point does before it has something to read from: name the node so a
@@ -186,17 +178,6 @@ Result<std::size_t> Image::Read(const ReadRequest& request, BufferView<float> de
     });
 }
 
-Result<std::size_t> Image::ReadPixelMask(const ReadRequest& request, BufferView<std::uint8_t> destination) const {
-    return ReadPixelMask(request, destination, ReadControl{});
-}
-
-Result<std::size_t> Image::ReadPixelMask(const ReadRequest& request, BufferView<std::uint8_t> destination,
-                                         const ReadControl& control) const {
-    return WithReadableImage(_impl, [&](const internal::ReadableImage& image) {
-        return internal::ReadPixelMask(image, request, destination, control);
-    });
-}
-
 Result<void> Image::ReduceSpectral(const SpectralReduceRequest& request, const SpectralSink& sink) const {
     return ReduceSpectral(request, sink, ReadOptions{});
 }
@@ -261,7 +242,7 @@ public:
     internal::SchemaProfile profile;
     std::shared_ptr<internal::Store> store;
     mutable std::mutex mutex;
-    mutable std::unordered_map<std::string, ImageDescriptor> image_descriptors;
+    mutable std::unordered_map<std::string, internal::DescribedImage> image_descriptors;
 };
 
 Dataset::Dataset(std::shared_ptr<Impl> impl) : _impl(std::move(impl)) {}
@@ -327,12 +308,9 @@ Result<Image> Dataset::OpenImage(std::string_view image_id) const {
         }
         std::scoped_lock const lock(_impl->mutex);
         const std::string image_name(image_id);
-        const auto make_image = [&](const ImageDescriptor& descriptor) {
-            // The descriptor already carries the stored layout; the geometry is that layout permuted
-            // into logical order, so it is derived here rather than read again.
-            return Image{std::make_shared<Image::Impl>(
-                _impl->context, _impl->location, _impl->profile, _impl->store, descriptor,
-                internal::BuildChunkGeometry(descriptor, descriptor.storage))};
+        const auto make_image = [&](const internal::DescribedImage& described) {
+            return Image{std::make_shared<Image::Impl>(_impl->context, _impl->location, _impl->profile,
+                                                      _impl->store, described.descriptor, described.geometry)};
         };
         const auto cached = _impl->image_descriptors.find(image_name);
         if (cached != _impl->image_descriptors.end()) {
@@ -348,42 +326,6 @@ Result<Image> Dataset::OpenImage(std::string_view image_id) const {
         auto [inserted, _] = _impl->image_descriptors.emplace(image_name, std::move(image_descriptor.value()));
         return make_image(inserted->second);
     });
-}
-
-ProbeResult Probe(std::string_view location, const ProbeOptions&) {
-    // The guard that does not report an Error, because a probe answers with a ProbeResult whatever
-    // happens: "not a Zarr store" is an answer rather than a failure. A throw becomes a diagnostic,
-    // and that is the only way this differs from every other entry point here.
-    const auto as_diagnostic = [](const auto& failure) {
-        return Diagnostic{internal::zarr::ErrorCodeName(failure.code), failure.message, failure.node_path};
-    };
-    return GuardedWith(
-        [&]() -> ProbeResult {
-            auto store_result = internal::OpenStore(location);
-            if (!store_result) {
-                const auto& failure = store_result.error();
-                ProbeResult result;
-                result.kind = failure.code == ErrorCode::invalid_metadata || failure.code == ErrorCode::io_error
-                                  ? ProbeKind::invalid_dataset
-                                  : ProbeKind::not_zarr;
-                result.diagnostics.push_back(as_diagnostic(failure));
-                return result;
-            }
-            auto probe_result = internal::ProbeStore(store_result.value());
-            if (!probe_result) {
-                ProbeResult result;
-                result.kind = ProbeKind::invalid_dataset;
-                result.diagnostics.push_back(as_diagnostic(probe_result.error()));
-                return result;
-            }
-            return probe_result.value();
-        },
-        [&](const std::exception& error) {
-            ProbeResult result;
-            result.kind = ProbeKind::invalid_dataset;
-            result.diagnostics.push_back(Diagnostic{"exception", error.what(), std::string(location)});
-            return result;
-        });
 }
 
 Result<SchemaProbeResult> ProbeSchema(std::string_view location, std::string_view schema_id) {

@@ -67,11 +67,11 @@ using ProgressCallback = std::function<bool(std::size_t elements_written, std::s
 
 // What a read is allowed to do while it runs, whatever it is reading for.
 //
-// These three are the whole of what every path through this library honours: an ordinary read, a
-// pixel mask read, and all three reductions reach the same storage operations underneath and check
-// the same things at the same boundaries. Said in its own type so that an operation which honours
-// only these can take only these -- ReadPixelMask does, and everything below the pixel source seam
-// does, because that is all any of them ever looked at.
+// These three are the whole of what every path through this library honours: an ordinary read and
+// all three reductions reach the same storage operations underneath and check the same things at
+// the same boundaries. Said in its own type so that an operation which honours only these can take
+// only these -- everything below the pixel source seam does, because that is all any of it ever
+// looked at.
 struct ReadControl {
     // Cooperative cancellation checked before and after each storage operation. The callback
     // must be safe to invoke from the calling thread.

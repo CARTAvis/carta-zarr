@@ -122,7 +122,7 @@ void TestSpectralAndPolarization(const carta::zarr::ImageDescriptor& sky) {
             "the compressed polarization label array did not decode to the FITS Stokes ordering");
 }
 
-void TestTemporalAndStorage(const carta::zarr::ImageDescriptor& sky) {
+void TestTemporalAndStorage(const carta::zarr::ImageDescriptor& sky, const carta::zarr::ChunkGeometry& geometry) {
     // DATE-OBS 2020-05-31T12:00:00 is MJD 59000.5. The FITS path writes MJD days, not the unix
     // seconds the schema document describes.
     Require(sky.temporal.has_value(), "no time coordinate was reported");
@@ -132,10 +132,12 @@ void TestTemporalAndStorage(const carta::zarr::ImageDescriptor& sky) {
     Require(sky.temporal->scale == "UTC", "the time scale was not normalized");
     Require(sky.temporal->format == "MJD", "the time format was not normalized");
 
-    Require(!sky.storage.sharded, "XRADIO's zarr writer started sharding");
-    Require(sky.storage.compressor == "zstd", "XRADIO's zarr writer changed compressor");
-    Require((sky.storage.chunk_shape == std::vector<std::uint64_t>{1, 2, 3, 5, 4}),
-            "the chunk shape changed; it is reported in stored axis order");
+    Require(!geometry.sharded, "XRADIO's zarr writer started sharding");
+    Require(geometry.compressor == "zstd", "XRADIO's zarr writer changed compressor");
+    // Stored as (time, frequency, polarization, l, m) chunks of (1, 2, 3, 5, 4), reported in the
+    // descriptor's logical order.
+    Require((geometry.chunk_shape == std::vector<std::uint64_t>{5, 4, 2, 3, 1}),
+            "the chunk shape changed, or is no longer reported in logical axis order");
 }
 
 }  // namespace
@@ -147,7 +149,7 @@ int main() {
         TestIdentityAndAxes(sky);
         TestDirection(sky);
         TestSpectralAndPolarization(sky);
-        TestTemporalAndStorage(sky);
+        TestTemporalAndStorage(sky, image.chunk_geometry());
 
         const auto beams = image.ReadBeams();
         Require(static_cast<bool>(beams), "BMAJ/BMIN/BPA did not survive as a readable beam");

@@ -45,8 +45,8 @@ bool IsEvenlySpaced(const std::vector<double>& values, double increment) {
     return true;
 }
 
-Diagnostic MakeDiagnostic(std::string code, std::string message, std::string_view axis_name) {
-    return Diagnostic{std::move(code), std::move(message), std::string(axis_name)};
+Diagnostic MakeDiagnostic(DiagnosticCode code, std::string message, std::string_view axis_name) {
+    return Diagnostic{code, std::move(message), std::string(axis_name)};
 }
 
 }  // namespace
@@ -75,7 +75,7 @@ LinearAxisFit FitLinearAxis(const std::vector<double>& values, std::optional<dou
     }
     if (!fit.uniform) {
         fit.diagnostics.push_back(
-            MakeDiagnostic("nonuniform_axis",
+            MakeDiagnostic(DiagnosticCode::nonuniform_axis,
                            "The " + std::string(axis_name) +
                                " coordinate is not evenly spaced; any linear description of it is an approximation",
                            axis_name));
@@ -89,7 +89,7 @@ LinearAxisFit FitLinearAxis(const std::vector<double>& values, std::optional<dou
         fit.reference_pixel = static_cast<double>(closest + 1);
     } else {
         fit.reference_pixel = ((reference_value - values.front()) / increment) + 1.0;
-        fit.diagnostics.push_back(MakeDiagnostic("inexact_reference_pixel",
+        fit.diagnostics.push_back(MakeDiagnostic(DiagnosticCode::inexact_reference_pixel,
                                                  "The " + std::string(axis_name) +
                                                      " coordinate has no sample at its reference world "
                                                      "value; CRPIX was linearly extrapolated",
@@ -117,7 +117,7 @@ DirectionAxisFit FitDirectionAxis(const std::vector<double>& cosines, std::strin
     // degenerate, it is a continuum image, and it takes the tabular path by design.
     if (!fit.reference_pixel) {
         direction.diagnostics.push_back(
-            MakeDiagnostic("degenerate_axis",
+            MakeDiagnostic(DiagnosticCode::degenerate_axis,
                            "The " + std::string(axis_name) +
                                " coordinate has fewer than two distinct samples, so it has no linear "
                                "description; any reference pixel or increment reported for it is not usable",
@@ -138,7 +138,7 @@ SpectralAxisFit FitSpectralAxis(const std::vector<double>& channels, double refe
         return spectral;
     }
     for (auto& diagnostic : fit.diagnostics) {
-        if (diagnostic.code == "nonuniform_axis") {
+        if (diagnostic.code == DiagnosticCode::nonuniform_axis) {
             spectral.diagnostics.push_back(std::move(diagnostic));
         }
     }

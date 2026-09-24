@@ -134,7 +134,7 @@ void TestAnUnevenAxisReportsAnIncrementAndADiagnostic() {
     Require(Near(direction->increment.at(0), 1.0e-4 * kRadToDeg), "with an increment in degrees");
     bool said_so = false;
     for (const auto& diagnostic : diagnostics) {
-        said_so = said_so || diagnostic.code == "nonuniform_axis";
+        said_so = said_so || diagnostic.code == carta::zarr::DiagnosticCode::nonuniform_axis;
     }
     Require(said_so, "and a diagnostic saying the samples were not evenly spaced");
 }

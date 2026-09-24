@@ -9,6 +9,7 @@
 
 #include "carta-zarr/descriptor.h"
 #include "carta-zarr/result.h"
+#include "zarr/storage_layout.h"
 
 #include <nlohmann/json.hpp>
 

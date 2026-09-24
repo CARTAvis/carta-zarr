@@ -23,17 +23,64 @@
 
 namespace carta::zarr {
 
-struct Diagnostic {
-    std::string code;
-    std::string message;
-    std::string node_path;
+// What a diagnostic is about. One closed set, so that a code is a name the compiler checks rather
+// than a string two places could spell differently -- which is what it was, made from ErrorCode's
+// names in some places and written out as literals in others.
+//
+// Several share a name with an ErrorCode, and mean the same thing: the diagnostic is what the error
+// would have been, had the rest of the store not still been readable.
+enum class DiagnosticCode {
+    invalid_metadata,
+    unsupported_data_type,
+    ambiguous_schema,
+    // A node the store holds that is neither a group nor an array this library recognises.
+    unrecognised_node,
+    // An array whose metadata would not parse.
+    unreadable_array,
+    // An image-shaped variable on the aperture plane (u, v) rather than the sky plane.
+    unsupported_coordinate_plane,
+    // More than one flag variable claims the same image.
+    ambiguous_pixel_mask,
+    // A coordinate whose samples are not evenly spaced, so it has no linear description.
+    nonuniform_axis,
+    // A coordinate with no sample at its reference world value, so its reference pixel was
+    // extrapolated rather than read off.
+    inexact_reference_pixel,
+    // A coordinate with fewer than two distinct samples, which has no linear description at all.
+    degenerate_axis,
 };
 
-enum class ProbeKind {
-    not_zarr,
-    zarr_without_supported_schema,
-    supported_dataset,
-    invalid_dataset,
+// The code's name, as it would be spelled in a message or a log.
+inline const char* DiagnosticCodeName(DiagnosticCode code) noexcept {
+    switch (code) {
+        case DiagnosticCode::invalid_metadata:
+            return "invalid_metadata";
+        case DiagnosticCode::unsupported_data_type:
+            return "unsupported_data_type";
+        case DiagnosticCode::ambiguous_schema:
+            return "ambiguous_schema";
+        case DiagnosticCode::unrecognised_node:
+            return "unrecognised_node";
+        case DiagnosticCode::unreadable_array:
+            return "unreadable_array";
+        case DiagnosticCode::unsupported_coordinate_plane:
+            return "unsupported_coordinate_plane";
+        case DiagnosticCode::ambiguous_pixel_mask:
+            return "ambiguous_pixel_mask";
+        case DiagnosticCode::nonuniform_axis:
+            return "nonuniform_axis";
+        case DiagnosticCode::inexact_reference_pixel:
+            return "inexact_reference_pixel";
+        case DiagnosticCode::degenerate_axis:
+            return "degenerate_axis";
+    }
+    return "unknown";
+}
+
+struct Diagnostic {
+    DiagnosticCode code = DiagnosticCode::invalid_metadata;
+    std::string message;
+    std::string node_path;
 };
 
 using SchemaId = std::string;
@@ -59,8 +106,6 @@ struct ImageEntry {
     std::vector<Diagnostic> diagnostics;
 };
 
-struct ProbeOptions {};
-
 // What this library knows about an image dataset without opening any image in it: which schema
 // profile describes it, which variables in it are images, and whatever that profile had to say about
 // a store it nonetheless accepted.
@@ -70,18 +115,6 @@ struct DatasetDescriptor {
     std::vector<ImageEntry> images;
     std::optional<std::string> default_image_id;
     std::vector<Diagnostic> diagnostics;
-};
-
-// A probe answers one more question than a descriptor does -- whether there is a dataset here at all
-// -- and otherwise reports exactly what Dataset::descriptor() reports for the same location. Saying
-// that with the type rather than by copying five fields is what keeps the two answers level: a field
-// added to DatasetDescriptor reaches both by construction.
-//
-// The inherited fields are filled to the extent the kind allows. A supported_dataset fills them all;
-// an invalid_dataset names the schema it failed to be and says why in diagnostics; anything else
-// carries diagnostics alone.
-struct ProbeResult : DatasetDescriptor {
-    ProbeKind kind = ProbeKind::not_zarr;
 };
 
 struct OpenOptions {
@@ -192,13 +225,6 @@ struct ObservationInfo {
     std::optional<std::array<double, 3>> observatory_position;  // OBSGEO-X, Y, Z (meters)
 };
 
-struct StorageLayout {
-    std::vector<std::uint64_t> chunk_shape;
-    std::vector<std::uint64_t> shard_shape;
-    std::string compressor;
-    bool sharded = false;
-};
-
 // The read geometry of one image, reported in the logical axis order of ImageDescriptor::axes so
 // that a consumer never has to undo the stored order itself.
 //
@@ -278,10 +304,6 @@ struct ImageDescriptor {
     std::optional<PolarizationCoordinate> polarization;
     std::optional<TemporalCoordinate> temporal;
     std::optional<ObservationInfo> observation;
-    // Always present. Every array this library opens declared a chunk grid it could read, so there
-    // is no image whose layout is unknown -- one whose sharding codec does not describe its chunks
-    // is refused rather than opened with the question left open.
-    StorageLayout storage;
     std::vector<Diagnostic> diagnostics;
 };
 

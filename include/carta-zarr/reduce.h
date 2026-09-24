@@ -206,7 +206,8 @@ struct CubeHistogramRequest {
     // because a chunk comes back whole however few of its pixels are wanted. It pays when it steps
     // over whole chunks.
     std::uint64_t spatial_sample = 1;
-    // Called as the walk advances, once per read. Returning false cancels. See
+    // Called as the walk advances: before every read after the first, so a walk that takes one read
+    // never calls it, and nothing is called once the last read is done. Returning false cancels. See
     // CubeHistogramProgress for what it can ask for besides the fraction done.
     std::function<bool(const CubeHistogramProgress&)> progress;
 };

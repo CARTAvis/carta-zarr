@@ -151,6 +151,23 @@ inline std::uint64_t ChunksSpanned(std::uint64_t start, std::uint64_t count, std
     return (last / chunk) - (start / chunk) + 1;
 }
 
+// How many chunks a strided selection touches along one axis: the ones that hold a selected
+// element, which is what a walk decodes and so what its progress is counted in.
+//
+// Not ChunksSpanned. A stride of a chunk or more puts every selected element in a chunk of its own
+// and can step over whole chunks between them, which a span from first to last would count. Below
+// a chunk, no step is long enough to skip one, and the two agree.
+inline std::uint64_t ChunksTouched(std::uint64_t start, std::uint64_t count, std::uint64_t stride,
+                                   std::uint64_t chunk) {
+    if (count == 0) {
+        return 0;
+    }
+    if (chunk == 0 || stride >= chunk) {
+        return count;
+    }
+    return ChunksSpanned(start, count, stride, chunk);
+}
+
 }  // namespace carta::zarr::internal
 
 #endif  // CARTA_ZARR_SRC_CHUNK_BLOCKS_H_

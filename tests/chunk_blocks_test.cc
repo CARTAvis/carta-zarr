@@ -108,6 +108,18 @@ void TestAMaskCostsOneByteAnElement() {
             "only a one-byte image is actually doubled by its flag");
 }
 
+// What a walk decodes along the spectrum, which is what its progress is counted in. The chunks a
+// selection spans from first to last are not that once a stride steps over whole chunks.
+void TestAStrideCountsOnlyTheChunksItLandsIn() {
+    using carta::zarr::internal::ChunksSpanned;
+    using carta::zarr::internal::ChunksTouched;
+    Require(ChunksTouched(1, 8, 1, 4) == 3, "channels 1 to 8 in chunks of four touch chunks 0, 1 and 2");
+    Require(ChunksTouched(1, 8, 3, 4) == 6, "every third channel from 1 misses none of six chunks");
+    Require(ChunksTouched(0, 3, 9, 4) == 3, "channels 0, 9 and 18 land in three chunks");
+    Require(ChunksSpanned(0, 3, 9, 4) == 5, "and step over the two between them, which a span counts");
+    Require(ChunksTouched(0, 0, 1, 4) == 0, "nothing selected touches nothing");
+}
+
 }  // namespace
 
 int main() {
@@ -116,6 +128,7 @@ int main() {
         TestAnOversizedChunkIsCappedRatherThanMultiplied();
         TestASmallChunkKeepsTheByteBudget();
         TestAMaskCostsOneByteAnElement();
+        TestAStrideCountsOnlyTheChunksItLandsIn();
     } catch (const std::exception& error) {
         std::fprintf(stderr, "chunk blocks test failed: %s\n", error.what());
         return 1;

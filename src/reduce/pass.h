@@ -131,7 +131,7 @@ public:
 
             visit(slab.value());
 
-            chunks_done += footprint.chunks * _plan.ChunksFor(slab_length);
+            chunks_done += footprint.chunks * _plan.ChunksTouched(slab_begin, slab_end);
             slab_begin = slab_end;
         }
         return {};
@@ -204,7 +204,7 @@ Result<void> RunPass(const PixelSource& source, const PassPlan& plan, const Read
         band.chunks = std::max<std::uint64_t>(
             1, (((plan.u_length - 1) / plan.chunk_u) + 1) * ((((v_end - v_begin) - 1) / plan.chunk_v) + 1));
         if (band.v_count == 0) {
-            chunks_done += band.chunks * plan.ChunksFor(end - begin);
+            chunks_done += band.chunks * plan.ChunksTouched(begin, end);
             v_begin = v_end;
             continue;
         }

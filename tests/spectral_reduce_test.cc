@@ -87,8 +87,8 @@ Totals Expected(const carta::zarr::RegionMask& region, std::uint64_t frequency, 
     Totals totals;
     for (std::uint64_t y = region.y_start; y < region.y_start + region.height; ++y) {
         for (std::uint64_t x = region.x_start; x < region.x_start + region.width; ++x) {
-            if (region.mask != nullptr &&
-                region.mask[((y - region.y_start) * region.width) + (x - region.x_start)] == 0) {
+            if (region.mask.data != nullptr &&
+                region.mask.data[((y - region.y_start) * region.width) + (x - region.x_start)] == 0) {
                 continue;
             }
             // A flagged pixel and a pixel in the deleted chunk are both absent, and the reduction
@@ -158,7 +158,7 @@ struct Collected {
 Collected Collect(const carta::zarr::Image& sky, const carta::zarr::SpectralReduceRequest& request,
                   const carta::zarr::ReadOptions& options) {
     Collected collected;
-    collected.region_count = request.region_count;
+    collected.region_count = request.regions.size;
     collected.channel_count = static_cast<std::size_t>(request.planes.spectral.count);
     std::uint64_t next_channel = 0;
     const auto result = sky.ReduceSpectral(request, [&](const carta::zarr::SpectralBlock& block) {
@@ -226,8 +226,7 @@ carta::zarr::SpectralReduceRequest WholeSpectrum(const std::vector<carta::zarr::
     carta::zarr::SpectralReduceRequest request;
     request.planes.spectral = {0, kFrequency, 1};
     request.planes.polarization = polarization;
-    request.regions = regions.data();
-    request.region_count = regions.size();
+    request.regions = {regions.data(), regions.size()};
     request.statistics = AllStatistics();
     return request;
 }
@@ -236,9 +235,9 @@ carta::zarr::SpectralReduceRequest WholeSpectrum(const std::vector<carta::zarr::
 // tells a correct walk from one that visits a region once per chunk and forgets to clip it.
 void TestRegionsSpanningChunks(const carta::zarr::Image& sky) {
     const std::vector<carta::zarr::RegionMask> regions{
-        {0, 0, kL, kM, nullptr},  // the whole plane, across both l chunks
-        {1, 1, 2, 2, nullptr},    // straddles the chunk boundary at l = 2
-        {3, 4, 1, 1, nullptr},    // a single pixel, which is what a cursor profile asks for
+        {0, 0, kL, kM},  // the whole plane, across both l chunks
+        {1, 1, 2, 2},    // straddles the chunk boundary at l = 2
+        {3, 4, 1, 1},    // a single pixel, which is what a cursor profile asks for
     };
     const auto collected = Collect(sky, WholeSpectrum(regions, 0));
     Require(collected.carried == AllStatistics(), "all six statistics should be reported");
@@ -247,7 +246,7 @@ void TestRegionsSpanningChunks(const carta::zarr::Image& sky) {
 
 // Every pixel of polarization 2, frequency 1, l >= 2 lives in the chunk the generator deleted.
 void TestMissingChunkHasNoFinitePixels(const carta::zarr::Image& sky) {
-    const std::vector<carta::zarr::RegionMask> regions{{2, 0, 2, kM, nullptr}};
+    const std::vector<carta::zarr::RegionMask> regions{{2, 0, 2, kM}};
     const auto collected = Collect(sky, WholeSpectrum(regions, 2));
     CheckAgainstOracle(collected, regions, 2, "missing chunk");
     RequireClose(collected.At(0, carta::zarr::Statistic::num_pixels, 1), 0.0,
@@ -271,9 +270,9 @@ void TestRasterMaskAndNullMaskAgree(const carta::zarr::Image& sky) {
     }
     const std::vector<std::uint8_t> full(kL * kM, 1);
     const std::vector<carta::zarr::RegionMask> regions{
-        {0, 0, kL, kM, checkerboard.data()},
-        {0, 0, kL, kM, full.data()},
-        {0, 0, kL, kM, nullptr},
+        {0, 0, kL, kM, {checkerboard.data(), checkerboard.size()}},
+        {0, 0, kL, kM, {full.data(), full.size()}},
+        {0, 0, kL, kM},
     };
     const auto collected = Collect(sky, WholeSpectrum(regions, 1));
     CheckAgainstOracle(collected, regions, 1, "masked");
@@ -286,7 +285,7 @@ void TestRasterMaskAndNullMaskAgree(const carta::zarr::Image& sky) {
 
 // The statistics a caller did not ask for must not appear, and the ones they did must.
 void TestOnlyRequestedStatisticsAreReported(const carta::zarr::Image& sky) {
-    const std::vector<carta::zarr::RegionMask> regions{{0, 0, kL, kM, nullptr}};
+    const std::vector<carta::zarr::RegionMask> regions{{0, 0, kL, kM}};
     auto request = WholeSpectrum(regions, 0);
     request.statistics = carta::zarr::Statistic::sum | carta::zarr::Statistic::num_pixels;
     const auto collected = Collect(sky, request);
@@ -301,7 +300,7 @@ void TestOnlyRequestedStatisticsAreReported(const carta::zarr::Image& sky) {
 // Strides skip channels rather than sampling a dense read afterwards, and first_channel indexes the
 // selection rather than the image.
 void TestStrideSelectsChannels(const carta::zarr::Image& sky) {
-    const std::vector<carta::zarr::RegionMask> regions{{0, 0, kL, kM, nullptr}};
+    const std::vector<carta::zarr::RegionMask> regions{{0, 0, kL, kM}};
     auto request = WholeSpectrum(regions, 0);
     request.planes.spectral = {1, 1, 2};
     const auto collected = Collect(sky, request);
@@ -313,7 +312,7 @@ void TestStrideSelectsChannels(const carta::zarr::Image& sky) {
 // emit_every_channels is a hint that the block reports back. One channel per block is inside every
 // budget here, so the hint survives intact and the reduction arrives in two pieces.
 void TestEmitGranularityIsReported(const carta::zarr::Image& sky) {
-    const std::vector<carta::zarr::RegionMask> regions{{0, 0, kL, kM, nullptr}};
+    const std::vector<carta::zarr::RegionMask> regions{{0, 0, kL, kM}};
     auto request = WholeSpectrum(regions, 0);
     request.emit_every_channels = 1;
     const auto collected = Collect(sky, request);
@@ -345,7 +344,7 @@ void TestEmitGranularityIsReported(const carta::zarr::Image& sky) {
 // finished block is unaffected -- in particular that putting the extremum identities back after a
 // hand-over leaves the walk able to keep accumulating into them.
 void TestAnUnfinishedBlockIsHandedOver(const carta::zarr::Image& sky) {
-    const std::vector<carta::zarr::RegionMask> regions{{0, 0, kL, kM, nullptr}};
+    const std::vector<carta::zarr::RegionMask> regions{{0, 0, kL, kM}};
     carta::zarr::ReadOptions options;
     // One chunk of the fixture, so the plane's two chunks cannot be read together.
     options.temporary_memory_limit_bytes = 40;
@@ -380,7 +379,7 @@ void TestAMaskWithHolesMatchesTheOracle(const carta::zarr::Image& sky) {
             raster.at(static_cast<std::size_t>((y * kL) + x)) = set ? 1 : 0;
         }
     }
-    const std::vector<carta::zarr::RegionMask> regions{{0, 0, kL, kM, raster.data()}};
+    const std::vector<carta::zarr::RegionMask> regions{{0, 0, kL, kM, {raster.data(), raster.size()}}};
     CheckAgainstOracle(Collect(sky, WholeSpectrum(regions, 0)), regions, 0, "a mask with holes");
 }
 
@@ -399,7 +398,7 @@ void TestAMaskWithHolesMatchesTheOracle(const carta::zarr::Image& sky) {
 // statistics against the oracle through the public interface.
 
 void TestABigRegionIsEmittedALayerAtATime(const carta::zarr::Image& sky) {
-    const std::vector<carta::zarr::RegionMask> regions{{0, 0, kL, kM, nullptr}};
+    const std::vector<carta::zarr::RegionMask> regions{{0, 0, kL, kM}};
     const auto& chunk = sky.chunk_geometry().chunk_shape;
     Require(chunk.at(2) == 1,
             "this test assumes the fixture's frequency chunk is one channel deep, so that a layer "
@@ -420,7 +419,7 @@ void TestABigRegionIsEmittedALayerAtATime(const carta::zarr::Image& sky) {
 }
 
 void TestSinkCancels(const carta::zarr::Image& sky) {
-    const std::vector<carta::zarr::RegionMask> regions{{0, 0, kL, kM, nullptr}};
+    const std::vector<carta::zarr::RegionMask> regions{{0, 0, kL, kM}};
     auto request = WholeSpectrum(regions, 0);
     request.emit_every_channels = 1;
     std::size_t blocks = 0;
@@ -434,7 +433,7 @@ void TestSinkCancels(const carta::zarr::Image& sky) {
 }
 
 void TestRejectedRequests(const carta::zarr::Image& sky) {
-    const std::vector<carta::zarr::RegionMask> regions{{0, 0, kL, kM, nullptr}};
+    const std::vector<carta::zarr::RegionMask> regions{{0, 0, kL, kM}};
     const auto sink = [](const carta::zarr::SpectralBlock&) { return true; };
     const auto rejects = [&](carta::zarr::SpectralReduceRequest request, const std::string& what) {
         const auto result = sky.ReduceSpectral(request, sink);
@@ -444,23 +443,32 @@ void TestRejectedRequests(const carta::zarr::Image& sky) {
     };
 
     auto no_regions = WholeSpectrum(regions, 0);
-    no_regions.region_count = 0;
+    no_regions.regions.size = 0;
     rejects(no_regions, "a reduction with no regions");
 
     auto too_many = WholeSpectrum(regions, 0);
-    too_many.region_count = carta::zarr::kMaxSpectralRegions + 1;
+    too_many.regions.size = carta::zarr::kMaxSpectralRegions + 1;
     rejects(too_many, "a region count past the structural bound");
 
     auto no_statistics = WholeSpectrum(regions, 0);
     no_statistics.statistics = {};
     rejects(no_statistics, "a reduction with no statistics");
 
-    const std::vector<carta::zarr::RegionMask> outside{{kL - 1, 0, 2, kM, nullptr}};
+    const std::vector<carta::zarr::RegionMask> outside{{kL - 1, 0, 2, kM}};
     auto past_the_edge = WholeSpectrum(outside, 0);
     rejects(past_the_edge, "a region hanging off the image");
 
-    const std::vector<carta::zarr::RegionMask> empty{{0, 0, 0, kM, nullptr}};
+    const std::vector<carta::zarr::RegionMask> empty{{0, 0, 0, kM}};
     rejects(WholeSpectrum(empty, 0), "a region with no width");
+
+    // A raster is width * height bytes, and one of any other length was cut for another box: read as
+    // this one it runs past its end, or stops short of the box it claims to cover.
+    const std::vector<std::uint8_t> short_raster(static_cast<std::size_t>(kL * kM) - 1, 1);
+    const std::vector<carta::zarr::RegionMask> short_mask{{0, 0, kL, kM, {short_raster.data(), short_raster.size()}}};
+    rejects(WholeSpectrum(short_mask, 0), "a mask shorter than its box");
+
+    const std::vector<carta::zarr::RegionMask> sized_but_absent{{0, 0, kL, kM, {nullptr, kL * kM}}};
+    rejects(WholeSpectrum(sized_but_absent, 0), "a mask with a length and no data");
 
     auto past_the_last_channel = WholeSpectrum(regions, 0);
     past_the_last_channel.planes.spectral = {0, kFrequency + 1, 1};
@@ -496,8 +504,8 @@ double ExpectedValue(std::uint64_t l, std::uint64_t m, std::uint64_t frequency, 
 void TestAWideRegionSplitsAndStillAgrees(const char* fixture) {
     const std::uint64_t polarization = 1;
     const std::vector<carta::zarr::RegionMask> regions{
-        {0, 0, kL, kM, nullptr},        // the whole plane
-        {100, 60, 300, 400, nullptr},   // an interior box across several chunks
+        {0, 0, kL, kM},        // the whole plane
+        {100, 60, 300, 400},   // an interior box across several chunks
     };
 
     // The oracle, recomputed from the fixture's encoding.
@@ -531,8 +539,7 @@ void TestAWideRegionSplitsAndStillAgrees(const char* fixture) {
         carta::zarr::SpectralReduceRequest request;
         request.planes.spectral = {0, kFrequency, 1};
         request.planes.polarization = polarization;
-        request.regions = regions.data();
-        request.region_count = regions.size();
+        request.regions = {regions.data(), regions.size()};
         request.statistics = AllStatistics();
         const auto collected = Collect(sky, request);
 

@@ -32,13 +32,14 @@ constexpr double kInfinity = std::numeric_limits<double>::infinity();
 Result<void> ValidateRequest(const ImageDescriptor& descriptor, const AxisMap& axes,
                              const SpectralReduceRequest& request) {
     const auto& node = descriptor.id;
-    if (request.region_count == 0 || request.regions == nullptr) {
+    const auto region_count = request.regions.size;
+    if (region_count == 0 || request.regions.data == nullptr) {
         return Error{ErrorCode::invalid_argument, "A spectral reduction needs at least one region", node};
     }
-    if (request.region_count > kMaxSpectralRegions) {
+    if (region_count > kMaxSpectralRegions) {
         return Error{ErrorCode::invalid_argument,
                      "A spectral reduction accepts at most " + std::to_string(kMaxSpectralRegions) +
-                         " regions, not " + std::to_string(request.region_count),
+                         " regions, not " + std::to_string(region_count),
                      node};
     }
     if (request.statistics.empty()) {
@@ -47,8 +48,8 @@ Result<void> ValidateRequest(const ImageDescriptor& descriptor, const AxisMap& a
 
     const auto width = descriptor.axes.at(axes.x).length;
     const auto height = descriptor.axes.at(axes.y).length;
-    for (std::size_t i = 0; i < request.region_count; ++i) {
-        const auto& region = request.regions[i];
+    for (std::size_t i = 0; i < region_count; ++i) {
+        const auto& region = request.regions.data[i];
         if (region.width == 0 || region.height == 0) {
             return Error{ErrorCode::invalid_argument, "Region " + std::to_string(i) + " is empty", node};
         }
@@ -56,6 +57,15 @@ Result<void> ValidateRequest(const ImageDescriptor& descriptor, const AxisMap& a
             region.height > height - region.y_start) {
             return Error{ErrorCode::invalid_argument,
                          "Region " + std::to_string(i) + " falls outside the image", node};
+        }
+        // Both inside the image, so their product is a pixel count and cannot overflow.
+        const auto box = region.width * region.height;
+        const auto& mask = region.mask;
+        if (mask.data != nullptr ? mask.size != box : mask.size != 0) {
+            return Error{ErrorCode::invalid_argument,
+                         "Region " + std::to_string(i) + " has a mask of " + std::to_string(mask.size) +
+                             " elements for a box of " + std::to_string(box),
+                         node};
         }
     }
 
@@ -143,7 +153,7 @@ Result<void> ReduceSpectral(const ReadableImage& image, const SpectralReduceRequ
     // Asked of the plan rather than of the geometry: the plan applied that rule when it picked
     // axis_u, and working it out again here would be a second place for it to be got wrong.
     auto occupancy_result =
-        Occupancy::Of(request.regions, request.region_count, plan.chunk_u, plan.chunk_v,
+        Occupancy::Of(request.regions, plan.chunk_u, plan.chunk_v,
                       plan.SwapsSpatial() ? AxisRole::spatial_y : AxisRole::spatial_x, node);
     if (!occupancy_result) {
         return occupancy_result.error();
@@ -180,7 +190,7 @@ Result<void> ReduceSpectral(const ReadableImage& image, const SpectralReduceRequ
     // Emitting only at the end instead, which is what a zero used to mean, is silent for as long as
     // the whole reduction takes. One layer of a 7763x4742 image is 160 MiB and 70 ms; a thousand
     // channels of it is a minute of work with no partial answer and nowhere to cancel.
-    const BlockEmitter emitter(plan, layer_chunks, layout.BytesPerChannel(request.region_count),
+    const BlockEmitter emitter(plan, layer_chunks, layout.BytesPerChannel(request.regions.size),
                                request.emit_every_channels,
                                "The spectral reduction was cancelled by its sink");
 
@@ -191,7 +201,7 @@ Result<void> ReduceSpectral(const ReadableImage& image, const SpectralReduceRequ
     std::vector<StatisticSlots> partials;
     SlabWalk walk(source, plan, options);
 
-    const auto reset_block = [&](std::uint64_t length) { accumulator.Reset(layout, request.region_count, length); };
+    const auto reset_block = [&](std::uint64_t length) { accumulator.Reset(layout, request.regions.size, length); };
 
     // One read's worth of pixels, accumulated into the block's own totals.
     //
@@ -226,7 +236,7 @@ Result<void> ReduceSpectral(const ReadableImage& image, const SpectralReduceRequ
         const std::uint64_t cells = std::max<std::uint64_t>(1, cv_span * cu_span);
         const std::uint64_t units = slab_length * cells;
         const std::size_t partial_bytes = std::max<std::size_t>(
-            1, layout.BytesPerChannel(request.region_count) * static_cast<std::size_t>(slab_length));
+            1, layout.BytesPerChannel(request.regions.size) * static_cast<std::size_t>(slab_length));
 
         // One (channel, chunk cell) unit of the accumulation, into a private partial the
         // length of this slab. Private because two units of the same channel can touch the
@@ -346,7 +356,7 @@ Result<void> ReduceSpectral(const ReadableImage& image, const SpectralReduceRequ
             partials.resize(tasks);
         }
         for (std::size_t task = 0; task < tasks; ++task) {
-            partials.at(task).Reset(layout, request.region_count, slab_length);
+            partials.at(task).Reset(layout, request.regions.size, slab_length);
         }
 
         // Contiguous runs of units, cut the way the histograms cut their rows. They were

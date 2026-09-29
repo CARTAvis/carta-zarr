@@ -116,14 +116,15 @@ struct PlaneSelection {
 
 // A 2D (x, y) mask in logical image coordinates, addressed row-major with x fastest.
 //
-// This is a borrowed view: the pointer must stay valid until ReduceSpectral returns, and the
+// This is a borrowed view: the raster must stay valid until ReduceSpectral returns, and the
 // library never retains it. The shape is the region's bounding box rather than the image, which is
 // what makes handing over tens of thousands of regions at once affordable -- 5,792 PV boxes on a
 // 4096^2 image describe themselves in 2.5 MB.
 //
-// A null mask selects the whole bounding box. That branch is required, not a convenience: an
-// unrotated rectangle reaches a caller as a box with no raster mask at all, and it is the most
-// common region shape there is.
+// A mask with no data selects the whole bounding box, and an unmasked region is written without one:
+// `{x_start, y_start, width, height}`. That branch is required, not a convenience: an unrotated
+// rectangle reaches a caller as a box with no raster mask at all, and it is the most common region
+// shape there is.
 struct RegionMask {
     std::uint64_t x_start = 0;
     std::uint64_t y_start = 0;
@@ -133,7 +134,11 @@ struct RegionMask {
     // the store varies fastest, in one pass over it -- about 2 ms for a 7763x4742 bounding box -- so
     // that it finds the chunks a region occupies from the runs, and accumulates every run with the
     // loop an unmasked region uses. A raster too fragmented to be worth runs is read as a raster.
-    const std::uint8_t* mask = nullptr;
+    //
+    // width * height elements when there is one, and nothing when there is not; a reduction refuses
+    // any other size. It was a bare pointer, whose length a reduction could only assume, so a raster
+    // cut for another box was read past its end.
+    BufferView<const std::uint8_t> mask;
 };
 
 // One plane histogram request: bin every pixel of each plane over a fixed range.
@@ -269,9 +274,9 @@ inline constexpr std::size_t kMaxSpectralRegions = 1u << 20;
 
 struct SpectralReduceRequest {
     PlaneSelection planes;
-    // The regions, all reduced in a single pass over the pixels.
-    const RegionMask* regions = nullptr;
-    std::size_t region_count = 0;
+    // The regions, all reduced in a single pass over the pixels. Borrowed until ReduceSpectral
+    // returns, as each one's raster is.
+    BufferView<const RegionMask> regions;
     StatisticSet statistics;
     // How often to hand results back, as a hint rather than a contract. Zero lets the library
     // choose, which is what most callers want: it emits as often as it can without making the reads

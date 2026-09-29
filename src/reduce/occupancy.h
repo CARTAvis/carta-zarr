@@ -120,8 +120,8 @@ public:
     //
     // Assumes at least one region: an empty set is refused a step earlier, where the rest of the
     // request is checked.
-    static Result<Occupancy> Of(const RegionMask* regions, std::size_t region_count, std::uint64_t chunk_u,
-                                std::uint64_t chunk_v, AxisRole fastest_spatial_axis, const std::string& node);
+    static Result<Occupancy> Of(BufferView<const RegionMask> regions, std::uint64_t chunk_u, std::uint64_t chunk_v,
+                                AxisRole fastest_spatial_axis, const std::string& node);
 
     // The caller's regions on the walk's axes, in the order they were given. The accumulation
     // indexes this by what RegionsTouching hands back.

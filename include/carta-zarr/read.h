@@ -118,7 +118,9 @@ struct ReadOptions {
     std::size_t temporary_memory_limit_bytes = 0;
 };
 
-// Somewhere for a read to write, counted in elements rather than in bytes.
+// A run of elements the caller owns and lends for one call, counted in elements rather than in
+// bytes: somewhere for a read to write, or, as BufferView<const T>, something for a reduction to read
+// -- its regions and each region's raster -- whose length the library checks rather than assumes.
 //
 // Typed because the element type is not the caller's to choose: pixels arrive as float, and a pixel
 // mask as one byte per pixel. An untyped view with a byte count could express neither fact, so the

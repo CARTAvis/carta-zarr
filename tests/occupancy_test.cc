@@ -46,7 +46,7 @@ RegionMask Box(std::uint64_t x, std::uint64_t y, std::uint64_t width, std::uint6
 
 Occupancy Built(const std::vector<RegionMask>& regions, std::uint64_t chunk_u, std::uint64_t chunk_v,
                 AxisRole fastest = AxisRole::spatial_x) {
-    auto built = Occupancy::Of(regions.data(), regions.size(), chunk_u, chunk_v, fastest, "TEST");
+    auto built = Occupancy::Of({regions.data(), regions.size()}, chunk_u, chunk_v, fastest, "TEST");
     Require(static_cast<bool>(built),
             "Occupancy::Of failed: " + (built ? std::string{} : built.error().message));
     return std::move(built.value());
@@ -137,7 +137,7 @@ void TestAMaskNarrowsTheOccupancyBelowTheBoundingBox() {
     // chunks and occupies four of them.
     const auto raster = DiagonalRaster(16, 16, 4);
     auto region = Box(0, 0, 16, 16);
-    region.mask = raster.data();
+    region.mask = {raster.data(), raster.size()};
 
     const auto occupancy = Built({region}, 4, 4);
 
@@ -153,7 +153,7 @@ void TestAMaskNarrowsTheOccupancyBelowTheBoundingBox() {
 void TestARasterReachesTheWalkAsRuns() {
     const auto raster = DiagonalRaster(16, 16, 4);
     auto region = Box(0, 0, 16, 16);
-    region.mask = raster.data();
+    region.mask = {raster.data(), raster.size()};
 
     for (const auto fastest : {AxisRole::spatial_x, AxisRole::spatial_y}) {
         const auto occupancy = Built({region}, 4, 4, fastest);
@@ -178,7 +178,7 @@ void TestAFragmentedRasterStaysARaster() {
         }
     }
     auto region = Box(0, 0, 16, 16);
-    region.mask = board.data();
+    region.mask = {board.data(), board.size()};
 
     for (const auto fastest : {AxisRole::spatial_x, AxisRole::spatial_y}) {
         const auto occupancy = Built({region}, 4, 4, fastest);
@@ -216,7 +216,7 @@ void TestTheIncidencesOfOneChunkAreContiguousAndInRegionOrder() {
 void TestAMaskThatSelectsNothingOccupiesNothing() {
     const std::vector<std::uint8_t> raster(16 * 16, 0);
     auto region = Box(0, 0, 16, 16);
-    region.mask = raster.data();
+    region.mask = {raster.data(), raster.size()};
 
     const auto occupancy = Built({region}, 4, 4);
 
@@ -284,7 +284,7 @@ void TestAGridTooLargeToIndexIsRefused() {
     // 65,536 chunks on a side is 2^32 cells, one more than a cell number can hold. Refused before
     // anything is allocated for it.
     const std::vector<RegionMask> regions{Box(0, 0, 65536, 65536)};
-    const auto refused = Occupancy::Of(regions.data(), regions.size(), 1, 1, AxisRole::spatial_x, "TEST");
+    const auto refused = Occupancy::Of({regions.data(), regions.size()}, 1, 1, AxisRole::spatial_x, "TEST");
     Require(!refused && refused.error().code == ErrorCode::invalid_argument,
             "a grid of 2^32 chunks was accepted");
 }

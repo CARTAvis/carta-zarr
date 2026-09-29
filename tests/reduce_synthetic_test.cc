@@ -230,13 +230,12 @@ void TestASpectralReductionAgreesWithTheFormula() {
     SyntheticPixelSource source(image, geometry, Value);
 
     const std::vector<carta::zarr::RegionMask> regions{
-        {0, 0, kX, kY, nullptr},
-        {40, 50, 100, 120, nullptr},
+        {0, 0, kX, kY},
+        {40, 50, 100, 120},
     };
     carta::zarr::SpectralReduceRequest request;
     request.planes.spectral = {0, kZ, 1};
-    request.regions = regions.data();
-    request.region_count = regions.size();
+    request.regions = {regions.data(), regions.size()};
     request.statistics = carta::zarr::Statistic::num_pixels | carta::zarr::Statistic::sum |
                          carta::zarr::Statistic::min | carta::zarr::Statistic::max;
 
@@ -346,8 +345,7 @@ void TestAMaskedRegionReadsOnlyTheChunksItOccupies() {
 
         carta::zarr::SpectralReduceRequest request;
         request.planes.spectral = {0, kChannels, 1};
-        request.regions = regions.data();
-        request.region_count = regions.size();
+        request.regions = {regions.data(), regions.size()};
         request.statistics = carta::zarr::Statistic::num_pixels | carta::zarr::Statistic::sum;
 
         ReadOptions options;
@@ -391,7 +389,7 @@ void TestAMaskedRegionReadsOnlyTheChunksItOccupies() {
 
     // This image varies y fastest, so the runs the reduction makes from the raster are ranges of
     // rows, one line per column -- the case that used to cost a column walk down the raster.
-    carta::zarr::RegionMask rastered{0, 0, kSide, kSide, raster.data()};
+    carta::zarr::RegionMask rastered{0, 0, kSide, kSide, {raster.data(), raster.size()}};
     reduce(rastered, "as a raster");
 }
 
@@ -567,11 +565,10 @@ void TestProgressNeverClaimsTheWholeRunBeforeItsLastRead() {
         }
 
         // One block for the whole run, so that a block is several reads.
-        const carta::zarr::RegionMask whole{0, 0, kSide, kSide, nullptr};
+        const carta::zarr::RegionMask whole{0, 0, kSide, kSide};
         carta::zarr::SpectralReduceRequest reduce;
         reduce.planes.spectral = spectral;
-        reduce.regions = &whole;
-        reduce.region_count = 1;
+        reduce.regions = {&whole, 1};
         reduce.statistics = carta::zarr::Statistic::sum;
         reduce.emit_every_channels = static_cast<std::uint32_t>(count);
         const auto reduced = carta::zarr::internal::ReduceSpectral(

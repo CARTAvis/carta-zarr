@@ -145,15 +145,14 @@ int main(int argc, char** argv) {
 
     // Two overlapping regions over every channel, which is what the multi-region pass exists for.
     const std::vector<carta::zarr::RegionMask> regions{
-        {0, 0, x, y, nullptr},
-        {x / 4, y / 4, x / 2, y / 2, nullptr},
+        {0, 0, x, y},
+        {x / 4, y / 4, x / 2, y / 2},
     };
     const auto reduce_over = [&](const std::vector<carta::zarr::RegionMask>& over) {
         return TimeIt(repeats, [&]() -> std::string {
             carta::zarr::SpectralReduceRequest request;
             request.planes.spectral = {0, channels, 1};
-            request.regions = over.data();
-            request.region_count = over.size();
+            request.regions = {over.data(), over.size()};
             request.statistics = carta::zarr::Statistic::num_pixels | carta::zarr::Statistic::nan_count |
                                  carta::zarr::Statistic::sum | carta::zarr::Statistic::sum_sq |
                                  carta::zarr::Statistic::min | carta::zarr::Statistic::max;
@@ -173,8 +172,8 @@ int main(int argc, char** argv) {
     // half the strips a row per pixel whichever axis that is.
     std::vector<carta::zarr::RegionMask> boxes;
     for (std::uint64_t i = 0; i < 32; ++i) {
-        boxes.push_back({(i * x) / 32, 0, 1, y, nullptr});
-        boxes.push_back({0, (i * y) / 32, x, 1, nullptr});
+        boxes.push_back({(i * x) / 32, 0, 1, y});
+        boxes.push_back({0, (i * y) / 32, x, 1});
     }
     const auto reduce_boxes = reduce_over(boxes);
 
@@ -188,7 +187,7 @@ int main(int argc, char** argv) {
             ellipse.at((row * x) + column) = (dx * dx) + (dy * dy) <= 1.0 ? 1 : 0;
         }
     }
-    const auto reduce_masked = reduce_over({carta::zarr::RegionMask{0, 0, x, y, ellipse.data()}});
+    const auto reduce_masked = reduce_over({carta::zarr::RegionMask{0, 0, x, y, {ellipse.data(), ellipse.size()}}});
 
     const auto histogram = TimeIt(repeats, [&]() -> std::string {
         carta::zarr::HistogramRequest request;

@@ -30,8 +30,9 @@ constexpr std::size_t kMaxChunkIncidences = 1u << 26;
 
 }  // namespace
 
-Result<Occupancy> Occupancy::Of(const RegionMask* regions, std::size_t region_count, std::uint64_t chunk_u,
-                                std::uint64_t chunk_v, AxisRole fastest_spatial_axis, const std::string& node) {
+Result<Occupancy> Occupancy::Of(BufferView<const RegionMask> regions, std::uint64_t chunk_u, std::uint64_t chunk_v,
+                                AxisRole fastest_spatial_axis, const std::string& node) {
+    const std::size_t region_count = regions.size;
     // The walk follows the store. Of the two spatial axes the one written last varies fastest, so
     // asking for it first is what keeps a plane from being transposed on its way into the
     // destination; everything below is in terms of that axis (u) and the other one (v).
@@ -42,22 +43,22 @@ Result<Occupancy> Occupancy::Of(const RegionMask* regions, std::size_t region_co
     occupancy._chunk_v = chunk_v;
     occupancy._regions.reserve(region_count);
     for (std::size_t i = 0; i < region_count; ++i) {
-        const auto& given = regions[i];
+        const auto& given = regions.data[i];
         // The raster keeps whatever order the caller wrote it in; only the steps through it change.
         PlacedRegion region;
         region.u_start = swap_spatial ? given.y_start : given.x_start;
         region.v_start = swap_spatial ? given.x_start : given.y_start;
         region.u_size = swap_spatial ? given.height : given.width;
         region.v_size = swap_spatial ? given.width : given.height;
-        region.mask = given.mask;
+        region.mask = given.mask.data;
         region.mask_u_stride = swap_spatial ? given.width : 1;
         region.mask_v_stride = swap_spatial ? 1 : given.width;
         // A raster is given runs, along u: which axis that is was the caller's to know once, and is
         // not any more. The raster stays beside them for a fragmented one, which comes back refused
         // and is read as the raster it is.
-        if (given.mask != nullptr) {
+        if (given.mask.data != nullptr) {
             RegionRuns made;
-            if (RunsAlongU(given.mask, given.width, given.height, !swap_spatial, made)) {
+            if (RunsAlongU(given.mask.data, given.width, given.height, !swap_spatial, made)) {
                 occupancy._made_runs.push_back(std::move(made));
                 region.runs = occupancy._made_runs.back().runs.data();
                 region.run_offsets = occupancy._made_runs.back().offsets.data();

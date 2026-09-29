@@ -71,7 +71,8 @@ them will open.
 
 - **Everything is a `Result<T>`.** A failure carries an `ErrorCode`, a message and the node it came
   from. No public entry point throws: a malformed value in the metadata or a length no allocator can
-  serve is reported as an error like any other.
+  serve is reported as an error like any other. `Result` is `[[nodiscard]]` and reads like
+  `std::expected`: `has_value`, `value`, `value_or`, `*`, `->` and `error`.
 - **Logical axis order is `l`, `m`, `frequency`, `polarization`, `time`** (`kXradioImageAxisOrder`),
   whatever order the store holds them in. A read returns them densely packed with axis 0 varying
   fastest; `AxisDescriptor::storage_index` says where each one lives on disk.

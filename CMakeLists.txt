@@ -215,6 +215,10 @@ if(CARTA_ZARR_BUILD_TESTS AND BUILD_TESTING)
             CARTA_ZARR_REFERENCE_FIXTURE="${CARTA_ZARR_FIXTURE_DIR}/xradio/minimal"
             CARTA_ZARR_LEGACY_FIXTURE="${CARTA_ZARR_FIXTURE_DIR}/xradio/legacy")
 
+    carta_zarr_add_test(carta_zarr_result_tests PUBLIC
+        TEST_NAME carta-zarr-result
+        SOURCES tests/result_test.cc)
+
     # The string decoder is an internal component with hidden visibility, so this test compiles it
     # directly instead of linking the shared library.
     carta_zarr_add_test(carta_zarr_string_tests INTERNAL

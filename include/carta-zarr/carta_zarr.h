@@ -119,6 +119,9 @@ public:
     Result<CubeHistogramResult> ComputeCubeHistogram(const CubeHistogramRequest& request) const;
     Result<CubeHistogramResult> ComputeCubeHistogram(const CubeHistogramRequest& request,
                                                      const ReadOptions& options) const;
+    // Watched as it advances. See CubeHistogramProgressCallback.
+    Result<CubeHistogramResult> ComputeCubeHistogram(const CubeHistogramRequest& request, const ReadOptions& options,
+                                                     const CubeHistogramProgressCallback& progress) const;
 
     Result<std::vector<Beam>> ReadBeams() const;
 

@@ -481,7 +481,7 @@ void TestACubeHistogramSplitAcrossWorkers() {
     WorkPool workers(4);
 
     const auto readable = Readable(source, image, geometry, workers);
-    const auto outcome = carta::zarr::internal::ComputeCubeHistogram(readable, request, options);
+    const auto outcome = carta::zarr::internal::ComputeCubeHistogram(readable, request, options, {});
     Require(static_cast<bool>(outcome),
             std::string("the cube histogram failed: ") + (outcome ? "" : outcome.error().message));
     const auto& result = outcome.value();
@@ -551,11 +551,11 @@ void TestProgressNeverClaimsTheWholeRunBeforeItsLastRead() {
         cube.planes.spectral = spectral;
         cube.bins = 16;
         std::vector<double> reported;
-        cube.progress = [&](const carta::zarr::CubeHistogramProgress& update) {
-            reported.push_back(update.progress);
-            return true;
-        };
-        const auto histogram = carta::zarr::internal::ComputeCubeHistogram(readable, cube, options);
+        const auto histogram = carta::zarr::internal::ComputeCubeHistogram(
+            readable, cube, options, [&](const carta::zarr::CubeHistogramProgress& update) {
+                reported.push_back(update.progress);
+                return true;
+            });
         Require(static_cast<bool>(histogram), "the cube histogram failed" + which);
         Require(!reported.empty(), "a one-byte budget should make the cube histogram report" + which);
         for (const double progress : reported) {

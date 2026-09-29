@@ -48,7 +48,8 @@ Result<void> ComputeHistogram(const ReadableImage& image, const HistogramRequest
  */
 Result<CubeHistogramResult> ComputeCubeHistogram(const ReadableImage& image,
                                                  const CubeHistogramRequest& request,
-                                                 const ReadOptions& options);
+                                                 const ReadOptions& options,
+                                                 const CubeHistogramProgressCallback& progress);
 
 }  // namespace carta::zarr::internal
 

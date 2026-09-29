@@ -165,6 +165,16 @@ struct CubeHistogramProgress {
     std::function<CubeHistogramResult()> snapshot;
 };
 
+// Called as a cube histogram's walk advances: before every read after the first, so a walk that takes
+// one read never calls it, and nothing is called once the last read is done. Returning false cancels,
+// which then reports cancelled.
+//
+// An argument of Image::ComputeCubeHistogram, as ProgressCallback is of Image::Read, rather than a
+// field of CubeHistogramRequest. A request says what to compute and is data; this is the caller's
+// code, run while it is computed. As a field it was the one request in the library that carried
+// behaviour, which the reasoning for ProgressCallback had already ruled out.
+using CubeHistogramProgressCallback = std::function<bool(const CubeHistogramProgress&)>;
+
 // One histogram for the whole selection in a single pass, for a caller that does not know the range
 // in advance.
 //
@@ -206,10 +216,6 @@ struct CubeHistogramRequest {
     // because a chunk comes back whole however few of its pixels are wanted. It pays when it steps
     // over whole chunks.
     std::uint64_t spatial_sample = 1;
-    // Called as the walk advances: before every read after the first, so a walk that takes one read
-    // never calls it, and nothing is called once the last read is done. Returning false cancels. See
-    // CubeHistogramProgress for what it can ask for besides the fraction done.
-    std::function<bool(const CubeHistogramProgress&)> progress;
 };
 
 

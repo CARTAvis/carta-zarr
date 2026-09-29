@@ -87,8 +87,9 @@ them will open.
   image does not open.
 - **Reads are cancellable.** `ReadOptions::control` carries a cancellation callback, a deadline and
   a cache policy, which every read and reduction honours; `ReadOptions` adds a ceiling on the
-  temporary memory a request may hold. A read's progress is an argument of `Image::Read`, and a
-  reduction's arrives with its blocks.
+  temporary memory a request may hold. Progress is an argument of `Image::Read` and of
+  `Image::ComputeCubeHistogram`, and a reduction's arrives with its blocks; a request is only ever
+  data.
 - **Threading**: `Context`, `Dataset` and `Image` handles may be shared and read from several
   threads at once. Reductions running concurrently share one worker pool, which runs one read's
   arithmetic at a time: two reductions interleave read by read rather than running side by side.

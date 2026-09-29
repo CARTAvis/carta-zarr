@@ -198,8 +198,13 @@ Result<CubeHistogramResult> Image::ComputeCubeHistogram(const CubeHistogramReque
 
 Result<CubeHistogramResult> Image::ComputeCubeHistogram(const CubeHistogramRequest& request,
                                                         const ReadOptions& options) const {
+    return ComputeCubeHistogram(request, options, CubeHistogramProgressCallback{});
+}
+
+Result<CubeHistogramResult> Image::ComputeCubeHistogram(const CubeHistogramRequest& request, const ReadOptions& options,
+                                                        const CubeHistogramProgressCallback& progress) const {
     return WithReadableImage(_impl, [&](const internal::ReadableImage& image) {
-        return internal::ComputeCubeHistogram(image, request, options);
+        return internal::ComputeCubeHistogram(image, request, options, progress);
     });
 }
 

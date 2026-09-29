@@ -56,9 +56,9 @@ enum class CachePolicy {
 // and a read with neither is issued in one piece.
 //
 // An argument of Image::Read rather than a field of ReadOptions, because it is the only operation
-// that has anywhere to report from -- a reduction reports through its sink, and a cube histogram
-// through its own request's callback. As a field it was a field four of the five entry points
-// silently ignored; as an argument it is simply not part of what they take.
+// that has anywhere to report from in these terms -- a reduction reports through its sink, and a
+// cube histogram through a CubeHistogramProgressCallback of its own. As a field it was a field four
+// of the five entry points silently ignored; as an argument it is simply not part of what they take.
 //
 // A read that nothing interrupts is not made slower by supplying one: the pieces are sized to hold
 // enough chunks to decode in parallel, and at that size a split read measures the same as an

@@ -212,7 +212,8 @@ Result<void> ComputeHistogram(const ReadableImage& image, const HistogramRequest
 
 Result<CubeHistogramResult> ComputeCubeHistogram(const ReadableImage& image,
                                                  const CubeHistogramRequest& request,
-                                                 const ReadOptions& options) {
+                                                 const ReadOptions& options,
+                                                 const CubeHistogramProgressCallback& progress) {
     const auto& descriptor = image.descriptor();
     const auto& geometry = image.geometry();
     const auto& source = image.source();
@@ -334,14 +335,14 @@ Result<CubeHistogramResult> ComputeCubeHistogram(const ReadableImage& image,
     const auto walked = RunPass(
         source, plan, options, SelectionChannel{}, SelectionChannel{planes.count()}, chunks_done,
         [&](std::uint64_t done) -> Result<void> {
-            if (request.progress) {
+            if (progress) {
                 CubeHistogramProgress update;
                 update.progress = static_cast<double>(done) / static_cast<double>(total_chunks);
                 // By reference and lazily: re-aggregating on every read would cost more than the
                 // binning does on a cube with thousands of them, and a caller that only draws a bar
                 // never asks.
                 update.snapshot = collect;
-                if (!request.progress(update)) {
+                if (!progress(update)) {
                     return Error{ErrorCode::cancelled, "The histogram was cancelled by its caller",
                                  node};
                 }

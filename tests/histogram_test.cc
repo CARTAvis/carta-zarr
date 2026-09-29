@@ -574,7 +574,7 @@ void TestAWideCubeReportsWhileItSplits(const char* fixture) {
 
     std::size_t updates = 0;
     double last_pixels = -1.0;
-    request.progress = [&](const carta::zarr::CubeHistogramProgress& update) {
+    const auto progress = [&](const carta::zarr::CubeHistogramProgress& update) {
         ++updates;
         const auto snapshot = update.snapshot();
         std::uint64_t total = 0;
@@ -588,7 +588,7 @@ void TestAWideCubeReportsWhileItSplits(const char* fixture) {
         return true;
     };
 
-    const auto result = sky.ComputeCubeHistogram(request, read_options);
+    const auto result = sky.ComputeCubeHistogram(request, read_options, progress);
     Require(static_cast<bool>(result), "the wide one-pass histogram failed");
     Require(updates > 1, "a budget this small should have taken several reads and reported on each");
     Require(result.value().num_pixels == static_cast<double>(kL * kM * kFrequency),
@@ -616,7 +616,7 @@ void TestOnePassReportsWhatItHasSoFar(const carta::zarr::Image& sky) {
     double last_pixels = -1.0;
     double widest_low = std::numeric_limits<double>::infinity();
     double widest_high = -std::numeric_limits<double>::infinity();
-    request.progress = [&](const carta::zarr::CubeHistogramProgress& update) {
+    const auto progress = [&](const carta::zarr::CubeHistogramProgress& update) {
         ++updates;
         Require(update.progress > last_progress, "progress should not go backwards");
         Require(update.progress >= 0.0 && update.progress <= 1.0, "progress should be a fraction");
@@ -644,7 +644,7 @@ void TestOnePassReportsWhatItHasSoFar(const carta::zarr::Image& sky) {
         return true;
     };
 
-    const auto result = sky.ComputeCubeHistogram(request, options);
+    const auto result = sky.ComputeCubeHistogram(request, options, progress);
     Require(static_cast<bool>(result), "the one-pass histogram failed");
     Require(updates > 0, "a walk taking several reads should have reported at least once");
     Require(result.value().num_pixels >= last_pixels, "the answer should hold at least what the last snapshot did");
@@ -652,8 +652,8 @@ void TestOnePassReportsWhatItHasSoFar(const carta::zarr::Image& sky) {
             "the answer's range should contain every range reported on the way");
 
     // Saying no stops the walk, and says why.
-    request.progress = [](const carta::zarr::CubeHistogramProgress&) { return false; };
-    const auto cancelled = sky.ComputeCubeHistogram(request, options);
+    const auto cancelled = sky.ComputeCubeHistogram(
+        request, options, [](const carta::zarr::CubeHistogramProgress&) { return false; });
     Require(!cancelled && cancelled.error().code == carta::zarr::ErrorCode::cancelled,
             "refusing a progress update should cancel the walk");
 }

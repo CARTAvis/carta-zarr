@@ -66,6 +66,11 @@ public:
     // The read geometry, in the same axis order as descriptor().axes.
     const ChunkGeometry& chunk_geometry() const noexcept;
 
+    // Every operation below takes its ReadOptions, and Read and ComputeCubeHistogram their progress
+    // callback, as defaulted trailing arguments rather than as one overload per argument left off.
+    // The overloads said nothing but "and the rest are defaults", three times over for Read, and a
+    // reader had to open each to see that it forwarded.
+
     // Reads a densely packed result in logical axis order, axis 0 fastest-varying. Returns the
     // number of elements written. Safe to call concurrently on one handle. On failure, the
     // destination may be unchanged, partially written, or fully written; callers must discard it.
@@ -73,12 +78,11 @@ public:
     // float is the only output this library produces. It is said in the destination's type rather
     // than asked for in the request, because a request that could name a type the buffer was not
     // shaped for is a mistake worth making unspellable.
-    Result<std::size_t> Read(const ReadRequest& request, BufferView<float> destination) const;
+    //
+    // A progress callback watches it as it advances, which also splits it into pieces. See
+    // ProgressCallback.
     Result<std::size_t> Read(const ReadRequest& request, BufferView<float> destination,
-                             const ReadOptions& options) const;
-    // Watched as it advances, which also splits it into pieces. See ProgressCallback.
-    Result<std::size_t> Read(const ReadRequest& request, BufferView<float> destination,
-                             const ReadOptions& options, const ProgressCallback& progress) const;
+                             const ReadOptions& options = {}, const ProgressCallback& progress = {}) const;
 
     // Reduces every region over the same channels in one pass over the pixels, handing results to
     // the sink block by block.
@@ -95,9 +99,8 @@ public:
     // on, exactly as it is for a read: a flagged pixel reaches the statistics as NaN, and declining
     // the mask means the flag is never read at all. ReadOptions also supplies cancellation, the
     // deadline, and a ceiling on the pixel buffer the pass may hold.
-    Result<void> ReduceSpectral(const SpectralReduceRequest& request, const SpectralSink& sink) const;
     Result<void> ReduceSpectral(const SpectralReduceRequest& request, const SpectralSink& sink,
-                                const ReadOptions& options) const;
+                                const ReadOptions& options = {}) const;
 
     // Bins every pixel of each plane over a fixed range, handing counts to the sink block by block.
     //
@@ -109,19 +112,16 @@ public:
     // The image's pixel mask is applied when it has one and ReadOptions::apply_pixel_mask is left
     // on, so a flagged pixel is not counted -- the same thing that happens to a NaN. Declining the
     // mask counts every stored pixel, flagged or not.
-    Result<void> ComputeHistogram(const HistogramRequest& request, const HistogramSink& sink) const;
     Result<void> ComputeHistogram(const HistogramRequest& request, const HistogramSink& sink,
-                                  const ReadOptions& options) const;
+                                  const ReadOptions& options = {}) const;
 
     // One histogram for the whole selection in a single pass, when the range is not known in
     // advance. See CubeHistogramRequest for what that costs and what it keeps exact. The pixel mask
-    // is applied on the same terms as ComputeHistogram, and on both passes it makes.
-    Result<CubeHistogramResult> ComputeCubeHistogram(const CubeHistogramRequest& request) const;
+    // is applied on the same terms as ComputeHistogram, and on both passes it makes. A progress
+    // callback watches it as it advances; see CubeHistogramProgressCallback.
     Result<CubeHistogramResult> ComputeCubeHistogram(const CubeHistogramRequest& request,
-                                                     const ReadOptions& options) const;
-    // Watched as it advances. See CubeHistogramProgressCallback.
-    Result<CubeHistogramResult> ComputeCubeHistogram(const CubeHistogramRequest& request, const ReadOptions& options,
-                                                     const CubeHistogramProgressCallback& progress) const;
+                                                     const ReadOptions& options = {},
+                                                     const CubeHistogramProgressCallback& progress = {}) const;
 
     Result<std::vector<Beam>> ReadBeams() const;
 

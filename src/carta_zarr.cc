@@ -154,24 +154,11 @@ const ChunkGeometry& Image::chunk_geometry() const noexcept {
     return _impl->geometry;
 }
 
-Result<std::size_t> Image::Read(const ReadRequest& request, BufferView<float> destination) const {
-    return Read(request, destination, ReadOptions{});
-}
-
-Result<std::size_t> Image::Read(const ReadRequest& request, BufferView<float> destination,
-                                const ReadOptions& options) const {
-    return Read(request, destination, options, ProgressCallback{});
-}
-
 Result<std::size_t> Image::Read(const ReadRequest& request, BufferView<float> destination,
                                 const ReadOptions& options, const ProgressCallback& progress) const {
     return WithReadableImage(_impl, [&](const internal::ReadableImage& image) {
         return internal::ReadInPieces(image, request, destination, options, progress);
     });
-}
-
-Result<void> Image::ReduceSpectral(const SpectralReduceRequest& request, const SpectralSink& sink) const {
-    return ReduceSpectral(request, sink, ReadOptions{});
 }
 
 Result<void> Image::ReduceSpectral(const SpectralReduceRequest& request, const SpectralSink& sink,
@@ -181,24 +168,11 @@ Result<void> Image::ReduceSpectral(const SpectralReduceRequest& request, const S
     });
 }
 
-Result<void> Image::ComputeHistogram(const HistogramRequest& request, const HistogramSink& sink) const {
-    return ComputeHistogram(request, sink, ReadOptions{});
-}
-
 Result<void> Image::ComputeHistogram(const HistogramRequest& request, const HistogramSink& sink,
                                      const ReadOptions& options) const {
     return WithReadableImage(_impl, [&](const internal::ReadableImage& image) {
         return internal::ComputeHistogram(image, request, sink, options);
     });
-}
-
-Result<CubeHistogramResult> Image::ComputeCubeHistogram(const CubeHistogramRequest& request) const {
-    return ComputeCubeHistogram(request, ReadOptions{});
-}
-
-Result<CubeHistogramResult> Image::ComputeCubeHistogram(const CubeHistogramRequest& request,
-                                                        const ReadOptions& options) const {
-    return ComputeCubeHistogram(request, options, CubeHistogramProgressCallback{});
 }
 
 Result<CubeHistogramResult> Image::ComputeCubeHistogram(const CubeHistogramRequest& request, const ReadOptions& options,

@@ -31,6 +31,48 @@ enum class ErrorCode {
     not_implemented,
 };
 
+// The code's name, as it would be spelled in a message or a log. DiagnosticCodeName says the same of
+// a diagnostic's, and the codes the two share are spelled the same way.
+inline const char* ErrorCodeName(ErrorCode code) noexcept {
+    switch (code) {
+        case ErrorCode::not_found:
+            return "not_found";
+        case ErrorCode::not_zarr:
+            return "not_zarr";
+        case ErrorCode::unsupported_transport:
+            return "unsupported_transport";
+        case ErrorCode::unsupported_zarr_version:
+            return "unsupported_zarr_version";
+        case ErrorCode::unsupported_schema:
+            return "unsupported_schema";
+        case ErrorCode::unsupported_schema_version:
+            return "unsupported_schema_version";
+        case ErrorCode::ambiguous_schema:
+            return "ambiguous_schema";
+        case ErrorCode::invalid_argument:
+            return "invalid_argument";
+        case ErrorCode::invalid_metadata:
+            return "invalid_metadata";
+        case ErrorCode::unsupported_data_type:
+            return "unsupported_data_type";
+        case ErrorCode::unsupported_codec:
+            return "unsupported_codec";
+        case ErrorCode::invalid_slice:
+            return "invalid_slice";
+        case ErrorCode::buffer_too_small:
+            return "buffer_too_small";
+        case ErrorCode::io_error:
+            return "io_error";
+        case ErrorCode::decode_error:
+            return "decode_error";
+        case ErrorCode::cancelled:
+            return "cancelled";
+        case ErrorCode::not_implemented:
+            return "not_implemented";
+    }
+    return "unknown";
+}
+
 struct Error {
     ErrorCode code;
     std::string message;

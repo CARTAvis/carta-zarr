@@ -9,10 +9,12 @@
 
 #include <iostream>
 #include <memory>
+#include <set>
 #include <string>
 #include <utility>
 #include <variant>
 
+#include <carta-zarr/descriptor.h>
 #include <carta-zarr/result.h>
 
 #include "support/check.h"
@@ -81,6 +83,25 @@ void TestVoid() {
     Require(moved.node_path == "SKY", "error() on an rvalue Result<void> did not hand the error over");
 }
 
+// Every code has a name of its own, and a code a diagnostic shares is spelled as the diagnostic's is:
+// the two are what a consumer writes into one log.
+void TestErrorCodeNames() {
+    std::set<std::string> names;
+    for (int code = 0; code <= static_cast<int>(ErrorCode::not_implemented); ++code) {
+        const std::string name = carta::zarr::ErrorCodeName(static_cast<ErrorCode>(code));
+        Require(name != "unknown", "error code " + std::to_string(code) + " has no name");
+        Require(names.insert(name).second, "two error codes are both named " + name);
+    }
+    using carta::zarr::DiagnosticCode;
+    for (const auto& [error, diagnostic] :
+         {std::pair{ErrorCode::invalid_metadata, DiagnosticCode::invalid_metadata},
+          std::pair{ErrorCode::unsupported_data_type, DiagnosticCode::unsupported_data_type},
+          std::pair{ErrorCode::ambiguous_schema, DiagnosticCode::ambiguous_schema}}) {
+        Require(std::string(carta::zarr::ErrorCodeName(error)) == carta::zarr::DiagnosticCodeName(diagnostic),
+                "an error and a diagnostic that share a code spell it differently");
+    }
+}
+
 }  // namespace
 
 int main() {
@@ -89,6 +110,7 @@ int main() {
         TestAnError();
         TestTheRvalueOverloadsMove();
         TestVoid();
+        TestErrorCodeNames();
         std::cout << "carta-zarr result tests passed\n";
         return 0;
     } catch (const std::exception& error) {

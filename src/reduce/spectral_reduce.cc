@@ -41,7 +41,7 @@ Result<void> ValidateRequest(const ImageDescriptor& descriptor, const AxisMap& a
                          " regions, not " + std::to_string(request.region_count),
                      node};
     }
-    if (request.statistics == 0) {
+    if (request.statistics.empty()) {
         return Error{ErrorCode::invalid_argument, "A spectral reduction needs at least one statistic", node};
     }
 

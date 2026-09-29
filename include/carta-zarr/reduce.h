@@ -48,16 +48,50 @@ enum class Statistic : std::uint32_t {
     max = 1u << 5,
 };
 
-using StatisticSet = std::uint32_t;
+// A set of statistics, made by joining them with |: `Statistic::sum | Statistic::num_pixels`. A single
+// statistic is the set of just it.
+//
+// A type of its own rather than the integer it was, because an integer could name a statistic that
+// does not exist -- `statistics = 0x40` compiled, and a bit past the last one was simply never
+// accumulated -- and because `set & statistic` read as a question and was a number. Nothing makes one
+// from bits, so every set holds only statistics there are.
+class StatisticSet {
+public:
+    constexpr StatisticSet() noexcept = default;
+    constexpr StatisticSet(Statistic statistic) noexcept : _bits(static_cast<std::uint32_t>(statistic)) {}
 
+    constexpr bool empty() const noexcept {
+        return _bits == 0;
+    }
+    // Whether every statistic in `other` is in this one. The empty set is in every set.
+    constexpr bool Contains(StatisticSet other) const noexcept {
+        return (other._bits & ~_bits) == 0;
+    }
+
+    friend constexpr StatisticSet operator|(StatisticSet a, StatisticSet b) noexcept {
+        return StatisticSet(a._bits | b._bits);
+    }
+    constexpr StatisticSet& operator|=(StatisticSet other) noexcept {
+        _bits |= other._bits;
+        return *this;
+    }
+    friend constexpr bool operator==(StatisticSet a, StatisticSet b) noexcept {
+        return a._bits == b._bits;
+    }
+    friend constexpr bool operator!=(StatisticSet a, StatisticSet b) noexcept {
+        return a._bits != b._bits;
+    }
+
+private:
+    constexpr explicit StatisticSet(std::uint32_t bits) noexcept : _bits(bits) {}
+
+    std::uint32_t _bits = 0;
+};
+
+// Two statistics make a set. Needed beside StatisticSet's own |, which is found only when one side
+// is already a set.
 inline constexpr StatisticSet operator|(Statistic a, Statistic b) noexcept {
-    return static_cast<StatisticSet>(a) | static_cast<StatisticSet>(b);
-}
-inline constexpr StatisticSet operator|(StatisticSet a, Statistic b) noexcept {
-    return a | static_cast<StatisticSet>(b);
-}
-inline constexpr bool Contains(StatisticSet set, Statistic statistic) noexcept {
-    return (set & static_cast<StatisticSet>(statistic)) != 0;
+    return StatisticSet(a) | StatisticSet(b);
 }
 
 
@@ -238,7 +272,7 @@ struct SpectralReduceRequest {
     // The regions, all reduced in a single pass over the pixels.
     const RegionMask* regions = nullptr;
     std::size_t region_count = 0;
-    StatisticSet statistics = 0;
+    StatisticSet statistics;
     // How often to hand results back, as a hint rather than a contract. Zero lets the library
     // choose, which is what most callers want: it emits as often as it can without making the reads
     // any smaller, so a region covering the image reports a chunk layer at a time while a
@@ -300,15 +334,15 @@ struct SpectralBlock {
     // How many regions the block reports, which is how many the request gave.
     std::size_t region_count = 0;
 
-    // Whether the block carries every statistic in `wanted`. The empty set is always carried.
+    // Whether the block carries every statistic in `wanted`, which may be one. The empty set is always
+    // carried.
     bool Carries(StatisticSet wanted) const noexcept {
-        StatisticSet carried = 0;
+        StatisticSet carried;
         for (std::size_t slot = 0; slot < _statistic_count; ++slot) {
-            carried |= static_cast<StatisticSet>(_statistics[slot]);
+            carried |= _statistics[slot];
         }
-        return (wanted & ~carried) == 0;
+        return carried.Contains(wanted);
     }
-    bool Carries(Statistic wanted) const noexcept { return Carries(static_cast<StatisticSet>(wanted)); }
 
     // One region's channel_count values of one statistic, in channel order, or nullptr when the block
     // does not carry that statistic. nullptr means nothing else: a region past region_count is a

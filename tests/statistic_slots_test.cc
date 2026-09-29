@@ -22,6 +22,7 @@
 #include <exception>
 #include <limits>
 #include <string>
+#include <type_traits>
 #include <vector>
 
 #include "support/check.h"
@@ -38,6 +39,13 @@ using carta::zarr::internal::StatisticLayout;
 using carta::zarr::internal::StatisticSlots;
 
 using carta::zarr::testing::Require;
+
+// A set holds only statistics there are: no integer becomes one, however it is asked.
+static_assert(!std::is_convertible_v<unsigned, StatisticSet> && !std::is_constructible_v<StatisticSet, unsigned>,
+              "a StatisticSet must not be made from bits");
+static_assert((Statistic::sum | Statistic::min).Contains(Statistic::min) &&
+                  !StatisticSet(Statistic::sum).Contains(Statistic::min) && StatisticSet{}.empty(),
+              "a set contains what was joined into it and nothing else");
 
 constexpr StatisticSet kEverything =
     Statistic::num_pixels | Statistic::nan_count | Statistic::sum | Statistic::sum_sq | Statistic::min | Statistic::max;
@@ -103,17 +111,22 @@ SpectralTotals Totals(double num_pixels, double nan_count, double sum, double su
 
 const SpectralTotals kNothing{};
 
-// Every one of the 63 sets a request can make, in the one order a block reports them.
+// Every one of the 63 sets a request can make, in the one order a block reports them. Each is made
+// from the statistics in it, bit i of `members` standing for kStatisticOrder[i]: a StatisticSet is
+// never made from bits.
 void TestTheLayoutFollowsTheOneOrder() {
-    for (StatisticSet requested = 1; requested <= kEverything; ++requested) {
-        const auto layout = StatisticLayout::Of(requested);
+    for (unsigned members = 1; members < (1u << kStatisticOrder.size()); ++members) {
+        StatisticSet requested;
         std::vector<Statistic> expected;
-        for (const auto statistic : kStatisticOrder) {
-            if (carta::zarr::Contains(requested, statistic)) {
-                expected.push_back(statistic);
+        for (std::size_t i = 0; i < kStatisticOrder.size(); ++i) {
+            if ((members & (1u << i)) != 0) {
+                requested |= kStatisticOrder.at(i);
+                expected.push_back(kStatisticOrder.at(i));
             }
         }
-        const std::string set = "set " + std::to_string(requested);
+        Require(kEverything.Contains(requested), "every set is part of the set of everything");
+        const auto layout = StatisticLayout::Of(requested);
+        const std::string set = "set " + std::to_string(members);
         Require(layout.count() == expected.size(), set + ": one slot per statistic asked for");
         for (std::size_t i = 0; i < expected.size(); ++i) {
             Require(layout.statistics()[i] == expected.at(i), set + ": slot " + std::to_string(i));
@@ -176,7 +189,7 @@ void TestOnlyWhatWasAskedForIsCarried() {
         Require(block.Carries(Statistic::num_pixels | Statistic::max), "carries what was asked for");
         Require(block.Carries(Statistic::max), "and each part of it");
         Require(!block.Carries(Statistic::num_pixels | Statistic::sum), "but not a set with one more in it");
-        Require(block.Carries(0), "everything in the empty set is carried");
+        Require(block.Carries(StatisticSet{}), "everything in the empty set is carried");
         Require(block.Series(0, Statistic::sum) == nullptr, "no series for a statistic not asked for");
         Require(block.Series(0, Statistic::min) == nullptr, "nor for an extremum not asked for");
         Require(block.Series(0, Statistic::num_pixels) != nullptr, "a series for one that was");

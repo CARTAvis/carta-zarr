@@ -124,12 +124,12 @@ struct Collected {
     std::size_t region_count = 0;
     std::size_t channel_count = 0;
     // Which statistics the blocks carried.
-    carta::zarr::StatisticSet carried = 0;
+    carta::zarr::StatisticSet carried;
     std::vector<carta::zarr::SpectralTotals> totals;  // [region][channel]
     std::vector<std::uint64_t> block_lengths;
 
     double At(std::size_t region, carta::zarr::Statistic statistic, std::size_t channel) const {
-        if (!carta::zarr::Contains(carried, statistic)) {
+        if (!carried.Contains(statistic)) {
             throw std::runtime_error("the block did not report the requested statistic");
         }
         const auto& at = totals.at((region * channel_count) + channel);
@@ -179,7 +179,7 @@ Collected Collect(const carta::zarr::Image& sky, const carta::zarr::SpectralRedu
         if (collected.totals.empty()) {
             for (const auto statistic : kEveryStatistic) {
                 if (block.Carries(statistic)) {
-                    collected.carried |= static_cast<carta::zarr::StatisticSet>(statistic);
+                    collected.carried |= statistic;
                 }
             }
             collected.totals.resize(collected.region_count * collected.channel_count);
@@ -452,7 +452,7 @@ void TestRejectedRequests(const carta::zarr::Image& sky) {
     rejects(too_many, "a region count past the structural bound");
 
     auto no_statistics = WholeSpectrum(regions, 0);
-    no_statistics.statistics = 0;
+    no_statistics.statistics = {};
     rejects(no_statistics, "a reduction with no statistics");
 
     const std::vector<carta::zarr::RegionMask> outside{{kL - 1, 0, 2, kM, nullptr}};

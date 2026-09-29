@@ -55,7 +55,7 @@ public:
         StatisticLayout layout;
         layout._slot_of.fill(-1);
         for (std::size_t i = 0; i < kStatisticOrder.size(); ++i) {
-            if (Contains(requested, kStatisticOrder.at(i))) {
+            if (requested.Contains(kStatisticOrder.at(i))) {
                 layout._slot_of.at(i) = static_cast<int>(layout._count);
                 layout._statistics.at(layout._count++) = kStatisticOrder.at(i);
             }

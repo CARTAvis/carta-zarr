@@ -572,7 +572,7 @@ void TestProgressNeverClaimsTheWholeRunBeforeItsLastRead() {
         reduce.planes.spectral = spectral;
         reduce.regions = &whole;
         reduce.region_count = 1;
-        reduce.statistics = static_cast<carta::zarr::StatisticSet>(carta::zarr::Statistic::sum);
+        reduce.statistics = carta::zarr::Statistic::sum;
         reduce.emit_every_channels = static_cast<std::uint32_t>(count);
         const auto reduced = carta::zarr::internal::ReduceSpectral(
             readable, reduce,

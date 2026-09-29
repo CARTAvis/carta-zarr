@@ -121,13 +121,6 @@ enum class AxisRole {
     other,
 };
 
-// The logical order the XRADIO image profile reports, which is the order a descriptor's axes and
-// every request's ranges are in. Named for that profile rather than for the library because the
-// order is the profile's choice: an image described by a different one need not be in it, and a
-// consumer that must not assume should read descriptor().axes instead of this.
-inline constexpr std::array<AxisRole, 5> kXradioImageAxisOrder{
-    AxisRole::spatial_x, AxisRole::spatial_y, AxisRole::spectral, AxisRole::polarization, AxisRole::time};
-
 struct AxisDescriptor {
     std::string name;
     AxisRole role = AxisRole::other;
@@ -135,6 +128,26 @@ struct AxisDescriptor {
     std::string unit;
     std::size_t storage_index = 0;
 };
+
+// Where the axis playing `role` sits among `axes`, or none when no axis plays it. Asked of
+// ImageDescriptor::axes or ImageEntry::axes, and the answer is also the index of that axis's Range
+// in a ReadRequest.
+//
+// Axes are reached by role because their logical order is a schema profile's choice rather than
+// this library's promise. The XRADIO profile happens to report l, m, frequency, polarization, time,
+// whatever order the store holds them in; a consumer that indexes by position is assuming that
+// profile, and this used to be exported as a constant for doing exactly that.
+//
+// Every role but `other` is played by at most one axis of an image this library describes. For
+// `other` this finds the first.
+inline std::optional<std::size_t> AxisIndex(const std::vector<AxisDescriptor>& axes, AxisRole role) noexcept {
+    for (std::size_t index = 0; index < axes.size(); ++index) {
+        if (axes[index].role == role) {
+            return index;
+        }
+    }
+    return std::nullopt;
+}
 
 // One variable of a dataset's image listing, and what can be said about it without opening it.
 struct ImageEntry {
@@ -304,7 +317,8 @@ struct ImageDescriptor {
     std::string image_role;
     std::vector<std::string> data_groups;
     DataType stored_type = DataType::unknown;
-    // XRADIO images report axes in kXradioImageAxisOrder; storage_index identifies each stored dimension.
+    // In the image's logical order, which a request's ranges follow. Find one with AxisIndex rather
+    // than by position; storage_index says where each one lives on disk.
     std::vector<AxisDescriptor> axes;
     std::string unit;
     bool has_pixel_mask = false;

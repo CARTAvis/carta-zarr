@@ -56,8 +56,11 @@ auto context = carta::zarr::Context::Create();          // one per process is en
 auto dataset = carta::zarr::Dataset::Open(context.value(), "/path/to/image.zarr");
 auto image = dataset.value().OpenImage(*dataset.value().descriptor().default_image_id);
 
-carta::zarr::ReadRequest request;                        // one Range per logical axis
-request.axes = {{0, 512, 1}, {0, 512, 1}, {0, 1, 1}, {0, 1, 1}, {0, 1, 1}};
+const auto& axes = image.value().descriptor().axes;
+carta::zarr::ReadRequest request;                        // one Range per axis, each defaulting to
+request.axes.resize(axes.size(), {0, 1, 1});             // the first plane of that axis
+request.axes[*carta::zarr::AxisIndex(axes, carta::zarr::AxisRole::spatial_x)] = {0, 512, 1};
+request.axes[*carta::zarr::AxisIndex(axes, carta::zarr::AxisRole::spatial_y)] = {0, 512, 1};
 std::vector<float> pixels(512 * 512);
 auto written = image.value().Read(request, {pixels.data(), pixels.size()});
 ```
@@ -77,9 +80,12 @@ among them without opening any.
 - **A handle always refers to something.** `Context`, `Dataset` and `Image` come only from their
   factories, and moving one copies it, so the handle moved from still works. A consumer that fills
   one in later holds a `std::optional` of it.
-- **Logical axis order is `l`, `m`, `frequency`, `polarization`, `time`** (`kXradioImageAxisOrder`),
-  whatever order the store holds them in. A read returns them densely packed with axis 0 varying
-  fastest; `AxisDescriptor::storage_index` says where each one lives on disk.
+- **Axes are found by role, not by position.** A descriptor lists an image's axes in a logical order
+  that its schema profile chooses, and a request's ranges follow it; `AxisIndex(axes, role)` finds
+  one. The XRADIO profile's order is `l`, `m`, `frequency`, `polarization`, `time`, whatever order
+  the store holds them in, but that is the profile's choice rather than a promise. A read returns
+  the axes densely packed with axis 0 varying fastest; `AxisDescriptor::storage_index` says where
+  each one lives on disk.
 - **Pixels come back as `float32`**, converted during the read rather than materialised in their
   stored type first. Reductions accumulate and report in `double`.
 - **Pixel masks are applied by default.** An image with a flag variable reads a masked pixel as NaN,

@@ -68,13 +68,14 @@ void TestIdentityAndAxes(const carta::zarr::ImageDescriptor& sky) {
     Require(sky.data_groups == std::vector<std::string>{"base"}, "SKY's data group membership changed");
     Require(!sky.has_pixel_mask, "an image converted from a FITS with no mask reported a pixel mask");
 
-    // The FITS was (RA 5, DEC 4, STOKES 3, FREQ 2); the library reports logical order.
+    // The FITS was (RA 5, DEC 4, STOKES 3, FREQ 2); the XRADIO profile reports its own logical order.
+    // That order is the profile's rather than a promise of the public API, which reaches an axis by
+    // its role, but it is still what this profile does and what every consumer of it has seen.
     constexpr std::array<AxisRole, 5> expected_roles{AxisRole::spatial_x, AxisRole::spatial_y, AxisRole::spectral,
                                                      AxisRole::polarization, AxisRole::time};
     constexpr std::array<std::uint64_t, 5> expected_lengths{5, 4, 2, 3, 1};
-    Require(carta::zarr::kXradioImageAxisOrder == expected_roles, "the public XRADIO axis order changed");
-    Require(sky.axes.size() == carta::zarr::kXradioImageAxisOrder.size(), "SKY did not report five axes");
-    const auto* expected_role = carta::zarr::kXradioImageAxisOrder.begin();
+    Require(sky.axes.size() == expected_roles.size(), "SKY did not report five axes");
+    const auto* expected_role = expected_roles.begin();
     const auto* expected_length = expected_lengths.begin();
     std::size_t index = 0;
     for (const auto& axis : sky.axes) {
@@ -84,6 +85,11 @@ void TestIdentityAndAxes(const carta::zarr::ImageDescriptor& sky) {
         ++expected_length;
         ++index;
     }
+    for (std::size_t role = 0; role < expected_roles.size(); ++role) {
+        Require(carta::zarr::AxisIndex(sky.axes, expected_roles.at(role)) == role,
+                "AxisIndex did not find the axis playing role " + std::to_string(role) + " where it is");
+    }
+    Require(!carta::zarr::AxisIndex(sky.axes, AxisRole::other), "AxisIndex found an axis no axis plays");
 }
 
 void TestDirection(const carta::zarr::ImageDescriptor& sky) {

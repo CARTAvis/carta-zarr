@@ -91,13 +91,23 @@ std::string ImageRoleOf(const zarr_metadata::ArrayMetadata& image) {
     return role;
 }
 
+// The order this profile reports an image's axes in, whatever order the store holds them in, and the
+// role each plays. The profile's choice, which is why it lives here: the public API promises only
+// that an axis can be found by its role (AxisIndex), not where.
+struct LogicalAxis {
+    std::string_view name;
+    AxisRole role;
+};
+constexpr std::array<LogicalAxis, 5> kLogicalAxes{{{"l", AxisRole::spatial_x},
+                                                   {"m", AxisRole::spatial_y},
+                                                   {"frequency", AxisRole::spectral},
+                                                   {"polarization", AxisRole::polarization},
+                                                   {"time", AxisRole::time}}};
+
 std::vector<AxisDescriptor> DescribeAxes(const Store& store, const zarr_metadata::ArrayMetadata& image) {
-    constexpr std::array<std::string_view, kXradioImageAxisOrder.size()> logical_axis_names{"l", "m", "frequency",
-                                                                                            "polarization", "time"};
     std::vector<AxisDescriptor> axes;
-    axes.reserve(logical_axis_names.size());
-    for (std::size_t logical = 0; logical < logical_axis_names.size(); ++logical) {
-        const auto name = logical_axis_names.at(logical);
+    axes.reserve(kLogicalAxes.size());
+    for (const auto& [name, role] : kLogicalAxes) {
         const auto index = zarr_metadata::FindDimensionIndex(image, name);
         if (!index) {
             continue;
@@ -107,7 +117,7 @@ std::vector<AxisDescriptor> DescribeAxes(const Store& store, const zarr_metadata
         if (coordinate_metadata) {
             unit = AttributeString(coordinate_metadata.value().attributes, "units");
         }
-        axes.push_back(AxisDescriptor{std::string(name), kXradioImageAxisOrder.at(logical), image.shape.at(*index),
+        axes.push_back(AxisDescriptor{std::string(name), role, image.shape.at(*index),
                                       std::move(unit), *index});
     }
     return axes;

@@ -22,6 +22,17 @@
 #include <vector>
 
 namespace carta::zarr::internal {
+
+// The one place a HistogramBlock is handed its counts. HistogramBlock names this its friend, so the
+// layout Counts reads is set here and nowhere a caller can reach.
+class HistogramBlocks {
+public:
+    // `counts` is [channel][bin], block.bin_count wide.
+    static void Hold(HistogramBlock& block, const std::uint64_t* counts) noexcept {
+        block._counts = counts;
+    }
+};
+
 namespace {
 
 // The one check both histograms make. It takes the count rather than a request because their two
@@ -202,8 +213,8 @@ Result<void> ComputeHistogram(const ReadableImage& image, const HistogramRequest
             // Out of the type and into the public block, which is the one place it happens.
             block.first_channel = first_channel.index;
             block.channel_count = length;
-            block.counts = counts.data();
             block.bin_count = bins;
+            HistogramBlocks::Hold(block, counts.data());
             block.complete = complete;
             block.completeness = completeness;
             return sink(block);

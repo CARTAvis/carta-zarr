@@ -160,16 +160,35 @@ struct HistogramRequest {
     std::uint32_t emit_every_channels = 0;
 };
 
-// Bin counts for a run of planes. `counts` is [channel][bin], `bin_count` wide, and is valid only
-// inside the sink call.
+namespace internal {
+class HistogramBlocks;
+}  // namespace internal
+
+// Bin counts for a run of planes, valid only inside the sink call.
+//
+// Read through Counts, as a SpectralBlock is read through Series: how the channels are laid out is
+// the library's alone, which is why only the library can fill one in. It was a bare pointer with the
+// layout written in a comment, the one block in the library a caller indexed by hand.
 struct HistogramBlock {
+    // Index into the request's spectral selection, as SpectralBlock::first_channel is.
     std::uint64_t first_channel = 0;
     std::uint64_t channel_count = 0;
-    const std::uint64_t* counts = nullptr;
     std::size_t bin_count = 0;
     // As in SpectralBlock: a block whose walk takes more than one read is handed over as it fills.
     bool complete = true;
     double completeness = 1.0;
+
+    // The bin_count counts of one channel of this block, counted from first_channel, lowest bin
+    // first. channel < channel_count.
+    const std::uint64_t* Counts(std::uint64_t channel) const noexcept {
+        assert(channel < channel_count);
+        return _counts + (static_cast<std::size_t>(channel) * bin_count);
+    }
+
+private:
+    friend class internal::HistogramBlocks;
+
+    const std::uint64_t* _counts = nullptr;
 };
 
 using HistogramSink = std::function<bool(const HistogramBlock&)>;

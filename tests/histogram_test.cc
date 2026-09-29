@@ -97,7 +97,7 @@ Collected Collect(const carta::zarr::Image& sky, const carta::zarr::HistogramReq
             return true;
         }
         for (std::uint64_t c = 0; c < block.channel_count; ++c) {
-            const auto* row = block.counts + (static_cast<std::size_t>(c) * block.bin_count);
+            const auto* row = block.Counts(c);
             collected.per_channel.at(static_cast<std::size_t>(block.first_channel + c))
                 .assign(row, row + block.bin_count);
         }
@@ -264,7 +264,7 @@ void TestEachBlockCountsItsOwnChannels(const carta::zarr::Image& sky) {
         }
         ++complete_blocks;
         Require(block.channel_count == 1, "a hint of one channel should emit one channel at a time");
-        by_channel.at(block.first_channel).assign(block.counts, block.counts + block.bin_count);
+        by_channel.at(block.first_channel).assign(block.Counts(0), block.Counts(0) + block.bin_count);
         return true;
     });
     Require(static_cast<bool>(result),
@@ -496,7 +496,7 @@ void TestAWidePlaneSplitsAndStillCounts(const char* fixture) {
                 return true;
             }
             for (std::uint64_t channel = 0; channel < block.channel_count; ++channel) {
-                const std::uint64_t* row = block.counts + (channel * block.bin_count);
+                const std::uint64_t* row = block.Counts(channel);
                 for (std::size_t bin = 0; bin < block.bin_count; ++bin) {
                     totals[bin] += row[bin];
                 }

@@ -139,8 +139,7 @@ void TestAHistogramCountsEveryPixel() {
             ++blocks;
             for (std::uint64_t c = 0; c < block.channel_count; ++c) {
                 for (std::size_t bin = 0; bin < block.bin_count; ++bin) {
-                    counts.at(((block.first_channel + c) * request.bins) + bin) =
-                        block.counts[(c * block.bin_count) + bin];
+                    counts.at(((block.first_channel + c) * request.bins) + bin) = block.Counts(c)[bin];
                 }
             }
             return true;
@@ -206,7 +205,7 @@ void TestARangeWiderThanAFloatStillBinsItsPixels() {
     const auto outcome = carta::zarr::internal::ComputeHistogram(
         readable, request, [&](const carta::zarr::HistogramBlock& block) {
             if (block.complete) {
-                counts.assign(block.counts, block.counts + block.bin_count);
+                counts.assign(block.Counts(0), block.Counts(0) + block.bin_count);
             }
             return true;
         }, ReadOptions{});
@@ -426,8 +425,7 @@ void TestAPlaneHistogramSplitAcrossWorkers() {
                 }
                 for (std::uint64_t c = 0; c < block.channel_count; ++c) {
                     for (std::size_t bin = 0; bin < block.bin_count; ++bin) {
-                        counts.at(((block.first_channel + c) * request.bins) + bin) =
-                            block.counts[(c * block.bin_count) + bin];
+                        counts.at(((block.first_channel + c) * request.bins) + bin) = block.Counts(c)[bin];
                     }
                 }
                 return true;

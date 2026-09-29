@@ -179,6 +179,51 @@ void TestAHistogramCountsEveryPixel() {
 }
 
 // Two overlapping regions over every channel, which is what the multi-region pass exists for.
+// A range wider than a float can hold. Both bounds and the bin width survive narrowing, so the
+// request is valid, but value - lower for a pixel in the upper half of it is not: 1e38 - (-3e38)
+// rounds to infinity, and infinity converted to a bin index was undefined -- in practice every such
+// pixel was counted in the last bin. Three columns: one at the lower bound, whose offset is zero;
+// one in the middle, whose offset overflows but whose bin is 6; one at the upper bound, whose
+// offset overflows too and whose bin is the last.
+void TestARangeWiderThanAFloatStillBinsItsPixels() {
+    constexpr std::uint64_t kColumns = 3;
+    constexpr std::uint64_t kRows = 4;
+    const float values[kColumns]{-3e38F, 1e38F, 3e38F};
+    const auto image = MakeImage(kColumns, kRows, 1);
+    const auto geometry = MakeGeometry(kColumns, kRows, 1);
+    SyntheticPixelSource source(image, geometry,
+                                [&](const std::vector<std::uint64_t>& logical) { return values[logical.at(0)]; });
+
+    carta::zarr::HistogramRequest request;
+    request.planes.spectral = {0, 1, 1};
+    request.bins = 10;
+    request.lower = -3e38;
+    request.upper = 3e38;
+
+    WorkPool workers(1);
+    std::vector<std::uint64_t> counts;
+    const auto readable = Readable(source, image, geometry, workers);
+    const auto outcome = carta::zarr::internal::ComputeHistogram(
+        readable, request, [&](const carta::zarr::HistogramBlock& block) {
+            if (block.complete) {
+                counts.assign(block.counts, block.counts + block.bin_count);
+            }
+            return true;
+        }, ReadOptions{});
+    Require(static_cast<bool>(outcome),
+            std::string("the histogram failed: ") + (outcome ? "" : outcome.error().message));
+
+    std::vector<std::uint64_t> expected(request.bins, 0);
+    expected.at(0) = kRows;
+    expected.at(6) = kRows;
+    expected.at(9) = kRows;
+    for (std::size_t bin = 0; bin < expected.size(); ++bin) {
+        Require(counts.at(bin) == expected.at(bin),
+                "bin " + std::to_string(bin) + ": expected " + std::to_string(expected.at(bin)) + ", got " +
+                    std::to_string(counts.at(bin)));
+    }
+}
+
 void TestASpectralReductionAgreesWithTheFormula() {
     const auto image = MakeImage(kX, kY, kZ);
     const auto geometry = MakeGeometry(64, 65, 2);
@@ -549,6 +594,7 @@ void TestProgressNeverClaimsTheWholeRunBeforeItsLastRead() {
 int main() {
     try {
         TestAHistogramCountsEveryPixel();
+        TestARangeWiderThanAFloatStillBinsItsPixels();
         TestASpectralReductionAgreesWithTheFormula();
         TestAMaskedRegionReadsOnlyTheChunksItOccupies();
         TestAPlaneHistogramSplitAcrossWorkers();

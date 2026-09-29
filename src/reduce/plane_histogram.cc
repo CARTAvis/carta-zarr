@@ -145,7 +145,17 @@ Result<void> ComputeHistogram(const ReadableImage& image, const HistogramRequest
                         // The caller's own rule: a pixel outside the range is not counted, and
                         // NaN fails both comparisons.
                         if (lower <= value && value <= upper) {
-                            auto bin = static_cast<std::size_t>((value - lower) / width);
+                            // A range wider than FLT_MAX passes ValidateRange -- its bounds and its
+                            // width each fit -- but the offset of a pixel in its upper part does not,
+                            // and infinity converted to an index is undefined. Only then is the offset
+                            // taken in double, where it fits; everywhere else the float sequence
+                            // above is left alone, because it is the caller's.
+                            const float offset = value - lower;
+                            auto bin = std::isfinite(offset)
+                                           ? static_cast<std::size_t>(offset / width)
+                                           : static_cast<std::size_t>(
+                                                 (static_cast<double>(value) - static_cast<double>(lower)) /
+                                                 static_cast<double>(width));
                             if (bin >= bins) {
                                 bin = bins - 1;
                             }

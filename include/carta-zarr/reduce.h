@@ -199,9 +199,11 @@ struct CubeHistogramResult {
     double nan_count = 0.0;
     double sum = 0.0;
     double sum_sq = 0.0;
-    // Exact, whatever the bin edges did. NaN when nothing finite was read.
-    double minimum = 0.0;
-    double maximum = 0.0;
+    // Exact, whatever the bin edges did. NaN when nothing finite was read -- and so NaN in a result
+    // nobody has filled in, which is the same state: SpectralTotals starts its extrema there for the
+    // same reason. A zero here looked like a range that had been found.
+    double minimum = std::numeric_limits<double>::quiet_NaN();
+    double maximum = std::numeric_limits<double>::quiet_NaN();
     // `bins` counts over [minimum, maximum].
     std::vector<std::uint64_t> counts;
     // Whether spatial_sample kept this from being every pixel.

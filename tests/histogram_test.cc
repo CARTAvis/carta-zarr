@@ -720,7 +720,21 @@ void TestThreadCountDoesNotChangeTheCounts(const char* fixture) {
     }
 }
 
+// A result nobody filled in has found no range, which is what the extrema say for a walk that read no
+// finite pixel. A zero read as a range from zero to zero.
+void TestAnUnfilledResultHasFoundNoRange() {
+    const carta::zarr::CubeHistogramResult unfilled;
+    Require(std::isnan(unfilled.minimum) && std::isnan(unfilled.maximum),
+            "an unfilled cube histogram should have no extremes, as an unfilled SpectralTotals has none");
+}
+
 int main() {
+    try {
+        TestAnUnfilledResultHasFoundNoRange();
+    } catch (const std::exception& error) {
+        std::cerr << "histogram test failed: " << error.what() << "\n";
+        return 1;
+    }
     for (const char* const fixture : kFixtures) {
         try {
             const auto sky = OpenSky(fixture);

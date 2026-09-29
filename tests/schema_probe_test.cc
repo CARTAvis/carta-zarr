@@ -854,6 +854,48 @@ void TestAHandleMovedFromStillWorks() {
     Require(static_cast<bool>(moved_image.Read(request, {&pixel, 1})), "an image moved to did not read");
 }
 
+// What the listing says about an image is what opening it says. A consumer deciding from the listing
+// alone -- carta-backend, which displays one time step, refuses an image with two -- is otherwise
+// deciding from something that could disagree with the image it would get.
+void TestAnEntrySaysWhatOpeningWould() {
+    const std::filesystem::path fixture(CARTA_ZARR_REFERENCE_FIXTURE);
+    const auto context = carta::zarr::Context::Create();
+    Require(static_cast<bool>(context), "Context::Create failed");
+    const auto dataset = carta::zarr::Dataset::Open(*context, fixture.string());
+    Require(static_cast<bool>(dataset), "Dataset::Open failed on reference fixture");
+
+    std::size_t opened = 0;
+    std::size_t refused = 0;
+    for (const auto& entry : dataset->descriptor().images) {
+        if (!entry.openable) {
+            ++refused;
+            Require(entry.axes.empty(), "entry " + entry.id + " will not open, and yet reports axes");
+            continue;
+        }
+        ++opened;
+        const auto image = dataset->OpenImage(entry.id);
+        Require(static_cast<bool>(image), "entry " + entry.id + " is openable and did not open");
+        const auto& described = image->descriptor();
+        Require(entry.image_role == described.image_role,
+                "entry " + entry.id + " says its role is '" + entry.image_role + "' and opens as '" +
+                    described.image_role + "'");
+        Require(entry.axes.size() == described.axes.size(),
+                "entry " + entry.id + " reports a different number of axes than it opens with");
+        for (std::size_t axis = 0; axis < entry.axes.size(); ++axis) {
+            const auto& listed = entry.axes.at(axis);
+            const auto& actual = described.axes.at(axis);
+            Require(listed.name == actual.name && listed.role == actual.role && listed.length == actual.length &&
+                        listed.unit == actual.unit && listed.storage_index == actual.storage_index,
+                    "entry " + entry.id + " reports axis " + std::to_string(axis) + " as '" + listed.name +
+                        "' and opens with '" + actual.name + "' there, or differs in its length, unit or storage");
+        }
+    }
+    Require(opened > 1 && refused > 0,
+            "the reference fixture should list both images that open and images that do not, or this "
+            "compares too little");
+    Require(dataset->descriptor().images.front().image_role == "sky", "SKY should list its role");
+}
+
 int main() {
     const auto suffix = std::chrono::steady_clock::now().time_since_epoch().count();
     const auto root = std::filesystem::temp_directory_path() / ("carta-zarr-schema-test-" + std::to_string(suffix));
@@ -880,6 +922,7 @@ int main() {
         TestBeamTableWithUnreadableLabels(root / "beam-labels");
         TestANodeNameSpelledWithADotIsTheSameNode(root / "dotted-node");
         TestReferenceFixture();
+        TestAnEntrySaysWhatOpeningWould();
         TestCompatibilityFixture();
         std::filesystem::remove_all(root);
         std::cout << "carta-zarr schema probe tests passed\n";

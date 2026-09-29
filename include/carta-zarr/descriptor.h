@@ -100,23 +100,6 @@ struct SchemaProbeResult {
     std::vector<Diagnostic> diagnostics;
 };
 
-struct ImageEntry {
-    std::string id;
-    bool openable = false;
-    std::vector<Diagnostic> diagnostics;
-};
-
-// What this library knows about an image dataset without opening any image in it: which schema
-// profile describes it, which variables in it are images, and whatever that profile had to say about
-// a store it nonetheless accepted.
-struct DatasetDescriptor {
-    SchemaId schema_id;
-    std::string schema_version;
-    std::vector<ImageEntry> images;
-    std::optional<std::string> default_image_id;
-    std::vector<Diagnostic> diagnostics;
-};
-
 struct OpenOptions {
     // How much decoded-chunk cache this context may hold, in bytes.
     //
@@ -151,6 +134,35 @@ struct AxisDescriptor {
     std::uint64_t length = 0;
     std::string unit;
     std::size_t storage_index = 0;
+};
+
+// One variable of a dataset's image listing, and what can be said about it without opening it.
+struct ImageEntry {
+    std::string id;
+    bool openable = false;
+    std::vector<Diagnostic> diagnostics;
+    // The part the image plays in its data group, as ImageDescriptor::image_role reports it. Empty
+    // when the variable does not say.
+    std::string image_role;
+    // The axes Dataset::OpenImage would report for this image -- ImageDescriptor::axes, element for
+    // element -- and empty when it is not openable.
+    //
+    // Here so that a consumer can decide whether it can use an image from the listing alone. One that
+    // displays a single time step, say, refuses an image with two, and without these it had to open
+    // every image in the dataset to find out, reading every coordinate value to answer a question
+    // about shapes. They come from metadata the listing has already parsed.
+    std::vector<AxisDescriptor> axes;
+};
+
+// What this library knows about an image dataset without opening any image in it: which schema
+// profile describes it, which variables in it are images, and whatever that profile had to say about
+// a store it nonetheless accepted.
+struct DatasetDescriptor {
+    SchemaId schema_id;
+    std::string schema_version;
+    std::vector<ImageEntry> images;
+    std::optional<std::string> default_image_id;
+    std::vector<Diagnostic> diagnostics;
 };
 
 enum class DataType {

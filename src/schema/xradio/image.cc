@@ -75,6 +75,22 @@ std::vector<std::string> FindDataGroups(const nlohmann::json& root_attributes, s
     return data_groups;
 }
 
+// XRADIO writes the role on the variable's own "type" attribute, lowercased ("sky", "model",
+// "residual"); the same attribute spells "flag" for pixel masks, which are never images. The v2
+// schema proposes a separate "image_type" attribute that no released XRADIO writes yet, so it is
+// only consulted as a forward-compatible fallback.
+//
+// One rule for the listing and for describing, so that an entry and the image it opens as cannot
+// disagree about which part the image plays.
+std::string ImageRoleOf(const zarr_metadata::ArrayMetadata& image) {
+    const std::string declared_role = AttributeString(image.attributes, "type");
+    std::string role = declared_role == "flag" ? std::string{} : declared_role;
+    if (role.empty()) {
+        role = AttributeString(image.attributes, "image_type");
+    }
+    return role;
+}
+
 std::vector<AxisDescriptor> DescribeAxes(const Store& store, const zarr_metadata::ArrayMetadata& image) {
     constexpr std::array<std::string_view, kXradioImageAxisOrder.size()> logical_axis_names{"l", "m", "frequency",
                                                                                             "polarization", "time"};
@@ -206,7 +222,14 @@ Result<Discovered> DiscoverImages(const Store& store) {
         if (qualified.diagnostic) {
             said.push_back(std::move(*qualified.diagnostic));
         }
-        result.images.push_back(ImageEntry{entry.name, qualified.openable, std::move(said)});
+        // Metadata the inventory has already parsed, and a listed node is always an array whose
+        // metadata did parse: the two kinds that are not never qualify as listed.
+        const auto& metadata = entry.array->value();
+        // Only for an image that opens: the axes promise what OpenImage would report, and a
+        // variable it refuses reports nothing -- an aperture-plane one would have only some of them.
+        auto axes = qualified.openable ? DescribeAxes(store, metadata) : std::vector<AxisDescriptor>{};
+        result.images.push_back(
+            ImageEntry{entry.name, qualified.openable, std::move(said), ImageRoleOf(metadata), std::move(axes)});
     }
 
     const auto sort_images = [](std::vector<ImageEntry>& images) {
@@ -331,15 +354,7 @@ Result<DescribedImage> DescribeImageFrom(const Store& store, std::string_view im
     descriptor.id = std::string(image_id);
     descriptor.stored_type = zarr_metadata::ParseDataType(image.data_type);
     descriptor.unit = AttributeString(image.attributes, "units");
-    // XRADIO writes the role on the variable's own "type" attribute, lowercased ("sky", "model",
-    // "residual"); the same attribute spells "flag" for pixel masks, which are never images. The v2
-    // schema proposes a separate "image_type" attribute that no released XRADIO writes yet, so it is
-    // only consulted as a forward-compatible fallback.
-    const std::string declared_role = AttributeString(image.attributes, "type");
-    descriptor.image_role = declared_role == "flag" ? std::string{} : declared_role;
-    if (descriptor.image_role.empty()) {
-        descriptor.image_role = AttributeString(image.attributes, "image_type");
-    }
+    descriptor.image_role = ImageRoleOf(image);
 
     const auto& root_attrs = store.RootAttributes();
     descriptor.data_groups = FindDataGroups(root_attrs, image_id);

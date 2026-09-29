@@ -65,7 +65,8 @@ auto written = image.value().Read(request, {pixels.data(), pixels.size()});
 `carta::zarr::ProbeSchema(path, carta::zarr::kXradioImageSchema)` answers "is this an image dataset
 this library reads?" without opening an image: a `SchemaMatchKind` of match, no match, or a match
 that is malformed. `Dataset::Open` lists the images in one, and `ImageEntry::openable` says which of
-them will open.
+them will open; an openable entry also carries the axes it will open with, so a consumer can choose
+among them without opening any.
 
 ### What the API promises
 

@@ -26,7 +26,7 @@ namespace carta::zarr {
 // increment -- so the handle left behind still works. A defaulted move would null it, which gave every
 // handle an empty state reachable only by std::move: each entry point then had to refuse it, and no
 // consumer could construct one or test for it. A consumer that needs a handle it fills in later
-// holds a std::optional of one.
+// holds a std::optional of one. See ADR 0013.
 class CARTA_ZARR_EXPORT Context final {
 public:
     Context(const Context&) = default;

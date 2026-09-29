@@ -73,6 +73,9 @@ them will open.
   from. No public entry point throws: a malformed value in the metadata or a length no allocator can
   serve is reported as an error like any other. `Result` is `[[nodiscard]]` and reads like
   `std::expected`: `has_value`, `value`, `value_or`, `*`, `->` and `error`.
+- **A handle always refers to something.** `Context`, `Dataset` and `Image` come only from their
+  factories, and moving one copies it, so the handle moved from still works. A consumer that fills
+  one in later holds a `std::optional` of it.
 - **Logical axis order is `l`, `m`, `frequency`, `polarization`, `time`** (`kXradioImageAxisOrder`),
   whatever order the store holds them in. A read returns them densely packed with axis 0 varying
   fastest; `AxisDescriptor::storage_index` says where each one lives on disk.

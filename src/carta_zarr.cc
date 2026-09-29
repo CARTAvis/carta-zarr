@@ -48,13 +48,11 @@ auto Guarded(ErrorCode code, std::string node, Function&& function) -> decltype(
 }
 
 // Everything an Image entry point does before it has something to read from: name the node so a
-// failure says which image it was about, refuse a handle that was moved from, build the
-// ReadableImage, and guard the lot.
+// failure says which image it was about, build the ReadableImage, and guard the lot.
 //
-// Five entry points wrote this out in full, and the five did not agree: two refused an empty
-// handle, the other three also refused a null store -- a condition Image::Impl's constructor
-// cannot produce, so the difference was a reader's problem rather than a behaviour. Said once,
-// there is one answer.
+// There is no empty handle to refuse here. A handle's _impl is never null -- see carta_zarr.h -- so
+// the checks every entry point used to open with guarded a state nothing could reach but a move,
+// and a move is now a copy.
 //
 // The handle is a template parameter because Image::Impl is private to Image and this is not.
 // Deducing the type asks nothing of access control, where naming it would.
@@ -62,11 +60,7 @@ template <typename ImplPtr, typename Function>
 auto WithReadableImage(const ImplPtr& impl, Function&& function)
     -> decltype(function(std::declval<const internal::ReadableImage&>())) {
     using Answer = decltype(function(std::declval<const internal::ReadableImage&>()));
-    const std::string node = impl ? impl->descriptor.id : std::string{};
-    return Guarded(ErrorCode::io_error, node, [&]() -> Answer {
-        if (!impl) {
-            return Error{ErrorCode::invalid_argument, "Image handle is empty"};
-        }
+    return Guarded(ErrorCode::io_error, impl->descriptor.id, [&]() -> Answer {
         auto image = impl->Readable();
         if (!image) {
             return image.error();
@@ -153,13 +147,11 @@ Image::Image(std::shared_ptr<Impl> impl) : _impl(std::move(impl)) {}
 Image::~Image() = default;
 
 const ImageDescriptor& Image::descriptor() const noexcept {
-    static const ImageDescriptor empty_descriptor;
-    return _impl ? _impl->descriptor : empty_descriptor;
+    return _impl->descriptor;
 }
 
 const ChunkGeometry& Image::chunk_geometry() const noexcept {
-    static const ChunkGeometry empty_geometry;
-    return _impl ? _impl->geometry : empty_geometry;
+    return _impl->geometry;
 }
 
 Result<std::size_t> Image::Read(const ReadRequest& request, BufferView<float> destination) const {
@@ -212,14 +204,7 @@ Result<CubeHistogramResult> Image::ComputeCubeHistogram(const CubeHistogramReque
 }
 
 Result<std::vector<Beam>> Image::ReadBeams() const {
-    const std::string node = _impl ? _impl->descriptor.id : std::string{};
-    return Guarded(ErrorCode::invalid_metadata, node, [&]() -> Result<std::vector<Beam>> {
-        if (!_impl) {
-            return Error{ErrorCode::invalid_argument, "Image handle is empty"};
-        }
-        if (!_impl->store) {
-            return Error{ErrorCode::invalid_argument, "Image store is unavailable"};
-        }
+    return Guarded(ErrorCode::invalid_metadata, _impl->descriptor.id, [&]() -> Result<std::vector<Beam>> {
         return _impl->profile.ReadBeams(*_impl->store, _impl->descriptor.id);
     });
 }
@@ -250,10 +235,6 @@ Dataset::~Dataset() = default;
 
 Result<Dataset> Dataset::Open(const Context& context, std::string_view location) {
     return Guarded(ErrorCode::invalid_metadata, std::string(location), [&]() -> Result<Dataset> {
-        if (!context._impl) {
-            return Error{ErrorCode::invalid_argument, "Context handle is empty"};
-        }
-
         // TensorStore resources are shared by Context, while array handles are scoped to this
         // Dataset and the Images that retain its Store.
         auto store_context = context._impl->store_context->CloneForStore();
@@ -282,16 +263,11 @@ Result<Dataset> Dataset::Open(const Context& context, std::string_view location)
 }
 
 const DatasetDescriptor& Dataset::descriptor() const noexcept {
-    static const DatasetDescriptor empty_descriptor;
-    return _impl ? _impl->descriptor : empty_descriptor;
+    return _impl->descriptor;
 }
 
 Result<DatasetSize> Dataset::Size(std::chrono::milliseconds stored_size_timeout) const {
-    const std::string node = _impl ? _impl->location : std::string{};
-    return Guarded(ErrorCode::io_error, node, [&]() -> Result<DatasetSize> {
-        if (!_impl) {
-            return Error{ErrorCode::invalid_argument, "Dataset handle is empty"};
-        }
+    return Guarded(ErrorCode::io_error, _impl->location, [&]() -> Result<DatasetSize> {
         // The caller's timeout becomes a deadline here and nowhere lower: a timeout is measured from
         // whenever the caller asked, which is a fact only this end of the call knows. Everything
         // below speaks deadlines, as every other storage operation in this library does.
@@ -303,9 +279,6 @@ Result<DatasetSize> Dataset::Size(std::chrono::milliseconds stored_size_timeout)
 Result<Image> Dataset::OpenImage(std::string_view image_id) const {
     const std::string node(image_id);
     return Guarded(ErrorCode::invalid_metadata, node, [&]() -> Result<Image> {
-        if (!_impl) {
-            return Error{ErrorCode::invalid_argument, "Dataset handle is empty"};
-        }
         std::scoped_lock const lock(_impl->mutex);
         const std::string image_name(image_id);
         const auto make_image = [&](const internal::DescribedImage& described) {

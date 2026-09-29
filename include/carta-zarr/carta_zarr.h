@@ -19,12 +19,23 @@
 
 namespace carta::zarr {
 
+// Context, Dataset and Image are shared handles, and a handle always refers to something: the only
+// way to get one is from the factory that made what it refers to, and nothing empties it afterwards.
+//
+// That includes moving from one. Each of the three moves by copying -- one reference-count
+// increment -- so the handle left behind still works. A defaulted move would null it, which gave every
+// handle an empty state reachable only by std::move: each entry point then had to refuse it, and no
+// consumer could construct one or test for it. A consumer that needs a handle it fills in later
+// holds a std::optional of one.
 class CARTA_ZARR_EXPORT Context final {
 public:
     Context(const Context&) = default;
     Context& operator=(const Context&) = default;
-    Context(Context&&) noexcept = default;
-    Context& operator=(Context&&) noexcept = default;
+    // A copy, so that the handle moved from still refers to what it did. See above.
+    Context(Context&& other) noexcept : Context(other) {}
+    Context& operator=(Context&& other) noexcept {
+        return *this = other;
+    }
     ~Context();
 
     static Result<Context> Create(const OpenOptions& options = {});
@@ -43,8 +54,11 @@ class CARTA_ZARR_EXPORT Image final {
 public:
     Image(const Image&) = default;
     Image& operator=(const Image&) = default;
-    Image(Image&&) noexcept = default;
-    Image& operator=(Image&&) noexcept = default;
+    // A copy, so that the handle moved from still refers to what it did. See above.
+    Image(Image&& other) noexcept : Image(other) {}
+    Image& operator=(Image&& other) noexcept {
+        return *this = other;
+    }
     ~Image();
 
     const ImageDescriptor& descriptor() const noexcept;
@@ -121,8 +135,11 @@ class CARTA_ZARR_EXPORT Dataset final {
 public:
     Dataset(const Dataset&) = default;
     Dataset& operator=(const Dataset&) = default;
-    Dataset(Dataset&&) noexcept = default;
-    Dataset& operator=(Dataset&&) noexcept = default;
+    // A copy, so that the handle moved from still refers to what it did. See above.
+    Dataset(Dataset&& other) noexcept : Dataset(other) {}
+    Dataset& operator=(Dataset&& other) noexcept {
+        return *this = other;
+    }
     ~Dataset();
 
     static Result<Dataset> Open(const Context& context, std::string_view location);

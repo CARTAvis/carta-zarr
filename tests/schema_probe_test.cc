@@ -14,6 +14,8 @@
 #include <iostream>
 #include <stdexcept>
 #include <string>
+#include <type_traits>
+#include <utility>
 #include <vector>
 
 #include <carta-zarr/carta_zarr.h>
@@ -811,12 +813,54 @@ void TestShardedStorageLayout(const std::filesystem::path& root) {
 
 }  // namespace
 
+// A handle moved from still refers to what it did. Moving used to null it, which was an empty
+// state every entry point had to refuse and nothing but std::move could reach; a move is now a copy.
+//
+// Against the reference fixture rather than a store built here, because the last step reads pixels
+// and a store written by this file holds metadata alone.
+void TestAHandleMovedFromStillWorks() {
+    static_assert(std::is_nothrow_move_constructible_v<carta::zarr::Context> &&
+                      std::is_nothrow_move_constructible_v<carta::zarr::Dataset> &&
+                      std::is_nothrow_move_constructible_v<carta::zarr::Image>,
+                  "a handle must move without throwing, so that a vector of them relocates by moving");
+    const std::filesystem::path root(CARTA_ZARR_REFERENCE_FIXTURE);
+
+    auto context = carta::zarr::Context::Create();
+    Require(static_cast<bool>(context), "Context::Create failed");
+    const carta::zarr::Context moved_context = std::move(*context);
+    auto dataset = carta::zarr::Dataset::Open(*context, root.string());
+    Require(static_cast<bool>(dataset), "a context moved from did not open a dataset");
+    Require(static_cast<bool>(carta::zarr::Dataset::Open(moved_context, root.string())),
+            "a context moved to did not open a dataset");
+
+    carta::zarr::Dataset moved_dataset = std::move(*dataset);
+    auto image = dataset->OpenImage("SKY");
+    Require(static_cast<bool>(image), "a dataset moved from did not open an image");
+    Require(dataset->descriptor().default_image_id == "SKY", "a dataset moved from lost its descriptor");
+    Require(static_cast<bool>(dataset->Size(std::chrono::milliseconds(0))), "a dataset moved from did not size");
+
+    auto moved_image = std::move(*image);
+    moved_dataset = std::move(*dataset);
+    Require(moved_dataset.descriptor().default_image_id == "SKY", "move assignment lost the dataset");
+    Require(image->descriptor().id == "SKY" && image->chunk_geometry().chunk_shape.size() == 5,
+            "an image moved from lost its descriptor or its geometry");
+
+    carta::zarr::ReadRequest request;
+    request.axes = {{0, 1, 1}, {0, 1, 1}, {0, 1, 1}, {0, 1, 1}, {0, 1, 1}};
+    float pixel = 0.0F;
+    const auto read = image->Read(request, {&pixel, 1});
+    Require(read && *read == 1,
+            "an image moved from did not read" + (read ? std::string{} : ": " + read.error().message));
+    Require(static_cast<bool>(moved_image.Read(request, {&pixel, 1})), "an image moved to did not read");
+}
+
 int main() {
     const auto suffix = std::chrono::steady_clock::now().time_since_epoch().count();
     const auto root = std::filesystem::temp_directory_path() / ("carta-zarr-schema-test-" + std::to_string(suffix));
     try {
         std::filesystem::remove_all(root);
         TestValidAndTimeAxis(root / "valid");
+        TestAHandleMovedFromStillWorks();
         TestTimeGreaterThanOne(root / "time-two");
         TestNonMatchAndInvalid(root / "classification");
         TestMissingAndUnsupported(root);

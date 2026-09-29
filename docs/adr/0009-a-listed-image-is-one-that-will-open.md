@@ -14,6 +14,14 @@ that needs the answer asks it, and the field was renamed from `readable` so that
 the question -- `RequireOpenableDataset` already spelled it that way, and `readable` was the one
 place saying the same thing with a different word.
 
+*Since decided:* `openable` is no longer the only thing an entry carries. An openable entry also
+reports `image_role` and the `axes` it will open with -- `ImageDescriptor::axes`, element for
+element -- because carta-backend-2 refuses more than this library does: it displays one time step,
+and opening every image to learn its axes read every coordinate value to answer a question about
+shapes. Its file list now builds the HDU list from `openable` and those axes together. The promise
+here is unchanged and is what makes that safe: the axes are reported only for an entry that will
+open, and they are the ones it opens with.
+
 ## The rule existed twice, and the copies differed
 
 Coordinate agreement -- an image's length along an axis must be the length of the dataset coordinate
@@ -55,6 +63,11 @@ Ordering and default selection stayed where they were. Ranking `SKY` first is pr
 default is "the first qualified image", which is a consequence of qualification rather than part of
 it. `DescribeAxes`'s logical axis order is untouched: it is a third list of axis names, but it
 describes the order this library reports, which is a public contract and a separate question.
+
+*Since decided:* the order is not a public contract. [ADR 0012](0012-an-axis-is-reached-by-its-role.md)
+settles that question the other way: the order is the XRADIO profile's choice, kept inside it as
+`kLogicalAxes`, and a consumer reaches an axis by its role through `AxisIndex`. What this paragraph
+decided still holds -- qualification does not own the order -- but the reason it gave is withdrawn.
 
 ## Both directions, not one
 

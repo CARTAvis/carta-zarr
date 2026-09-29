@@ -1,8 +1,8 @@
 # A caller's stop is one error, whichever way the caller said it
 
-`ErrorCode::cancelled` answers four different things: a sink that returned false, a read's progress
-callback that returned false, a `ReadControl::cancellation_requested` that returned true, and a
-`ReadControl::deadline` that passed. We keep them one code. It looks like a conflation worth pulling
+`ErrorCode::cancelled` answers four different things: a sink that returned false, a read's or a cube
+histogram's progress callback that returned false, a `ReadControl::cancellation_requested` that
+returned true, and a `ReadControl::deadline` that passed. We keep them one code. It looks like a conflation worth pulling
 apart -- an architecture review proposed reporting a sink's stop as a successful outcome that says
 where it stopped, keeping `cancelled` for the rest -- and this records why that was not done.
 

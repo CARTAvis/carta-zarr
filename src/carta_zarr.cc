@@ -73,7 +73,7 @@ auto WithReadableImage(const ImplPtr& impl, Function&& function)
 
 class Context::Impl {
 public:
-    Impl(OpenOptions options, internal::StoreContextPtr store_context)
+    Impl(ContextOptions options, internal::StoreContextPtr store_context)
         : options(options),
           store_context(std::move(store_context)),
           // decode_threads is the consumer's statement of how much of this machine the library may
@@ -83,7 +83,7 @@ public:
           // what TensorStore's own default does with the same number.
           workers(std::make_shared<internal::WorkPool>(options.decode_threads)) {}
 
-    OpenOptions options;
+    ContextOptions options;
     // Shared by every dataset and image opened through this context, so that its cache and
     // concurrency limits apply to all reads rather than being rebuilt per read.
     internal::StoreContextPtr store_context;
@@ -94,7 +94,7 @@ public:
 Context::Context(std::shared_ptr<Impl> impl) : _impl(std::move(impl)) {}
 Context::~Context() = default;
 
-Result<Context> Context::Create(const OpenOptions& options) {
+Result<Context> Context::Create(const ContextOptions& options) {
     // Guarded like every other public entry point, and for a reason the others do not have: building
     // an Impl starts the worker threads, and a system that refuses one throws std::system_error.
     // Without this, the one call a consumer makes before it can do anything else is also the only

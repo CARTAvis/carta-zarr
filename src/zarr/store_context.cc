@@ -95,7 +95,7 @@ StoreContextPtr StoreContext::WithoutCache() const {
     return _without_cache;
 }
 
-Result<StoreContextPtr> MakeStoreContext(const OpenOptions& options) {
+Result<StoreContextPtr> MakeStoreContext(const ContextOptions& options) {
     nlohmann::json spec = nlohmann::json::object();
     if (options.cache_bytes) {
         // Zero is a size like any other here: it is the pool that holds nothing, which is what a

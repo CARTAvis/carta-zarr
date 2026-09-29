@@ -327,7 +327,7 @@ void TestReferenceFixture() {
             "the XRADIO reference fixture did not match");
 
     // Resource limits must be accepted and applied to every read made through this context.
-    carta::zarr::OpenOptions options;
+    carta::zarr::ContextOptions options;
     options.cache_bytes = static_cast<std::size_t>(32U * 1024U * 1024U);
     options.io_threads = 2;
     options.decode_threads = 2;

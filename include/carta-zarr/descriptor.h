@@ -100,7 +100,10 @@ struct SchemaProbeResult {
     std::vector<Diagnostic> diagnostics;
 };
 
-struct OpenOptions {
+// What Context::Create takes: the resources every dataset and image opened through that context
+// share. Named for the context rather than for opening, which it was, because it opens nothing --
+// Dataset::Open takes a location and the context, and none of these.
+struct ContextOptions {
     // How much decoded-chunk cache this context may hold, in bytes.
     //
     // Three answers, and one field because they are one question: no value leaves TensorStore's own

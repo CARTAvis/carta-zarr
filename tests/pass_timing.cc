@@ -97,7 +97,7 @@ int main(int argc, char** argv) {
         return 2;
     }
 
-    carta::zarr::OpenOptions open_options;
+    carta::zarr::ContextOptions open_options;
     open_options.decode_threads = threads;
     const auto context = carta::zarr::Context::Create(open_options);
     if (!context) {

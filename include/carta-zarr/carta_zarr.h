@@ -38,7 +38,7 @@ public:
     }
     ~Context();
 
-    static Result<Context> Create(const OpenOptions& options = {});
+    static Result<Context> Create(const ContextOptions& options = {});
 
 private:
     class Impl;

@@ -86,7 +86,7 @@ Result<tensorstore::TensorStore<>> OpenZarrArray(const std::filesystem::path& ar
 // Translate the public options into TensorStore context resources. A concurrency limit of zero
 // keeps TensorStore's default; a cache size is written whenever the caller gave one, zero included,
 // because zero is the pool that holds nothing rather than the absence of an answer.
-Result<StoreContextPtr> MakeStoreContext(const OpenOptions& options);
+Result<StoreContextPtr> MakeStoreContext(const ContextOptions& options);
 
 }  // namespace carta::zarr::internal
 

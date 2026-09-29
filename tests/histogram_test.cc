@@ -43,7 +43,7 @@ float ExpectedValue(std::uint64_t l, std::uint64_t m, std::uint64_t frequency, s
     return static_cast<float>((frequency * 1000) + (polarization * 100) + (l * 10) + m);
 }
 
-carta::zarr::Image OpenSky(const char* fixture, const carta::zarr::OpenOptions& options = {}) {
+carta::zarr::Image OpenSky(const char* fixture, const carta::zarr::ContextOptions& options = {}) {
     Require(std::filesystem::exists(fixture),
             "the pixel fixture is missing; run tests/data/generate_zarr_fixtures.py");
     const auto context = carta::zarr::Context::Create(options);
@@ -480,7 +480,7 @@ void TestAWidePlaneSplitsAndStillCounts(const char* fixture) {
 
     std::vector<std::vector<std::uint64_t>> answers;
     for (const unsigned int threads : {1U, 4U, 16U}) {
-        carta::zarr::OpenOptions options;
+        carta::zarr::ContextOptions options;
         options.decode_threads = threads;
         const auto sky = OpenSky(fixture, options);
 
@@ -532,7 +532,7 @@ void TestAWideCubeSplitsAndStillAddsUp(const char* fixture) {
     }
 
     for (const unsigned int threads : {1U, 4U, 16U}) {
-        carta::zarr::OpenOptions options;
+        carta::zarr::ContextOptions options;
         options.decode_threads = threads;
         const auto sky = OpenSky(fixture, options);
         carta::zarr::CubeHistogramRequest request;
@@ -560,7 +560,7 @@ void TestAWideCubeSplitsAndStillAddsUp(const char* fixture) {
 // workers. Every snapshot is therefore taken over accumulators that several threads have been
 // writing to, which is the arrangement the small fixture cannot produce.
 void TestAWideCubeReportsWhileItSplits(const char* fixture) {
-    carta::zarr::OpenOptions options;
+    carta::zarr::ContextOptions options;
     options.decode_threads = 8;
     const auto sky = OpenSky(fixture, options);
 
@@ -667,7 +667,7 @@ void TestOnePassReportsWhatItHasSoFar(const carta::zarr::Image& sky) {
 void TestOnePassKeepsItsContractAtAnyThreadCount(const char* fixture) {
     std::vector<carta::zarr::CubeHistogramResult> answers;
     for (const unsigned int threads : {1U, 2U, 8U}) {
-        carta::zarr::OpenOptions options;
+        carta::zarr::ContextOptions options;
         options.decode_threads = threads;
         const auto sky = OpenSky(fixture, options);
         carta::zarr::CubeHistogramRequest request;
@@ -704,7 +704,7 @@ void TestOnePassKeepsItsContractAtAnyThreadCount(const char* fixture) {
 void TestThreadCountDoesNotChangeTheCounts(const char* fixture) {
     std::vector<std::vector<std::uint64_t>> answers;
     for (const unsigned int threads : {1U, 2U, 8U}) {
-        carta::zarr::OpenOptions options;
+        carta::zarr::ContextOptions options;
         options.decode_threads = threads;
         const auto sky = OpenSky(fixture, options);
         const auto collected = Collect(sky, WholeSpectrum(0, 0.0F, 2000.0F, 16), {});

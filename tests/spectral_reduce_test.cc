@@ -61,7 +61,7 @@ void RequireClose(double actual, double expected, const std::string& message) {
             message + ": expected " + std::to_string(expected) + ", got " + std::to_string(actual));
 }
 
-carta::zarr::Image OpenSky(const char* fixture, const carta::zarr::OpenOptions& options = {}) {
+carta::zarr::Image OpenSky(const char* fixture, const carta::zarr::ContextOptions& options = {}) {
     Require(std::filesystem::exists(fixture),
             "the pixel fixture is missing; run tests/data/generate_zarr_fixtures.py");
     const auto context = carta::zarr::Context::Create(options);
@@ -524,7 +524,7 @@ void TestAWideRegionSplitsAndStillAgrees(const char* fixture) {
     }
 
     for (const unsigned int threads : {1U, 4U, 16U}) {
-        carta::zarr::OpenOptions options;
+        carta::zarr::ContextOptions options;
         options.decode_threads = threads;
         const auto sky = OpenSky(fixture, options);
 

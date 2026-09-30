@@ -356,12 +356,12 @@ void TestOnePassMatchesTheTwoPassAnswer(const carta::zarr::Image& sky) {
             }
         }
     }
-    Require(result.num_pixels == expected_pixels, "the finite pixel count should be exact");
-    Require(result.nan_count == expected_nan, "the absent pixel count should be exact");
-    Require(std::abs(result.sum - expected_sum) <= 1e-9 * (1.0 + std::abs(expected_sum)),
+    Require(result.totals.num_pixels == expected_pixels, "the finite pixel count should be exact");
+    Require(result.totals.nan_count == expected_nan, "the absent pixel count should be exact");
+    Require(std::abs(result.totals.sum - expected_sum) <= 1e-9 * (1.0 + std::abs(expected_sum)),
             "the sum should agree to a rounding");
-    Require(result.minimum == expected_min, "the minimum should be exact, whatever the bins did");
-    Require(result.maximum == expected_max, "the maximum should be exact, whatever the bins did");
+    Require(result.totals.min == expected_min, "the minimum should be exact, whatever the bins did");
+    Require(result.totals.max == expected_max, "the maximum should be exact, whatever the bins did");
     Require(!result.sampled, "nothing was sampled");
 
     std::uint64_t total = 0;
@@ -375,7 +375,7 @@ void TestOnePassMatchesTheTwoPassAnswer(const carta::zarr::Image& sky) {
     // bin -- a provisional bin straddling a target edge goes to one side -- so what is required is
     // that no bin is off by more than the fixture's largest provisional bin could hold, which for
     // values this far apart is nothing.
-    auto fixed = WholeSpectrum(polarization, result.minimum, result.maximum, request.bins);
+    auto fixed = WholeSpectrum(polarization, result.totals.min, result.totals.max, request.bins);
     const auto two_pass = Collect(sky, fixed, {});
     for (std::size_t bin = 0; bin < request.bins; ++bin) {
         std::uint64_t summed = 0;
@@ -403,7 +403,7 @@ void TestTheProvisionalRangeGrowsToFit(const carta::zarr::Image& sky) {
     for (const auto count : result.value().counts) {
         total += count;
     }
-    Require(static_cast<double>(total) == result.value().num_pixels,
+    Require(static_cast<double>(total) == result.value().totals.num_pixels,
             "merging on a doubling must not drop a pixel");
 }
 
@@ -420,11 +420,11 @@ void TestSamplingTakesFewerPixels(const carta::zarr::Image& sky) {
     const auto sampled = sky.ComputeCubeHistogram(request);
     Require(static_cast<bool>(sampled), "the sampled pass should work");
     Require(sampled.value().sampled, "a sampled result should say so");
-    Require(sampled.value().num_pixels + sampled.value().nan_count <
-                every.value().num_pixels + every.value().nan_count,
+    Require(sampled.value().totals.num_pixels + sampled.value().totals.nan_count <
+                every.value().totals.num_pixels + every.value().totals.nan_count,
             "taking every second pixel along both axes should look at fewer of them");
-    Require(sampled.value().minimum >= every.value().minimum &&
-                sampled.value().maximum <= every.value().maximum,
+    Require(sampled.value().totals.min >= every.value().totals.min &&
+                sampled.value().totals.max <= every.value().totals.max,
             "a sample cannot find an extreme that is not there");
 }
 
@@ -542,10 +542,10 @@ void TestAWideCubeSplitsAndStillAddsUp(const char* fixture) {
         const auto result = sky.ComputeCubeHistogram(request);
         Require(static_cast<bool>(result), "the wide one-pass histogram failed");
         const auto& answer = result.value();
-        Require(answer.num_pixels == expected_pixels, "the wide cube's pixel count should be exact");
-        Require(answer.nan_count == 0.0, "the wide fixture has no absent chunk");
-        Require(answer.minimum == expected_min, "the wide cube's minimum should be exact");
-        Require(answer.maximum == expected_max, "the wide cube's maximum should be exact");
+        Require(answer.totals.num_pixels == expected_pixels, "the wide cube's pixel count should be exact");
+        Require(answer.totals.nan_count == 0.0, "the wide fixture has no absent chunk");
+        Require(answer.totals.min == expected_min, "the wide cube's minimum should be exact");
+        Require(answer.totals.max == expected_max, "the wide cube's maximum should be exact");
         std::uint64_t total = 0;
         for (const auto count : answer.counts) {
             total += count;
@@ -581,17 +581,17 @@ void TestAWideCubeReportsWhileItSplits(const char* fixture) {
         for (const auto count : snapshot.counts) {
             total += count;
         }
-        Require(static_cast<double>(total) == snapshot.num_pixels,
+        Require(static_cast<double>(total) == snapshot.totals.num_pixels,
                 "a snapshot taken mid-split should still hold every pixel it has counted");
-        Require(snapshot.num_pixels >= last_pixels, "a snapshot cannot un-read a pixel");
-        last_pixels = snapshot.num_pixels;
+        Require(snapshot.totals.num_pixels >= last_pixels, "a snapshot cannot un-read a pixel");
+        last_pixels = snapshot.totals.num_pixels;
         return true;
     };
 
     const auto result = sky.ComputeCubeHistogram(request, read_options, progress);
     Require(static_cast<bool>(result), "the wide one-pass histogram failed");
     Require(updates > 1, "a budget this small should have taken several reads and reported on each");
-    Require(result.value().num_pixels == static_cast<double>(kL * kM * kFrequency),
+    Require(result.value().totals.num_pixels == static_cast<double>(kL * kM * kFrequency),
             "splitting and reporting must not change what was counted");
 }
 
@@ -628,18 +628,18 @@ void TestOnePassReportsWhatItHasSoFar(const carta::zarr::Image& sky) {
             total += count;
         }
         Require(snapshot.counts.size() == request.bins, "a snapshot should have the bins that were asked for");
-        Require(static_cast<double>(total) == snapshot.num_pixels,
+        Require(static_cast<double>(total) == snapshot.totals.num_pixels,
                 "a snapshot's bins should hold every pixel it has counted");
-        Require(snapshot.num_pixels >= last_pixels, "a snapshot cannot un-read a pixel");
-        last_pixels = snapshot.num_pixels;
-        if (snapshot.num_pixels > 0.0) {
+        Require(snapshot.totals.num_pixels >= last_pixels, "a snapshot cannot un-read a pixel");
+        last_pixels = snapshot.totals.num_pixels;
+        if (snapshot.totals.num_pixels > 0.0) {
             // The range only ever widens, because it is the extremes of a growing set of pixels.
-            Require(snapshot.minimum <= widest_low || widest_low == std::numeric_limits<double>::infinity(),
+            Require(snapshot.totals.min <= widest_low || widest_low == std::numeric_limits<double>::infinity(),
                     "a snapshot's minimum should only fall");
-            Require(snapshot.maximum >= widest_high || widest_high == -std::numeric_limits<double>::infinity(),
+            Require(snapshot.totals.max >= widest_high || widest_high == -std::numeric_limits<double>::infinity(),
                     "a snapshot's maximum should only rise");
-            widest_low = std::min(widest_low, snapshot.minimum);
-            widest_high = std::max(widest_high, snapshot.maximum);
+            widest_low = std::min(widest_low, snapshot.totals.min);
+            widest_high = std::max(widest_high, snapshot.totals.max);
         }
         return true;
     };
@@ -647,8 +647,8 @@ void TestOnePassReportsWhatItHasSoFar(const carta::zarr::Image& sky) {
     const auto result = sky.ComputeCubeHistogram(request, options, progress);
     Require(static_cast<bool>(result), "the one-pass histogram failed");
     Require(updates > 0, "a walk taking several reads should have reported at least once");
-    Require(result.value().num_pixels >= last_pixels, "the answer should hold at least what the last snapshot did");
-    Require(result.value().minimum <= widest_low && result.value().maximum >= widest_high,
+    Require(result.value().totals.num_pixels >= last_pixels, "the answer should hold at least what the last snapshot did");
+    Require(result.value().totals.min <= widest_low && result.value().totals.max >= widest_high,
             "the answer's range should contain every range reported on the way");
 
     // Saying no stops the walk, and says why.
@@ -680,19 +680,19 @@ void TestOnePassKeepsItsContractAtAnyThreadCount(const char* fixture) {
     }
     const auto& first = answers.front();
     for (const auto& answer : answers) {
-        Require(answer.num_pixels == first.num_pixels, "the finite pixel count must not move with the threads");
-        Require(answer.nan_count == first.nan_count, "the absent pixel count must not move with the threads");
-        Require(answer.minimum == first.minimum, "the minimum must not move with the threads");
-        Require(answer.maximum == first.maximum, "the maximum must not move with the threads");
-        Require(std::abs(answer.sum - first.sum) <= 1e-12 * (1.0 + std::abs(first.sum)),
+        Require(answer.totals.num_pixels == first.totals.num_pixels, "the finite pixel count must not move with the threads");
+        Require(answer.totals.nan_count == first.totals.nan_count, "the absent pixel count must not move with the threads");
+        Require(answer.totals.min == first.totals.min, "the minimum must not move with the threads");
+        Require(answer.totals.max == first.totals.max, "the maximum must not move with the threads");
+        Require(std::abs(answer.totals.sum - first.totals.sum) <= 1e-12 * (1.0 + std::abs(first.totals.sum)),
                 "the sum should agree to a rounding");
-        Require(std::abs(answer.sum_sq - first.sum_sq) <= 1e-12 * (1.0 + std::abs(first.sum_sq)),
+        Require(std::abs(answer.totals.sum_sq - first.totals.sum_sq) <= 1e-12 * (1.0 + std::abs(first.totals.sum_sq)),
                 "the sum of squares should agree to a rounding");
         std::uint64_t total = 0;
         for (const auto count : answer.counts) {
             total += count;
         }
-        Require(static_cast<double>(total) == answer.num_pixels,
+        Require(static_cast<double>(total) == answer.totals.num_pixels,
                 "every finite pixel should still land in some bin, whoever binned it");
     }
 }
@@ -721,11 +721,12 @@ void TestThreadCountDoesNotChangeTheCounts(const char* fixture) {
 }
 
 // A result nobody filled in has found no range, which is what the extrema say for a walk that read no
-// finite pixel. A zero read as a range from zero to zero.
+// finite pixel. A zero read as a range from zero to zero. The default is SpectralTotals' own now,
+// which is the point: it is written once, for this and for every spectral block.
 void TestAnUnfilledResultHasFoundNoRange() {
     const carta::zarr::CubeHistogramResult unfilled;
-    Require(std::isnan(unfilled.minimum) && std::isnan(unfilled.maximum),
-            "an unfilled cube histogram should have no extremes, as an unfilled SpectralTotals has none");
+    Require(std::isnan(unfilled.totals.min) && std::isnan(unfilled.totals.max),
+            "an unfilled cube histogram should have no extremes");
 }
 
 int main() {

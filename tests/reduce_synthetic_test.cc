@@ -497,11 +497,11 @@ void TestACubeHistogramSplitAcrossWorkers() {
     }
 
     const auto pixels = static_cast<double>(kSplitX * kSplitY * kSplitZ);
-    Require(result.num_pixels == pixels, "every pixel is finite, so every one counts");
-    Require(result.nan_count == 0.0, "and none of them is a NaN");
-    Require(result.minimum == smallest && result.maximum == largest,
+    Require(result.totals.num_pixels == pixels, "every pixel is finite, so every one counts");
+    Require(result.totals.nan_count == 0.0, "and none of them is a NaN");
+    Require(result.totals.min == smallest && result.totals.max == largest,
             "the extremes are tracked exactly, whatever the split");
-    Require(std::abs(result.sum - sum) <= 1e-9 * (1.0 + std::abs(sum)), "the sum over four accumulators");
+    Require(std::abs(result.totals.sum - sum) <= 1e-9 * (1.0 + std::abs(sum)), "the sum over four accumulators");
 
     std::uint64_t binned = 0;
     for (const auto count : result.counts) {

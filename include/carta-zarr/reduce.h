@@ -193,18 +193,35 @@ private:
 
 using HistogramSink = std::function<bool(const HistogramBlock&)>;
 
-// Everything one pass can say about the selection.
-struct CubeHistogramResult {
+// The six statistics a reduction counts over a set of pixels: one region at one channel of a
+// SpectralBlock, or everything a cube histogram's selection covers.
+//
+// What nothing was counted into reads as zero for the counts and sums and NaN for the extrema, since
+// there is no smallest value of nothing -- and that is what a default-constructed one holds, so a
+// total nobody filled in cannot pass for a range that was found. A caller deriving a mean from these
+// sees the division it must not perform either way.
+//
+// In a SpectralBlock, a statistic the block does not carry reads the same way. A caller that has to
+// tell "not asked for" from "nothing there" asks the block, with Carries.
+//
+// One type for both, rather than a set of fields per result: the cube histogram used to spell the
+// same six its own way, with the extrema named minimum and maximum, and the two defaults drifted
+// apart until c66699d put them back.
+struct SpectralTotals {
     double num_pixels = 0.0;
     double nan_count = 0.0;
     double sum = 0.0;
     double sum_sq = 0.0;
-    // Exact, whatever the bin edges did. NaN when nothing finite was read -- and so NaN in a result
-    // nobody has filled in, which is the same state: SpectralTotals starts its extrema there for the
-    // same reason. A zero here looked like a range that had been found.
-    double minimum = std::numeric_limits<double>::quiet_NaN();
-    double maximum = std::numeric_limits<double>::quiet_NaN();
-    // `bins` counts over [minimum, maximum].
+    double min = std::numeric_limits<double>::quiet_NaN();
+    double max = std::numeric_limits<double>::quiet_NaN();
+};
+
+// Everything one pass can say about the selection.
+struct CubeHistogramResult {
+    // Over every pixel the selection covers, or every one the sample kept. The extrema are exact,
+    // whatever the bin edges did, and NaN when nothing finite was read.
+    SpectralTotals totals;
+    // `bins` counts over [totals.min, totals.max].
     std::vector<std::uint64_t> counts;
     // Whether spatial_sample kept this from being every pixel.
     bool sampled = false;
@@ -310,21 +327,6 @@ struct SpectralReduceRequest {
     // SpectralReduceRequest::planes.spectral.count. The value actually used is reported as
     // SpectralBlock::channel_count, which a caller has to read anyway.
     std::uint32_t emit_every_channels = 0;
-};
-
-// The accumulated statistics of one region at one channel.
-//
-// A statistic the block does not carry reads as though nothing had been counted: zero for the counts
-// and sums, NaN for the extrema. That is also exactly what a channel whose region caught no finite
-// pixel reports, so a caller deriving a mean from these sees the division it must not perform either
-// way. A caller that has to tell "not asked for" from "nothing there" asks the block, with Carries.
-struct SpectralTotals {
-    double num_pixels = 0.0;
-    double nan_count = 0.0;
-    double sum = 0.0;
-    double sum_sq = 0.0;
-    double min = std::numeric_limits<double>::quiet_NaN();
-    double max = std::numeric_limits<double>::quiet_NaN();
 };
 
 namespace internal {

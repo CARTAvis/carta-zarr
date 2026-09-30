@@ -9,9 +9,13 @@
 
 #include "axis_map.h"
 #include "pixel_source.h"
+#include "reduce/pass_plan.h"
+#include "reduce/plane_selection.h"
 #include "work_pool.h"
 
 #include "carta-zarr/descriptor.h"
+#include "carta-zarr/read.h"
+#include "carta-zarr/reduce.h"
 #include "carta-zarr/result.h"
 
 namespace carta::zarr::internal {
@@ -36,7 +40,9 @@ namespace carta::zarr::internal {
  *
  * Checking a plane selection used to live here too, as `ValidateSpectral`. That was one third of
  * the question in the one place the other two thirds were not; `CheckedPlanes::Of` asks all of it,
- * from the descriptor and the map this already holds.
+ * from the descriptor and the map this already holds. What lives here now is `Plan`, which asks it
+ * and plans the pass over the answer in one step, because no reduction ever did one without the
+ * other.
  *
  * Holds references and an AxisMap by value, so it is cheap to build per call and owns nothing. It
  * must not outlive the source, the descriptor, the geometry or the pool it was built from.
@@ -61,14 +67,28 @@ public:
     const ImageDescriptor& descriptor() const noexcept {
         return *_descriptor;
     }
-    const ChunkGeometry& geometry() const noexcept {
-        return *_geometry;
-    }
     WorkPool& workers() const noexcept {
         return *_workers;
     }
     const AxisMap& map() const noexcept {
         return _map;
+    }
+
+    // The pass a reduction makes over `planes`, once they are checked against this image: every
+    // reduction asked CheckedPlanes::Of and then PlanPass, from the same descriptor, geometry and
+    // map, in the same order, and did nothing between them. The plan keeps the checked planes, so
+    // the answer is the one value a reduction needs afterwards. `sample` takes every nth pixel along
+    // both spatial axes; one reads them all.
+    //
+    // Reports invalid_argument for planes this image cannot serve; see CheckedPlanes::Of. What a
+    // request asks beyond its planes -- bins, bounds, regions, a sink -- stays with the reduction
+    // that understands it.
+    Result<PassPlan> Plan(const PlaneSelection& planes, std::uint64_t sample, const ReadOptions& options) const {
+        const auto checked = CheckedPlanes::Of(*_descriptor, _map, planes);
+        if (!checked) {
+            return checked.error();
+        }
+        return PlanPass(*_descriptor, *_geometry, _map, checked.value(), sample, options);
     }
 
 private:

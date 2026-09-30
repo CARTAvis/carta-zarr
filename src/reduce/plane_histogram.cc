@@ -79,9 +79,7 @@ Result<void> ValidateRange(const std::string& node, const HistogramRequest& requ
 Result<void> ComputeHistogram(const ReducibleImage& image, const HistogramRequest& request,
                               const HistogramSink& sink, const ReadOptions& options) {
     const auto& descriptor = image.descriptor();
-    const auto& geometry = image.geometry();
     const auto& source = image.source();
-    const auto& map = image.map();
     auto& workers = image.workers();
     const auto& node = descriptor.id;
     if (!sink) {
@@ -93,13 +91,11 @@ Result<void> ComputeHistogram(const ReducibleImage& image, const HistogramReques
     if (auto valid = ValidateRange(node, request); !valid) {
         return valid.error();
     }
-    const auto checked = CheckedPlanes::Of(descriptor, map, request.planes);
-    if (!checked) {
-        return checked.error();
+    const auto planned = image.Plan(request.planes, 1, options);
+    if (!planned) {
+        return planned.error();
     }
-    const auto& planes = checked.value();
-
-    const auto plan = PlanPass(descriptor, geometry, map, planes, 1, options);
+    const auto& plan = planned.value();
 
     // A whole plane, so the layer the emit budget is spent against -- which is the same layer
     // progress is counted in -- is the plan's own.
@@ -226,9 +222,7 @@ Result<CubeHistogramResult> ComputeCubeHistogram(const ReducibleImage& image,
                                                  const ReadOptions& options,
                                                  const CubeHistogramProgressCallback& progress) {
     const auto& descriptor = image.descriptor();
-    const auto& geometry = image.geometry();
     const auto& source = image.source();
-    const auto& map = image.map();
     auto& workers = image.workers();
     const auto& node = descriptor.id;
     if (auto valid = ValidateBins(node, request.bins); !valid) {
@@ -237,11 +231,12 @@ Result<CubeHistogramResult> ComputeCubeHistogram(const ReducibleImage& image,
     if (request.spatial_sample == 0) {
         return Error{ErrorCode::invalid_argument, "A spatial sample of zero selects nothing", node};
     }
-    const auto checked = CheckedPlanes::Of(descriptor, map, request.planes);
-    if (!checked) {
-        return checked.error();
+    const auto planned = image.Plan(request.planes, request.spatial_sample, options);
+    if (!planned) {
+        return planned.error();
     }
-    const auto& planes = checked.value();
+    const auto& plan = planned.value();
+    const SelectionChannel end_of_selection{plan.planes.spectral.count};
 
     std::size_t provisional = request.provisional_bins;
     if (provisional == 0) {
@@ -256,10 +251,8 @@ Result<CubeHistogramResult> ComputeCubeHistogram(const ReducibleImage& image,
     }
     provisional = rounded;
 
-    const auto plan = PlanPass(descriptor, geometry, map, planes, request.spatial_sample, options);
     const std::uint64_t total_chunks =
-        std::max<std::uint64_t>(
-            1, plan.layer_chunks * plan.ChunksTouched(SelectionChannel{0}, SelectionChannel{planes.count()}));
+        std::max<std::uint64_t>(1, plan.layer_chunks * plan.ChunksTouched(SelectionChannel{0}, end_of_selection));
 
     // One accumulator per task, which is safe because the split below never asks for more tasks than
     // there are accumulators, so no two bodies ever hold the same one at once. See the split itself
@@ -344,7 +337,7 @@ Result<CubeHistogramResult> ComputeCubeHistogram(const ReducibleImage& image,
 
     std::uint64_t chunks_done = 0;
     const auto walked = RunPass(
-        source, plan, options, SelectionChannel{}, SelectionChannel{planes.count()}, chunks_done,
+        source, plan, options, SelectionChannel{}, end_of_selection, chunks_done,
         [&](std::uint64_t done) -> Result<void> {
             if (progress) {
                 CubeHistogramProgress update;

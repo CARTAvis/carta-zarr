@@ -124,7 +124,6 @@ void AccumulateRow(const float* row, std::uint64_t stride, std::uint64_t count, 
 Result<void> ReduceSpectral(const ReducibleImage& image, const SpectralReduceRequest& request,
                             const SpectralSink& sink, const ReadOptions& options) {
     const auto& descriptor = image.descriptor();
-    const auto& geometry = image.geometry();
     const auto& source = image.source();
     const auto& map = image.map();
     auto& workers = image.workers();
@@ -139,13 +138,11 @@ Result<void> ReduceSpectral(const ReducibleImage& image, const SpectralReduceReq
 
     // Checked here as well as inside each slab request, so that a bad range is one error naming the
     // axis rather than a partial reduction that fails on some later slab.
-    const auto checked = CheckedPlanes::Of(descriptor, map, request.planes);
-    if (!checked) {
-        return checked.error();
+    const auto planned = image.Plan(request.planes, 1, options);
+    if (!planned) {
+        return planned.error();
     }
-    const auto& planes = checked.value();
-
-    const auto plan = PlanPass(descriptor, geometry, map, planes, 1, options);
+    const auto& plan = planned.value();
 
     // The caller's regions, placed on the walk's axes and indexed by the chunks they occupy. Which
     // spatial axis the store varies fastest decides both -- where a region lands, and whether its

@@ -357,7 +357,8 @@ if(CARTA_ZARR_BUILD_TESTS AND BUILD_TESTING)
         SOURCES tests/piece_plan_test.cc src/read/pieces.cc)
 
     # What an ordinary read does once it starts, against pixels that were never written down. The
-    # read takes a PixelSource like the pass does, so this links no Store and no TensorStore -- and
+    # read takes a PixelSource like the pass does, so this links no Store, no TensorStore and no
+    # WorkPool, since a read is not a reduction and has no arithmetic to run on one -- and
     # the flag-before-pixels contract, which a fixture on disk cannot show because it cannot be told
     # to fail one read and not another, is checkable here.
     carta_zarr_add_test(carta_zarr_read_synthetic_tests INTERNAL
@@ -366,9 +367,8 @@ if(CARTA_ZARR_BUILD_TESTS AND BUILD_TESTING)
             tests/read_synthetic_test.cc
             src/read/pieces.cc
             src/read/pieces_read.cc
-            src/work_pool.cc
             src/zarr/pixel_selection.cc
-        LIBRARIES nlohmann_json::nlohmann_json Threads::Threads)
+        LIBRARIES nlohmann_json::nlohmann_json)
 
     # What a reduction may ask for, asked of nothing but a descriptor. This target compiles no
     # implementation source at all: a plane selection is checked from the image's axes and the

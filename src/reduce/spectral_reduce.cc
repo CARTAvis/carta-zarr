@@ -121,7 +121,7 @@ void AccumulateRow(const float* row, std::uint64_t stride, std::uint64_t count, 
 
 }  // namespace
 
-Result<void> ReduceSpectral(const ReadableImage& image, const SpectralReduceRequest& request,
+Result<void> ReduceSpectral(const ReducibleImage& image, const SpectralReduceRequest& request,
                             const SpectralSink& sink, const ReadOptions& options) {
     const auto& descriptor = image.descriptor();
     const auto& geometry = image.geometry();

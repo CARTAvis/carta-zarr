@@ -43,17 +43,17 @@ using carta::zarr::ReadOptions;
 using carta::zarr::internal::MapAxes;
 using carta::zarr::internal::PlanPass;
 using carta::zarr::internal::PlanRowTasks;
-using carta::zarr::internal::ReadableImage;
+using carta::zarr::internal::ReducibleImage;
 using carta::zarr::internal::WorkPool;
 using carta::zarr::testing::SyntheticPixelSource;
 
 using carta::zarr::testing::Require;
 
-ReadableImage Readable(const SyntheticPixelSource& source, const ImageDescriptor& image,
+ReducibleImage Reducible(const SyntheticPixelSource& source, const ImageDescriptor& image,
                        const ChunkGeometry& geometry, WorkPool& workers) {
-    auto readable = ReadableImage::Of(source, image, geometry, workers);
-    Require(static_cast<bool>(readable), "the synthetic image's axes could not be mapped");
-    return readable.value();
+    auto reducible = ReducibleImage::Of(source, image, geometry, workers);
+    Require(static_cast<bool>(reducible), "the synthetic image's axes could not be mapped");
+    return reducible.value();
 }
 
 ImageDescriptor MakeImage(std::uint64_t x, std::uint64_t y, std::uint64_t channels) {
@@ -130,9 +130,9 @@ void TestAHistogramCountsEveryPixel() {
 
     std::vector<std::uint64_t> counts(request.bins * kZ, 0);
     std::uint64_t blocks = 0;
-    const auto readable = Readable(source, image, geometry, workers);
+    const auto reducible = Reducible(source, image, geometry, workers);
     const auto outcome = carta::zarr::internal::ComputeHistogram(
-        readable, request, [&](const carta::zarr::HistogramBlock& block) {
+        reducible, request, [&](const carta::zarr::HistogramBlock& block) {
             if (!block.complete) {
                 return true;
             }
@@ -201,9 +201,9 @@ void TestARangeWiderThanAFloatStillBinsItsPixels() {
 
     WorkPool workers(1);
     std::vector<std::uint64_t> counts;
-    const auto readable = Readable(source, image, geometry, workers);
+    const auto reducible = Reducible(source, image, geometry, workers);
     const auto outcome = carta::zarr::internal::ComputeHistogram(
-        readable, request, [&](const carta::zarr::HistogramBlock& block) {
+        reducible, request, [&](const carta::zarr::HistogramBlock& block) {
             if (block.complete) {
                 counts.assign(block.Counts(0), block.Counts(0) + block.bin_count);
             }
@@ -246,9 +246,9 @@ void TestASpectralReductionAgreesWithTheFormula() {
     std::vector<double> sums(regions.size() * kZ, 0.0);
     std::vector<double> minima(regions.size() * kZ, 0.0);
     std::vector<double> maxima(regions.size() * kZ, 0.0);
-    const auto readable = Readable(source, image, geometry, workers);
+    const auto reducible = Reducible(source, image, geometry, workers);
     const auto outcome = carta::zarr::internal::ReduceSpectral(
-        readable, request, [&](const carta::zarr::SpectralBlock& block) {
+        reducible, request, [&](const carta::zarr::SpectralBlock& block) {
             if (!block.complete) {
                 return true;
             }
@@ -353,9 +353,9 @@ void TestAMaskedRegionReadsOnlyTheChunksItOccupies() {
 
         std::vector<double> sums(kChannels, 0.0);
         std::vector<double> counts(kChannels, 0.0);
-        const auto readable = Readable(source, image, geometry, workers);
+        const auto reducible = Reducible(source, image, geometry, workers);
         const auto outcome = carta::zarr::internal::ReduceSpectral(
-            readable, request, [&](const carta::zarr::SpectralBlock& block) {
+            reducible, request, [&](const carta::zarr::SpectralBlock& block) {
                 if (!block.complete) {
                     return true;
                 }
@@ -416,10 +416,10 @@ void TestAPlaneHistogramSplitAcrossWorkers() {
 
     const auto counts_from = [&](std::size_t worker_count) {
         WorkPool workers(worker_count);
-        const auto readable = Readable(source, image, geometry, workers);
+        const auto reducible = Reducible(source, image, geometry, workers);
         std::vector<std::uint64_t> counts(request.bins * kSplitZ, 0);
         const auto outcome = carta::zarr::internal::ComputeHistogram(
-            readable, request, [&](const carta::zarr::HistogramBlock& block) {
+            reducible, request, [&](const carta::zarr::HistogramBlock& block) {
                 if (!block.complete) {
                     return true;
                 }
@@ -476,8 +476,8 @@ void TestACubeHistogramSplitAcrossWorkers() {
     options.temporary_memory_limit_bytes = kRoomyBudget;
     WorkPool workers(4);
 
-    const auto readable = Readable(source, image, geometry, workers);
-    const auto outcome = carta::zarr::internal::ComputeCubeHistogram(readable, request, options, {});
+    const auto reducible = Reducible(source, image, geometry, workers);
+    const auto outcome = carta::zarr::internal::ComputeCubeHistogram(reducible, request, options, {});
     Require(static_cast<bool>(outcome),
             std::string("the cube histogram failed: ") + (outcome ? "" : outcome.error().message));
     const auto& result = outcome.value();
@@ -526,7 +526,7 @@ void TestProgressNeverClaimsTheWholeRunBeforeItsLastRead() {
     const auto geometry = MakeGeometry(4, 4, 4);
     SyntheticPixelSource source(image, geometry, Value);
     WorkPool workers(1);
-    const auto readable = Readable(source, image, geometry, workers);
+    const auto reducible = Reducible(source, image, geometry, workers);
 
     ReadOptions options;
     options.temporary_memory_limit_bytes = 1;
@@ -548,7 +548,7 @@ void TestProgressNeverClaimsTheWholeRunBeforeItsLastRead() {
         cube.bins = 16;
         std::vector<double> reported;
         const auto histogram = carta::zarr::internal::ComputeCubeHistogram(
-            readable, cube, options, [&](const carta::zarr::CubeHistogramProgress& update) {
+            reducible, cube, options, [&](const carta::zarr::CubeHistogramProgress& update) {
                 reported.push_back(update.progress);
                 return true;
             });
@@ -570,7 +570,7 @@ void TestProgressNeverClaimsTheWholeRunBeforeItsLastRead() {
         reduce.statistics = carta::zarr::Statistic::sum;
         reduce.emit_every_channels = static_cast<std::uint32_t>(count);
         const auto reduced = carta::zarr::internal::ReduceSpectral(
-            readable, reduce,
+            reducible, reduce,
             [&](const carta::zarr::SpectralBlock& block) {
                 if (!block.complete && block.completeness >= 1.0) {
                     wrong += "\n  an unfinished block claimed " + std::to_string(block.completeness) +

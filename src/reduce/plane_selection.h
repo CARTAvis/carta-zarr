@@ -32,7 +32,7 @@ namespace carta::zarr::internal {
  * is to check it. `PlanPass` and both reductions take one instead of three loose numbers, which is
  * how they stop being able to plan a pass over planes nobody looked at.
  *
- * Takes a descriptor and an `AxisMap` rather than a `ReadableImage`, because those are what the
+ * Takes a descriptor and an `AxisMap` rather than a `ReducibleImage`, because those are what the
  * question is about and what a test can stand up with nothing linked behind it -- ADR 0006.
  */
 class CheckedPlanes {

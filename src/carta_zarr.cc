@@ -7,7 +7,7 @@
 #include "carta-zarr/carta_zarr.h"
 
 #include "read/pieces.h"
-#include "readable_image.h"
+#include "reducible_image.h"
 #include "reduce/plane_histogram.h"
 #include "reduce/spectral_reduce.h"
 #include "schema/profile.h"
@@ -47,8 +47,9 @@ auto Guarded(ErrorCode code, std::string node, Function&& function) -> decltype(
     }
 }
 
-// Everything an Image entry point does before it has something to read from: name the node so a
-// failure says which image it was about, build the ReadableImage, and guard the lot.
+// Everything a reduction's entry point does before it has something to walk: name the node so a
+// failure says which image it was about, build the ReducibleImage, and guard the lot. Image::Read
+// does the first and the last and not the middle, because a read is not a reduction.
 //
 // There is no empty handle to refuse here. A handle's _impl is never null -- see carta_zarr.h -- so
 // the checks every entry point used to open with guarded a state nothing could reach but a move,
@@ -57,11 +58,11 @@ auto Guarded(ErrorCode code, std::string node, Function&& function) -> decltype(
 // The handle is a template parameter because Image::Impl is private to Image and this is not.
 // Deducing the type asks nothing of access control, where naming it would.
 template <typename ImplPtr, typename Function>
-auto WithReadableImage(const ImplPtr& impl, Function&& function)
-    -> decltype(function(std::declval<const internal::ReadableImage&>())) {
-    using Answer = decltype(function(std::declval<const internal::ReadableImage&>()));
+auto WithReducibleImage(const ImplPtr& impl, Function&& function)
+    -> decltype(function(std::declval<const internal::ReducibleImage&>())) {
+    using Answer = decltype(function(std::declval<const internal::ReducibleImage&>()));
     return Guarded(ErrorCode::io_error, impl->descriptor.id, [&]() -> Answer {
-        auto image = impl->Readable();
+        auto image = impl->Reducible();
         if (!image) {
             return image.error();
         }
@@ -135,11 +136,11 @@ public:
     // why it lives here rather than being made at each entry point.
     internal::StorePixelSource source;
 
-    // What every read and reduction is against. Built per call, so that an image whose axes cannot
-    // be mapped fails the operation that needed them rather than the open -- which is where that
-    // failure has always reached the caller.
-    Result<internal::ReadableImage> Readable() const {
-        return internal::ReadableImage::Of(source, descriptor, geometry, *context->workers);
+    // What every reduction is against. Built per call, so that an image whose axes cannot be mapped
+    // fails the reduction that needed them rather than the open -- which is where that failure has
+    // always reached the caller.
+    Result<internal::ReducibleImage> Reducible() const {
+        return internal::ReducibleImage::Of(source, descriptor, geometry, *context->workers);
     }
 };
 
@@ -156,28 +157,29 @@ const ChunkGeometry& Image::chunk_geometry() const noexcept {
 
 Result<std::size_t> Image::Read(const ReadRequest& request, BufferView<float> destination,
                                 const ReadOptions& options, const ProgressCallback& progress) const {
-    return WithReadableImage(_impl, [&](const internal::ReadableImage& image) {
-        return internal::ReadInPieces(image, request, destination, options, progress);
+    return Guarded(ErrorCode::io_error, _impl->descriptor.id, [&] {
+        return internal::ReadInPieces(_impl->source, _impl->descriptor, _impl->geometry, request, destination,
+                                      options, progress);
     });
 }
 
 Result<void> Image::ReduceSpectral(const SpectralReduceRequest& request, const SpectralSink& sink,
                                    const ReadOptions& options) const {
-    return WithReadableImage(_impl, [&](const internal::ReadableImage& image) {
+    return WithReducibleImage(_impl, [&](const internal::ReducibleImage& image) {
         return internal::ReduceSpectral(image, request, sink, options);
     });
 }
 
 Result<void> Image::ComputeHistogram(const HistogramRequest& request, const HistogramSink& sink,
                                      const ReadOptions& options) const {
-    return WithReadableImage(_impl, [&](const internal::ReadableImage& image) {
+    return WithReducibleImage(_impl, [&](const internal::ReducibleImage& image) {
         return internal::ComputeHistogram(image, request, sink, options);
     });
 }
 
 Result<CubeHistogramResult> Image::ComputeCubeHistogram(const CubeHistogramRequest& request, const ReadOptions& options,
                                                         const CubeHistogramProgressCallback& progress) const {
-    return WithReadableImage(_impl, [&](const internal::ReadableImage& image) {
+    return WithReducibleImage(_impl, [&](const internal::ReducibleImage& image) {
         return internal::ComputeCubeHistogram(image, request, options, progress);
     });
 }

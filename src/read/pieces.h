@@ -7,10 +7,11 @@
 #ifndef CARTA_ZARR_SRC_READ_PIECES_H_
 #define CARTA_ZARR_SRC_READ_PIECES_H_
 
+#include "carta-zarr/descriptor.h"
 #include "carta-zarr/read.h"
 #include "carta-zarr/result.h"
 
-#include "readable_image.h"
+#include "pixel_source.h"
 
 #include <cstddef>
 #include <cstdint>
@@ -63,6 +64,10 @@ std::vector<Piece> PlanPieces(const ImageDescriptor& descriptor, const ChunkGeom
  * folds the flag in, and reports progress. The caller supplies the source and translates whatever
  * comes back; it does not need to know that any of this happened.
  *
+ * It takes the source, the descriptor and the geometry, which are all it uses, rather than the
+ * ReducibleImage a reduction is handed: that also carries an axis map and a pool, and a read has no
+ * use for either.
+ *
  * The flag is read before the pixels, which is the opposite of what a pass does and is the reason
  * ADR 0005 gives for this staying outside one: the destination is the caller's, so a mask that
  * cannot be read must not leave a piece of it updated.
@@ -70,7 +75,8 @@ std::vector<Piece> PlanPieces(const ImageDescriptor& descriptor, const ChunkGeom
  * Reports buffer_too_small when the destination cannot hold the selection, or when a piece's flag
  * buffer exceeds a ceiling that no further splitting gets under.
  */
-Result<std::size_t> ReadInPieces(const ReadableImage& image, const ReadRequest& request,
+Result<std::size_t> ReadInPieces(const PixelSource& source, const ImageDescriptor& descriptor,
+                                 const ChunkGeometry& geometry, const ReadRequest& request,
                                  BufferView<float> destination, const ReadOptions& options,
                                  const ProgressCallback& progress);
 

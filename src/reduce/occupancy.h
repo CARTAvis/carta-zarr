@@ -108,7 +108,7 @@ struct OccupiedFootprint {
  *
  * Takes chunk_u, chunk_v and the fastest spatial axis rather than a PassPlan, because those are
  * what the question is about and what a test can stand up with nothing linked behind it -- ADR 0006,
- * and the same reasoning CheckedPlanes gives for taking a descriptor rather than a ReadableImage.
+ * and the same reasoning CheckedPlanes gives for taking a descriptor rather than a ReducibleImage.
  */
 class Occupancy {
 public:

@@ -76,7 +76,7 @@ Result<void> ValidateRange(const std::string& node, const HistogramRequest& requ
 
 }  // namespace
 
-Result<void> ComputeHistogram(const ReadableImage& image, const HistogramRequest& request,
+Result<void> ComputeHistogram(const ReducibleImage& image, const HistogramRequest& request,
                               const HistogramSink& sink, const ReadOptions& options) {
     const auto& descriptor = image.descriptor();
     const auto& geometry = image.geometry();
@@ -221,7 +221,7 @@ Result<void> ComputeHistogram(const ReadableImage& image, const HistogramRequest
         });
 }
 
-Result<CubeHistogramResult> ComputeCubeHistogram(const ReadableImage& image,
+Result<CubeHistogramResult> ComputeCubeHistogram(const ReducibleImage& image,
                                                  const CubeHistogramRequest& request,
                                                  const ReadOptions& options,
                                                  const CubeHistogramProgressCallback& progress) {

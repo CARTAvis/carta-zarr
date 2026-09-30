@@ -143,7 +143,7 @@ void TestTheCallersCeilingWins() {
     const Range spectral{0, 32, 1};
 
     ReadOptions limited;
-    limited.temporary_memory_limit_bytes = 1u << 20;
+    limited.read_budget_bytes = 1u << 20;
     const auto small = Plan(image, geometry, spectral, limited);
     Require(small.slab_budget_bytes == (1u << 20), "a stated limit is the budget");
 
@@ -196,7 +196,7 @@ void TestABandIsNeverEmpty() {
     const auto image = MakeImage(512, 520, 32);
     const auto geometry = MakeGeometry(256, 260, 2, AxisRole::spatial_y);
     ReadOptions tiny;
-    tiny.temporary_memory_limit_bytes = 1;
+    tiny.read_budget_bytes = 1;
     const auto plan = Plan(image, geometry, Range{0, 32, 1}, tiny);
     Require(plan.band_rows >= 1, "a band holds at least one chunk row however small the budget");
     Require(plan.SlabChannels(plan.layer_chunks) >= 1, "and a slab at least one channel");
@@ -210,7 +210,7 @@ void TestARegionSetOccupyingNothingBoundsNoBlock() {
     const auto image = MakeImage(512, 520, 32);
     const auto geometry = MakeGeometry(256, 260, 2, AxisRole::spatial_y);
     ReadOptions tiny;
-    tiny.temporary_memory_limit_bytes = 1;
+    tiny.read_budget_bytes = 1;
     const auto plan = Plan(image, geometry, Range{0, 32, 1}, tiny);
     Require(plan.EmitChannels(0, 8, 0) == 32, "a block over no chunks was bounded by the read budget");
     // Anything that does occupy a chunk is still held to the read budget, which affords one layer.
@@ -294,7 +294,7 @@ void TestEachChunkIsReadOnce() {
     const auto geometry = MakeGeometry(128, 130, 4, AxisRole::spatial_y);
     ReadOptions options;
     // Small enough that the pass has to split along the chunk rows and along the spectrum at once.
-    options.temporary_memory_limit_bytes = 4 * 128 * 130 * 4 * 4;
+    options.read_budget_bytes = 4 * 128 * 130 * 4 * 4;
     const auto plan = Plan(image, geometry, Range{0, 32, 1}, options);
     SyntheticPixelSource source(image, geometry, Encoded);
 
@@ -312,7 +312,7 @@ void TestThePassVisitsEveryPixelOnce() {
     const auto image = MakeImage(64, 40, 8);
     const auto geometry = MakeGeometry(16, 20, 2, AxisRole::spatial_y);
     ReadOptions options;
-    options.temporary_memory_limit_bytes = 16 * 20 * 2 * 4;
+    options.read_budget_bytes = 16 * 20 * 2 * 4;
     const auto plan = Plan(image, geometry, Range{0, 8, 1}, options);
     SyntheticPixelSource source(image, geometry, Encoded);
 
@@ -372,7 +372,7 @@ void TestCancellationStopsThePass() {
     const auto image = MakeImage(256, 260, 16);
     const auto geometry = MakeGeometry(64, 65, 2, AxisRole::spatial_y);
     ReadOptions options;
-    options.temporary_memory_limit_bytes = 64 * 65 * 2 * 4;
+    options.read_budget_bytes = 64 * 65 * 2 * 4;
     int reads = 0;
     options.control.cancellation_requested = [&]() { return reads >= 2; };
     const auto plan = Plan(image, geometry, Range{0, 16, 1}, options);
@@ -409,7 +409,7 @@ void TestAReadFailureStopsThePass() {
     const auto image = MakeImage(128, 130, 8);
     const auto geometry = MakeGeometry(32, 65, 2, AxisRole::spatial_y);
     ReadOptions options;
-    options.temporary_memory_limit_bytes = 32 * 65 * 2 * 4;
+    options.read_budget_bytes = 32 * 65 * 2 * 4;
     const auto plan = Plan(image, geometry, Range{0, 8, 1}, options);
     SyntheticPixelSource source(image, geometry, Encoded);
     source.fail_read(2, carta::zarr::ErrorCode::io_error);
@@ -431,7 +431,7 @@ void TestALargePlaneSplitsIntoBands() {
     const auto geometry = MakeGeometry(512, 512, 1, AxisRole::spatial_y);
     ReadOptions options;
     // Eight chunks to a read, which is the floor chunk_blocks measured.
-    options.temporary_memory_limit_bytes = 8 * 512 * 512 * 4;
+    options.read_budget_bytes = 8 * 512 * 512 * 4;
     const auto plan = Plan(image, geometry, Range{0, 4, 1}, options);
     SyntheticPixelSource source(image, geometry, Encoded);
     // This one is about the splitting, not the pixels, so it does not pay for them.

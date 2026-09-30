@@ -212,7 +212,7 @@ void TestTheMissingChunkIsNotCounted(const carta::zarr::Image& sky) {
 // A block that takes more than one read is handed over as it fills, as in the reduction.
 void TestAnUnfinishedBlockIsHandedOver(const carta::zarr::Image& sky) {
     carta::zarr::ReadOptions options;
-    options.temporary_memory_limit_bytes = 40;  // one chunk of the fixture
+    options.read_budget_bytes = 40;  // one chunk of the fixture
     const auto collected = Collect(sky, WholeSpectrum(0, 0.0F, 2000.0F, 16), options);
 
     // The walk reads a band of the slower spatial axis at a time, so it can only split when the
@@ -565,7 +565,7 @@ void TestAWideCubeReportsWhileItSplits(const char* fixture) {
     const auto sky = OpenSky(fixture, options);
 
     carta::zarr::ReadOptions read_options;
-    read_options.temporary_memory_limit_bytes = 1U << 20U;
+    read_options.read_budget_bytes = 1U << 20U;
 
     carta::zarr::CubeHistogramRequest request;
     request.planes.spectral = {0, kFrequency, 1};
@@ -604,7 +604,7 @@ void TestAWideCubeReportsWhileItSplits(const char* fixture) {
 // is what makes it report at all.
 void TestOnePassReportsWhatItHasSoFar(const carta::zarr::Image& sky) {
     carta::zarr::ReadOptions options;
-    options.temporary_memory_limit_bytes = 1;
+    options.read_budget_bytes = 1;
 
     carta::zarr::CubeHistogramRequest request;
     request.planes.spectral = {0, kFrequency, 1};

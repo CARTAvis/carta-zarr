@@ -125,7 +125,7 @@ struct ReadCost {
         ReadCost cost;
         cost.apply_mask = AppliesPixelMask(options, descriptor);
         cost.chunk_bytes = DecodedChunkBytes(descriptor, geometry, cost.apply_mask);
-        cost.budget_bytes = options.temporary_memory_limit_bytes != 0 ? options.temporary_memory_limit_bytes
+        cost.budget_bytes = options.read_budget_bytes != 0 ? options.read_budget_bytes
                                                                       : DefaultReadBytes(cost.chunk_bytes);
         return cost;
     }

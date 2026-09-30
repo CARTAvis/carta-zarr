@@ -64,7 +64,7 @@ std::uint64_t UnitsPerPiece(const ReadRequest& request, const ChunkGeometry& geo
 std::vector<Piece> PlanPieces(const ImageDescriptor& descriptor, const ChunkGeometry& geometry,
                               const ReadRequest& request, const ReadOptions& options, bool watching) {
     const auto axis = SlowestSelectedAxis(request);
-    if (!axis || (!watching && options.temporary_memory_limit_bytes == 0)) {
+    if (!axis || (!watching && options.read_budget_bytes == 0)) {
         return {Piece{request, 0}};
     }
 

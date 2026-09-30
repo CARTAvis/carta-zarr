@@ -52,7 +52,7 @@ enum class CachePolicy {
 // logical order with axis 0 fastest, which is what makes the finished part a prefix rather than a
 // scatter -- a caller can render or forward it as it arrives.
 //
-// It is not the only thing that splits a read; ReadOptions::temporary_memory_limit_bytes does too,
+// It is not the only thing that splits a read; ReadOptions::read_budget_bytes does too,
 // and a read with neither is issued in one piece.
 //
 // An argument of Image::Read rather than a field of ReadOptions, because it is the only operation
@@ -100,22 +100,27 @@ struct ReadOptions {
     // a pixel read plus a mask read. On by default: masking during the read costs one pass over
     // data already in hand, while a caller doing it afterwards pays for a second traversal.
     bool apply_pixel_mask = true;
-    // Maximum temporary memory one piece of the read may use. Zero means the library's own budget.
+    // How much decoded chunk data one read of the pixels should hold at once, in bytes. Zero means
+    // the library's own budget, which it sizes from the image's chunks.
     //
-    // This bounds the pixel mask buffer, and it is also what a split read sizes its pieces by --
-    // both are "how much this read may hold at once", and splitting to fit is a better answer than
-    // refusing. So setting it splits the read, whether or not anyone asked to watch: a ceiling is a
-    // statement about memory, not about wanting progress. A read that cannot be split far enough --
-    // no axis selects more than one element, or a piece of one chunk is still too large -- reports
-    // buffer_too_small rather than allocating past the limit.
+    // Every operation that takes these options spends it the same way. Image::Read cuts its request
+    // into pieces of about this much; ReduceSpectral, ComputeHistogram and ComputeCubeHistogram size
+    // each read of their walk by it. Setting it splits a read whether or not anyone asked to watch,
+    // since it is a statement about memory rather than about wanting progress.
     //
-    // For ReduceSpectral it is a target rather than a limit. That walk splits along x, along the
-    // chunk rows and along the spectrum, and each of the three bottoms out at one chunk, which is
-    // the smallest thing that can be decoded: asking for part of a chunk decodes all of it anyway,
-    // and asking twice decodes it twice. So an image whose chunk is larger than this exceeds it by
-    // the ratio, and refusing to reduce would be the worse answer. ChunkGeometry::chunk_shape says
-    // in advance when that will happen.
-    std::size_t temporary_memory_limit_bytes = 0;
+    // It is a budget rather than a ceiling, because a chunk is the smallest thing that can be
+    // decoded: asking for part of one decodes all of it, and asking twice decodes it twice. So no
+    // read holds less than one chunk, and an image whose chunk is larger than this exceeds it by the
+    // ratio rather than refusing. ChunkGeometry::chunk_shape says in advance when that will happen.
+    //
+    // What it does bound outright is the one buffer the library allocates for a read's own sake.
+    // When Image::Read folds in the pixel mask it holds the flag for one piece, and a piece whose
+    // flag would exceed this -- because no axis selects more than one element, or a single chunk is
+    // still too large -- reports buffer_too_small rather than allocating past it.
+    //
+    // It was called temporary_memory_limit_bytes, which described that last case and none of the
+    // others.
+    std::size_t read_budget_bytes = 0;
 };
 
 // A run of elements the caller owns and lends for one call, counted in elements rather than in

@@ -271,7 +271,7 @@ void TestReadControls(const carta::zarr::Image& sky) {
     carta::zarr::ReadOptions budgeted;
     // Less than one piece covering everything needs, and more than one polarization's worth -- so it
     // has to be split, and splitting is enough.
-    budgeted.temporary_memory_limit_bytes = elements - 1;
+    budgeted.read_budget_bytes = elements - 1;
     std::vector<float> budgeted_pixels(elements, 0.0F);
     const auto budgeted_read =
         sky.Read(request, {budgeted_pixels.data(), budgeted_pixels.size()}, budgeted);
@@ -288,7 +288,7 @@ void TestReadControls(const carta::zarr::Image& sky) {
     // pieces bottom out at one chunk, because asking for less than a chunk decodes the whole chunk
     // anyway, so below that there is nothing left to give.
     carta::zarr::ReadOptions unreachable;
-    unreachable.temporary_memory_limit_bytes = 1;
+    unreachable.read_budget_bytes = 1;
     const auto refused = sky.Read(request, {pixels.data(), pixels.size()}, unreachable);
     Require(!refused && refused.error().code == carta::zarr::ErrorCode::buffer_too_small,
             "a masked read that cannot be split under its ceiling was not rejected");
@@ -356,7 +356,7 @@ void TestProgressiveRead(const carta::zarr::Image& sky) {
     // A piece is sized by how much chunk data it decodes, so a small limit is what makes this
     // fixture -- forty bytes per chunk -- produce more than one. Without it the whole image fits in
     // a single piece and the split below is never exercised.
-    options.temporary_memory_limit_bytes = 160;
+    options.read_budget_bytes = 160;
     const carta::zarr::ProgressCallback progress = [&](std::size_t written, std::size_t elements_total) {
         Require(elements_total == total, "progress should report the request's own element count");
         Require(written > 0 && written <= total, "progress should report a prefix of the destination");
@@ -381,7 +381,7 @@ void TestProgressiveRead(const carta::zarr::Image& sky) {
 
     Require(reported.size() > 1,
             "the read should have been split; if kDecodedBytesPerRead or the fixture's chunk shape "
-            "changed, raise temporary_memory_limit_bytes here or this test stops testing the split");
+            "changed, raise read_budget_bytes here or this test stops testing the split");
 
     // The same read with the pixel mask applied, because the mask buffer and the NaN it writes are
     // per piece too, and a wrong offset there would corrupt every piece but the first.
@@ -390,7 +390,7 @@ void TestProgressiveRead(const carta::zarr::Image& sky) {
             "the masked reference read failed");
     std::vector<float> masked(total, -1.0f);
     carta::zarr::ReadOptions masked_options;
-    masked_options.temporary_memory_limit_bytes = 160;
+    masked_options.read_budget_bytes = 160;
     std::size_t masked_pieces = 0;
     const carta::zarr::ProgressCallback masked_progress = [&](std::size_t, std::size_t) {
         ++masked_pieces;
@@ -407,7 +407,7 @@ void TestProgressiveRead(const carta::zarr::Image& sky) {
 
     std::vector<float> abandoned(total, -1.0f);
     auto cancelling = Unmasked();
-    cancelling.temporary_memory_limit_bytes = 160;
+    cancelling.read_budget_bytes = 160;
     std::size_t calls = 0;
     const carta::zarr::ProgressCallback refusing = [&](std::size_t, std::size_t) {
         ++calls;

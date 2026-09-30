@@ -125,7 +125,7 @@ void TestAHistogramCountsEveryPixel() {
     request.upper = 1000.0;
 
     ReadOptions options;
-    options.temporary_memory_limit_bytes = 4 * 64 * 65 * 2 * 4;
+    options.read_budget_bytes = 4 * 64 * 65 * 2 * 4;
     WorkPool workers(4);
 
     std::vector<std::uint64_t> counts(request.bins * kZ, 0);
@@ -239,7 +239,7 @@ void TestASpectralReductionAgreesWithTheFormula() {
                          carta::zarr::Statistic::min | carta::zarr::Statistic::max;
 
     ReadOptions options;
-    options.temporary_memory_limit_bytes = 4 * 64 * 65 * 2 * 4;
+    options.read_budget_bytes = 4 * 64 * 65 * 2 * 4;
     WorkPool workers(4);
 
     std::vector<double> pixels(regions.size() * kZ, 0.0);
@@ -348,7 +348,7 @@ void TestAMaskedRegionReadsOnlyTheChunksItOccupies() {
         request.statistics = carta::zarr::Statistic::num_pixels | carta::zarr::Statistic::sum;
 
         ReadOptions options;
-        options.temporary_memory_limit_bytes = kRoomyBudget;
+        options.read_budget_bytes = kRoomyBudget;
         WorkPool workers(4);
 
         std::vector<double> sums(kChannels, 0.0);
@@ -412,7 +412,7 @@ void TestAPlaneHistogramSplitAcrossWorkers() {
     request.upper = 1000.0;
 
     ReadOptions options;
-    options.temporary_memory_limit_bytes = kRoomyBudget;
+    options.read_budget_bytes = kRoomyBudget;
 
     const auto counts_from = [&](std::size_t worker_count) {
         WorkPool workers(worker_count);
@@ -473,7 +473,7 @@ void TestACubeHistogramSplitAcrossWorkers() {
     request.bins = 64;
 
     ReadOptions options;
-    options.temporary_memory_limit_bytes = kRoomyBudget;
+    options.read_budget_bytes = kRoomyBudget;
     WorkPool workers(4);
 
     const auto reducible = Reducible(source, image, geometry, workers);
@@ -529,7 +529,7 @@ void TestProgressNeverClaimsTheWholeRunBeforeItsLastRead() {
     const auto reducible = Reducible(source, image, geometry, workers);
 
     ReadOptions options;
-    options.temporary_memory_limit_bytes = 1;
+    options.read_budget_bytes = 1;
 
     // Run to the end, and stopped short of it: a run whose ends both fall inside a chunk is the one
     // that covers a chunk more than its length suggests.

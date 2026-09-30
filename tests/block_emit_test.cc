@@ -75,7 +75,7 @@ PassPlan Plan(const ImageDescriptor& descriptor, std::uint64_t chunk_z, const Ra
     const auto planes = CheckedPlanes::Of(descriptor, map.value(), {spectral, 0, 0});
     Require(static_cast<bool>(planes), "the spectral range does not fit this image");
     ReadOptions options;
-    options.temporary_memory_limit_bytes = budget_bytes;
+    options.read_budget_bytes = budget_bytes;
     return PlanPass(descriptor, geometry, map.value(), planes.value(), 1, options);
 }
 

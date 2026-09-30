@@ -152,7 +152,7 @@ void TestACeilingTooLowToFitIsRefused() {
     SyntheticPixelSource source(image, geometry, Value);
 
     ReadOptions options;
-    options.temporary_memory_limit_bytes = 1;
+    options.read_budget_bytes = 1;
     std::vector<float> destination(kElements, kUntouched);
     const auto read = ReadInPieces(source, image, geometry, WholeCube(),
                                    BufferView<float>{destination.data(), destination.size()}, options, ProgressCallback{});
@@ -172,7 +172,7 @@ void TestProgressCountsElementsAndFinishesAtTheTotal() {
     std::vector<std::size_t> written;
     std::size_t reported_total = 0;
     ReadOptions options;
-    options.temporary_memory_limit_bytes = kThreePieces;
+    options.read_budget_bytes = kThreePieces;
     const ProgressCallback progress = [&](std::size_t elements_written, std::size_t elements_total) {
         written.push_back(elements_written);
         reported_total = elements_total;
@@ -200,7 +200,7 @@ void TestProgressCanStopTheRead() {
     SyntheticPixelSource source(image, geometry, Value);
 
     ReadOptions options;
-    options.temporary_memory_limit_bytes = kThreePieces;
+    options.read_budget_bytes = kThreePieces;
     const ProgressCallback progress = [](std::size_t, std::size_t) { return false; };
 
     std::vector<float> destination(kElements, kUntouched);
@@ -226,7 +226,7 @@ void TestASplitReadAgreesWithAnUnsplitOne() {
 
     SyntheticPixelSource split_source(image, geometry, Value);
     ReadOptions options;
-    options.temporary_memory_limit_bytes = kThreePieces;
+    options.read_budget_bytes = kThreePieces;
     std::vector<float> split(kElements, kUntouched);
     const auto in_pieces = ReadInPieces(split_source, image, geometry, WholeCube(),
                                         BufferView<float>{split.data(), split.size()}, options, ProgressCallback{});
@@ -249,7 +249,7 @@ void TestEachPieceIsHandedTheRestOfTheBuffer() {
     constexpr std::size_t kSpare = 7;
     constexpr std::size_t kPiece = static_cast<std::size_t>(kX * kY * 2);
     ReadOptions options;
-    options.temporary_memory_limit_bytes = kThreePieces;
+    options.read_budget_bytes = kThreePieces;
     std::vector<float> destination(kElements + kSpare, kUntouched);
     const auto read = ReadInPieces(source, image, geometry, WholeCube(),
                                    BufferView<float>{destination.data(), destination.size()}, options,

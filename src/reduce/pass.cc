@@ -6,7 +6,6 @@
 
 #include "reduce/pass_plan.h"
 
-#include "pixel_mask.h"
 #include "reduce/tuning.h"
 
 namespace carta::zarr::internal {
@@ -27,10 +26,10 @@ PassPlan PlanPass(const ImageDescriptor& descriptor, const ChunkGeometry& geomet
     plan.chunk_u = std::max<std::uint64_t>(1, geometry.chunk_shape.at(plan.axis_u));
     plan.chunk_v = std::max<std::uint64_t>(1, geometry.chunk_shape.at(plan.axis_v));
     plan._chunk_depth = std::max<std::uint64_t>(1, geometry.chunk_shape.at(map.spectral));
-    plan.apply_mask = AppliesPixelMask(options, descriptor);
-    plan.chunk_bytes = DecodedChunkBytes(descriptor, geometry, plan.apply_mask);
-    plan.slab_budget_bytes = options.temporary_memory_limit_bytes != 0 ? options.temporary_memory_limit_bytes
-                                                                      : DefaultReadBytes(plan.chunk_bytes);
+    const auto cost = ReadCost::Of(descriptor, geometry, options);
+    plan.apply_mask = cost.apply_mask;
+    plan.chunk_bytes = cost.chunk_bytes;
+    plan.slab_budget_bytes = cost.budget_bytes;
     plan._least_channels = ((plan._chunk_depth + spectral.stride - 1) / spectral.stride);
     plan.planes = planes.selection();
     const std::uint64_t row_chunks = std::max<std::uint64_t>(1, ((plan.u_length - 1) / plan.chunk_u) + 1);

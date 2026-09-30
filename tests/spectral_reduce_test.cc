@@ -347,7 +347,7 @@ void TestAnUnfinishedBlockIsHandedOver(const carta::zarr::Image& sky) {
     const std::vector<carta::zarr::RegionMask> regions{{0, 0, kL, kM}};
     carta::zarr::ReadOptions options;
     // One chunk of the fixture, so the plane's two chunks cannot be read together.
-    options.temporary_memory_limit_bytes = 40;
+    options.read_budget_bytes = 40;
     const auto collected = Collect(sky, WholeSpectrum(regions, 0), options);
     Require(!collected.partial_counts.empty(),
             "a budget of one chunk should take more than one read for a plane two chunks wide; if "
@@ -407,7 +407,7 @@ void TestABigRegionIsEmittedALayerAtATime(const carta::zarr::Image& sky) {
     carta::zarr::ReadOptions options;
     // The plane is two chunks of forty bytes, doubled because the mask is read alongside: one
     // budget buys exactly one layer.
-    options.temporary_memory_limit_bytes = 2 * 40 * 2;
+    options.read_budget_bytes = 2 * 40 * 2;
     const auto collected = Collect(sky, WholeSpectrum(regions, 0), options);
     Require(collected.block_lengths.size() == kFrequency,
             "a budget worth one layer should emit one layer per block; if the fixture's chunk shape "

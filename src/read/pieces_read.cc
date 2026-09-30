@@ -79,12 +79,12 @@ Result<std::size_t> ReadInPieces(const PixelSource& source, const ImageDescripto
                                                   destination.size - static_cast<std::size_t>(piece.first_element)};
 
         if (apply_mask) {
-            // The limit bounds a piece, and a read that is not split is one piece, so a request that
-            // cannot be cut any further still has to say so rather than allocate.
-            if (options.temporary_memory_limit_bytes != 0 &&
-                piece_elements > options.temporary_memory_limit_bytes) {
+            // The budget bounds the flag a piece holds, and a read that is not split is one piece,
+            // so a request that cannot be cut any further still has to say so rather than allocate.
+            if (options.read_budget_bytes != 0 &&
+                piece_elements > options.read_budget_bytes) {
                 return Error{ErrorCode::buffer_too_small,
-                             "Pixel mask temporary buffer exceeds the configured memory limit",
+                             "Pixel mask temporary buffer exceeds the read budget",
                              descriptor.id};
             }
             mask.assign(piece_elements, 0);

@@ -150,7 +150,7 @@ void TestEitherReasonCutsTheRead() {
 
     const auto image = MakeImage(64, 64, 8);
     ReadOptions bounded;
-    bounded.temporary_memory_limit_bytes = 4096;
+    bounded.read_budget_bytes = 4096;
     Require(Pieces(image, MakeGeometry(32, 64, 1), WholeImage(image), bounded).size() > 1,
             "a read with a memory ceiling was not cut");
 }
@@ -165,7 +165,7 @@ void TestTheCutGoesOnTheSlowestSelectedAxis() {
     // Axes 3 and 4 are degenerate here, so the spectrum at index 2 is the slowest one selected. A
     // ceiling of one plane makes each channel a piece.
     ReadOptions a_plane;
-    a_plane.temporary_memory_limit_bytes = 64 * 64 * sizeof(float);
+    a_plane.read_budget_bytes = 64 * 64 * sizeof(float);
     const auto pieces = Pieces(image, geometry, request, a_plane);
     Require(pieces.size() == 8, "a ceiling of one plane did not make a piece of each channel");
     for (const auto& piece : pieces) {
@@ -182,7 +182,7 @@ void TestTheCutGoesOnTheSlowestSelectedAxis() {
     auto one_channel = request;
     one_channel.axes.at(2) = Range{0, 1, 1};
     ReadOptions a_row_of_chunks;
-    a_row_of_chunks.temporary_memory_limit_bytes = 2 * 32 * 16 * sizeof(float);
+    a_row_of_chunks.read_budget_bytes = 2 * 32 * 16 * sizeof(float);
     const auto narrowed = Pieces(image, geometry, one_channel, a_row_of_chunks);
     Require(narrowed.size() == 4, "a ceiling of one row of chunks did not cut the plane into four");
     for (const auto& piece : narrowed) {
@@ -202,7 +202,7 @@ void TestAReadWithNowhereToCutIsOnePiece() {
     single.axes.assign(5, Range{0, 1, 1});
 
     ReadOptions bounded;
-    bounded.temporary_memory_limit_bytes = 1;
+    bounded.read_budget_bytes = 1;
     Require(Pieces(image, geometry, single, bounded, /*watching=*/true).size() == 1,
             "a single-element read has nowhere to be cut");
 }
@@ -215,9 +215,9 @@ void TestATighterCeilingBuysFewerChunks() {
     const auto request = WholeImage(image);
 
     ReadOptions generous;
-    generous.temporary_memory_limit_bytes = 64 * 64 * 4 * sizeof(float) * 8;
+    generous.read_budget_bytes = 64 * 64 * 4 * sizeof(float) * 8;
     ReadOptions tight;
-    tight.temporary_memory_limit_bytes = 64 * 64 * 4 * sizeof(float);
+    tight.read_budget_bytes = 64 * 64 * 4 * sizeof(float);
 
     const auto wide = Pieces(image, geometry, request, generous);
     const auto narrow = Pieces(image, geometry, request, tight);
@@ -243,7 +243,7 @@ void TestNoChunkIsReadByTwoPieces() {
     const auto image = MakeImage(64, 64, 32);
     const auto geometry = MakeGeometry(64, 64, 4);
     ReadOptions tight;
-    tight.temporary_memory_limit_bytes = 64 * 64 * 4 * sizeof(float);
+    tight.read_budget_bytes = 64 * 64 * 4 * sizeof(float);
 
     const auto check = [&](const Range& spectrum, const std::string& what) {
         auto request = WholeImage(image);
@@ -275,7 +275,7 @@ void TestApplyingTheFlagCostsTheBudget() {
     const auto request = WholeImage(image);
 
     ReadOptions declined;
-    declined.temporary_memory_limit_bytes = 64 * 64 * sizeof(float) * 6;
+    declined.read_budget_bytes = 64 * 64 * sizeof(float) * 6;
     declined.apply_pixel_mask = false;
     ReadOptions applied = declined;
     applied.apply_pixel_mask = true;

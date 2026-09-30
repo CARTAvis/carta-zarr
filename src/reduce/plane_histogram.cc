@@ -281,31 +281,34 @@ Result<CubeHistogramResult> ComputeCubeHistogram(const ReducibleImage& image,
     // and nothing touching an accumulator.
     const auto collect = [&]() {
         CubeHistogramResult result;
-        result.minimum = std::numeric_limits<double>::infinity();
-        result.maximum = -std::numeric_limits<double>::infinity();
         result.sampled = request.spatial_sample > 1;
+        auto& totals = result.totals;
+        double smallest = std::numeric_limits<double>::infinity();
+        double largest = -std::numeric_limits<double>::infinity();
         for (const auto& accumulator : accumulators) {
-            result.num_pixels += accumulator.num_pixels;
-            result.nan_count += accumulator.nan_count;
-            result.sum += accumulator.sum;
-            result.sum_sq += accumulator.sum_sq;
-            result.minimum = std::min(result.minimum, accumulator.minimum);
-            result.maximum = std::max(result.maximum, accumulator.maximum);
+            totals.num_pixels += accumulator.num_pixels;
+            totals.nan_count += accumulator.nan_count;
+            totals.sum += accumulator.sum;
+            totals.sum_sq += accumulator.sum_sq;
+            smallest = std::min(smallest, accumulator.minimum);
+            largest = std::max(largest, accumulator.maximum);
         }
 
         result.counts.assign(request.bins, 0);
-        if (result.num_pixels == 0.0) {
-            result.minimum = std::numeric_limits<double>::quiet_NaN();
-            result.maximum = std::numeric_limits<double>::quiet_NaN();
+        // Nothing finite was read, so the extrema stay at the NaN SpectralTotals starts them at: the
+        // one place that answer is written, for this and for every spectral block.
+        if (totals.num_pixels == 0.0) {
             return result;
         }
+        totals.min = smallest;
+        totals.max = largest;
 
         // Each accumulator re-aggregates onto the same target grid and the counts are added. No two
         // provisional histograms are ever merged with each other, which is what makes their ranges
         // having drifted apart not a problem: the grid they all land on comes from the extremes, and
         // those are exact. An accumulator that saw nothing contributes zeros.
         for (const auto& accumulator : accumulators) {
-            const auto part = accumulator.growing.Aggregate(request.bins, result.minimum, result.maximum);
+            const auto part = accumulator.growing.Aggregate(request.bins, totals.min, totals.max);
             for (std::size_t bin = 0; bin < result.counts.size(); ++bin) {
                 result.counts[bin] += part[bin];
             }

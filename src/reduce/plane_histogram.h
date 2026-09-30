@@ -10,7 +10,7 @@
 #include "carta-zarr/reduce.h"
 #include "carta-zarr/result.h"
 
-#include "readable_image.h"
+#include "reducible_image.h"
 
 namespace carta::zarr::internal {
 
@@ -29,7 +29,7 @@ namespace carta::zarr::internal {
  * alternative, splitting by plane, is capped at however many planes one read holds, which for a
  * large image is often one.
  */
-Result<void> ComputeHistogram(const ReadableImage& image, const HistogramRequest& request,
+Result<void> ComputeHistogram(const ReducibleImage& image, const HistogramRequest& request,
                               const HistogramSink& sink, const ReadOptions& options);
 
 /**
@@ -46,7 +46,7 @@ Result<void> ComputeHistogram(const ReadableImage& image, const HistogramRequest
  * -- once per worker instead of once, which is why this is the one reduction here whose counts are
  * not the serial answer exactly.
  */
-Result<CubeHistogramResult> ComputeCubeHistogram(const ReadableImage& image,
+Result<CubeHistogramResult> ComputeCubeHistogram(const ReducibleImage& image,
                                                  const CubeHistogramRequest& request,
                                                  const ReadOptions& options,
                                                  const CubeHistogramProgressCallback& progress);

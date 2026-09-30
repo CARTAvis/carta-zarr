@@ -49,12 +49,10 @@ Result<zarr::PixelSelection> CheckRead(const ImageDescriptor& descriptor, const 
 
 }  // namespace
 
-Result<std::size_t> ReadInPieces(const ReadableImage& image, const ReadRequest& request,
+Result<std::size_t> ReadInPieces(const PixelSource& source, const ImageDescriptor& descriptor,
+                                 const ChunkGeometry& geometry, const ReadRequest& request,
                                  BufferView<float> destination, const ReadOptions& options,
                                  const ProgressCallback& progress) {
-    const auto& descriptor = image.descriptor();
-    const auto& geometry = image.geometry();
-    const auto& source = image.source();
     const auto checked = CheckRead(descriptor, request, destination.size, options.control);
     if (!checked) {
         return checked.error();

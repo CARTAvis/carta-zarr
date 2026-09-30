@@ -121,13 +121,11 @@ void AccumulateRow(const float* row, std::uint64_t stride, std::uint64_t count, 
 
 }  // namespace
 
-Result<void> ReduceSpectral(const ReadableImage& image, const SpectralReduceRequest& request,
+Result<void> ReduceSpectral(const ReducibleImage& image, const SpectralReduceRequest& request,
                             const SpectralSink& sink, const ReadOptions& options) {
     const auto& descriptor = image.descriptor();
-    const auto& geometry = image.geometry();
     const auto& source = image.source();
     const auto& map = image.map();
-    auto& workers = image.workers();
     const auto& node = descriptor.id;
     if (!sink) {
         return Error{ErrorCode::invalid_argument, "A spectral reduction needs a sink", node};
@@ -139,13 +137,11 @@ Result<void> ReduceSpectral(const ReadableImage& image, const SpectralReduceRequ
 
     // Checked here as well as inside each slab request, so that a bad range is one error naming the
     // axis rather than a partial reduction that fails on some later slab.
-    const auto checked = CheckedPlanes::Of(descriptor, map, request.planes);
-    if (!checked) {
-        return checked.error();
+    const auto planned = image.Plan(request.planes, 1, options);
+    if (!planned) {
+        return planned.error();
     }
-    const auto& planes = checked.value();
-
-    const auto plan = PlanPass(descriptor, geometry, map, planes, 1, options);
+    const auto& plan = planned.value();
 
     // The caller's regions, placed on the walk's axes and indexed by the chunks they occupy. Which
     // spatial axis the store varies fastest decides both -- where a region lands, and whether its
@@ -344,13 +340,10 @@ Result<void> ReduceSpectral(const ReadableImage& image, const SpectralReduceRequ
         // relative for exactly this reason, and the counts and extrema are unaffected
         // because integers and min/max do not care what order they arrive in.
         // One per task, so the split is also an allocation and a memset of this size
-        // once per slab. Capped so that a reduction over thousands of regions does not
-        // spend more on the split than on the pixels.
-        constexpr std::size_t kSpectralPartialBudgetBytes = 16U << 20U;
-        const std::size_t tasks_by_memory = std::max<std::size_t>(1, kSpectralPartialBudgetBytes / partial_bytes);
-        const std::size_t max_tasks = std::min(workers.size(), tasks_by_memory);
-        const std::size_t tasks =
-            PlanRowTasks(plan.chunk_u * plan.chunk_v, units, max_tasks, kLeastPixelsPerTask);
+        // once per slab, which is why the split is made here rather than once: a
+        // partial is as long as the slab. See kSpectralPartialBudgetBytes.
+        const auto split = image.Split(kSpectralPartialBudgetBytes, partial_bytes);
+        const std::size_t tasks = split.Tasks(plan.chunk_u * plan.chunk_v, units);
 
         if (partials.size() < tasks) {
             partials.resize(tasks);
@@ -363,10 +356,9 @@ Result<void> ReduceSpectral(const ReadableImage& image, const SpectralReduceRequ
         // dealt out round-robin once, for no recorded reason, and that measured slower
         // rather than better balanced: on a 7763x4742 plane of 31x19 chunk cells, 5-13%
         // slower at ten threads and no different at four, and never measurably faster.
-        workers.Run(tasks, [&](std::size_t task, std::size_t) {
+        split.Run(tasks, units, [&](std::size_t task, std::uint64_t first, std::uint64_t last) {
             StatisticSlots& partial = partials.at(task);
-            const auto share = TaskRows(task, tasks, units);
-            for (std::uint64_t unit = share.first; unit < share.last; ++unit) {
+            for (std::uint64_t unit = first; unit < last; ++unit) {
                 const std::uint64_t channel = unit / cells;
                 const std::uint64_t cell = unit % cells;
                 accumulate_unit(channel, chunk_cv_begin + (cell / cu_span),

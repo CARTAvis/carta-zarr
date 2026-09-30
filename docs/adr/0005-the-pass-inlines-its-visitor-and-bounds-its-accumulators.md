@@ -35,17 +35,23 @@ histograms and the pass gets slower the more workers it uses. Measured on a 512x
 warm, against 8.8 s for not splitting at all: four workers 4.9 s, eight 8.7 s, twenty-eight 16.5 s.
 
 So what bounds the split is cache rather than the pool: the cap is a memory budget divided by what
-one accumulator costs, which at the default resolution comes out at four. `Accumulator` is
+one accumulator costs, which at the default resolution comes out at four. The budget is
+`kCubeAccumulatorCacheBytes` in `tuning.h`, beside the two the other reductions divide in the same
+way; theirs bound an allocation rather than cache, and are not this cap. `Accumulator` is
 `alignas(64)` because `Add` writes the range and a bin on every pixel, and two accumulators sharing
 a cache line would trade it between cores once per pixel.
 
 The accumulator a body writes is chosen by **task** index, and it is safe because the split never
 asks for more tasks than there are accumulators, so no two bodies ever hold the same one at once.
+That guarantee has one home, `TaskSplit` in `reduce/task_split.h`: it works out the cap from the
+budget and the accumulator's size, never answers more tasks than that, and is the only way a
+reduction reaches the pool.
 
 This is worth stating precisely because the pool offers the other choice and nothing uses it.
 `WorkPool::Run` hands the body a worker index as well as a task index, exactly so that "a caller
-that needs private accumulation can address one slot per worker without a map or a lock" -- and all
-three reduction call sites take `(std::size_t task, std::size_t)` and ignore it. Since tasks are
+that needs private accumulation can address one slot per worker without a map or a lock" -- and
+`TaskSplit::Run`, the one call site all three reductions go through, takes `(std::size_t task,
+std::size_t)` and ignores it. Since tasks are
 claimed from a shared counter rather than divided up front, task n is run by a different thread on
 each slab, so a task-keyed accumulator does migrate between cores as the pass advances. Whether
 keying by worker instead would recover anything is unmeasured, and is not settled here; what is
@@ -84,7 +90,8 @@ counting it in one and not the other sizes pieces against a cost the read does n
 The pass cannot be given a non-template entry point for convenience, and a second overload taking a
 `std::function` would be a trap rather than a shortcut: it would compile, pass every test, and cost
 a quarter of the reduction. If one is ever wanted for a cold path, it belongs behind a name that
-says so.
+says so. The same holds for `TaskSplit::Run`, which takes its body as a template parameter and
+calls it directly when a read is one task.
 
 The numbers above cannot be reproduced by anything in this repository. Every fixture is far too
 small to show either effect, no test asserts a duration, and the default `build/` tree is Debug, so

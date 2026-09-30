@@ -48,7 +48,7 @@ inline constexpr std::uint32_t kMostProvisionalBins = 1u << 16;
 inline constexpr std::size_t kSpectralEmitBudgetBytes = 64u << 20;
 
 // Below this a task is not worth its share of a dispatch, so the work is done on the calling thread
-// instead. It is what every reduction hands PlanRowTasks as its floor, and all three of them had
+// instead. It is the floor TaskSplit hands PlanRowTasks for every reduction. All three used to have
 // their own copy of the number -- two under one name and one under another, which is why the two
 // looked like different rules rather than the same one written three times.
 //
@@ -57,6 +57,31 @@ inline constexpr std::size_t kSpectralEmitBudgetBytes = 64u << 20;
 // reduction splits chunk cells. PlanRowTasks multiplies out to pixels before it divides, so all
 // three are asking the same question of the same number.
 inline constexpr std::uint64_t kLeastPixelsPerTask = 1u << 16;
+
+// What every task's private accumulator may cost together, one budget per reduction, each handed to
+// TaskSplit with what one accumulator costs. They are three numbers rather than one because they
+// bound two different things, and the first two are not ADR 0005's cap.
+//
+// A spectral reduction's partials are the region totals for one slab, allocated and zeroed once per
+// slab. The budget stops a reduction over thousands of regions from spending more on the split than
+// on the pixels.
+inline constexpr std::size_t kSpectralPartialBudgetBytes = 16u << 20;
+
+// A plane histogram's partials are a copy of the bins per task. A caller may ask for as many as
+// kMaxHistogramBins, and a private copy of that for every worker is hundreds of megabytes for a pass
+// that is supposed to stream, so this is what keeps a large bin count from turning a split into an
+// allocation.
+inline constexpr std::size_t kHistogramPartialBudgetBytes = 64u << 20;
+
+// A cube histogram's accumulators are a provisional histogram each, and what bounds them is cache
+// rather than memory: this is the cap ADR 0005 is about. A provisional histogram is eight bytes a
+// bin -- half a megabyte at the default resolution -- and every worker writes to its own at random
+// while streaming its share of the pixels through the same cache. Past a couple of megabytes of them
+// the pixels evict the histograms and the pass gets slower the more workers it uses.
+//
+// Measured on a 512x512x7776 ASKAP cube, warm, against 8.8 s for not splitting at all: four workers
+// 4.9 s, eight 8.7 s, twenty-eight 16.5 s. At the default resolution this comes out at four.
+inline constexpr std::size_t kCubeAccumulatorCacheBytes = 2u << 20;
 
 }  // namespace carta::zarr::internal
 

@@ -11,6 +11,7 @@
 #include "pixel_source.h"
 #include "reduce/pass_plan.h"
 #include "reduce/plane_selection.h"
+#include "reduce/task_split.h"
 #include "work_pool.h"
 
 #include "carta-zarr/descriptor.h"
@@ -67,9 +68,6 @@ public:
     const ImageDescriptor& descriptor() const noexcept {
         return *_descriptor;
     }
-    WorkPool& workers() const noexcept {
-        return *_workers;
-    }
     const AxisMap& map() const noexcept {
         return _map;
     }
@@ -89,6 +87,13 @@ public:
             return checked.error();
         }
         return PlanPass(*_descriptor, *_geometry, _map, checked.value(), sample, options);
+    }
+
+    // How a reduction whose tasks each hold an accumulator of `accumulator_bytes` divides a read
+    // among the pool, with `budget_bytes` for all of them together. The only way a reduction reaches
+    // the pool, so that the cap ADR 0005 turns on is applied wherever tasks are run. See TaskSplit.
+    TaskSplit Split(std::size_t budget_bytes, std::size_t accumulator_bytes) const {
+        return TaskSplit(*_workers, budget_bytes, accumulator_bytes);
     }
 
 private:

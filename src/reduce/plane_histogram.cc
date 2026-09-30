@@ -80,7 +80,6 @@ Result<void> ComputeHistogram(const ReducibleImage& image, const HistogramReques
                               const HistogramSink& sink, const ReadOptions& options) {
     const auto& descriptor = image.descriptor();
     const auto& source = image.source();
-    auto& workers = image.workers();
     const auto& node = descriptor.id;
     if (!sink) {
         return Error{ErrorCode::invalid_argument, "A histogram needs a sink", node};
@@ -112,21 +111,14 @@ Result<void> ComputeHistogram(const ReducibleImage& image, const HistogramReques
     std::vector<std::uint64_t> counts;
 
     // How many private histograms the binning may split a plane into. Capped three ways: by the
-    // pool, by memory, and -- inside the visit, where the plane's size is known -- by whether there
-    // is enough work to be worth waking anyone for.
-    //
-    // The memory cap is what keeps a large bin count from turning a split into an allocation: a
-    // caller may ask for as many as kMaxHistogramBins, and a private copy of that for every worker
-    // is hundreds of megabytes for a pass that is supposed to stream.
-    constexpr std::size_t kHistogramPartialBudgetBytes = 64U << 20U;
-    const std::size_t partials_by_memory =
-        std::max<std::size_t>(1, kHistogramPartialBudgetBytes / std::max<std::size_t>(1, bins * sizeof(std::uint64_t)));
-    const std::size_t max_tasks = std::min(workers.size(), partials_by_memory);
+    // pool, by memory -- see kHistogramPartialBudgetBytes -- and, inside the visit where the plane's
+    // size is known, by whether there is enough work to be worth waking anyone for.
+    const auto split = image.Split(kHistogramPartialBudgetBytes, bins * sizeof(std::uint64_t));
     // One allocation for the whole plan. Each task owns one row of it, so no two of them ever touch
     // the same bin and the sum at the end is the only place they meet.
     std::vector<std::uint64_t> partials;
-    if (max_tasks > 1) {
-        partials.resize(max_tasks * bins);
+    if (split.most() > 1) {
+        partials.resize(split.most() * bins);
     }
 
     // One read's worth of pixels binned into the block's counts. Named rather than written
@@ -174,19 +166,15 @@ Result<void> ComputeHistogram(const ReducibleImage& image, const HistogramReques
 
             // Rows, not planes: a read holding one plane is the common case for a large image,
             // so splitting by plane would leave the split with nothing to divide.
-            const std::size_t tasks = PlanRowTasks(u_count, v_count, max_tasks, kLeastPixelsPerTask);
+            const std::size_t tasks = split.Tasks(u_count, v_count);
             if (tasks <= 1) {
                 bin_rows(0, v_count, into);
                 continue;
             }
 
             std::fill(partials.begin(), partials.begin() + static_cast<std::ptrdiff_t>(tasks * bins), 0);
-            workers.Run(tasks, [&](std::size_t task, std::size_t) {
-                const auto rows = TaskRows(task, tasks, v_count);
-                if (rows.first == rows.last) {
-                    return;
-                }
-                bin_rows(rows.first, rows.last, partials.data() + (task * bins));
+            split.Run(tasks, v_count, [&](std::size_t task, std::uint64_t first, std::uint64_t last) {
+                bin_rows(first, last, partials.data() + (task * bins));
             });
             // Integer counts, so this sum is the serial loop's answer exactly -- which is what
             // lets histogram_test keep comparing against an oracle rather than a tolerance.
@@ -223,7 +211,6 @@ Result<CubeHistogramResult> ComputeCubeHistogram(const ReducibleImage& image,
                                                  const CubeHistogramProgressCallback& progress) {
     const auto& descriptor = image.descriptor();
     const auto& source = image.source();
-    auto& workers = image.workers();
     const auto& node = descriptor.id;
     if (auto valid = ValidateBins(node, request.bins); !valid) {
         return valid.error();
@@ -279,20 +266,11 @@ Result<CubeHistogramResult> ComputeCubeHistogram(const ReducibleImage& image,
         double maximum = -std::numeric_limits<double>::infinity();
     };
 
-    // What limits the split is cache, not the pool. A provisional histogram is eight bytes a bin --
-    // half a megabyte at the default resolution -- and every worker writes to its own at random
-    // while streaming its share of the pixels through the same cache. Past a couple of megabytes of
-    // them the pixels evict the histograms and the pass gets slower the more workers it uses.
-    //
-    // Measured on a 512x512x7776 ASKAP cube, warm, against 8.8 s for not splitting at all: four
-    // workers 4.9 s, eight 8.7 s, twenty-eight 16.5 s. So the cap is the budget divided by what one
-    // accumulator costs, which at the default resolution comes out at four.
-    constexpr std::size_t kAccumulatorCacheBytes = 2U << 20U;
-    const std::size_t accumulator_bytes = provisional * sizeof(std::uint64_t);
-    const std::size_t by_cache =
-        std::max<std::size_t>(1, kAccumulatorCacheBytes / std::max<std::size_t>(1, accumulator_bytes));
-    const std::size_t max_tasks = std::min(workers.size(), by_cache);
-    std::vector<Accumulator> accumulators(max_tasks, Accumulator(provisional));
+    // What limits the split is cache, not the pool: the budget is kCubeAccumulatorCacheBytes, which
+    // says why and what it was measured at. Divided by what one provisional histogram costs, it
+    // comes out at four accumulators at the default resolution.
+    const auto split = image.Split(kCubeAccumulatorCacheBytes, provisional * sizeof(std::uint64_t));
+    std::vector<Accumulator> accumulators(split.most(), Accumulator(provisional));
 
     // The answer over whatever the accumulators hold, which is what the walk returns at the end and
     // what it hands a caller that asks for a snapshot part of the way through. The two are the same
@@ -403,22 +381,14 @@ Result<CubeHistogramResult> ComputeCubeHistogram(const ReducibleImage& image,
             };
 
             const std::uint64_t rows = channel_count * v_count;
-            const std::size_t tasks = PlanRowTasks(u_count, rows, max_tasks, kLeastPixelsPerTask);
-            if (tasks <= 1) {
-                take_rows(0, rows, accumulators.front());
-                return;
-            }
-
             // By task, not by worker: the cap above can leave fewer accumulators than the pool has
             // workers, and a task is the thing there is one accumulator for. Two tasks never run at
-            // once on the same accumulator because there are never more tasks than accumulators.
-            workers.Run(tasks, [&](std::size_t task, std::size_t) {
-                const auto share = TaskRows(task, tasks, rows);
-                if (share.first == share.last) {
-                    return;
-                }
-                take_rows(share.first, share.last, accumulators[task]);
-            });
+            // once on the same accumulator because the split never asks for more tasks than it has
+            // accumulators. A read of one task binds into the first, on this thread.
+            split.Run(split.Tasks(u_count, rows), rows,
+                      [&](std::size_t task, std::uint64_t first, std::uint64_t last) {
+                          take_rows(first, last, accumulators[task]);
+                      });
         });
     if (!walked) {
         return walked.error();

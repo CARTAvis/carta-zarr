@@ -122,6 +122,17 @@ public:
                                                       end - begin, planes.spectral.stride, _chunk_depth);
     }
 
+    // The chunks a walk over the channels [begin, end) decodes, when each spectral layer of what it
+    // walks occupies `layer_chunks`: what its progress is a fraction of. Never zero, so it can be
+    // divided by -- a selection holds at least one channel, and one that occupies nothing still
+    // reports against a whole.
+    //
+    // A block's completeness and a cube histogram's progress are both this number, and each used to
+    // multiply it out for itself.
+    std::uint64_t ChunksCovering(std::uint64_t layer_chunks, SelectionChannel begin, SelectionChannel end) const {
+        return std::max<std::uint64_t>(1, layer_chunks * ChunksTouched(begin, end));
+    }
+
     // How many chunks one read may decode: the budget in the units everything else here counts in.
     // Zero when the budget is smaller than a single chunk, which UnitsAffordable floors at one.
     //

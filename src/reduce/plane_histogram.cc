@@ -238,8 +238,7 @@ Result<CubeHistogramResult> ComputeCubeHistogram(const ReducibleImage& image,
     }
     provisional = rounded;
 
-    const std::uint64_t total_chunks =
-        std::max<std::uint64_t>(1, plan.layer_chunks * plan.ChunksTouched(SelectionChannel{0}, end_of_selection));
+    const std::uint64_t total_chunks = plan.ChunksCovering(plan.layer_chunks, SelectionChannel{0}, end_of_selection);
 
     // One accumulator per task, which is safe because the split below never asks for more tasks than
     // there are accumulators, so no two bodies ever hold the same one at once. See the split itself

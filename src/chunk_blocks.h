@@ -7,8 +7,10 @@
 #ifndef CARTA_ZARR_SRC_CHUNK_BLOCKS_H_
 #define CARTA_ZARR_SRC_CHUNK_BLOCKS_H_
 
+#include "carta-zarr/read.h"
 #include "carta-zarr/reduce.h"
 
+#include "pixel_mask.h"
 #include "zarr/data_type.h"
 
 #include <algorithm>
@@ -105,6 +107,29 @@ inline std::uint64_t DecodedChunkBytes(const ImageDescriptor& descriptor, const 
     const std::uint64_t pixels = DecodedChunkBytes(descriptor, geometry);
     return apply_mask ? pixels + ChunkElements(geometry) : pixels;
 }
+
+// What one read of this image costs, and how much of that it may spend at once: the three answers
+// every walk starts from, whether it is Image::Read cutting pieces or a reduction planning a pass.
+//
+// They were written out twice, word for word -- whether the flag is folded in, what a chunk
+// decodes to counting it, and the caller's budget or the library's own -- and the two copies have
+// to agree, because a read and a reduction that sized themselves against different costs would
+// split the same image differently for no reason either could give.
+struct ReadCost {
+    bool apply_mask = false;
+    std::uint64_t chunk_bytes = 1;
+    std::size_t budget_bytes = 0;
+
+    static ReadCost Of(const ImageDescriptor& descriptor, const ChunkGeometry& geometry,
+                       const ReadOptions& options) {
+        ReadCost cost;
+        cost.apply_mask = AppliesPixelMask(options, descriptor);
+        cost.chunk_bytes = DecodedChunkBytes(descriptor, geometry, cost.apply_mask);
+        cost.budget_bytes = options.temporary_memory_limit_bytes != 0 ? options.temporary_memory_limit_bytes
+                                                                      : DefaultReadBytes(cost.chunk_bytes);
+        return cost;
+    }
+};
 
 // The end of a block of selected indices that begins at `begin` and would like to be `desired`
 // long, moved so that it lands on a chunk boundary.

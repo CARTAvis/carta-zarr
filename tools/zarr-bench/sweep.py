@@ -794,6 +794,13 @@ def score(medians: dict[str, float], best: dict[str, float], weights: dict[str, 
     return (math.exp(total / weighted) if weighted else math.inf), worst
 
 
+def worst_mode(medians: dict[str, float], best: dict[str, float], weights: dict[str, float]) -> str:
+    """The weighted mode furthest from its own best: the one a warning about a slowdown names."""
+    slowdowns = {mode: median / best[mode] for mode, median in medians.items()
+                 if weights.get(mode, 0.0) > 0 and math.isfinite(median) and best[mode] > 0}
+    return max(slowdowns, key=slowdowns.get) if slowdowns else "–"
+
+
 def bests(candidates: list[dict[str, float]], modes: list[str]) -> dict[str, float]:
     return {mode: min((medians[mode] for medians in candidates), default=math.inf) for mode in modes}
 
@@ -1085,8 +1092,9 @@ def write_report(sweep: Sweep, layouts: list[Layout], invalid: list[tuple[Layout
             ranked = analysis.ranked_settings(choice.layout)
             own = next((entry for entry in ranked if entry.setting == choice.setting), None)
             if own and own.worst > SACRIFICE:
-                warnings.append(f"**A mode is given up** at the recommended settings on {choice.layout.name}: one mode "
-                                f"runs {own.worst:.2f}× slower than its own best setting.")
+                mode = worst_mode(own.medians, bests([entry.medians for entry in ranked], modes), analysis.weights)
+                warnings.append(f"**A mode is given up** at the recommended settings on {choice.layout.name}: {mode} "
+                                f"runs {own.worst:.2f}× slower than at its own best setting.")
         conclusion.append(f"**Recommended layout:** {after.layout.name} ({after.layout.describe()}).")
         if now and now.layout != after.layout:
             conclusion.append(f"The current layout is {now.score / after.score:.2f}× slower overall "
@@ -1137,8 +1145,9 @@ def write_report(sweep: Sweep, layouts: list[Layout], invalid: list[tuple[Layout
             for setting, medians in measured.items():
                 value, worst = score(medians, best, analysis.weights)
                 if setting in recommended and math.isfinite(worst) and worst > SACRIFICE:
+                    mode = worst_mode(medians, best, analysis.weights)
                     warnings.append(f"**With {users} user{'s' if users > 1 else ''}** the recommended settings run "
-                                    f"one mode {worst:.2f}× slower than the best candidate on {layout.name}.")
+                                    f"{mode} {worst:.2f}× slower than the best candidate on {layout.name}.")
                 confirm_rows.append([layout.name, str(users), setting.describe(), ratio_text(value), ratio_text(worst)])
 
     # -- Validation verdict

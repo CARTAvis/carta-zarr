@@ -40,7 +40,10 @@ typical = 4
 [measure]
 # Each mode is measured and reported on its own; [weights] says how much each counts when one
 # setting has to serve them all.
-modes = ["plane", "spectrum", "region", "cube-histogram", "open"]
+# plane and spectrum are each read through a cache of their own, so they time a first touch: what
+# jumping to a channel, or to a pixel, costs when nothing near it was read. animation plays consecutive
+# channels through the shared cache, as the backend does, and is reported per frame.
+modes = ["plane", "animation", "spectrum", "region", "cube-histogram", "open"]
 trials = 5
 # Seconds before a trial's remaining operations are recorded as timeouts.
 trial_timeout = 600
@@ -50,11 +53,15 @@ seed = 1
 # on this host only.
 cold = "auto"
 drop_cache_cmd = ""
-# Operations per user per trial, by mode, when the defaults (plane 16, spectrum 32, region 1,
-# cube-histogram 1, open 8) are not what you want. For example: ops = { spectrum = 64 }
+# Operations per user per trial, by mode, when the defaults (plane 16, animation 2, spectrum 32,
+# region 1, cube-histogram 1, open 8) are not what you want. For example: ops = { spectrum = 64 }
+# plane, spectrum and region are ranked only on operations that read no chunk another one did; when
+# the crop is too shallow for the chunk depth to leave five of those, the report says what to change.
 ops = {}
 # The share of the plane a region covers.
 region_fraction = 0.05
+# The frames one animation plays.
+animation_frames = 32
 # One-pass cube histograms to time against the backend's exact two passes, for reference only:
 # "binned", "sampled:4".
 histogram_reference = []
@@ -71,8 +78,11 @@ cache_mib = 1024
 read_budget = "0"
 
 [weights]
-# How much each mode counts in choosing a layout and settings. Zero leaves a mode out.
+# How much each mode counts in choosing a layout and settings. Zero leaves a mode out. Chunk depth is a
+# trade between plane and animation on one side and spectrum on the other; the report's "plane against
+# spectrum" table shows each layout's side of it, and says when doubling one of them changes the choice.
 plane = 1.0
+animation = 1.0
 spectrum = 1.0
 region = 1.0
 cube-histogram = 1.0

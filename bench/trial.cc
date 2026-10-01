@@ -236,9 +236,15 @@ std::string Describe(const Error& error) {
         }
         DescribeImage(row, *image);
         item_size = ItemSize(image->descriptor().stored_type);
-        plan = PlanOperations(mode, *axes, options.seed, trial, options.processes, process_index, ops,
-                              options.region_fraction);
-        runner.emplace(*context, std::move(image).value(), options.histogram);
+        // Every process's plan, to tell which of this one's operations share a chunk with another's.
+        std::vector<std::vector<Operation>> plans;
+        for (unsigned process = 0; process < options.processes; ++process) {
+            plans.push_back(PlanOperations(mode, *axes, options.seed, trial, options.processes, process, ops,
+                                           options.region_fraction, options.animation_frames));
+        }
+        MarkSharedChunks(plans, *axes, image->chunk_geometry().chunk_shape);
+        plan = std::move(plans[process_index]);
+        runner.emplace(*context, std::move(image).value(), options.histogram, options.FirstTouchCacheBytes());
     }
 
     send(kReady);
@@ -263,9 +269,16 @@ std::string Describe(const Error& error) {
         result.op_index = index;
         result.position = operation.Describe();
         result.overlap = operation.overlap;
+        result.shares_chunks = operation.shares_chunks;
         if (Clock::now() >= deadline) {
             result.status = "timeout";
             result.error = "not started: the trial deadline had passed";
+            send(kRow + FormatRow(result));
+            continue;
+        }
+        if (auto prepared = runner->Prepare(operation); !prepared) {
+            result.status = "error";
+            result.error = "preparing: " + Describe(prepared.error());
             send(kRow + FormatRow(result));
             continue;
         }

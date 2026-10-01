@@ -88,6 +88,7 @@ const std::vector<Column>& Columns() {
         {"ops", [](const Row& r) { return std::to_string(r.ops); }},
         {"region_fraction", [](const Row& r) { return r.region_fraction; }},
         {"histogram_method", [](const Row& r) { return r.histogram_method; }},
+        {"animation_frames", [](const Row& r) { return r.animation_frames; }},
         {"trial_timeout_s", [](const Row& r) { return std::to_string(r.trial_timeout_s); }},
         {"cold_method", [](const Row& r) { return r.cold_method; }},
         {"cold_ok", [](const Row& r) { return Bool(r.cold_ok); }},
@@ -96,6 +97,7 @@ const std::vector<Column>& Columns() {
         {"op_index", [](const Row& r) { return Text(r.op_index); }},
         {"position", [](const Row& r) { return r.position; }},
         {"overlap", [](const Row& r) { return Bool(r.overlap); }},
+        {"shares_chunks", [](const Row& r) { return Bool(r.shares_chunks); }},
         {"status", [](const Row& r) { return r.status; }},
         {"error", [](const Row& r) { return r.error; }},
         {"seconds", [](const Row& r) { return Text(r.seconds); }},
@@ -237,6 +239,9 @@ Row RowTemplate(const RunOptions& options, Mode mode, ColdMethod cold, const Dat
     if (mode == Mode::cube_histogram) {
         row.histogram_method = options.histogram.Spell();
     }
+    if (mode == Mode::animation) {
+        row.animation_frames = std::to_string(options.animation_frames);
+    }
     row.trial_timeout_s = options.trial_timeout.count();
     row.cold_method = ColdMethodName(cold);
 
@@ -251,7 +256,7 @@ Row RowTemplate(const RunOptions& options, Mode mode, ColdMethod cold, const Dat
     for (const auto& part :
          {identity, options.image_id, row.mode, std::to_string(row.processes), std::to_string(row.io_threads),
           std::to_string(row.decode_threads), row.cache_bytes, std::to_string(row.read_budget_bytes),
-          std::to_string(row.seed), std::to_string(row.ops), row.region_fraction, row.histogram_method,
+          std::to_string(row.seed), std::to_string(row.ops), row.region_fraction, row.histogram_method, row.animation_frames,
           std::to_string(row.trial_timeout_s), row.cold_method, row.label}) {
         key += '|';
         key += part;

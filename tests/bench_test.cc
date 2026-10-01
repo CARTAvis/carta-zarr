@@ -31,6 +31,7 @@
 #include <fstream>
 #include <iostream>
 #include <limits>
+#include <optional>
 #include <set>
 #include <string>
 #include <vector>
@@ -122,7 +123,15 @@ void TestSizesArePowersOf1024() {
 
 void TestTheCommandLine() {
     const auto defaults = Get<RunOptions>(Parse({"run", "cube.zarr"}));
-    Require(defaults.dataset == "cube.zarr" && defaults.modes.size() == 5, "run does not default to every mode");
+    Require(defaults.dataset == "cube.zarr" && defaults.modes.size() == 6, "run does not default to every mode");
+    Require(defaults.OpsFor(Mode::animation) == 2 && defaults.animation_frames == 32,
+            "an animation does not default to two runs of 32 frames");
+    Require(defaults.FirstTouchCacheBytes() == std::size_t{1} << 30,
+            "a first touch does not get the backend's default cache when the context's is left to TensorStore");
+    Require(Get<RunOptions>(Parse({"run", "cube.zarr", "--animation-frames", "8"})).animation_frames == 8,
+            "--animation-frames was lost");
+    Require(Get<Usage>(Parse({"run", "cube.zarr", "--animation-frames", "0"})).error,
+            "an animation of no frames was accepted");
     Require(defaults.trials == 5 && defaults.processes == 1 && !defaults.cold, "run's defaults moved");
     Require(defaults.OpsFor(Mode::spectrum) == 32 && defaults.OpsFor(Mode::region) == 1,
             "operations per trial do not default by mode");
@@ -132,6 +141,7 @@ void TestTheCommandLine() {
                                             "3", "--read-budget-bytes=1G", "--cold", "off", "--trial-timeout", "9"}));
     Require(set.modes == std::vector<Mode>{Mode::plane, Mode::open}, "--mode was not read as a list");
     Require(set.context.cache_bytes == std::size_t{0}, "--cache-bytes 0 is not a cache of nothing");
+    Require(set.FirstTouchCacheBytes() == 0, "a first touch does not get the context's cache size");
     Require(set.OpsFor(Mode::spectrum) == 3, "--ops does not apply to every mode");
     Require(set.read_budget_bytes == std::size_t{1} << 30 && set.cold == ColdMethod::off, "an option was lost");
     Require(set.trial_timeout == std::chrono::seconds(9), "--trial-timeout was lost");
@@ -422,6 +432,152 @@ void TestResumingSkipsOnlyWholeTrials() {
     std::filesystem::remove(path);
 }
 
+// An animation plays consecutive channels, and two of one trial never play the same ones while the
+// cube has channels enough for both.
+void TestAnAnimationPlaysConsecutiveChannels() {
+    const auto axes = Cube(100, 90, 300, 2);
+    const auto all = Trial(Mode::animation, axes, 2, 2);
+    Require(all.size() == 4, "an animation trial did not plan an operation per process per run");
+    for (std::size_t one = 0; one < all.size(); ++one) {
+        Require(all[one].channel_count == 32 && all[one].channel + 32 <= axes.channels,
+                "an animation is not 32 channels inside the cube: " + all[one].Describe());
+        Require(!all[one].overlap, "an animation was marked as repeating another with channels to spare");
+        for (std::size_t other = 0; other < one; ++other) {
+            const auto& a = all[one];
+            const auto& b = all[other];
+            const bool apart = a.polarization != b.polarization || a.channel + a.channel_count <= b.channel ||
+                               b.channel + b.channel_count <= a.channel;
+            Require(apart, "two animations of one trial play the same planes: " + a.Describe() + " and " +
+                               b.Describe());
+        }
+    }
+    const auto short_cube = PlanOperations(Mode::animation, Cube(100, 90, 10, 1), 1, 0, 1, 0, 1, 0.05, 32);
+    Require(short_cube.front().channel == 0 && short_cube.front().channel_count == 10,
+            "an animation longer than the cube does not play the whole of it");
+    const auto shorter = PlanOperations(Mode::animation, axes, 1, 0, 1, 0, 1, 0.05, 5);
+    Require(shorter.front().channel_count == 5, "--animation-frames does not set the frames");
+}
+
+// Which operations of a trial read a chunk that another has read or is reading.
+void TestSharedChunksAreMarked() {
+    const auto axes = Cube(256, 256, 300, 2);
+    const auto plane = [](std::uint64_t channel, std::uint64_t polarization = 0) {
+        Operation operation;
+        operation.mode = Mode::plane;
+        operation.channel = channel;
+        operation.polarization = polarization;
+        return operation;
+    };
+    const auto marks = [&](std::vector<std::vector<Operation>> plans, std::vector<std::uint64_t> chunk) {
+        MarkSharedChunks(plans, axes, chunk);
+        std::vector<bool> marked;
+        for (const auto& plan : plans) {
+            for (const auto& operation : plan) {
+                marked.push_back(operation.shares_chunks);
+            }
+        }
+        return marked;
+    };
+    using Marks = std::vector<bool>;
+
+    Require(marks({{plane(3), plane(10), plane(20)}}, {256, 256, 1, 1}) == Marks{false, false, false},
+            "planes of a layout one channel deep were marked as sharing chunks");
+    Require(marks({{plane(3), plane(10), plane(20)}}, {256, 256, 16, 1}) == Marks{false, true, false},
+            "only the later of two planes in one chunk's depth is to be marked");
+    Require(marks({{plane(3)}, {plane(10)}}, {256, 256, 16, 1}) == Marks{true, true},
+            "planes of two processes in one chunk's depth are not both marked");
+    Require(marks({{plane(3), plane(3, 1)}}, {256, 256, 16, 1}) == Marks{false, false},
+            "planes of different polarizations were marked as sharing chunks");
+    Require(marks({{plane(3), plane(3, 1)}}, {256, 256, 16, 2}) == Marks{false, true},
+            "polarizations in one chunk were not marked as sharing it");
+
+    const auto spectrum = [](std::uint64_t x, std::uint64_t y) {
+        Operation operation;
+        operation.mode = Mode::spectrum;
+        operation.x = x;
+        operation.y = y;
+        return operation;
+    };
+    Require(marks({{spectrum(10, 10), spectrum(50, 50), spectrum(100, 10)}}, {64, 64, 300, 1}) ==
+                Marks{false, true, false},
+            "spectra in one spatial chunk were not marked, or ones in different chunks were");
+
+    // Each process's run of channels ends inside a chunk the next one's begins in.
+    const auto slabs = [&](std::uint64_t depth) {
+        std::vector<std::vector<Operation>> plans;
+        for (unsigned process = 0; process < 2; ++process) {
+            plans.push_back(PlanOperations(Mode::cube_histogram, axes, 1, 0, 2, process, 1));
+        }
+        MarkSharedChunks(plans, axes, {64, 64, depth, 1});
+        return plans[0][0].shares_chunks && plans[1][0].shares_chunks;
+    };
+    Require(slabs(16), "cube histograms whose runs meet inside a chunk were not marked");
+    Require(!slabs(1), "cube histograms of disjoint runs of channels were marked");
+
+    auto animations = std::vector<std::vector<Operation>>{Trial(Mode::animation, axes, 1, 2)};
+    animations[0].push_back(animations[0].front());
+    MarkSharedChunks(animations, axes, {256, 256, 300, 2});
+    for (const auto& operation : animations[0]) {
+        Require(!operation.shares_chunks, "an animation was marked: it reuses chunks on purpose");
+    }
+}
+
+// What this process has asked the kernel to read, page cache or not, as /proc/self/io counts it.
+// Linux only.
+std::optional<std::uint64_t> BytesAskedFor() {
+    std::ifstream io("/proc/self/io");
+    std::string key;
+    std::uint64_t value = 0;
+    while (io >> key >> value) {
+        if (key == "rchar:") {
+            return value;
+        }
+    }
+    return std::nullopt;
+}
+
+// A plane or a spectrum reads its chunks again however recently they were read, where a read through
+// the context's cache only asks storage whether they changed. Told apart by the bytes the process
+// reads, which only Linux counts. Not by making the chunks unreadable or removing them: TensorStore
+// opens a chunk to check it is unchanged before it uses the cached one, so both reads would fail.
+void TestAFirstTouchReadsItsChunksAgain() {
+    if (!BytesAskedFor()) {
+        std::cerr << "skipped: a first touch is told by /proc/self/io, which this system does not have\n";
+        return;
+    }
+    ContextOptions caching;
+    caching.cache_bytes = std::size_t{64} << 20;
+    const auto context = Context::Create(caching);
+    Require(context.has_value(), "Context::Create failed");
+    const auto dataset = Dataset::Open(*context, kWide);
+    Require(dataset.has_value(), "the wide fixture did not open");
+    const auto image = dataset->OpenImage(dataset->descriptor().default_image_id.value_or(""));
+    Require(image.has_value(), "the wide fixture's image did not open");
+    const auto axes = CubeAxes::Of(image->descriptor());
+
+    const auto read_twice = [&](Runner& runner, const Operation& operation) {
+        Require(runner.Prepare(operation).has_value() && runner.Run(operation, {}).has_value(), "a read failed");
+        Require(runner.Prepare(operation).has_value(), "a fresh pool could not be made");
+        const auto before = *BytesAskedFor();
+        Require(runner.Run(operation, {}).has_value(), "a read failed the second time");
+        return *BytesAskedFor() - before;
+    };
+    Runner fresh(*context, *image, {}, std::size_t{64} << 20);
+    Runner shared(*context, *image);
+    constexpr std::uint64_t kSome = 4096;
+    for (const auto mode : {Mode::plane, Mode::spectrum}) {
+        const auto operation = PlanOperations(mode, *axes, 1, 0, 1, 0, 1).front();
+        Require(read_twice(fresh, operation) >= kSome,
+                std::string(ModeName(mode)) + " found its chunks in a cache rather than reading them");
+    }
+    // An animation of one frame reads the plane through the context's cache.
+    auto frame = PlanOperations(Mode::plane, *axes, 1, 0, 1, 0, 1).front();
+    frame.mode = Mode::animation;
+    frame.channel_count = 1;
+    Require(read_twice(shared, frame) < kSome,
+            "the shared cache read the plane's chunks again, so this test shows nothing about a fresh pool");
+}
+
 // Each mode against a real image, through the library: the elements an operation reports, and a
 // fingerprint of a plane that matches reading the plane directly.
 void TestEachModeReads() {
@@ -453,6 +609,25 @@ void TestEachModeReads() {
             "the plane's fingerprint is not the fingerprint of the plane");
 
     Require(read(Mode::spectrum).second == axes->channels, "a spectrum is not every channel");
+
+    // An animation's fingerprint is its frames', each as a plane read alone fingerprints, in order.
+    const auto animation = PlanOperations(Mode::animation, *axes, 1, 0, 1, 0, 1, 0.05, 3).front();
+    const auto played = runner.Run(animation, {});
+    Require(played.has_value() && *played == 3 * plane, "an animation did not read three planes");
+    const auto frames = runner.Fingerprint();
+    std::uint64_t expected = 0xCBF29CE484222325ull;
+    Operation frame = animation;
+    frame.mode = Mode::plane;
+    for (std::uint64_t index = 0; index < 3; ++index) {
+        frame.channel = animation.channel + index;
+        Require(runner.Run(frame, {}).has_value(), "a frame did not read alone");
+        const auto one = runner.Fingerprint();
+        for (unsigned byte = 0; byte < 8; ++byte) {
+            expected ^= (one >> (8 * byte)) & 0xFFu;
+            expected *= 0x100000001B3ull;
+        }
+    }
+    Require(frames == expected, "an animation did not read the planes from its channel on, in order");
     const auto [box, region_elements] = read(Mode::region);
     Require(region_elements == box.width * box.height * axes->channels, "a region did not cover its box");
     const auto region = runner.Fingerprint();
@@ -525,11 +700,14 @@ int main(int argc, char** argv) {
         TestARegionCoversItsFraction();
         TestRunningOutOfPositionsIsSaid();
         TestACubeHistogramSplitsTheChannels();
+        TestAnAnimationPlaysConsecutiveChannels();
+        TestSharedChunksAreMarked();
         TestAFingerprintHasOneNaN();
         TestTheRunKeyIsTheSettings();
         TestARowIsOneLine();
         TestResumingSkipsOnlyWholeTrials();
         TestEachModeReads();
+        TestAFirstTouchReadsItsChunksAgain();
         TestTheColdMethodIsChosenOrRefused();
     } catch (const std::exception& error) {
         std::cerr << "bench: " << error.what() << '\n';

@@ -69,10 +69,20 @@ carta-zarr-bench run /lustre/scratch/zarr-bench/<dataset> --processes 8 \
 `probe` prints what the library sees of a dataset as one line of JSON, and fails when it would not
 open. `run` writes one CSV row per operation; `--help` lists its options.
 
-- **Modes.** `plane` reads a whole plane at a random channel, `spectrum` every channel at a random
-  pixel, `region` reduces every statistic over a box covering `--region-fraction` of the plane (5%),
-  `cube-histogram` bins the cube, and `open` times `Context::Create`, `Dataset::Open` and
+- **Modes.** `plane` reads a whole plane at a random channel, `animation` reads
+  `--animation-frames` consecutive planes (32) from a random channel, `spectrum` every channel at a
+  random pixel, `region` reduces every statistic over a box covering `--region-fraction` of the plane
+  (5%), `cube-histogram` bins the cube, and `open` times `Context::Create`, `Dataset::Open` and
   `OpenImage` together. `--ops 8,spectrum=64` sets how many operations each makes per trial.
+- **First touches.** `plane` and `spectrum` read each operation through a cache pool of its own, made
+  before the clock starts and the size of `--cache-bytes` (1 GiB for `default`, the backend's own
+  default). Otherwise a layout whose chunks are 128 channels deep would answer most of a trial's
+  planes from the cache the first one filled, and its median would be a cache hit. `animation` is
+  the mode where that reuse is real -- a user playing through channels -- and reads through the
+  context's shared cache.
+- **`shares_chunks`** marks an operation that reads a chunk an earlier operation of its process read,
+  or one any other process reads. Its time may be the page cache's, so it is not a first touch however
+  fresh its cache pool; sweep.py ranks `plane`, `spectrum` and `region` without such operations.
 - **Cube histograms** are computed as carta-backend computes them by default
   (`--zarr_histogram_method exact`): a reduction over whole planes for the range, then every plane
   binned over it -- two passes over the cube, through a cache pool that keeps nothing, as the
@@ -86,8 +96,8 @@ open. `run` writes one CSV row per operation; `--help` lists its options.
   round, the rows that share one say `overlap`.
 - **Trials.** Each trial empties the caches, then forks fresh processes, so no trial inherits a cache
   or a thread pool from the one before. Within a trial a process keeps its context, as a backend
-  would: later operations may find chunks an earlier one decoded, and an `open` after the first
-  finds the metadata in the page cache.
+  would: a region or an animation may find chunks an earlier operation decoded, and an `open` after
+  the first finds the metadata in the page cache.
 - **Cold reads.** `--cold auto` uses `--drop-cache-cmd` when given, then `drop_caches` as root, then
   `posix_fadvise` on every file of the dataset. Only the command can reach a parallel filesystem's
   servers; the other two empty this host's page cache alone, and `cold_method` says which was used.
@@ -132,10 +142,18 @@ the data as it is, and for once it is in the recommended layout, and every warni
 failed, cold reads that were cold on this host only, a mode the recommendation gives up, results
 that did not survive validation. The tables behind it follow.
 
-- **Choosing across modes.** Each mode is ranked on its own, by the median operation. Where one
+- **Choosing across modes.** Each mode is ranked on its own, by the median operation -- for `plane`,
+  `spectrum` and `region` the median first touch, and for `animation` the median frame. Where one
   choice has to serve them all -- the layouts stage 2 tries, the settings recommended -- each mode's
   slowdown against its own best is combined in a geometric mean weighted by `[weights]`, and the
   largest slowdown is reported beside it.
+- **Chunk depth** trades planes against spectra: deeper chunks read a spectrum in fewer pieces and
+  make a plane read the channels around it too. Stage 1 ends with a table of each layout's side of
+  that trade, the layouts no other beats in every mode marked as the front, and a note when doubling
+  the weight of `spectrum` or of `plane` would change the best layout.
+- **Too few first touches.** When a crop is shallow for its chunk depth -- 1024 channels hold only 8
+  chunks 128 deep, against 16 planes a user -- fewer than five operations of a mode read chunks of
+  their own. That mode is then ranked on every operation, and the report says so and what to change.
 - **The read budget** has no backend setting, so a setting with one is never recommended. The report
   says when one would make a mode at least 10% faster, which is the case for adding the setting.
 - **Resuming.** `sweep-state.json` records each finished run, so a rerun skips it without writing its

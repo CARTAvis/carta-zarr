@@ -17,8 +17,10 @@ namespace carta::zarr::bench {
 
 namespace {
 
-constexpr std::array<std::pair<Mode, std::string_view>, 5> kModes{{
+// In the order a run measures them when --mode does not say.
+constexpr std::array<std::pair<Mode, std::string_view>, 6> kModes{{
     {Mode::plane, "plane"},
+    {Mode::animation, "animation"},
     {Mode::spectrum, "spectrum"},
     {Mode::region, "region"},
     {Mode::cube_histogram, "cube-histogram"},
@@ -34,11 +36,11 @@ constexpr std::array<std::pair<ColdMethod, std::string_view>, 4> kColdMethods{{
 
 // The options of run that take a value, so that one it does not know is reported as unknown rather
 // than as missing its value.
-constexpr std::array<std::string_view, 17> kRunOptions{
+constexpr std::array<std::string_view, 18> kRunOptions{
     "--image", "--mode", "--trials", "--ops", "--seed",
     "--io-threads", "--decode-threads", "--cache-bytes", "--read-budget-bytes", "--processes",
     "--cold", "--drop-cache-cmd", "--trial-timeout", "--csv", "--label",
-    "--region-fraction", "--histogram-method",
+    "--region-fraction", "--histogram-method", "--animation-frames",
 };
 
 constexpr std::string_view kUsage = R"(usage:
@@ -48,21 +50,25 @@ constexpr std::string_view kUsage = R"(usage:
 probe opens the dataset as carta-backend would and prints what the library sees, as one line of JSON.
 It exits non-zero when the dataset does not open.
 
-run measures reads of the dataset and writes one CSV row per operation.
+run measures reads of the dataset and writes one CSV row per operation. plane and spectrum read
+each operation through a cache of its own, so that each is a first touch; animation reads through
+the shared one, as playing a cube does.
 
   --image ID                 the image to read; the dataset's default image otherwise
-  --mode LIST                plane,spectrum,region,cube-histogram,open (all of them by default)
+  --mode LIST                plane,animation,spectrum,region,cube-histogram,open (all by default)
   --trials N                 trials per mode (5)
   --ops LIST                 operations per process per trial: N for every mode, MODE=N for one,
-                             or both, as in 8,spectrum=64
-                             (plane 16, spectrum 32, region 1, cube-histogram 1, open 8)
+                             or both, as in 8,spectrum=64 (plane 16, animation 2, spectrum 32,
+                             region 1, cube-histogram 1, open 8)
+  --animation-frames N       consecutive planes one animation operation reads (32)
   --region-fraction F        the share of the plane a region box covers (0.05)
   --histogram-method METHOD  exact, binned or sampled:N, as the backend's --zarr_histogram_method (exact)
   --seed N                   where the random positions come from (1)
   --io-threads N             ContextOptions::io_threads, the backend's --zarr_file_io_threads (0)
   --decode-threads N         ContextOptions::decode_threads, the backend's --zarr_data_copy_threads (0)
   --cache-bytes SIZE         ContextOptions::cache_bytes, the backend's --zarr_cache_size:
-                             default, 0 for none, or a size
+                             default, 0 for none, or a size; also the size of the cache each plane
+                             and spectrum operation gets, 1G for default
   --read-budget-bytes SIZE   ReadOptions::read_budget_bytes (0, the library's own)
   --processes N              users reading at once, one process each (1)
   --cold METHOD              auto, command, drop-caches, fadvise or off (auto)
@@ -233,6 +239,10 @@ Command ParseRun(Arguments& arguments) {
             if (!ParseOps(*value, options)) {
                 return bad();
             }
+        } else if (word == "--animation-frames") {
+            if (!count(options.animation_frames, 1)) {
+                return bad();
+            }
         } else if (word == "--region-fraction") {
             char* end = nullptr;
             const std::string text(*value);
@@ -361,6 +371,8 @@ unsigned DefaultOps(Mode mode) noexcept {
             return 1;
         case Mode::open:
             return 8;
+        case Mode::animation:
+            return 2;
     }
     return 1;
 }

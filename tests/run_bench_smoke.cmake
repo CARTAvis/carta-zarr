@@ -25,9 +25,9 @@ if(NOT result)
     message(FATAL_ERROR "probe succeeded on a dataset that does not exist: ${report}")
 endif()
 
-# Rows in one trial of every mode for two processes: plane 16, spectrum 32, region 1, cube-histogram 1
-# and open 8 operations each.
-math(EXPR per_trial "2 * (16 + 32 + 1 + 1 + 8)")
+# Rows in one trial of every mode for two processes: plane 16, animation 2, spectrum 32, region 1,
+# cube-histogram 1 and open 8 operations each.
+math(EXPR per_trial "2 * (16 + 2 + 32 + 1 + 1 + 8)")
 
 function(run_and_count trials expected)
     execute_process(

@@ -57,6 +57,11 @@ struct Operation {
     // Whether another operation of this trial, in any process, reads the same position: there were
     // more operations than distinct positions to give them.
     bool overlap = false;
+    // Whether it reads a chunk that an earlier operation of its own process read, or that any
+    // operation of another process reads. Its time may then be the page cache's rather than the
+    // storage's -- the earlier read brought the chunk in, or the other process is bringing it in
+    // now -- so it is not a first touch however fresh its cache pool. See MarkSharedChunks.
+    bool shares_chunks = false;
 
     // Where it reads, for the CSV: semicolon-separated, so that it stays one field.
     std::string Describe() const;
@@ -70,10 +75,20 @@ struct Operation {
 // `processes` contiguous runs of channels, and each operation a polarization of its own.
 //
 // A region box covers `region_fraction` of the plane, square in pixels' proportion to the plane, and
-// sits in a cell of a grid of as many such boxes as fit along each side.
+// sits in a cell of a grid of as many such boxes as fit along each side. An animation reads
+// `animation_frames` consecutive channels from a start in a cell of channels the same way, so that no
+// two of a trial's animations play the same planes while there are enough channels for them.
 std::vector<Operation> PlanOperations(Mode mode, const CubeAxes& axes, std::uint64_t seed, unsigned trial,
                                       unsigned processes, unsigned process_index, unsigned ops,
-                                      double region_fraction = 0.05);
+                                      double region_fraction = 0.05, unsigned animation_frames = 32);
+
+// Sets shares_chunks on every operation of a trial, given each process's plan, indexed by process,
+// and the image's chunk shape in logical axis order. An operation that reads a chunk first is never
+// marked: of two that share one, the earlier in its process is the first touch, unless the other is
+// another process's, which may be reading it at the same moment. animation and open are left alone,
+// the one meaning to reuse chunks and the other reading none.
+void MarkSharedChunks(std::vector<std::vector<Operation>>& plans, const CubeAxes& axes,
+                      const std::vector<std::uint64_t>& chunk_shape);
 
 // Runs operations against one image and remembers enough of the last result to fingerprint it.
 //
@@ -85,13 +100,20 @@ std::vector<Operation> PlanOperations(Mode mode, const CubeAxes& axes, std::uint
 // depend on the thread count.
 //
 // A cube histogram reads through a cache pool that keeps nothing, as carta-backend's cube walks do,
-// so that a scan of the whole cube neither fills nor finds the context's cache.
+// so that a scan of the whole cube neither fills nor finds the context's cache. A plane or a spectrum
+// reads through a pool of `first_touch_bytes` made for it by Prepare, and an animation through the
+// context's own, which its frames share as the backend's do.
 class Runner {
 public:
     // For every mode but open, which brings its own context and image to each operation.
-    Runner(const Context& context, Image image, HistogramMethod histogram = {});
+    Runner(const Context& context, Image image, HistogramMethod histogram = {},
+           std::size_t first_touch_bytes = std::size_t{1} << 30);
     // For open.
     Runner(ContextOptions context, std::string dataset, std::string image_id);
+
+    // What an operation needs that is not part of what it measures, done before the clock starts:
+    // a fresh cache pool for a plane or a spectrum, with the previous one let go of.
+    Result<void> Prepare(const Operation& operation);
 
     // How many elements of the cube the operation covered.
     Result<std::uint64_t> Run(const Operation& operation, const ReadOptions& options);
@@ -105,21 +127,27 @@ public:
 
 private:
     Result<std::uint64_t> Read(const Operation& operation, const ReadOptions& options);
+    Result<std::uint64_t> Animate(const Operation& operation, const ReadOptions& options);
     Result<std::uint64_t> Reduce(const Operation& operation, const ReadOptions& options);
     Result<std::uint64_t> Histogram(const Operation& operation, const ReadOptions& options);
     Result<std::uint64_t> ExactHistogram(const Operation& operation, const ReadOptions& options);
     Result<std::uint64_t> Open();
 
+    std::optional<Context> _shared;
     std::optional<Image> _image;
     std::optional<CubeAxes> _axes;
     HistogramMethod _histogram;
     std::optional<CachePool> _keeping_nothing;
+    std::size_t _first_touch_bytes = 0;
+    std::optional<CachePool> _first_touch;
     ContextOptions _context;
     std::string _dataset;
     std::string _image_id;
 
     std::vector<float> _pixels;
     std::size_t _pixel_count = 0;
+    // An animation's frames, each fingerprinted as it is read and the fingerprints hashed together.
+    std::optional<std::uint64_t> _frames;
     // The exact statistics of a reduction or a cube histogram, in order.
     std::vector<double> _exact;
     std::vector<std::uint64_t> _counts;

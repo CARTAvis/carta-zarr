@@ -25,7 +25,7 @@
 
 namespace carta::zarr::bench {
 
-inline constexpr int kCsvVersion = 2;
+inline constexpr int kCsvVersion = 3;
 
 // What a dataset's bench-manifest.json says, for the columns the library cannot answer. Empty for a
 // dataset the generator did not write, which the bench reads as well as any other.
@@ -69,6 +69,7 @@ struct Row {
     // Each only for the mode it shapes, and empty for the others.
     std::string region_fraction;
     std::string histogram_method;
+    std::string animation_frames;
     long long trial_timeout_s = 0;
     std::string cold_method;
     bool cold_ok = false;
@@ -78,6 +79,7 @@ struct Row {
     std::optional<unsigned> op_index;
     std::string position;
     bool overlap = false;
+    bool shares_chunks = false;
     // What came of it.
     std::string status;
     std::string error;

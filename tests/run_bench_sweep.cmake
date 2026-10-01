@@ -18,6 +18,8 @@ set(config "${OUTPUT_DIR}/sweep.toml")
 # The fixture is 512 x 520 x 4 channels x 2 polarizations. Two grid layouts and the fixture's own,
 # one that is refused, two settings in stage 2, and validation over all four channels. The RAM check
 # is off, since nothing here is larger than RAM, and with it validation runs although caches stay warm.
+# Two channels are far too few for 16 planes a user to each read chunks of their own, so the report
+# must say so: that warning is checked for below.
 file(WRITE "${config}" "
 [paths]
 bench = \"${BENCH}\"
@@ -88,7 +90,9 @@ endif()
 file(READ "${results}/summary.md" summary)
 foreach(section "## Conclusion" "## Machine and environment" "## Stage 1: layouts" "## Stage 2: reader settings"
         "## Sensitivity to the number of users" "## Validation" "## Reference: one-pass cube histograms"
-        "## Configuration" "--zarr_file_io_threads" "Skipped layout refused" "| binned |")
+        "## Configuration" "--zarr_file_io_threads" "Skipped layout refused" "| binned |"
+        "### animation" "### Plane against spectrum" "animation per frame" "Too few first touches for plane"
+        "first touches (2)")
     string(FIND "${summary}" "${section}" found)
     if(found EQUAL -1)
         message(FATAL_ERROR "summary.md has no \"${section}\":\n${summary}")

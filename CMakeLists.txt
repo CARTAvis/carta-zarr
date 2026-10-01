@@ -13,6 +13,7 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 
 option(CARTA_ZARR_BUILD_TESTS "Build carta-zarr tests" ON)
 option(CARTA_ZARR_BUILD_PACKAGE_TEST "Build the install-tree CMake consumer test" ON)
+option(CARTA_ZARR_BUILD_BENCH "Build the storage benchmark tools and their tests" OFF)
 
 # TensorStore is a required private dependency: it is the storage backend of this library,
 # not an optional feature. Building without it would produce a library that cannot read
@@ -497,6 +498,39 @@ if(CARTA_ZARR_BUILD_TESTS AND BUILD_TESTING)
     carta_zarr_add_test(carta_zarr_pass_timing PUBLIC
         SOURCES tests/pass_timing.cc
         DEFINITIONS ${CARTA_ZARR_WIDE_FIXTURE})
+
+    #[[
+      The layout generator under tools/zarr-bench is Python run by uv, which brings its own pinned
+      interpreter and packages. The setup test writes small datasets with it into the build tree, and
+      the test after it reads them back through the library: a layout the generator writes and the
+      library cannot read is the one failure that would make every later measurement meaningless.
+      Without uv there is nothing to run them with, which is a reason to skip them rather than fail.
+    ]]
+    if(CARTA_ZARR_BUILD_BENCH)
+        find_program(CARTA_ZARR_UV uv)
+        if(CARTA_ZARR_UV)
+            set(CARTA_ZARR_GENERATED_DIR "${CMAKE_CURRENT_BINARY_DIR}/bench-generated")
+            add_test(
+                NAME carta-zarr-bench-generate
+                COMMAND ${CMAKE_COMMAND}
+                    -DUV=${CARTA_ZARR_UV}
+                    -DSOURCE_DIR=${CMAKE_CURRENT_SOURCE_DIR}
+                    -DOUTPUT_DIR=${CARTA_ZARR_GENERATED_DIR}
+                    -P ${CMAKE_CURRENT_SOURCE_DIR}/tests/run_bench_generator.cmake)
+            set_tests_properties(carta-zarr-bench-generate PROPERTIES FIXTURES_SETUP bench-generated)
+
+            carta_zarr_add_test(carta_zarr_bench_generator_tests PUBLIC
+                TEST_NAME carta-zarr-bench-generator
+                SOURCES tests/bench_generator_test.cc
+                LIBRARIES nlohmann_json::nlohmann_json
+                DEFINITIONS
+                    CARTA_ZARR_GENERATED_DIR="${CARTA_ZARR_GENERATED_DIR}"
+                    CARTA_ZARR_PIXEL_FIXTURE="${CARTA_ZARR_FIXTURE_DIR}/xradio/pixels")
+            set_tests_properties(carta-zarr-bench-generator PROPERTIES FIXTURES_REQUIRED bench-generated)
+        else()
+            message(STATUS "uv was not found; the zarr-bench generator tests are skipped")
+        endif()
+    endif()
 
     if(CARTA_ZARR_BUILD_PACKAGE_TEST)
         add_test(

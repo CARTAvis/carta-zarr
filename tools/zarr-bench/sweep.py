@@ -54,7 +54,9 @@ MODES = ("plane", "animation", "spectrum", "region", "cube-histogram", "open")
 # trial read before them or alongside them, which carta-zarr-bench marks shares_chunks = false.
 FIRST_TOUCH_MODES = ("plane", "spectrum", "region")
 # Fewer first touches than this in a group, when some of its operations were not, and it is ranked on
-# every operation, with a warning.
+# every operation, with a warning -- and so is every group it is compared with, the same stage, number
+# of users, mode and method on other layouts and settings, so that no layout is ranked on cache hits
+# its rivals were spared.
 MIN_FIRST_TOUCHES = 5
 # carta-zarr-bench's operations per user per trial when measure.ops does not say.
 BENCH_DEFAULT_OPS = {"plane": 16, "animation": 2, "spectrum": 32, "region": 1, "cube-histogram": 1, "open": 8}
@@ -697,6 +699,8 @@ class Stats:
     ops: list[Op]
     errors: int
     makespans: list[float]
+    # Ranked on every operation because a group it is compared with is short.
+    every_operation: bool = False
 
     @property
     def first_touches(self) -> int:
@@ -711,7 +715,7 @@ class Stats:
 
     @property
     def sample(self) -> list[Op]:
-        if self.mode in FIRST_TOUCH_MODES and not self.short:
+        if self.mode in FIRST_TOUCH_MODES and not self.short and not self.every_operation:
             return [op for op in self.ops if not op.shares_chunks]
         return self.ops
 
@@ -828,6 +832,11 @@ class Results:
                 checksums.setdefault(where, {})[dataset] = row["checksum"]
         for (key, _), end in trial_ends.items():
             self.groups[key].makespans.append(end)
+        # A comparison is ranked one way throughout: on every operation, if any group in it has to be.
+        short = {(stage, users, mode, method) for (stage, _, _, users, mode, method), stats in self.groups.items()
+                 if stats.short}
+        for (stage, _, _, users, mode, method), stats in self.groups.items():
+            stats.every_operation = (stage, users, mode, method) in short
         for where, seen in checksums.items():
             if len(set(seen.values())) > 1:
                 self.mismatches.append(f"{where[0]} at {where[6]} ({', '.join(sorted(seen))})")
@@ -1151,12 +1160,17 @@ def first_touch_advice(mode: str, shape: dict[str, int], chunk: dict[str, int], 
         # Planes of different polarizations share a chunk only when it holds more than one of them.
         slabs = math.ceil(shape.get("frequency", 1) / depth) * \
             math.ceil(shape.get("polarization", 1) / chunk.get("polarization", 1))
+        fewer = f", or set measure.ops plane = {slabs // users}" if slabs >= 2 * users else ""
         return (f"{total} planes a trial fall in {plural(slabs, 'run')} of chunks {plural(depth, 'channel')} deep: "
-                f"crop at least {depth * total} channels, or set measure.ops plane = {max(1, slabs // users)}.")
+                f"crop at least {depth * total} channels{fewer}.")
     tiles = math.ceil(shape.get("l", 1) / chunk.get("l", 1)) * math.ceil(shape.get("m", 1) / chunk.get("m", 1))
-    return (f"{total} {mode} operations a trial fall in {plural(tiles, 'spatial chunk')} of "
-            f"{chunk.get('l', 1)}×{chunk.get('m', 1)}: set measure.ops {mode} = {max(1, tiles // users)}, or crop "
-            "a larger plane.")
+    where = (f"{total} {mode} operations a trial fall in {plural(tiles, 'spatial chunk')} of "
+             f"{chunk.get('l', 1)}×{chunk.get('m', 1)}")
+    if tiles < 2 * users:
+        # Users who share a chunk are each other's cache, and no count of operations parts them.
+        return (f"{where}, too few for {users} users to read chunks of their own: only a cube with a larger plane, "
+                "or fewer users, can measure this.")
+    return f"{where}: set measure.ops {mode} = {tiles // users}, or crop a larger plane."
 
 
 def write_report(sweep: Sweep, layouts: list[Layout], invalid: list[tuple[Layout, str]]) -> list[str]:
@@ -1199,8 +1213,8 @@ def write_report(sweep: Sweep, layouts: list[Layout], invalid: list[tuple[Layout
         advice = first_touch_advice(mode, axis_lengths(results.shapes.get(dataset, "")), chunk, users, ops)
         warnings.append(f"**Too few first touches for {mode} on {name}**: with {users} user{'s' if users > 1 else ''}, "
                         f"{stats.first_touches} of {len(stats.ops)} operations read no chunk another one read, so "
-                        f"{mode} there is ranked on every operation, cache hits included. The crop is small for "
-                        f"chunks of {chunk_text(chunk)}. {advice}")
+                        f"{mode} is ranked on every operation there, cache hits included, and so is every layout "
+                        f"compared with it. The crop is small for chunks of {chunk_text(chunk)}. {advice}")
 
     # -- Conclusion
     now, after = analysis.recommendations()
@@ -1345,7 +1359,8 @@ def write_report(sweep: Sweep, layouts: list[Layout], invalid: list[tuple[Layout
               f"At the baseline settings ({sweep.baseline.describe()}). Times are per operation, and an animation's "
               "per frame; makespan is the slowest user's whole trial. plane, spectrum and region are ranked on their "
               "first touches -- operations that read no chunk another operation of the trial read before or "
-              "alongside them -- which the first touches column counts.", ""]
+              "alongside them -- which the first touches column counts; \"all ranked\" marks a mode ranked on "
+              "every operation, because some layout had too few first touches.", ""]
     for layout in layouts:
         entry = sweep.state["datasets"].get(dataset_key(layout, False))
         if entry:
@@ -1367,7 +1382,9 @@ def write_report(sweep: Sweep, layouts: list[Layout], invalid: list[tuple[Layout
             cells += [seconds_text(stats.minimum) if stats else "–",
                       seconds_text(stats.makespan) if stats and target > 1 else "–"]
             if mode in FIRST_TOUCH_MODES:
-                cells.append(f"{stats.first_touches}/{len(stats.ops)}" if stats else "–")
+                ranked_on_all = stats and (stats.short or stats.every_operation)
+                cells.append(f"{stats.first_touches}/{len(stats.ops)}{' (all ranked)' if ranked_on_all else ''}"
+                             if stats else "–")
             rows.append(cells)
         header = ["layout"]
         for users in sweep.user_counts("stage1"):
@@ -1451,6 +1468,7 @@ def tradeoff_section(analysis: Analysis, ranking: list[tuple[Layout, float, floa
                             ["yes" if layout.name in front else ""] for layout, chunk in rows])
 
     best = ranking[0][0].name if math.isfinite(ranking[0][1]) else None
+    steady = []
     for mode, other in (("spectrum", "plane"), ("plane", "spectrum")):
         if mode not in analysis.modes or not best:
             continue
@@ -1462,6 +1480,11 @@ def tradeoff_section(analysis: Analysis, ranking: list[tuple[Layout, float, floa
         if shifted and math.isfinite(shifted[0][1]) and shifted[0][0].name != best:
             lines.append(f"Doubling weights.{mode} makes {shifted[0][0].name} the best layout instead of {best}: "
                          f"the choice turns on how much {mode} matters against {other}.")
+            lines.append("")
+        else:
+            steady.append(f"weights.{mode}")
+    if steady:
+        lines.append(f"Doubling {' or '.join(steady)} leaves {best} the best layout.")
     if lines[-1] != "":
         lines.append("")
     return lines

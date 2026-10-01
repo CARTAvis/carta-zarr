@@ -788,7 +788,10 @@ def filesystem_of(path: Path) -> str:
 
 
 def run(command: list[str]) -> str:
-    completed = subprocess.run(command, capture_output=True, text=True)
+    try:
+        completed = subprocess.run(command, capture_output=True, text=True)
+    except FileNotFoundError:
+        raise SystemExit(f"{command[0]} is not installed here, so {' '.join(command)} cannot run") from None
     if completed.returncode != 0:
         raise SystemExit(f"{' '.join(command)} failed ({completed.returncode}): {completed.stderr.strip()}")
     return completed.stdout
@@ -831,6 +834,54 @@ def tree_size(path: Path) -> tuple[int, int]:
             total += os.lstat(os.path.join(directory, entry)).st_size
             files += 1
     return total, files
+
+
+# -- The source's own layout ----------------------------------------------------------------------
+
+
+def codec_spelling(codecs: list[dict[str, Any]], where: str) -> str:
+    """The --codec spelling of a chain of zarr v3 codecs this generator could have written: bytes,
+    then at most one compressor. Anything else is refused rather than approximated, since a layout
+    labelled the source's own that is not would make every comparison with it wrong."""
+    names = [codec.get("name") for codec in codecs]
+    if not names or names[0] != "bytes" or len(names) > 2:
+        raise SystemExit(f"--layout-from-source: {where} has codecs {names}, which this generator cannot write")
+    if len(names) == 1:
+        return "none"
+    compressor = codecs[1]
+    config = compressor.get("configuration", {})
+    if compressor["name"] == "zstd" and not config.get("checksum", False):
+        return f"zstd:{config.get('level', 3)}"
+    if compressor["name"] == "gzip":
+        return f"gzip:{config.get('level', 6)}"
+    if compressor["name"] == "blosc" and config.get("shuffle") in ("noshuffle", "shuffle", "bitshuffle"):
+        return f"blosc:{config['cname']}:{config['clevel']}:{config['shuffle']}"
+    raise SystemExit(f"--layout-from-source: {where} is compressed as {compressor}, which this generator cannot write")
+
+
+def take_layout_from_source(args: argparse.Namespace) -> None:
+    """Fill in --chunk, --shard, --codec and --no-consolidate as the source has them, so that the
+    rewrite is the source's own layout over the crop -- what a data producer already writes, to
+    compare every other layout with -- and has the identity it would have had spelt out by hand."""
+    source = Path(args.source).resolve()
+    root = read_metadata(source)
+    image = args.image or default_image(root)
+    metadata = read_metadata(source / image)
+    dims = metadata.get("dimension_names") or []
+    outer = metadata["chunk_grid"]["configuration"]["chunk_shape"]
+    codecs = metadata["codecs"]
+    shard = None
+    chunk = outer
+    if codecs and codecs[0].get("name") == "sharding_indexed":
+        config = codecs[0]["configuration"]
+        shard, chunk, codecs = outer, config["chunk_shape"], config["codecs"]
+    args.chunk = ",".join(f"{name}={length}" for name, length in zip(dims, chunk))
+    args.shard = ",".join(f"{name}={length}" for name, length in zip(dims, shard)) if shard else None
+    args.codec = codec_spelling(codecs, f"{source.name}/{image}")
+    args.no_consolidate = root.get("consolidated_metadata") is None
+    log(f"the source's own layout: --chunk {args.chunk}"
+        + (f" --shard {args.shard}" if args.shard else "")
+        + f" --codec {args.codec}" + (" --no-consolidate" if args.no_consolidate else ""))
 
 
 # -- Identity and reuse ---------------------------------------------------------------------------
@@ -902,12 +953,14 @@ def parse_arguments(argv: list[str] | None) -> argparse.Namespace:
     where.add_argument("--output-root", help="a directory to write it in, named after what decides its bytes")
 
     layout = parser.add_argument_group("layout")
-    layout.add_argument("--chunk", required=True, help="chunk shape per axis, e.g. l=512,m=512,frequency=16; others are 1")
+    layout.add_argument("--chunk", help="chunk shape per axis, e.g. l=512,m=512,frequency=16; others are 1")
     layout.add_argument("--shard", help="shard shape per axis, a multiple of the chunk; others are the chunk")
-    layout.add_argument("--codec", default="zstd:3", help="none, zstd[:level], gzip[:level], blosc[:cname[:level[:shuffle]]]")
+    layout.add_argument("--codec", help="none, zstd[:level], gzip[:level], blosc[:cname[:level[:shuffle]]] (zstd:3)")
     layout.add_argument("--keep-bits", type=int, help="round pixels to this many float32 mantissa bits")
     layout.add_argument("--no-consolidate", action="store_true", help="leave out the root's consolidated metadata")
     layout.add_argument("--stripe", help="lustre:count=N,size=S or beegfs:count=N,size=S, set before writing")
+    layout.add_argument("--layout-from-source", action="store_true",
+                        help="the source's own chunk, shard, codec and consolidation, in place of those four")
 
     rewrite = parser.add_argument_group("rewriting a source")
     rewrite.add_argument("--image", help="the image to rewrite; the dataset's base sky image by default")
@@ -934,10 +987,51 @@ def parse_arguments(argv: list[str] | None) -> argparse.Namespace:
         parser.error("--synthetic needs --shape")
     if args.source and args.shape:
         parser.error("--shape is for --synthetic; a rewrite takes its shape from the source, and --crop")
+    if args.layout_from_source:
+        if not args.source:
+            parser.error("--layout-from-source needs --source: a synthetic cube has no layout of its own")
+        given = [flag for flag, value in (("--chunk", args.chunk), ("--shard", args.shard), ("--codec", args.codec),
+                                          ("--no-consolidate", args.no_consolidate), ("--keep-bits", args.keep_bits))
+                 if value]
+        if given:
+            parser.error(f"--layout-from-source takes the layout from the source; leave out {', '.join(given)}")
+        take_layout_from_source(args)
+    elif not args.chunk:
+        parser.error("--chunk is required, unless --layout-from-source takes it from the source")
+    if args.codec is None:
+        args.codec = "zstd:3"
     return args
 
 
+def check_stripe(argv: list[str]) -> int:
+    """Whether this striping can be set under the output root, tried on an empty directory that is
+    removed again: so that sweep.py --dry-run finds a BeeGFS that reserves striping for root before
+    the sweep has spent hours on the layouts that do not need it."""
+    parser = argparse.ArgumentParser(prog="generate.py --check-stripe")
+    parser.add_argument("--check-stripe", required=True, metavar="STRIPE")
+    parser.add_argument("--output-root", required=True)
+    args = parser.parse_args(argv)
+    stripe = Stripe.parse(args.check_stripe)
+    root = Path(args.output_root).resolve()
+    filesystem = filesystem_of(root if root.exists() else root.parent)
+    if filesystem not in ("unknown", stripe.filesystem):
+        raise SystemExit(f"--stripe is for {stripe.filesystem}, but {root} is on {filesystem}")
+    root.mkdir(parents=True, exist_ok=True)
+    probe = root / f".stripe-check-{os.getpid()}"
+    probe.mkdir()
+    try:
+        set_command, _ = stripe_commands(stripe, probe)
+        run(set_command)
+    finally:
+        shutil.rmtree(probe, ignore_errors=True)
+    log(f"{stripe.spelling()} can be set under {root}")
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
+    arguments = sys.argv[1:] if argv is None else argv
+    if any(argument.split("=", 1)[0] == "--check-stripe" for argument in arguments):
+        return check_stripe(arguments)
     args = parse_arguments(argv)
     stripe = Stripe.parse(args.stripe) if args.stripe else None
     key = identity(args)

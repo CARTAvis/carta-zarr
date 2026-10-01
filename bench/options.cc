@@ -9,6 +9,7 @@
 #include <algorithm>
 #include <array>
 #include <charconv>
+#include <cstdlib>
 #include <limits>
 #include <utility>
 
@@ -33,10 +34,11 @@ constexpr std::array<std::pair<ColdMethod, std::string_view>, 4> kColdMethods{{
 
 // The options of run that take a value, so that one it does not know is reported as unknown rather
 // than as missing its value.
-constexpr std::array<std::string_view, 15> kRunOptions{
+constexpr std::array<std::string_view, 17> kRunOptions{
     "--image", "--mode", "--trials", "--ops", "--seed",
     "--io-threads", "--decode-threads", "--cache-bytes", "--read-budget-bytes", "--processes",
     "--cold", "--drop-cache-cmd", "--trial-timeout", "--csv", "--label",
+    "--region-fraction", "--histogram-method",
 };
 
 constexpr std::string_view kUsage = R"(usage:
@@ -51,8 +53,11 @@ run measures reads of the dataset and writes one CSV row per operation.
   --image ID                 the image to read; the dataset's default image otherwise
   --mode LIST                plane,spectrum,region,cube-histogram,open (all of them by default)
   --trials N                 trials per mode (5)
-  --ops N                    operations per process per trial
+  --ops LIST                 operations per process per trial: N for every mode, MODE=N for one,
+                             or both, as in 8,spectrum=64
                              (plane 16, spectrum 32, region 1, cube-histogram 1, open 8)
+  --region-fraction F        the share of the plane a region box covers (0.05)
+  --histogram-method METHOD  exact, binned or sampled:N, as the backend's --zarr_histogram_method (exact)
   --seed N                   where the random positions come from (1)
   --io-threads N             ContextOptions::io_threads, the backend's --zarr_file_io_threads (0)
   --decode-threads N         ContextOptions::decode_threads, the backend's --zarr_data_copy_threads (0)
@@ -127,6 +132,33 @@ struct Arguments {
     }
 };
 
+// Comma-separated entries, each a count for every mode or MODE=count for one.
+bool ParseOps(std::string_view list, RunOptions& options) {
+    if (list.empty()) {
+        return false;
+    }
+    while (!list.empty()) {
+        const auto comma = list.find(',');
+        const auto entry = list.substr(0, comma);
+        list = comma == std::string_view::npos ? std::string_view() : list.substr(comma + 1);
+        const auto equals = entry.find('=');
+        const auto count = ParseNumber<unsigned>(equals == std::string_view::npos ? entry : entry.substr(equals + 1));
+        if (!count || *count == 0) {
+            return false;
+        }
+        if (equals == std::string_view::npos) {
+            options.ops = *count;
+            continue;
+        }
+        const auto mode = ParseMode(entry.substr(0, equals));
+        if (!mode) {
+            return false;
+        }
+        options.mode_ops[*mode] = *count;
+    }
+    return true;
+}
+
 std::optional<std::vector<Mode>> ParseModes(std::string_view list) {
     std::vector<Mode> modes;
     while (!list.empty()) {
@@ -198,11 +230,23 @@ Command ParseRun(Arguments& arguments) {
                 return bad();
             }
         } else if (word == "--ops") {
-            unsigned ops = 0;
-            if (!count(ops, 1)) {
+            if (!ParseOps(*value, options)) {
                 return bad();
             }
-            options.ops = ops;
+        } else if (word == "--region-fraction") {
+            char* end = nullptr;
+            const std::string text(*value);
+            const double fraction = std::strtod(text.c_str(), &end);
+            if (text.empty() || end != text.c_str() + text.size() || !(fraction > 0.0 && fraction <= 1.0)) {
+                return bad();
+            }
+            options.region_fraction = fraction;
+        } else if (word == "--histogram-method") {
+            const auto method = HistogramMethod::Parse(*value);
+            if (!method) {
+                return bad();
+            }
+            options.histogram = *method;
         } else if (word == "--seed") {
             if (!count(options.seed, 0)) {
                 return bad();
@@ -327,6 +371,46 @@ const char* ColdMethodName(ColdMethod method) noexcept {
 
 std::optional<ColdMethod> ParseColdMethod(std::string_view name) noexcept {
     return Lookup(kColdMethods, name);
+}
+
+std::string HistogramMethod::Spell() const {
+    switch (kind) {
+        case Kind::exact:
+            return "exact";
+        case Kind::binned:
+            return "binned";
+        case Kind::sampled:
+            return "sampled:" + std::to_string(stride);
+    }
+    return "exact";
+}
+
+std::optional<HistogramMethod> HistogramMethod::Parse(std::string_view text) noexcept {
+    HistogramMethod method;
+    if (text == "exact") {
+        return method;
+    }
+    if (text == "binned") {
+        method.kind = Kind::binned;
+        return method;
+    }
+    // The backend's own default stride for a bare "sampled" is 4.
+    constexpr std::string_view kSampled = "sampled";
+    if (text.substr(0, kSampled.size()) != kSampled) {
+        return std::nullopt;
+    }
+    method.kind = Kind::sampled;
+    method.stride = 4;
+    const auto rest = text.substr(kSampled.size());
+    if (rest.empty()) {
+        return method;
+    }
+    const auto stride = rest.front() == ':' ? ParseNumber<std::uint64_t>(rest.substr(1)) : std::nullopt;
+    if (!stride || *stride == 0) {
+        return std::nullopt;
+    }
+    method.stride = *stride;
+    return method;
 }
 
 std::optional<std::size_t> ParseSize(std::string_view text) noexcept {

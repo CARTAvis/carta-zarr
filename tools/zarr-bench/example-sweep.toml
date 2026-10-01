@@ -1,0 +1,115 @@
+# A sweep for tools/zarr-bench/sweep.py. Copy it, change what differs, and run
+#
+#   ./sweep.py my-sweep.toml --dry-run      # what would run, how much disk it needs, whether it can
+#   ./sweep.py my-sweep.toml                # run it; rerun the same command to resume
+#
+# Any setting can be overridden for one run: --set users.target=32 --set stage2.trials=3
+
+[paths]
+# carta-zarr-bench from a Release build configured with -DCARTA_ZARR_BUILD_BENCH=ON.
+bench = "/opt/carta-zarr/build-release/bench/carta-zarr-bench"
+# Where the datasets are written: on the filesystem being measured, with room for one of them.
+# Each layout is written, measured and deleted before the next.
+work = "/lustre/scratch/zarr-bench"
+# Keep every dataset rather than deleting it once measured. Needs room for all of them.
+keep_datasets = false
+
+[source]
+# The cube to rewrite in each layout. Real pixels are better than synthetic ones: a layout's cost
+# depends on how well its pixels compress. Leave path empty and give synthetic instead when there is
+# no cube to hand, e.g. synthetic = "frequency=2000,polarization=1,l=4096,m=4096".
+path = "/data/askap/cube.zarr"
+# The image to rewrite; the dataset's base sky image when empty.
+image = ""
+# A window of it for stages 1 and 2: 50-100 GB is enough when caches can be emptied.
+crop = "frequency=0:2000"
+# A larger window for validation, which must be larger than this machine's RAM. Empty skips it.
+validate_crop = "frequency=0:12000"
+# For a synthetic source: the larger shape to validate with, and the seed of its pixels.
+synthetic = ""
+validate_synthetic = ""
+seed = 1
+
+[users]
+# How many people use CARTA on one server at once. carta-controller starts one backend per user, and
+# every backend takes the same settings, so they are chosen for the target -- the peak -- and the
+# report says what that costs one user alone and the typical number.
+target = 16
+typical = 4
+
+[measure]
+# Each mode is measured and reported on its own; [weights] says how much each counts when one
+# setting has to serve them all.
+modes = ["plane", "spectrum", "region", "cube-histogram", "open"]
+trials = 5
+# Seconds before a trial's remaining operations are recorded as timeouts.
+trial_timeout = 600
+seed = 1
+# How caches are emptied before each trial: auto, command, drop-caches, fadvise or off. Only a
+# command can empty a parallel filesystem's servers; without one, the report says reads were cold
+# on this host only.
+cold = "auto"
+drop_cache_cmd = ""
+# Operations per user per trial, by mode, when the defaults (plane 16, spectrum 32, region 1,
+# cube-histogram 1, open 8) are not what you want. For example: ops = { spectrum = 64 }
+ops = {}
+# The share of the plane a region covers.
+region_fraction = 0.05
+# One-pass cube histograms to time against the backend's exact two passes, for reference only:
+# "binned", "sampled:4".
+histogram_reference = []
+# Processes generate.py writes with; 0 for every core.
+generator_workers = 0
+
+[baseline]
+# What the backend runs with now, which every recommendation is compared with. These are the
+# backend's own defaults; put your production settings here if they differ.
+# decode_threads may be a number, "cores" or "cores/N".
+io_threads = 2
+decode_threads = "cores"
+cache_mib = 1024
+read_budget = "0"
+
+[weights]
+# How much each mode counts in choosing a layout and settings. Zero leaves a mode out.
+plane = 1.0
+spectrum = 1.0
+region = 1.0
+cube-histogram = 1.0
+open = 1.0
+
+[stage1]
+# Every combination of these is a layout. Axes are named as XRADIO names them; an axis left out of
+# chunk is 1, and one left out of shard is its chunk. "" is no shard, or no striping.
+chunk = ["l=512,m=512,frequency=16", "l=256,m=256,frequency=64", "l=128,m=128,frequency=256"]
+shard = ["", "frequency=256"]
+codec = ["zstd:3", "blosc:zstd:5:shuffle"]
+consolidated = [true]
+stripe = [""]  # e.g. "lustre:count=4,size=4M" or "beegfs:count=4,size=1M"
+
+# Layouts outside the grid, one table each:
+# [[stage1.layout]]
+# name = "planes"
+# chunk = "l=4096,m=4096"
+# codec = "zstd:3"
+
+[stage2]
+# How many of stage 1's best layouts get every reader setting tried on them. The current layout is
+# always added. layouts = ["L03", "L07"] picks them by name instead.
+top = 2
+layouts = []
+# Trials per setting here, 0 for measure.trials. Stage 2 is the long one: --dry-run estimates it
+# once stage 1 has run.
+trials = 3
+# Every combination of these is tried. read_budget has no backend setting yet; it is measured so that
+# the report can say whether one is worth adding, and never recommended.
+io_threads = [2, 8, 32]
+decode_threads = ["cores/2", "cores"]
+cache_mib = [256, 1024, 4096]
+read_budget = ["0", "256M"]
+
+[checks]
+# Refuse a validation copy, or a sweep that cannot empty caches, whose data fits in RAM.
+ram = true
+# Refuse to write a dataset where there is not room for it uncompressed.
+space = true

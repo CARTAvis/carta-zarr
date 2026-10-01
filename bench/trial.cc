@@ -236,8 +236,9 @@ std::string Describe(const Error& error) {
         }
         DescribeImage(row, *image);
         item_size = ItemSize(image->descriptor().stored_type);
-        plan = PlanOperations(mode, *axes, options.seed, trial, options.processes, process_index, ops);
-        runner.emplace(std::move(image).value());
+        plan = PlanOperations(mode, *axes, options.seed, trial, options.processes, process_index, ops,
+                              options.region_fraction);
+        runner.emplace(*context, std::move(image).value(), options.histogram);
     }
 
     send(kReady);

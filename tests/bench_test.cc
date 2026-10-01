@@ -49,10 +49,14 @@ const std::string kWide = CARTA_ZARR_PIXEL_FIXTURE_WIDE;
 
 constexpr Mode kPositionedModes[] = {Mode::plane, Mode::spectrum, Mode::region};
 
-Image OpenDefault(const std::string& location) {
+const Context& SharedContext() {
     static const auto context = Context::Create();
     Require(static_cast<bool>(context), "Context::Create failed");
-    const auto dataset = Dataset::Open(*context, location);
+    return *context;
+}
+
+Image OpenDefault(const std::string& location) {
+    const auto dataset = Dataset::Open(SharedContext(), location);
     Require(dataset.has_value(), location + " did not open");
     const auto image = dataset->OpenImage(dataset->descriptor().default_image_id.value_or(""));
     Require(image.has_value(), location + ": the default image did not open");
@@ -83,10 +87,10 @@ std::vector<std::string> Positions(const std::vector<Operation>& operations) {
 
 // Every operation of a trial, every process's, in process order.
 std::vector<Operation> Trial(Mode mode, const CubeAxes& axes, unsigned processes, unsigned ops,
-                             std::uint64_t seed = 1, unsigned trial = 0) {
+                             std::uint64_t seed = 1, unsigned trial = 0, double region_fraction = 0.05) {
     std::vector<Operation> all;
     for (unsigned process = 0; process < processes; ++process) {
-        const auto some = PlanOperations(mode, axes, seed, trial, processes, process, ops);
+        const auto some = PlanOperations(mode, axes, seed, trial, processes, process, ops, region_fraction);
         all.insert(all.end(), some.begin(), some.end());
     }
     return all;
@@ -131,6 +135,27 @@ void TestTheCommandLine() {
     Require(set.OpsFor(Mode::spectrum) == 3, "--ops does not apply to every mode");
     Require(set.read_budget_bytes == std::size_t{1} << 30 && set.cold == ColdMethod::off, "an option was lost");
     Require(set.trial_timeout == std::chrono::seconds(9), "--trial-timeout was lost");
+
+    const auto shaped = Get<RunOptions>(Parse({"run", "cube.zarr", "--ops", "8,spectrum=64,region=2",
+                                               "--region-fraction", "0.2", "--histogram-method", "sampled:8"}));
+    Require(shaped.OpsFor(Mode::plane) == 8 && shaped.OpsFor(Mode::spectrum) == 64 &&
+                shaped.OpsFor(Mode::region) == 2,
+            "--ops does not give a mode its own count over the one for every mode");
+    Require(Get<RunOptions>(Parse({"run", "cube.zarr", "--ops", "spectrum=64"})).OpsFor(Mode::plane) == 16,
+            "a count for one mode moved another mode off its default");
+    Require(shaped.region_fraction == 0.2, "--region-fraction was lost");
+    Require(shaped.histogram.kind == HistogramMethod::Kind::sampled && shaped.histogram.stride == 8,
+            "--histogram-method sampled:8 was lost");
+    Require(defaults.histogram.kind == HistogramMethod::Kind::exact,
+            "a cube histogram is not exact by default, as the backend's is");
+    for (const char* bad : {"plane=0", "cube=3", "", "spectrum="}) {
+        Require(Get<Usage>(Parse({"run", "cube.zarr", "--ops", bad})).error,
+                std::string("--ops accepted ") + bad);
+    }
+    for (const char* bad : {"0", "1.5", "x", "-0.1"}) {
+        Require(Get<Usage>(Parse({"run", "cube.zarr", "--region-fraction", bad})).error,
+                std::string("--region-fraction accepted ") + bad);
+    }
 
     const auto unknown = Get<Usage>(Parse({"run", "cube.zarr", "--bogus"}));
     Require(unknown.error && unknown.message.find("unknown option") != std::string::npos,
@@ -195,6 +220,40 @@ void TestProcessesDoNotShareAPosition() {
             const bool apart = box.x + box.width <= them.x || them.x + them.width <= box.x ||
                                box.y + box.height <= them.y || them.y + them.height <= box.y;
             Require(apart, "two region boxes of one trial overlap");
+        }
+    }
+}
+
+void TestTheHistogramMethodIsSpelledAsTheBackendSpellsIt() {
+    for (const char* spelling : {"exact", "binned", "sampled:4", "sampled:16"}) {
+        const auto method = HistogramMethod::Parse(spelling);
+        Require(method && method->Spell() == spelling, std::string("did not round-trip ") + spelling);
+    }
+    Require(HistogramMethod::Parse("sampled")->stride == 4, "a bare sampled is not the backend's stride of 4");
+    for (const char* bad : {"", "sampled:0", "sampled:x", "sampledx", "two-pass"}) {
+        Require(!HistogramMethod::Parse(bad), std::string("accepted a method there is not: ") + bad);
+    }
+}
+
+void TestARegionCoversItsFraction() {
+    const auto axes = Cube(1000, 900, 30, 1);
+    for (const double fraction : {0.01, 0.05, 0.2, 0.5, 1.0}) {
+        const auto side = std::sqrt(fraction);
+        const auto cells = static_cast<unsigned>(std::floor(1.0 / side));
+        const auto boxes = Trial(Mode::region, axes, cells * cells, 1, 1, 0, fraction);
+        for (std::size_t index = 0; index < boxes.size(); ++index) {
+            const auto& box = boxes[index];
+            const double covered = static_cast<double>(box.width * box.height) / (axes.width * axes.height);
+            Require(std::abs(covered - fraction) < 0.01 * fraction + 0.002,
+                    "a region box does not cover its fraction of the plane");
+            Require(box.x + box.width <= axes.width && box.y + box.height <= axes.height, "a box leaves the plane");
+            Require(!box.overlap, "boxes that fit the grid were marked as overlapping");
+            for (std::size_t other = 0; other < index; ++other) {
+                const auto& them = boxes[other];
+                Require(box.x + box.width <= them.x || them.x + them.width <= box.x ||
+                            box.y + box.height <= them.y || them.y + them.height <= box.y,
+                        "two region boxes of one trial overlap");
+            }
         }
     }
 }
@@ -278,6 +337,21 @@ void TestTheRunKeyIsTheSettings() {
             "the mode does not change the run key");
     Require(key != RowTemplate(options, Mode::plane, ColdMethod::off, facts, "run-a").run_key,
             "warm and cold share a run key");
+
+    // A setting that shapes one mode moves that mode's key and no other's.
+    auto wider = options;
+    wider.region_fraction = 0.2;
+    auto binned = options;
+    binned.histogram.kind = HistogramMethod::Kind::binned;
+    Require(key == RowTemplate(wider, Mode::plane, ColdMethod::fadvise, facts, "run-a").run_key &&
+                key == RowTemplate(binned, Mode::plane, ColdMethod::fadvise, facts, "run-a").run_key,
+            "a setting of another mode changed the plane's run key");
+    Require(RowTemplate(options, Mode::region, ColdMethod::fadvise, facts, "run-a").run_key !=
+                RowTemplate(wider, Mode::region, ColdMethod::fadvise, facts, "run-a").run_key,
+            "the region fraction does not change the region's run key");
+    Require(RowTemplate(options, Mode::cube_histogram, ColdMethod::fadvise, facts, "run-a").run_key !=
+                RowTemplate(binned, Mode::cube_histogram, ColdMethod::fadvise, facts, "run-a").run_key,
+            "the histogram method does not change the cube histogram's run key");
     Require(key != RowTemplate(options, Mode::plane, ColdMethod::fadvise, DatasetFacts{"def456", "", "", ""}, "run-a")
                        .run_key,
             "two datasets share a run key");
@@ -355,7 +429,7 @@ void TestEachModeReads() {
     const auto axes = CubeAxes::Of(image.descriptor());
     Require(axes.has_value(), "the wide fixture is not a cube");
     const std::uint64_t plane = axes->width * axes->height;
-    Runner runner(image);
+    Runner runner(SharedContext(), image);
 
     const auto read = [&](Mode mode, unsigned processes = 1) {
         const auto operation = PlanOperations(mode, *axes, 1, 0, processes, 0, 1).front();
@@ -381,10 +455,18 @@ void TestEachModeReads() {
     Require(read(Mode::spectrum).second == axes->channels, "a spectrum is not every channel");
     const auto [box, region_elements] = read(Mode::region);
     Require(region_elements == box.width * box.height * axes->channels, "a region did not cover its box");
-    const auto histogram = runner.Fingerprint();
+    const auto region = runner.Fingerprint();
     Require(read(Mode::cube_histogram, 2).second == plane * (axes->channels / 2),
             "a cube histogram did not cover its share of the channels");
-    Require(runner.Fingerprint() != histogram, "a cube histogram fingerprinted as the region before it");
+    const auto exact = runner.Fingerprint();
+    Require(exact != region, "a cube histogram fingerprinted as the region before it");
+
+    // One pass over the same channels: its extremes and pixel count are the exact ones, but it carries
+    // no counts into the fingerprint, so it cannot fingerprint as the two-pass histogram does.
+    Runner one_pass(SharedContext(), image, *HistogramMethod::Parse("binned"));
+    const auto histogram = PlanOperations(Mode::cube_histogram, *axes, 1, 0, 2, 0, 1).front();
+    Require(one_pass.Run(histogram, {}).has_value(), "a one-pass cube histogram failed");
+    Require(one_pass.Fingerprint() != exact, "a one-pass histogram fingerprinted as an exact one");
 
     Runner opener(ContextOptions{}, kWide, "");
     Require(opener.Run(Operation{Mode::open}, {}).has_value() && opener.image().has_value(),
@@ -409,15 +491,18 @@ void TestLayoutsFingerprintAlike(const std::string& generated) {
     const auto axes = CubeAxes::Of(plain.descriptor());
     Require(axes.has_value(), "the plain layout is not a cube");
     for (const char* layout : {"sharded", "flagged"}) {
-        Runner left(plain);
-        Runner right(OpenDefault(generated + "/" + layout));
-        for (const auto mode : {Mode::plane, Mode::spectrum, Mode::region, Mode::cube_histogram}) {
-            for (const auto& operation : Trial(mode, *axes, 3, mode == Mode::cube_histogram ? 2 : 3)) {
-                Require(left.Run(operation, {}).has_value() && right.Run(operation, {}).has_value(),
-                        std::string(layout) + ": " + ModeName(mode) + " failed at " + operation.Describe());
-                Require(left.Fingerprint() == right.Fingerprint(),
-                        std::string(layout) + " reads differently from plain: " + ModeName(mode) + " at " +
-                            operation.Describe());
+        for (const char* method : {"exact", "binned", "sampled:2"}) {
+            const auto histogram = *HistogramMethod::Parse(method);
+            Runner left(SharedContext(), plain, histogram);
+            Runner right(SharedContext(), OpenDefault(generated + "/" + layout), histogram);
+            for (const auto mode : {Mode::plane, Mode::spectrum, Mode::region, Mode::cube_histogram}) {
+                for (const auto& operation : Trial(mode, *axes, 3, mode == Mode::cube_histogram ? 2 : 3)) {
+                    const auto where = std::string(layout) + ", " + method + ": " + ModeName(mode) + " at " +
+                                       operation.Describe();
+                    Require(left.Run(operation, {}).has_value() && right.Run(operation, {}).has_value(),
+                            where + " failed");
+                    Require(left.Fingerprint() == right.Fingerprint(), where + " reads differently from plain");
+                }
             }
         }
     }
@@ -436,6 +521,8 @@ int main(int argc, char** argv) {
         TestProcessZeroReadsTheSameWhateverTheCount();
         TestPositionsDependOnTheSeedAndTheTrial();
         TestProcessesDoNotShareAPosition();
+        TestTheHistogramMethodIsSpelledAsTheBackendSpellsIt();
+        TestARegionCoversItsFraction();
         TestRunningOutOfPositionsIsSaid();
         TestACubeHistogramSplitsTheChannels();
         TestAFingerprintHasOneNaN();

@@ -47,6 +47,10 @@ Each dataset carries `bench-manifest.json`: its source, layout, striping as the 
 it, file count and compression ratio. The manifest is written last, so a dataset without one is
 unfinished. The last line on stdout is the dataset's path.
 
+- **`--layout-from-source`** takes the chunk, shard, codec and consolidation from the source rather
+  than from `--chunk`, `--shard`, `--codec` and `--no-consolidate`: the source's own layout over the
+  crop, to compare every other layout with. sweep.py calls it `current`.
+
 `ctest` checks the generator against the library when configured with
 `-DCARTA_ZARR_BUILD_BENCH=ON` and `uv` is on the path.
 
@@ -66,8 +70,14 @@ carta-zarr-bench run /lustre/scratch/zarr-bench/<dataset> --processes 8 \
 open. `run` writes one CSV row per operation; `--help` lists its options.
 
 - **Modes.** `plane` reads a whole plane at a random channel, `spectrum` every channel at a random
-  pixel, `region` reduces every statistic over a box covering 5% of the plane, `cube-histogram` bins
-  the cube, and `open` times `Context::Create`, `Dataset::Open` and `OpenImage` together.
+  pixel, `region` reduces every statistic over a box covering `--region-fraction` of the plane (5%),
+  `cube-histogram` bins the cube, and `open` times `Context::Create`, `Dataset::Open` and
+  `OpenImage` together. `--ops 8,spectrum=64` sets how many operations each makes per trial.
+- **Cube histograms** are computed as carta-backend computes them by default
+  (`--zarr_histogram_method exact`): a reduction over whole planes for the range, then every plane
+  binned over it -- two passes over the cube, through a cache pool that keeps nothing, as the
+  backend's are. `--histogram-method binned` or `sampled:N` times `ComputeCubeHistogram`'s one pass
+  instead.
 - **Positions** come from `--seed` and the trial number and the cube's shape, never its layout, so
   every layout of a cube is read at the same places. They are not aligned to chunks.
 - **Processes.** `--processes N` stands for N users, since carta-controller starts one backend per
@@ -88,8 +98,50 @@ open. `run` writes one CSV row per operation; `--help` lists its options.
   was in. `--resume` skips the trials the CSV already holds for the same settings -- the `run_key`
   column -- that finished without an error.
 - **`checksum`** fingerprints what each operation returned, taken after the clock stops: the pixels
-  for a read, and the pixel counts and extremes for a reduction or a histogram, which every layout of
-  the same pixels must agree on exactly. Sums and histogram counts are left out, because their
-  rounding follows the order the chunks were visited in.
+  for a read, the pixel counts and extremes for a reduction or a histogram, and an exact histogram's
+  counts, which every layout of the same pixels must agree on exactly. Sums are left out, because
+  their rounding follows the order the chunks were visited in, and so are a one-pass histogram's
+  counts, which depend on the thread count.
 - **`storage_read_bytes`** is what `/proc/self/io` says the operation fetched from storage, so it is
   empty off Linux.
+
+## sweep.py
+
+Runs the other two over every layout and setting worth trying, and says which to use. Copy
+[`example-sweep.toml`](example-sweep.toml), whose every field is explained, and:
+
+```sh
+./sweep.py my-sweep.toml --dry-run     # what would run, the disk it needs, and whether it can
+./sweep.py my-sweep.toml               # run it; the same command resumes it
+./sweep.py my-sweep.toml --set users.target=32 --output results-32
+```
+
+It works in four stages, each written into one `results.csv` under its own label:
+
+1. **stage1** writes each layout in turn -- the grid of `[stage1]` and the source's own, `current` --
+   measures it at the baseline settings with one user and with `users.target`, and deletes it.
+2. **stage2** takes the best layouts of stage 1, and `current`, and tries every reader setting of
+   `[stage2]` on them with the target number of users.
+3. **confirm** measures the recommended settings, their nearest rivals and the baseline with one
+   user and with `users.typical`: what choosing for the peak costs everyone else.
+4. **validate** writes the recommended layout again from `validate_crop`, larger than RAM, and checks
+   that what the smaller copy said still holds. It needs caches that can be emptied.
+
+`summary.md` opens with the settings to give carta-backend -- as flags and as `settings.json` -- for
+the data as it is, and for once it is in the recommended layout, and every warning: layouts that
+failed, cold reads that were cold on this host only, a mode the recommendation gives up, results
+that did not survive validation. The tables behind it follow.
+
+- **Choosing across modes.** Each mode is ranked on its own, by the median operation. Where one
+  choice has to serve them all -- the layouts stage 2 tries, the settings recommended -- each mode's
+  slowdown against its own best is combined in a geometric mean weighted by `[weights]`, and the
+  largest slowdown is reported beside it.
+- **The read budget** has no backend setting, so a setting with one is never recommended. The report
+  says when one would make a mode at least 10% faster, which is the case for adding the setting.
+- **Resuming.** `sweep-state.json` records each finished run, so a rerun skips it without writing its
+  layout again; a run cut short resumes from the CSV. Runs that failed are tried again.
+- **`--report-only`** rewrites `summary.md` from what there is, mid-sweep or after.
+
+The output directory, `zarr-bench-results` beside the config unless `--output` says otherwise, holds
+`results.csv`, `summary.md`, `sweep-state.json`, `config.toml` (the configuration as run, every
+default filled in), `machine.json`, and a log per stage and layout under `logs/`.

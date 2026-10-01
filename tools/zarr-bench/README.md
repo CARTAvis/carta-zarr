@@ -49,3 +49,47 @@ unfinished. The last line on stdout is the dataset's path.
 
 `ctest` checks the generator against the library when configured with
 `-DCARTA_ZARR_BUILD_BENCH=ON` and `uv` is on the path.
+
+## carta-zarr-bench
+
+Measures how fast the library reads one dataset the way CARTA reads it. Built with
+`-DCARTA_ZARR_BUILD_BENCH=ON`, as `bench/carta-zarr-bench` in the build tree; measure with a Release
+build, since a Debug one is five to seven times slower and says so on every run.
+
+```sh
+carta-zarr-bench probe /lustre/scratch/zarr-bench/<dataset>
+carta-zarr-bench run /lustre/scratch/zarr-bench/<dataset> --processes 8 \
+    --io-threads 16 --decode-threads 8 --cache-bytes 2G --csv results.csv --resume
+```
+
+`probe` prints what the library sees of a dataset as one line of JSON, and fails when it would not
+open. `run` writes one CSV row per operation; `--help` lists its options.
+
+- **Modes.** `plane` reads a whole plane at a random channel, `spectrum` every channel at a random
+  pixel, `region` reduces every statistic over a box covering 5% of the plane, `cube-histogram` bins
+  the cube, and `open` times `Context::Create`, `Dataset::Open` and `OpenImage` together.
+- **Positions** come from `--seed` and the trial number and the cube's shape, never its layout, so
+  every layout of a cube is read at the same places. They are not aligned to chunks.
+- **Processes.** `--processes N` stands for N users, since carta-controller starts one backend per
+  user: N processes, each with its own context, released together. They read different positions;
+  a cube histogram splits the channels between them. When there are not enough positions to go
+  round, the rows that share one say `overlap`.
+- **Trials.** Each trial empties the caches, then forks fresh processes, so no trial inherits a cache
+  or a thread pool from the one before. Within a trial a process keeps its context, as a backend
+  would: later operations may find chunks an earlier one decoded, and an `open` after the first
+  finds the metadata in the page cache.
+- **Cold reads.** `--cold auto` uses `--drop-cache-cmd` when given, then `drop_caches` as root, then
+  `posix_fadvise` on every file of the dataset. Only the command can reach a parallel filesystem's
+  servers; the other two empty this host's page cache alone, and `cold_method` says which was used.
+  On macOS only the command is available.
+- **Deadline.** `--trial-timeout` becomes each read's `ReadControl::deadline`. An operation it stops,
+  and any not yet started, is a `timeout` row; a process still running 30 s past it is killed.
+- **Resuming.** Rows are written a trial at a time, so an interrupted run loses at most the trial it
+  was in. `--resume` skips the trials the CSV already holds for the same settings -- the `run_key`
+  column -- that finished without an error.
+- **`checksum`** fingerprints what each operation returned, taken after the clock stops: the pixels
+  for a read, and the pixel counts and extremes for a reduction or a histogram, which every layout of
+  the same pixels must agree on exactly. Sums and histogram counts are left out, because their
+  rounding follows the order the chunks were visited in.
+- **`storage_read_bytes`** is what `/proc/self/io` says the operation fetched from storage, so it is
+  empty off Linux.

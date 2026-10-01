@@ -65,8 +65,15 @@ inline constexpr std::size_t kSpectralEmitBudgetBytes = 64u << 20;
 // rows of a plane, a cube histogram splits rows across the planes of a read, and a spectral
 // reduction splits chunk cells. PlanRowTasks multiplies out to pixels before it divides, so all
 // three are asking the same question of the same number.
+//
+// It was 65,536, which split a 512 x 512 plane into four tasks however many cores there were. Measured
+// on the 512x512x7776 ASKAP cube, warm, one user: at 16,384 the backend's exact cube histogram, which
+// bins plane by plane, took 4.91 s against 5.50 s on a 28-core desktop and 5.15 s against 6.24 s on a
+// 32-thread two-socket server; at 262,144 it took 6.99 s and 10.52 s. With eight users at once every
+// value tried, 4,096 to 1,048,576, was within 6% on both, and regions within 3%. 4,096 gained a few
+// percent more on both, which is less than it risks for a small read on a slower dispatch. ADR 0014.
 #ifndef CARTA_ZARR_TUNING_LEAST_PIXELS_PER_TASK
-#define CARTA_ZARR_TUNING_LEAST_PIXELS_PER_TASK (1u << 16)
+#define CARTA_ZARR_TUNING_LEAST_PIXELS_PER_TASK (1u << 14)
 #endif
 inline constexpr std::uint64_t kLeastPixelsPerTask = CARTA_ZARR_TUNING_LEAST_PIXELS_PER_TASK;
 static_assert(kLeastPixelsPerTask > 0, "CARTA_ZARR_TUNING_LEAST_PIXELS_PER_TASK must be positive");

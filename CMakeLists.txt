@@ -544,13 +544,24 @@ if(CARTA_ZARR_BUILD_TESTS AND BUILD_TESTING)
                 LIBRARIES nlohmann_json::nlohmann_json
                 DEFINITIONS
                     CARTA_ZARR_GENERATED_DIR="${CARTA_ZARR_GENERATED_DIR}"
-                    CARTA_ZARR_PIXEL_FIXTURE="${CARTA_ZARR_FIXTURE_DIR}/xradio/pixels")
+                    CARTA_ZARR_PIXEL_FIXTURE="${CARTA_ZARR_FIXTURE_DIR}/xradio/pixels"
+                    ${CARTA_ZARR_WIDE_FIXTURE})
             set_tests_properties(carta-zarr-bench-generator PROPERTIES FIXTURES_REQUIRED bench-generated)
 
             # The generator's layouts of one cube, fingerprinted alike by the bench at every position.
             add_test(NAME carta-zarr-bench-layouts
                 COMMAND carta_zarr_bench_tests layouts ${CARTA_ZARR_GENERATED_DIR})
             set_tests_properties(carta-zarr-bench-layouts PROPERTIES FIXTURES_REQUIRED bench-generated)
+
+            # The whole sweep -- generate, bench, rank, report, resume -- on a committed fixture.
+            add_test(
+                NAME carta-zarr-bench-sweep
+                COMMAND ${CMAKE_COMMAND}
+                    -DUV=${CARTA_ZARR_UV}
+                    -DBENCH=$<TARGET_FILE:carta_zarr_bench>
+                    -DSOURCE_DIR=${CMAKE_CURRENT_SOURCE_DIR}
+                    -DOUTPUT_DIR=${CMAKE_CURRENT_BINARY_DIR}/bench-sweep
+                    -P ${CMAKE_CURRENT_SOURCE_DIR}/tests/run_bench_sweep.cmake)
         else()
             message(STATUS "uv was not found; the zarr-bench generator tests are skipped")
         endif()

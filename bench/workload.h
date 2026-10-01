@@ -68,20 +68,28 @@ struct Operation {
 //
 // cube-histogram is the exception, since its operation covers the plane: process p takes the p-th of
 // `processes` contiguous runs of channels, and each operation a polarization of its own.
+//
+// A region box covers `region_fraction` of the plane, square in pixels' proportion to the plane, and
+// sits in a cell of a grid of as many such boxes as fit along each side.
 std::vector<Operation> PlanOperations(Mode mode, const CubeAxes& axes, std::uint64_t seed, unsigned trial,
-                                      unsigned processes, unsigned process_index, unsigned ops);
+                                      unsigned processes, unsigned process_index, unsigned ops,
+                                      double region_fraction = 0.05);
 
 // Runs operations against one image and remembers enough of the last result to fingerprint it.
 //
 // The fingerprint is taken after the clock stops, and only of what every layout of the same pixels
 // must agree on exactly: the pixels a read returns, with every NaN one NaN; and for a reduction or a
 // histogram the pixel counts and extremes, which are exact, but not sums, whose rounding depends on
-// the order the chunks were visited in, nor histogram counts, which ComputeCubeHistogram says depend
-// on the thread count.
+// the order the chunks were visited in. An exact histogram's counts are in it too, since binning
+// over fixed bounds is exact; a one-pass histogram's are not, since ComputeCubeHistogram says they
+// depend on the thread count.
+//
+// A cube histogram reads through a cache pool that keeps nothing, as carta-backend's cube walks do,
+// so that a scan of the whole cube neither fills nor finds the context's cache.
 class Runner {
 public:
     // For every mode but open, which brings its own context and image to each operation.
-    explicit Runner(Image image);
+    Runner(const Context& context, Image image, HistogramMethod histogram = {});
     // For open.
     Runner(ContextOptions context, std::string dataset, std::string image_id);
 
@@ -99,10 +107,13 @@ private:
     Result<std::uint64_t> Read(const Operation& operation, const ReadOptions& options);
     Result<std::uint64_t> Reduce(const Operation& operation, const ReadOptions& options);
     Result<std::uint64_t> Histogram(const Operation& operation, const ReadOptions& options);
+    Result<std::uint64_t> ExactHistogram(const Operation& operation, const ReadOptions& options);
     Result<std::uint64_t> Open();
 
     std::optional<Image> _image;
     std::optional<CubeAxes> _axes;
+    HistogramMethod _histogram;
+    std::optional<CachePool> _keeping_nothing;
     ContextOptions _context;
     std::string _dataset;
     std::string _image_id;
@@ -111,6 +122,7 @@ private:
     std::size_t _pixel_count = 0;
     // The exact statistics of a reduction or a cube histogram, in order.
     std::vector<double> _exact;
+    std::vector<std::uint64_t> _counts;
 };
 
 // FNV-1a over a run of values, with every NaN hashed as the one quiet NaN.

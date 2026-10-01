@@ -86,6 +86,8 @@ const std::vector<Column>& Columns() {
         {"read_budget_bytes", [](const Row& r) { return std::to_string(r.read_budget_bytes); }},
         {"seed", [](const Row& r) { return std::to_string(r.seed); }},
         {"ops", [](const Row& r) { return std::to_string(r.ops); }},
+        {"region_fraction", [](const Row& r) { return r.region_fraction; }},
+        {"histogram_method", [](const Row& r) { return r.histogram_method; }},
         {"trial_timeout_s", [](const Row& r) { return std::to_string(r.trial_timeout_s); }},
         {"cold_method", [](const Row& r) { return r.cold_method; }},
         {"cold_ok", [](const Row& r) { return Bool(r.cold_ok); }},
@@ -227,6 +229,14 @@ Row RowTemplate(const RunOptions& options, Mode mode, ColdMethod cold, const Dat
     row.read_budget_bytes = options.read_budget_bytes;
     row.seed = options.seed;
     row.ops = options.OpsFor(mode);
+    if (mode == Mode::region) {
+        std::array<char, 32> fraction{};
+        std::snprintf(fraction.data(), fraction.size(), "%.4f", options.region_fraction);
+        row.region_fraction = fraction.data();
+    }
+    if (mode == Mode::cube_histogram) {
+        row.histogram_method = options.histogram.Spell();
+    }
     row.trial_timeout_s = options.trial_timeout.count();
     row.cold_method = ColdMethodName(cold);
 
@@ -241,8 +251,8 @@ Row RowTemplate(const RunOptions& options, Mode mode, ColdMethod cold, const Dat
     for (const auto& part :
          {identity, options.image_id, row.mode, std::to_string(row.processes), std::to_string(row.io_threads),
           std::to_string(row.decode_threads), row.cache_bytes, std::to_string(row.read_budget_bytes),
-          std::to_string(row.seed), std::to_string(row.ops), std::to_string(row.trial_timeout_s), row.cold_method,
-          row.label}) {
+          std::to_string(row.seed), std::to_string(row.ops), row.region_fraction, row.histogram_method,
+          std::to_string(row.trial_timeout_s), row.cold_method, row.label}) {
         key += '|';
         key += part;
     }

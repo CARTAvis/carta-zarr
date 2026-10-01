@@ -100,12 +100,11 @@ std::uint32_t AutomaticBins(const CubeAxes& axes) {
     return static_cast<std::uint32_t>(std::max(bins, 2.0));
 }
 
-// One side of a box covering 5% of the plane, inside a cell of a 4 x 4 grid. sqrt(0.05) of each side
-// is 0.2236 of it and a cell is 0.25, so a box fits a cell with room to move.
-constexpr double kRegionSide = 0.22360679774997896;
-
-std::uint64_t GridCells(std::uint64_t length) {
-    return length >= 4 ? 4 : 1;
+// How many boxes of `side` (a share of the axis) fit along an axis of `length` pixels: at 5% of the
+// plane a side is 0.2236 of the axis, so four, each in a cell of 0.25 with room to move.
+std::uint64_t GridCells(std::uint64_t length, double side) {
+    const auto cells = static_cast<std::uint64_t>(std::floor(1.0 / side));
+    return std::clamp<std::uint64_t>(cells, 1, std::max<std::uint64_t>(length, 1));
 }
 
 }  // namespace
@@ -154,7 +153,8 @@ std::string Operation::Describe() const {
 }
 
 std::vector<Operation> PlanOperations(Mode mode, const CubeAxes& axes, std::uint64_t seed, unsigned trial,
-                                      unsigned processes, unsigned process_index, unsigned ops) {
+                                      unsigned processes, unsigned process_index, unsigned ops,
+                                      double region_fraction) {
     std::vector<Operation> operations(ops);
     for (auto& operation : operations) {
         operation.mode = mode;
@@ -191,6 +191,10 @@ std::vector<Operation> PlanOperations(Mode mode, const CubeAxes& axes, std::uint
         return operations;
     }
 
+    const double side = std::sqrt(region_fraction);
+    const auto cells_x = GridCells(axes.width, side);
+    const auto cells_y = GridCells(axes.height, side);
+
     std::uint64_t pool = 0;
     switch (mode) {
         case Mode::plane:
@@ -200,7 +204,7 @@ std::vector<Operation> PlanOperations(Mode mode, const CubeAxes& axes, std::uint
             pool = axes.width * axes.height;
             break;
         case Mode::region:
-            pool = GridCells(axes.width) * GridCells(axes.height);
+            pool = cells_x * cells_y;
             break;
         default:
             break;
@@ -209,14 +213,12 @@ std::vector<Operation> PlanOperations(Mode mode, const CubeAxes& axes, std::uint
 
     // The details are drawn for every operation of the trial in order, including other processes',
     // so that each process's are the same whatever process it is.
-    const auto cells_x = GridCells(axes.width);
-    const auto cells_y = GridCells(axes.height);
     const auto cell_width = axes.width / cells_x;
     const auto cell_height = axes.height / cells_y;
     const auto box_width =
-        std::clamp<std::uint64_t>(std::llround(kRegionSide * static_cast<double>(axes.width)), 1, cell_width);
+        std::clamp<std::uint64_t>(std::llround(side * static_cast<double>(axes.width)), 1, cell_width);
     const auto box_height =
-        std::clamp<std::uint64_t>(std::llround(kRegionSide * static_cast<double>(axes.height)), 1, cell_height);
+        std::clamp<std::uint64_t>(std::llround(side * static_cast<double>(axes.height)), 1, cell_height);
 
     for (std::uint64_t index = 0; index < total; ++index) {
         const auto& draw = draws[index];
@@ -251,7 +253,11 @@ std::vector<Operation> PlanOperations(Mode mode, const CubeAxes& axes, std::uint
     return operations;
 }
 
-Runner::Runner(Image image) : _image(std::move(image)) {
+Runner::Runner(const Context& context, Image image, HistogramMethod histogram)
+    : _image(std::move(image)), _histogram(histogram) {
+    if (auto pool = context.NewCachePool(0)) {
+        _keeping_nothing = *pool;
+    }
     if (auto axes = CubeAxes::Of(_image->descriptor())) {
         _axes = *axes;
         // Sized here so that no operation pays for growing it.
@@ -266,6 +272,7 @@ Runner::Runner(ContextOptions context, std::string dataset, std::string image_id
 Result<std::uint64_t> Runner::Run(const Operation& operation, const ReadOptions& options) {
     _pixel_count = 0;
     _exact.clear();
+    _counts.clear();
     if (operation.mode == Mode::open) {
         return Open();
     }
@@ -338,18 +345,85 @@ Result<std::uint64_t> Runner::Reduce(const Operation& operation, const ReadOptio
     return operation.width * operation.height * axes.channels;
 }
 
-Result<std::uint64_t> Runner::Histogram(const Operation& operation, const ReadOptions& options) {
+Result<std::uint64_t> Runner::Histogram(const Operation& operation, const ReadOptions& passed) {
+    auto options = passed;
+    options.control.cache_pool = _keeping_nothing;
+    if (_histogram.kind == HistogramMethod::Kind::exact) {
+        return ExactHistogram(operation, options);
+    }
     const auto& axes = *_axes;
     CubeHistogramRequest request;
     request.planes.spectral = Range{operation.channel, operation.channel_count, 1};
     request.planes.polarization = operation.polarization;
     request.bins = AutomaticBins(axes);
+    request.spatial_sample = _histogram.kind == HistogramMethod::Kind::sampled ? _histogram.stride : 1;
     auto histogram = _image->ComputeCubeHistogram(request, options);
     if (!histogram) {
         return std::move(histogram).error();
     }
     const auto& totals = histogram->totals;
     _exact = {totals.num_pixels, totals.nan_count, totals.min, totals.max};
+    return axes.width * axes.height * operation.channel_count;
+}
+
+// As carta-backend computes a cube histogram by default: a reduction over whole planes for the
+// cube's range, then every plane binned over it and the planes added together.
+Result<std::uint64_t> Runner::ExactHistogram(const Operation& operation, const ReadOptions& options) {
+    const auto& axes = *_axes;
+    const RegionMask plane{0, 0, axes.width, axes.height, {}};
+    SpectralReduceRequest range;
+    range.planes.spectral = Range{operation.channel, operation.channel_count, 1};
+    range.planes.polarization = operation.polarization;
+    range.regions = {&plane, 1};
+    range.statistics =
+        Statistic::num_pixels | Statistic::sum | Statistic::sum_sq | Statistic::min | Statistic::max;
+
+    double pixels = 0.0;
+    double lowest = std::numeric_limits<double>::quiet_NaN();
+    double highest = std::numeric_limits<double>::quiet_NaN();
+    const auto extremes = [&](const SpectralBlock& block) {
+        if (!block.complete) {
+            return true;
+        }
+        for (std::uint64_t channel = 0; channel < block.channel_count; ++channel) {
+            const auto totals = block.Totals(0, channel);
+            pixels += totals.num_pixels;
+            // fmin and fmax pass over NaN, which is what a plane with nothing finite reports.
+            lowest = std::fmin(lowest, totals.min);
+            highest = std::fmax(highest, totals.max);
+        }
+        return true;
+    };
+    if (auto reduced = _image->ReduceSpectral(range, extremes, options); !reduced) {
+        return std::move(reduced).error();
+    }
+    _exact = {pixels, lowest, highest};
+
+    // The backend declines an empty or inverted range, and so does this: there is nothing to bin.
+    if (lowest < highest) {
+        HistogramRequest bins;
+        bins.planes = range.planes;
+        bins.bins = AutomaticBins(axes);
+        bins.lower = lowest;
+        bins.upper = highest;
+        _counts.assign(bins.bins, 0);
+        const auto add = [this](const HistogramBlock& block) {
+            if (!block.complete) {
+                return true;
+            }
+            for (std::uint64_t channel = 0; channel < block.channel_count; ++channel) {
+                const auto* counts = block.Counts(channel);
+                for (std::size_t bin = 0; bin < block.bin_count; ++bin) {
+                    _counts[bin] += counts[bin];
+                }
+            }
+            return true;
+        };
+        if (auto binned = _image->ComputeHistogram(bins, add, options); !binned) {
+            _counts.clear();
+            return std::move(binned).error();
+        }
+    }
     return axes.width * axes.height * operation.channel_count;
 }
 
@@ -384,7 +458,11 @@ std::uint64_t Runner::Fingerprint() const {
     if (_pixel_count > 0) {
         return bench::Fingerprint(_pixels.data(), _pixel_count);
     }
-    return bench::Fingerprint(_exact.data(), _exact.size());
+    auto hash = bench::Fingerprint(_exact.data(), _exact.size());
+    for (const auto count : _counts) {
+        Mix(hash, count, sizeof(count));
+    }
+    return hash;
 }
 
 std::uint64_t Fingerprint(const float* values, std::size_t count) {

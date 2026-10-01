@@ -14,6 +14,7 @@
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
+#include <map>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -49,14 +50,36 @@ enum class ColdMethod {
 const char* ColdMethodName(ColdMethod method) noexcept;
 std::optional<ColdMethod> ParseColdMethod(std::string_view name) noexcept;
 
+// How a cube histogram is computed, as carta-backend's --zarr_histogram_method names the choices.
+//
+// exact is the backend's default, and so the bench's: two passes, ReduceSpectral over whole planes
+// for the range and then ComputeHistogram over it, reading the cube twice. binned and sampled are
+// ComputeCubeHistogram's one pass, measured for reference rather than recommended -- they move where
+// the bin edges land, which is a question of accuracy and not one a timing can settle.
+struct HistogramMethod {
+    enum class Kind { exact, binned, sampled };
+    Kind kind = Kind::exact;
+    // Every nth pixel along both spatial axes, for sampled.
+    std::uint64_t stride = 1;
+
+    // As the backend spells it: exact, binned, or sampled:N.
+    std::string Spell() const;
+    static std::optional<HistogramMethod> Parse(std::string_view text) noexcept;
+};
+
 struct RunOptions {
     std::string dataset;
     // Empty for the dataset's default image.
     std::string image_id;
     std::vector<Mode> modes;
     unsigned trials = 5;
-    // Operations per process per trial; DefaultOps when unset.
+    // Operations per process per trial: a mode's own count, then the one for every mode, then
+    // DefaultOps.
     std::optional<unsigned> ops;
+    std::map<Mode, unsigned> mode_ops;
+    // The share of the plane one region box covers.
+    double region_fraction = 0.05;
+    HistogramMethod histogram;
     std::uint64_t seed = 1;
     ContextOptions context;
     std::size_t read_budget_bytes = 0;
@@ -71,6 +94,9 @@ struct RunOptions {
     bool resume = false;
 
     unsigned OpsFor(Mode mode) const noexcept {
+        if (const auto own = mode_ops.find(mode); own != mode_ops.end()) {
+            return own->second;
+        }
         return ops.value_or(DefaultOps(mode));
     }
 };

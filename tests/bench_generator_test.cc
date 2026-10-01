@@ -162,6 +162,33 @@ void TestARewriteIsTheWindowItWasCutFrom() {
     Require(SameBits(expected, ReadAll(rewritten)), "the rewrite is not the window it was cut from");
 }
 
+// The source's own layout, taken by --layout-from-source: the fixture's chunks and codec, and its
+// pixels over the crop.
+void TestTheSourcesOwnLayoutIsTheSources() {
+    const auto original = OpenDefault(CARTA_ZARR_PIXEL_FIXTURE_WIDE);
+    const auto current = OpenDefault(kGenerated + "/current");
+    RequireGeometryMatches(kGenerated + "/current", current);
+    Require(current.chunk_geometry().chunk_shape == original.chunk_geometry().chunk_shape,
+            "the source's own layout is not chunked as the source is");
+    Require(current.chunk_geometry().compressor == original.chunk_geometry().compressor &&
+                Manifest(kGenerated + "/current").at("layout").at("codec") == "zstd:9",
+            "the source's own layout is not compressed as the source is");
+
+    const auto& axes = original.descriptor().axes;
+    carta::zarr::ReadRequest window;
+    std::size_t elements = 1;
+    for (const auto& axis : axes) {
+        window.axes.push_back({0, axis.length, 1});
+    }
+    window.axes.at(*carta::zarr::AxisIndex(axes, AxisRole::spectral)) = {1, 2, 1};
+    for (const auto& range : window.axes) {
+        elements *= range.count;
+    }
+    std::vector<float> expected(elements);
+    Require(original.Read(window, {expected.data(), expected.size()}).has_value(), "the fixture's window did not read");
+    Require(SameBits(expected, ReadAll(current)), "the source's own layout is not the window it was cut from");
+}
+
 }  // namespace
 
 int main() {
@@ -169,6 +196,7 @@ int main() {
         TestLayoutsHoldTheSamePixels();
         TestAFlagMasksWhatNaNWouldHave();
         TestARewriteIsTheWindowItWasCutFrom();
+        TestTheSourcesOwnLayoutIsTheSources();
     } catch (const std::exception& error) {
         std::cerr << "bench generator: " << error.what() << '\n';
         return 1;

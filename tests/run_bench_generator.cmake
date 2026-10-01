@@ -1,8 +1,8 @@
 # Writes the datasets tests/bench_generator_test.cc reads, with tools/zarr-bench/generate.py.
 #
 # Three synthetic cubes of one seed in three layouts -- plain zstd chunks; blosc in shards, without
-# consolidated metadata; and a flag variable where the others write NaN -- and one rewrite of a
-# committed fixture, cropped. The test reads them back and checks that the layouts hold the same
+# consolidated metadata; and a flag variable where the others write NaN -- and two rewrites of a
+# committed fixture, cropped: one in a layout of its own, one in the fixture's. The test reads them back and checks that the layouts hold the same
 # pixels, which is the property every comparison between layouts rests on.
 
 if(NOT DEFINED UV OR NOT DEFINED SOURCE_DIR OR NOT DEFINED OUTPUT_DIR)
@@ -30,3 +30,5 @@ generate(sharded --synthetic --shape ${shape} --chunk l=32,m=128,frequency=2,pol
 generate(flagged --synthetic --shape ${shape} --chunk l=64,m=64,frequency=4 --flag)
 generate(rewritten --source "${SOURCE_DIR}/tests/data/images/zarr/xradio/pixels" --crop l=1:4
          --chunk l=3,m=2,frequency=2 --codec gzip:1)
+generate(current --source "${SOURCE_DIR}/tests/data/images/zarr/xradio/pixels_wide" --crop frequency=1:3
+         --layout-from-source)

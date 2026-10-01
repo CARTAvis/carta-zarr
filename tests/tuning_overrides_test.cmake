@@ -1,6 +1,9 @@
 # cmake/TuningOverrides.cmake: which overrides a configure accepts, the definitions they become, and
 # the description carta-zarr-bench writes into every row of a build made with them.
 
+# A script sets no policies of its own, and before CMake 4 IN_LIST needs one.
+cmake_minimum_required(VERSION 3.24)
+
 if(NOT DEFINED SOURCE_DIR)
     message(FATAL_ERROR "SOURCE_DIR must be set")
 endif()
@@ -29,7 +32,8 @@ foreach(bad "PROVISIONAL_BINS_PER_BIN=8" "LEAST_PIXELS_PER_TASK=0" "LEAST_PIXELS
     # "|" separates the entries of one list, which set() in the script makes a list of.
     string(REPLACE "|" "\" \"" entries "${bad}")
     set(script "${CMAKE_CURRENT_BINARY_DIR}/tuning_overrides_refused.cmake")
-    file(WRITE "${script}" "include(\"${SOURCE_DIR}/cmake/TuningOverrides.cmake\")\n"
+    file(WRITE "${script}" "cmake_minimum_required(VERSION 3.24)\n"
+                           "include(\"${SOURCE_DIR}/cmake/TuningOverrides.cmake\")\n"
                            "set(overrides \"${entries}\")\n"
                            "carta_zarr_tuning_definitions(\"\${overrides}\" d s)\n")
     execute_process(COMMAND "${CMAKE_COMMAND}" -P "${script}" RESULT_VARIABLE result OUTPUT_QUIET

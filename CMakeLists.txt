@@ -140,6 +140,10 @@ install(FILES
     "${CMAKE_CURRENT_BINARY_DIR}/CartaZarrConfigVersion.cmake"
     DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/CartaZarr")
 
+if(CARTA_ZARR_BUILD_BENCH)
+    add_subdirectory(bench)
+endif()
+
 include(CTest)
 if(CARTA_ZARR_BUILD_TESTS AND BUILD_TESTING)
     find_package(Threads REQUIRED)
@@ -507,6 +511,21 @@ if(CARTA_ZARR_BUILD_TESTS AND BUILD_TESTING)
       Without uv there is nothing to run them with, which is a reason to skip them rather than fail.
     ]]
     if(CARTA_ZARR_BUILD_BENCH)
+        # carta-zarr-bench below its command line -- where it reads, what it writes, and what it reads
+        # there -- and then the executable itself, run as the sweep runs it. Neither needs uv.
+        carta_zarr_add_test(carta_zarr_bench_tests PUBLIC
+            TEST_NAME carta-zarr-bench
+            SOURCES tests/bench_test.cc
+            LIBRARIES carta_zarr_bench_core
+            DEFINITIONS ${CARTA_ZARR_WIDE_FIXTURE})
+        add_test(
+            NAME carta-zarr-bench-run
+            COMMAND ${CMAKE_COMMAND}
+                -DBENCH=$<TARGET_FILE:carta_zarr_bench>
+                -DFIXTURE=${CARTA_ZARR_FIXTURE_DIR}/xradio/pixels_wide
+                -DOUTPUT_DIR=${CMAKE_CURRENT_BINARY_DIR}/bench-run
+                -P ${CMAKE_CURRENT_SOURCE_DIR}/tests/run_bench_smoke.cmake)
+
         find_program(CARTA_ZARR_UV uv)
         if(CARTA_ZARR_UV)
             set(CARTA_ZARR_GENERATED_DIR "${CMAKE_CURRENT_BINARY_DIR}/bench-generated")
@@ -527,6 +546,11 @@ if(CARTA_ZARR_BUILD_TESTS AND BUILD_TESTING)
                     CARTA_ZARR_GENERATED_DIR="${CARTA_ZARR_GENERATED_DIR}"
                     CARTA_ZARR_PIXEL_FIXTURE="${CARTA_ZARR_FIXTURE_DIR}/xradio/pixels")
             set_tests_properties(carta-zarr-bench-generator PROPERTIES FIXTURES_REQUIRED bench-generated)
+
+            # The generator's layouts of one cube, fingerprinted alike by the bench at every position.
+            add_test(NAME carta-zarr-bench-layouts
+                COMMAND carta_zarr_bench_tests layouts ${CARTA_ZARR_GENERATED_DIR})
+            set_tests_properties(carta-zarr-bench-layouts PROPERTIES FIXTURES_REQUIRED bench-generated)
         else()
             message(STATUS "uv was not found; the zarr-bench generator tests are skipped")
         endif()

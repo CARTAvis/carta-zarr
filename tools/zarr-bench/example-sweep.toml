@@ -50,7 +50,9 @@ trial_timeout = 600
 seed = 1
 # How caches are emptied before each trial: auto, command, drop-caches, fadvise or off. Only a
 # command can empty a parallel filesystem's servers; without one, the report says reads were cold
-# on this host only.
+# on this host only. On Lustre, without root, drop-lustre-cache.py empties both this client's cache
+# and the servers': drop_cache_cmd = "/opt/carta-zarr/tools/zarr-bench/drop-lustre-cache.py
+# /lustre/scratch/zarr-bench" (paths.work, which holds one dataset at a time).
 cold = "auto"
 drop_cache_cmd = ""
 # Operations per user per trial, by mode, when the defaults (plane 16, animation 2, spectrum 32,

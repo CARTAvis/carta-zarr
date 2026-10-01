@@ -77,9 +77,9 @@ among them without opening any.
   from. No public entry point throws: a malformed value in the metadata or a length no allocator can
   serve is reported as an error like any other. `Result` is `[[nodiscard]]` and reads like
   `std::expected`: `has_value`, `value`, `value_or`, `*`, `->` and `error`.
-- **A handle always refers to something.** `Context`, `Dataset` and `Image` come only from their
-  factories, and moving one copies it, so the handle moved from still works. A consumer that fills
-  one in later holds a `std::optional` of it.
+- **A handle always refers to something.** `Context`, `Dataset`, `Image` and `CachePool` come only
+  from their factories, and moving one copies it, so the handle moved from still works. A consumer
+  that fills one in later holds a `std::optional` of it.
 - **Axes are found by role, not by position.** A descriptor lists an image's axes in a logical order
   that its schema profile chooses, and a request's ranges follow it; `AxisIndex(axes, role)` finds
   one. The XRADIO profile's order is `l`, `m`, `frequency`, `polarization`, `time`, whatever order
@@ -93,8 +93,9 @@ among them without opening any.
   that off. A declared mask must be boolean and carry the image's own dimensions in order, or the
   image does not open.
 - **Reads are cancellable.** `ReadOptions::control` carries a cancellation callback, a deadline and
-  a cache policy, which every read and reduction honours; `ReadOptions` adds a ceiling on the
-  temporary memory a request may hold. Progress is an argument of `Image::Read` and of
+  the cache pool the read keeps what it decodes in -- the context's shared one unless it brings its
+  own from `Context::NewCachePool` -- which every read and reduction honours; `ReadOptions` adds a
+  ceiling on the temporary memory a request may hold. Progress is an argument of `Image::Read` and of
   `Image::ComputeCubeHistogram`, and a reduction's arrives with its blocks; a request is only ever
   data.
 - **Threading**: `Context`, `Dataset` and `Image` handles may be shared and read from several

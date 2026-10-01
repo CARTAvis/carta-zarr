@@ -137,11 +137,11 @@ Result<void> ReadInto(const std::filesystem::path& array_path, const StoreContex
     try {
         // Reused across calls. A slice read happens once per casacore cursor step, so opening here
         // would make a fixed cost a per-call one.
-        // A read that says it should not pollute the shared cache runs against a child context
-        // whose pool holds nothing. Chosen here rather than by the caller because this is where the
-        // array handle is taken, and a handle carries the pool it was opened against.
-        const StoreContextPtr pool =
-            control.cache_policy == CachePolicy::bypass ? context->WithoutCache() : context;
+        // A read with a pool of its own runs against that pool's context rather than the session's.
+        // Chosen here rather than by the caller because this is where the array handle is taken,
+        // and a handle carries the pool it was opened against.
+        const StoreContextPtr& pool =
+            control.cache_pool ? CachePoolAccess::StoreContextOf(*control.cache_pool) : context;
         auto opened = pool->OpenArray(array_path, node);
         if (!opened) {
             return opened.error();

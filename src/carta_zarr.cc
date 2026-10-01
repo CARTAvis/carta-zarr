@@ -110,6 +110,20 @@ Result<Context> Context::Create(const ContextOptions& options) {
     });
 }
 
+Result<CachePool> Context::NewCachePool(std::size_t bytes) const {
+    auto store_context = _impl->store_context->WithCachePool(bytes);
+    if (!store_context) {
+        return store_context.error();
+    }
+    return CachePool{std::make_shared<const CachePool::Impl>(bytes, std::move(store_context.value()))};
+}
+
+CachePool::CachePool(std::shared_ptr<const Impl> impl) : _impl(std::move(impl)) {}
+
+std::size_t CachePool::bytes() const noexcept {
+    return _impl->bytes;
+}
+
 class Image::Impl {
 public:
     Impl(std::shared_ptr<Context::Impl> context, std::string location, internal::SchemaProfile profile,

@@ -821,7 +821,8 @@ void TestShardedStorageLayout(const std::filesystem::path& root) {
 void TestAHandleMovedFromStillWorks() {
     static_assert(std::is_nothrow_move_constructible_v<carta::zarr::Context> &&
                       std::is_nothrow_move_constructible_v<carta::zarr::Dataset> &&
-                      std::is_nothrow_move_constructible_v<carta::zarr::Image>,
+                      std::is_nothrow_move_constructible_v<carta::zarr::Image> &&
+                      std::is_nothrow_move_constructible_v<carta::zarr::CachePool>,
                   "a handle must move without throwing, so that a vector of them relocates by moving");
     const std::filesystem::path root(CARTA_ZARR_REFERENCE_FIXTURE);
 
@@ -852,6 +853,20 @@ void TestAHandleMovedFromStillWorks() {
     Require(read && *read == 1,
             "an image moved from did not read" + (read ? std::string{} : ": " + read.error().message));
     Require(static_cast<bool>(moved_image.Read(request, {&pixel, 1})), "an image moved to did not read");
+
+    auto pool = context->NewCachePool(std::size_t{1} << 20);
+    Require(static_cast<bool>(pool), "NewCachePool failed");
+    const carta::zarr::CachePool moved_pool = std::move(*pool);
+    Require(pool->bytes() == (std::size_t{1} << 20), "a pool moved from forgot its size");
+    carta::zarr::ReadOptions through_moved_from;
+    through_moved_from.control.cache_pool = *pool;
+    const auto pooled = image->Read(request, {&pixel, 1}, through_moved_from);
+    Require(pooled && *pooled == 1,
+            "a read through a pool moved from failed" + (pooled ? std::string{} : ": " + pooled.error().message));
+    carta::zarr::ReadOptions through_moved_to;
+    through_moved_to.control.cache_pool = moved_pool;
+    Require(static_cast<bool>(image->Read(request, {&pixel, 1}, through_moved_to)),
+            "a read through a pool moved to failed");
 }
 
 // What the listing says about an image is what opening it says. A consumer deciding from the listing

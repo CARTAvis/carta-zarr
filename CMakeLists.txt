@@ -286,6 +286,18 @@ if(CARTA_ZARR_BUILD_TESTS AND BUILD_TESTING)
         SOURCES tests/transport_test.cc src/zarr/transport.cc
         LIBRARIES nlohmann_json::nlohmann_json)
 
+    # What a pool of its own is made of: its size, whose threads it runs on, and whether anything keeps
+    # it. Compiled on its own because a consumer reading through one cannot see any of the three --
+    # the pixels are the same whatever the pool.
+    carta_zarr_add_test(carta_zarr_store_context_tests INTERNAL
+        TEST_NAME carta-zarr-store-context
+        SOURCES tests/store_context_test.cc src/zarr/store_context.cc
+        LIBRARIES
+            nlohmann_json::nlohmann_json
+            tensorstore::tensorstore
+            tensorstore::driver_zarr3
+            tensorstore::kvstore_file)
+
     # The worker pool and the rule that decides whether to wake it. Compiled on its own because the
     # reductions' own fixtures are far smaller than the split's threshold, so the parallel path is
     # unreachable from there -- see the comment at the top of the test.

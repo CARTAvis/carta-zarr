@@ -174,3 +174,11 @@ more than one element of. A read is always made of pieces; an unsplit one is a s
 everything. Cutting there and nowhere else is what keeps the finished part of the destination a
 prefix rather than a scatter, which is what lets a caller be told how far along it is, or stop it.
 _Avoid_: block, slab, chunk, batch
+
+**Cache pool**:
+Where a read keeps the chunks it decodes, for a later read to find instead of decoding them again.
+A context shares one among every read made through it, which holds what is being looked at; a read
+may bring one of its own instead -- of nothing, for a scan that will not come back to a chunk, or of
+as much as a walk will come back for, held only as long as the walk. A chunk is decoded whole, so
+a read that needs any of it keeps all of it.
+_Avoid_: tile cache, chunk cache policy, bypass

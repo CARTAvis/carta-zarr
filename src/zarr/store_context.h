@@ -25,7 +25,7 @@ namespace carta::zarr::internal {
 // are cloned into a per-Store context, so this object retains only shared TensorStore resources.
 // Only translation units that talk to TensorStore include this header; store.h forward declares the
 // type so that the schema layer never sees TensorStore.
-class StoreContext : public std::enable_shared_from_this<StoreContext> {
+class StoreContext {
 public:
     explicit StoreContext(tensorstore::Context context) : context(std::move(context)) {}
 
@@ -48,25 +48,54 @@ public:
                                                  std::string_view node) const;
 
     /**
-     * The same resources with a cache pool of zero bytes.
+     * The same resources with a cache pool of `bytes` of its own. See carta::zarr::CachePool.
      *
-     * A child context, so the thread pools are the shared ones -- a scan that ran on its own
+     * A child context, so the thread pools are the shared ones -- a walk that ran on its own
      * threads would compete with the session rather than take its turn.
      *
      * It keeps its own array table because a handle carries the pool it was opened against, so a
-     * bypassed read cannot reuse one opened with the shared pool. Built once and kept, since the
-     * scans that want it are long and there are few of them.
+     * read through this pool cannot reuse one opened with the shared pool. A new one each call,
+     * and kept by nothing here: whoever asked holds the only reference, so what the pool decoded is
+     * freed when they let go. The zero-byte pool used to be built once and kept for as long as the
+     * store, which cost nothing at that size and would keep gigabytes at the size a moment asks for.
      */
-    StoreContextPtr WithoutCache() const;
+    Result<StoreContextPtr> WithCachePool(std::size_t bytes) const;
 
     tensorstore::Context context;
 
 private:
     mutable std::mutex _arrays_mutex;
     mutable std::map<std::string, tensorstore::TensorStore<>> _arrays;
-    mutable std::mutex _without_cache_mutex;
-    mutable StoreContextPtr _without_cache;
 };
+
+// How CachePool's implementation reaches the context it reads through, which is internal and has no
+// business in the public header.
+struct CachePoolAccess {
+    static const StoreContextPtr& StoreContextOf(const CachePool& pool);
+};
+
+}  // namespace carta::zarr::internal
+
+namespace carta::zarr {
+
+// The size a pool was asked for, beside the context that holds it; TensorStore keeps the size too,
+// but only behind a resource lookup that can fail.
+class CachePool::Impl {
+public:
+    Impl(std::size_t bytes, internal::StoreContextPtr store_context)
+        : bytes(bytes), store_context(std::move(store_context)) {}
+
+    std::size_t bytes;
+    internal::StoreContextPtr store_context;
+};
+
+}  // namespace carta::zarr
+
+namespace carta::zarr::internal {
+
+inline const StoreContextPtr& CachePoolAccess::StoreContextOf(const CachePool& pool) {
+    return pool._impl->store_context;
+}
 
 /**
  * Open the Zarr array held in a located directory.

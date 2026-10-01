@@ -7,6 +7,7 @@
 #include "workload.h"
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <cstring>
 #include <limits>
@@ -145,6 +146,7 @@ std::string Operation::Describe() const {
             return pol + ";l=" + std::to_string(x) + ":" + std::to_string(x + width) + ";m=" + std::to_string(y) +
                    ":" + std::to_string(y + height);
         case Mode::cube_histogram:
+        case Mode::animation:
             return pol + ";chan=" + std::to_string(channel) + ":" + std::to_string(channel + channel_count);
         case Mode::open:
             return "";
@@ -154,7 +156,7 @@ std::string Operation::Describe() const {
 
 std::vector<Operation> PlanOperations(Mode mode, const CubeAxes& axes, std::uint64_t seed, unsigned trial,
                                       unsigned processes, unsigned process_index, unsigned ops,
-                                      double region_fraction) {
+                                      double region_fraction, unsigned animation_frames) {
     std::vector<Operation> operations(ops);
     for (auto& operation : operations) {
         operation.mode = mode;
@@ -194,6 +196,10 @@ std::vector<Operation> PlanOperations(Mode mode, const CubeAxes& axes, std::uint
     const double side = std::sqrt(region_fraction);
     const auto cells_x = GridCells(axes.width, side);
     const auto cells_y = GridCells(axes.height, side);
+    // An animation's runs of channels, each in a cell of its own with room to move.
+    const auto frames = std::clamp<std::uint64_t>(animation_frames, 1, std::max<std::uint64_t>(axes.channels, 1));
+    const auto runs = std::max<std::uint64_t>(axes.channels / frames, 1);
+    const auto run_cell = axes.channels / runs;
 
     std::uint64_t pool = 0;
     switch (mode) {
@@ -205,6 +211,9 @@ std::vector<Operation> PlanOperations(Mode mode, const CubeAxes& axes, std::uint
             break;
         case Mode::region:
             pool = cells_x * cells_y;
+            break;
+        case Mode::animation:
+            pool = runs * axes.polarizations;
             break;
         default:
             break;
@@ -243,6 +252,11 @@ std::vector<Operation> PlanOperations(Mode mode, const CubeAxes& axes, std::uint
                 operation.polarization = details.Below(axes.polarizations);
                 break;
             }
+            case Mode::animation:
+                operation.channel_count = frames;
+                operation.channel = (draw.value % runs) * run_cell + details.Below(run_cell - frames + 1);
+                operation.polarization = draw.value / runs;
+                break;
             default:
                 break;
         }
@@ -253,8 +267,94 @@ std::vector<Operation> PlanOperations(Mode mode, const CubeAxes& axes, std::uint
     return operations;
 }
 
-Runner::Runner(const Context& context, Image image, HistogramMethod histogram)
-    : _image(std::move(image)), _histogram(histogram) {
+namespace {
+
+// The chunks an operation reads, as a range of chunk indices along each axis it moves on: the spatial
+// two, the spectral and the polarization. Every other axis is read at 0 by every operation.
+struct ChunkBox {
+    std::array<std::uint64_t, 4> first{};
+    std::array<std::uint64_t, 4> last{};
+
+    bool Meets(const ChunkBox& other) const {
+        for (std::size_t axis = 0; axis < first.size(); ++axis) {
+            if (last[axis] < other.first[axis] || other.last[axis] < first[axis]) {
+                return false;
+            }
+        }
+        return true;
+    }
+};
+
+ChunkBox ChunksOf(const Operation& operation, const CubeAxes& axes, const std::vector<std::uint64_t>& chunk_shape) {
+    // From and to, in pixels, along x, y, spectral and polarization.
+    std::array<std::uint64_t, 4> from{};
+    std::array<std::uint64_t, 4> to{};
+    switch (operation.mode) {
+        case Mode::plane:
+            from = {0, 0, operation.channel, operation.polarization};
+            to = {axes.width, axes.height, operation.channel + 1, operation.polarization + 1};
+            break;
+        case Mode::spectrum:
+            from = {operation.x, operation.y, 0, operation.polarization};
+            to = {operation.x + 1, operation.y + 1, axes.channels, operation.polarization + 1};
+            break;
+        case Mode::region:
+            from = {operation.x, operation.y, 0, operation.polarization};
+            to = {operation.x + operation.width, operation.y + operation.height, axes.channels,
+                  operation.polarization + 1};
+            break;
+        default:
+            from = {0, 0, operation.channel, operation.polarization};
+            to = {axes.width, axes.height, operation.channel + operation.channel_count, operation.polarization + 1};
+            break;
+    }
+    const std::array<std::optional<std::size_t>, 4> index{axes.x, axes.y, axes.spectral, axes.polarization};
+    ChunkBox box;
+    for (std::size_t axis = 0; axis < index.size(); ++axis) {
+        std::uint64_t chunk = 1;
+        if (index[axis] && *index[axis] < chunk_shape.size()) {
+            chunk = std::max<std::uint64_t>(chunk_shape[*index[axis]], 1);
+        }
+        box.first[axis] = from[axis] / chunk;
+        box.last[axis] = (std::max(to[axis], from[axis] + 1) - 1) / chunk;
+    }
+    return box;
+}
+
+}  // namespace
+
+void MarkSharedChunks(std::vector<std::vector<Operation>>& plans, const CubeAxes& axes,
+                      const std::vector<std::uint64_t>& chunk_shape) {
+    struct Placed {
+        std::size_t process;
+        std::size_t index;
+        ChunkBox box;
+    };
+    std::vector<Placed> placed;
+    for (std::size_t process = 0; process < plans.size(); ++process) {
+        for (std::size_t index = 0; index < plans[process].size(); ++index) {
+            const auto& operation = plans[process][index];
+            if (operation.mode == Mode::animation || operation.mode == Mode::open) {
+                continue;
+            }
+            placed.push_back({process, index, ChunksOf(operation, axes, chunk_shape)});
+        }
+    }
+    for (const auto& one : placed) {
+        bool shares = false;
+        for (const auto& other : placed) {
+            const bool earlier_here = other.process == one.process && other.index < one.index;
+            if ((earlier_here || other.process != one.process) && one.box.Meets(other.box)) {
+                shares = true;
+                break;
+            }
+        }
+        plans[one.process][one.index].shares_chunks = shares;
+    }
+}
+
+Runner::Runner(const Context& context, Image image, HistogramMethod histogram, std::size_t first_touch_bytes)
+    : _shared(context), _image(std::move(image)), _histogram(histogram), _first_touch_bytes(first_touch_bytes) {
     if (auto pool = context.NewCachePool(0)) {
         _keeping_nothing = *pool;
     }
@@ -269,8 +369,23 @@ Runner::Runner(const Context& context, Image image, HistogramMethod histogram)
 Runner::Runner(ContextOptions context, std::string dataset, std::string image_id)
     : _context(std::move(context)), _dataset(std::move(dataset)), _image_id(std::move(image_id)) {}
 
+Result<void> Runner::Prepare(const Operation& operation) {
+    // Let go of the last one first, so that two pools' worth of chunks are never held at once.
+    _first_touch.reset();
+    if ((operation.mode != Mode::plane && operation.mode != Mode::spectrum) || !_shared) {
+        return {};
+    }
+    auto pool = _shared->NewCachePool(_first_touch_bytes);
+    if (!pool) {
+        return std::move(pool).error();
+    }
+    _first_touch = *pool;
+    return {};
+}
+
 Result<std::uint64_t> Runner::Run(const Operation& operation, const ReadOptions& options) {
     _pixel_count = 0;
+    _frames.reset();
     _exact.clear();
     _counts.clear();
     if (operation.mode == Mode::open) {
@@ -281,8 +396,15 @@ Result<std::uint64_t> Runner::Run(const Operation& operation, const ReadOptions&
     }
     switch (operation.mode) {
         case Mode::plane:
-        case Mode::spectrum:
-            return Read(operation, options);
+        case Mode::spectrum: {
+            auto own = options;
+            if (_first_touch) {
+                own.control.cache_pool = _first_touch;
+            }
+            return Read(operation, own);
+        }
+        case Mode::animation:
+            return Animate(operation, options);
         case Mode::region:
             return Reduce(operation, options);
         case Mode::cube_histogram:
@@ -291,6 +413,27 @@ Result<std::uint64_t> Runner::Run(const Operation& operation, const ReadOptions&
             break;
     }
     return Error{ErrorCode::invalid_argument, "unknown mode", ""};
+}
+
+// Plane after plane, as carta-backend serves a playing animation: each frame its own read, through
+// the context's cache, so that a frame finds what the one before it decoded when they share chunks.
+Result<std::uint64_t> Runner::Animate(const Operation& operation, const ReadOptions& options) {
+    std::uint64_t hash = kFnvOffset;
+    std::uint64_t elements = 0;
+    Operation frame = operation;
+    frame.mode = Mode::plane;
+    for (std::uint64_t index = 0; index < operation.channel_count; ++index) {
+        frame.channel = operation.channel + index;
+        auto read = Read(frame, options);
+        if (!read) {
+            return read;
+        }
+        elements += *read;
+        Mix(hash, bench::Fingerprint(_pixels.data(), _pixel_count), sizeof(hash));
+    }
+    _pixel_count = 0;
+    _frames = hash;
+    return elements;
 }
 
 Result<std::uint64_t> Runner::Read(const Operation& operation, const ReadOptions& options) {
@@ -455,6 +598,9 @@ Result<std::uint64_t> Runner::Open() {
 }
 
 std::uint64_t Runner::Fingerprint() const {
+    if (_frames) {
+        return *_frames;
+    }
     if (_pixel_count > 0) {
         return bench::Fingerprint(_pixels.data(), _pixel_count);
     }

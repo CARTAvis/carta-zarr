@@ -24,12 +24,21 @@
 namespace carta::zarr::bench {
 
 // The ways a CARTA user reads a cube, each measured on its own.
+//
+// plane and spectrum time a first touch: each reads through a cache pool of its own, made before the
+// clock starts, so that what an earlier operation decoded never answers a later one. A cube's chunks
+// span many channels or many pixels, and with a shared cache most of a trial's planes would be found
+// already decoded by the one before -- a median of cache hits, which says nothing about the layout
+// except that its chunks are deep. animation is where that reuse is the point, and measures it.
+//
+// The order is the one positions are drawn under, so a new mode goes at the end.
 enum class Mode {
     plane,           // one whole l x m plane at a random channel
     spectrum,        // every channel at one random pixel
     region,          // ReduceSpectral over a box covering 5% of the plane
     cube_histogram,  // ComputeCubeHistogram over this process's share of the channels
     open,            // Context::Create, Dataset::Open and OpenImage, with nothing cached
+    animation,       // consecutive planes from a random channel, through the context's shared cache
 };
 
 const char* ModeName(Mode mode) noexcept;
@@ -79,6 +88,8 @@ struct RunOptions {
     std::map<Mode, unsigned> mode_ops;
     // The share of the plane one region box covers.
     double region_fraction = 0.05;
+    // The planes one animation operation reads, one after another.
+    unsigned animation_frames = 32;
     HistogramMethod histogram;
     std::uint64_t seed = 1;
     ContextOptions context;
@@ -92,6 +103,14 @@ struct RunOptions {
     std::string csv_path;
     std::string label;
     bool resume = false;
+
+    // The cache pool plane and spectrum read each operation through: the size of the context's own,
+    // and carta-backend's default --zarr_cache_size of 1 GiB when that is left to the library. Not
+    // none, even then: a sharded layout keeps its shard index in the pool, and one that kept nothing
+    // would read the index again for every chunk of a single read.
+    std::size_t FirstTouchCacheBytes() const noexcept {
+        return context.cache_bytes.value_or(std::size_t{1} << 30);
+    }
 
     unsigned OpsFor(Mode mode) const noexcept {
         if (const auto own = mode_ops.find(mode); own != mode_ops.end()) {

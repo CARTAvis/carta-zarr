@@ -10,11 +10,14 @@
 // Asking for pixels: which of them, into what, and under what limits.
 
 #include "carta-zarr/descriptor.h"
+#include "carta-zarr/export.h"
 
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
 #include <functional>
+#include <memory>
+#include <optional>
 #include <vector>
 
 namespace carta::zarr {
@@ -30,18 +33,51 @@ struct ReadRequest {
     std::vector<Range> axes;
 };
 
-// What a read should do with the decoded-chunk cache.
+namespace internal {
+struct CachePoolAccess;
+}  // namespace internal
+
+// A decoded-chunk cache of a read's own, apart from the one its Context shares among every read.
 //
-// A scan over a cube touches every chunk once and reuses none of them, so caching what it decodes
-// evicts an interactive working set to no purpose -- and rebuilding that working set costs
-// decompression, which is the resource the scan is already saturating. `bypass` runs the read
-// against a cache pool of zero bytes, leaving the shared one alone.
+// What a read keeps decides what the next one has to decode again. The shared cache holds a session's
+// interactive working set -- the planes and profiles being looked at -- and two kinds of read do
+// better elsewhere. A scan that touches every chunk once reuses none of them, so caching what it
+// decodes evicts that working set to no purpose, and rebuilding it costs decompression, which is the
+// resource the scan is already saturating: it reads through a pool of zero bytes. A walk that does
+// come back -- a moment, whose neighbouring slabs share the chunks between them -- needs as much as it
+// will come back for, which is more than a session should keep for everything else and is wanted only
+// while the walk lasts: it reads through a pool of that size, and lets go of it when it ends.
 //
-// Arrays are opened per pool, so the first bypassed read of an array pays to open it again. That is
-// once per array, against a scan that reads all of it.
-enum class CachePolicy {
-    inherit,
-    bypass,
+// Made by Context::NewCachePool, and a shared handle like Context: copying one shares the pool, and
+// it is the last copy let go of that frees what the pool holds. The pool runs on its Context's
+// threads, so a read through it takes its turn among the session's reads rather than competing with
+// them. Arrays are opened per pool, so the first read of an array through a new one pays to open it
+// again -- a few milliseconds, once per array, against a walk that reads all of it.
+class CARTA_ZARR_EXPORT CachePool final {
+public:
+    CachePool(const CachePool&) = default;
+    CachePool& operator=(const CachePool&) = default;
+    // A copy, so that the handle moved from still refers to what it did. See ADR 0013.
+    CachePool(CachePool&& other) noexcept : CachePool(other) {}
+    CachePool& operator=(CachePool&& other) noexcept {
+        return *this = other;
+    }
+    // Inline, unlike the other handles': ReadControl holds one, and the parts of this library that
+    // are built and tested without the rest of it take a ReadControl. A shared_ptr's deleter is fixed
+    // where it was made, so nothing here needs Impl to be complete.
+    ~CachePool() = default;
+
+    // How much decoded chunk data the pool may hold, in bytes, as it was asked for.
+    std::size_t bytes() const noexcept;
+
+private:
+    class Impl;
+    explicit CachePool(std::shared_ptr<const Impl> impl);
+
+    std::shared_ptr<const Impl> _impl;
+
+    friend class Context;
+    friend struct internal::CachePoolAccess;
 };
 
 // Called as a read advances, with the number of destination elements that are final and the number
@@ -80,8 +116,12 @@ struct ReadControl {
     // TensorStore operation is not interrupted, but a request never starts another operation once
     // this deadline has passed.
     std::chrono::steady_clock::time_point deadline = std::chrono::steady_clock::time_point::max();
-    // Whether this read may put what it decodes in the shared cache. See CachePolicy.
-    CachePolicy cache_policy = CachePolicy::inherit;
+    // The cache this read keeps what it decodes in, and finds what an earlier read kept: its Context's
+    // shared one when there is none. See CachePool.
+    //
+    // One field rather than a policy beside a pool, so that "bypass the cache" and "use this pool"
+    // cannot both be said at once: declining the cache is a pool of zero bytes.
+    std::optional<CachePool> cache_pool;
 };
 
 // Everything a read of pixels takes, on top of what any read takes.

@@ -12,6 +12,7 @@
 
 #include <nlohmann/json.hpp>
 
+#include <cstddef>
 #include <memory>
 #include <utility>
 
@@ -38,6 +39,11 @@ Result<tensorstore::TensorStore<>> OpenZarr3File(const std::string& path, const 
                      std::string(node)};
     }
     return std::move(opened).value();
+}
+
+// A pool of `bytes`, said once for the session's pool and for a read's own.
+nlohmann::json CachePoolSpec(std::size_t bytes) {
+    return {{"total_bytes_limit", bytes}};
 }
 
 }  // namespace
@@ -76,23 +82,15 @@ Result<tensorstore::TensorStore<>> OpenZarrArray(const std::filesystem::path& ar
     return OpenZarr3File(array_directory.string(), tensorstore::Context::Default(), node);
 }
 
-StoreContextPtr StoreContext::WithoutCache() const {
-    std::scoped_lock lock(_without_cache_mutex);
-    if (_without_cache) {
-        return _without_cache;
-    }
+Result<StoreContextPtr> StoreContext::WithCachePool(std::size_t bytes) const {
     nlohmann::json spec = nlohmann::json::object();
     // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-    spec["cache_pool"] = {{"total_bytes_limit", 0}};
+    spec["cache_pool"] = CachePoolSpec(bytes);
     auto child = tensorstore::Context::FromJson(std::move(spec), context);
     if (!child.ok()) {
-        // Nothing here can fail that is not a programming error, and a read that cannot bypass the
-        // cache is better served with it than refused.
-        _without_cache = shared_from_this();
-        return _without_cache;
+        return Error{ErrorCode::invalid_argument, "Unable to make a cache pool: " + child.status().ToString(), {}};
     }
-    _without_cache = std::make_shared<const StoreContext>(std::move(child.value()));
-    return _without_cache;
+    return std::make_shared<const StoreContext>(std::move(child.value()));
 }
 
 Result<StoreContextPtr> MakeStoreContext(const ContextOptions& options) {
@@ -102,7 +100,7 @@ Result<StoreContextPtr> MakeStoreContext(const ContextOptions& options) {
         // caller declining the cache asks for. No value at all is the only thing that leaves
         // TensorStore's default in place.
         // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
-        spec["cache_pool"] = {{"total_bytes_limit", *options.cache_bytes}};
+        spec["cache_pool"] = CachePoolSpec(*options.cache_bytes);
     }
     if (options.io_threads > 0) {
         // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)

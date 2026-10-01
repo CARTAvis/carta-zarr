@@ -40,6 +40,11 @@ public:
 
     static Result<Context> Create(const ContextOptions& options = {});
 
+    // A decoded-chunk cache of `bytes`, apart from the one this context shares among every read, for
+    // a read to keep what it decodes in through ReadControl::cache_pool. Zero is the pool that keeps
+    // nothing. See CachePool.
+    Result<CachePool> NewCachePool(std::size_t bytes) const;
+
 private:
     class Impl;
     explicit Context(std::shared_ptr<Impl> impl);

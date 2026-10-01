@@ -296,6 +296,44 @@ void TestReadControls(const carta::zarr::Image& sky) {
             "a read rejected for memory budget modified its destination");
 }
 
+// A read through a pool of its own returns what a read through the session's does: the pool decides
+// what is kept, never what is read. Read twice, so that the second is answered from what the first
+// kept, and at zero bytes too, which is the pool that keeps nothing.
+void TestReadsThroughAPoolOfTheirOwn(const char* fixture) {
+    const auto context = carta::zarr::Context::Create();
+    Require(static_cast<bool>(context), "Context::Create failed");
+    const auto dataset = carta::zarr::Dataset::Open(context.value(), fixture);
+    Require(static_cast<bool>(dataset), "Dataset::Open failed on the pixel fixture");
+    const auto sky = dataset.value().OpenImage("SKY");
+    Require(static_cast<bool>(sky), "SKY could not be opened");
+
+    const auto request = WholeImage(sky->descriptor());
+    const std::size_t elements = kL * kM * kFrequency * kPolarization * kTime;
+    std::vector<float> reference(elements, 0.0F);
+    Require(static_cast<bool>(sky->Read(request, {reference.data(), reference.size()})),
+            "the read through the session's pool failed");
+
+    for (const std::size_t bytes : {std::size_t{0}, std::size_t{64} << 20}) {
+        const auto pool = context->NewCachePool(bytes);
+        Require(static_cast<bool>(pool), "NewCachePool(" + std::to_string(bytes) + ") failed");
+        Require(pool->bytes() == bytes, "a pool of " + std::to_string(bytes) + " bytes says it is another size");
+        carta::zarr::ReadOptions options;
+        options.control.cache_pool = *pool;
+        for (int pass = 0; pass < 2; ++pass) {
+            std::vector<float> pixels(elements, 123.0F);
+            const auto read = sky->Read(request, {pixels.data(), pixels.size()}, options);
+            Require(read && *read == elements, "a read through a pool of " + std::to_string(bytes) + " bytes failed" +
+                                                   (read ? std::string{} : ": " + read.error().message));
+            for (std::size_t i = 0; i < elements; ++i) {
+                const bool both_nan = std::isnan(pixels.at(i)) && std::isnan(reference.at(i));
+                Require(both_nan || pixels.at(i) == reference.at(i),
+                        "a pool of " + std::to_string(bytes) + " bytes changed the pixel at offset " +
+                            std::to_string(i) + " on pass " + std::to_string(pass));
+            }
+        }
+    }
+}
+
 // The header promises that one handle may be read from any number of threads. This cannot prove
 // the absence of a race, but it does fail loudly if the shared state a read touches is not actually
 // read-only, and it pins the contract next to the code that has to keep it.
@@ -479,6 +517,7 @@ int main() {
             TestReadControls(sky);
             TestProgressiveRead(sky);
             TestConcurrentReads(sky);
+            TestReadsThroughAPoolOfTheirOwn(fixture);
         } catch (const std::exception& error) {
             std::cerr << "pixel read test failed on " << fixture << ": " << error.what() << "\n";
             return 1;

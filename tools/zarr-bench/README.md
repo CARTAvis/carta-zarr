@@ -101,7 +101,8 @@ open. `run` writes one CSV row per operation; `--help` lists its options.
 - **Cold reads.** `--cold auto` uses `--drop-cache-cmd` when given, then `drop_caches` as root, then
   `posix_fadvise` on every file of the dataset. Only the command can reach a parallel filesystem's
   servers; the other two empty this host's page cache alone, and `cold_method` says which was used.
-  On macOS only the command is available.
+  On macOS only the command is available. On Lustre, [`drop-lustre-cache.py`](#without-root) is such
+  a command that needs no root.
 - **Deadline.** `--trial-timeout` becomes each read's `ReadControl::deadline`. An operation it stops,
   and any not yet started, is a `timeout` row; a process still running 30 s past it is killed.
 - **Resuming.** Rows are written a trial at a time, so an interrupted run loses at most the trial it
@@ -163,3 +164,36 @@ that did not survive validation. The tables behind it follow.
 The output directory, `zarr-bench-results` beside the config unless `--output` says otherwise, holds
 `results.csv`, `summary.md`, `sweep-state.json`, `config.toml` (the configuration as run, every
 default filled in), `machine.json`, and a log per stage and layout under `logs/`.
+
+## Without root
+
+Everything here runs as an ordinary user: `uv` installs into the home directory, the bench builds
+anywhere a C++17 compiler and CMake 3.24 are (on an old distribution, a conda-forge `gxx` and
+`python>=3.10`, which TensorStore's build needs, will do), and its processes need no privilege. What
+root buys is emptying caches, and on a parallel file system the caches that matter most are on the
+servers.
+
+- **Lustre.** [`drop-lustre-cache.py`](drop-lustre-cache.py) `DIR` empties this client's page cache
+  for every file under `DIR`, as `--cold fadvise` would, and then asks the servers to drop theirs
+  with `lfs ladvise -a dontneed`, which Lustre 2.9 and later accept from a file's owner. Give it the
+  sweep's work directory, which holds one dataset at a time:
+
+  ```toml
+  [measure]
+  cold = "command"
+  drop_cache_cmd = "/opt/carta-zarr/tools/zarr-bench/drop-lustre-cache.py /lustre/scratch/zarr-bench"
+  ```
+
+  Without the second step a sweep measures the servers' memory, not their disks: on one Lustre 2.15
+  system a whole-cube read took 1.2 s warm, 2.0 s with only the client's cache emptied, and 5.5 s
+  with both. `lfs setstripe` on a directory of one's own needs no root either, so `stage1.stripe`
+  can be swept.
+- **BeeGFS.** Nothing an ordinary user can call empties a storage server's cache, so `--cold fadvise`
+  is the most there is, and the report says reads were cold on this host only: a layout read twice
+  in a row reads faster the second time. A client whose `tuneFileCacheType` is `buffered` keeps
+  little in its own page cache to begin with. `beegfs-ctl --setpattern` is root's unless the
+  file system is configured to let users set it; `--dry-run` tries it, and says when
+  `stage1.stripe` cannot be swept.
+- **Quotas.** sweep.py checks the file system's free space, not a user's quota. Check that
+  `lfs quota -u $USER` or `beegfs-ctl --getquota --uid $USER` leaves room for one uncompressed crop
+  and a tenth more.

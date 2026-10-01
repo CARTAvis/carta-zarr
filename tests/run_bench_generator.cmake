@@ -1,0 +1,32 @@
+# Writes the datasets tests/bench_generator_test.cc reads, with tools/zarr-bench/generate.py.
+#
+# Three synthetic cubes of one seed in three layouts -- plain zstd chunks; blosc in shards, without
+# consolidated metadata; and a flag variable where the others write NaN -- and one rewrite of a
+# committed fixture, cropped. The test reads them back and checks that the layouts hold the same
+# pixels, which is the property every comparison between layouts rests on.
+
+if(NOT DEFINED UV OR NOT DEFINED SOURCE_DIR OR NOT DEFINED OUTPUT_DIR)
+    message(FATAL_ERROR "UV, SOURCE_DIR and OUTPUT_DIR must be set")
+endif()
+
+set(generator "${SOURCE_DIR}/tools/zarr-bench/generate.py")
+set(shape "frequency=12,polarization=2,l=150,m=130")
+file(REMOVE_RECURSE "${OUTPUT_DIR}")
+file(MAKE_DIRECTORY "${OUTPUT_DIR}")
+
+function(generate name)
+    execute_process(
+        COMMAND "${UV}" run --quiet --script "${generator}" --output "${OUTPUT_DIR}/${name}" --workers 2 ${ARGN}
+        RESULT_VARIABLE result
+        OUTPUT_QUIET)
+    if(result)
+        message(FATAL_ERROR "generate.py failed writing ${name}: ${result}")
+    endif()
+endfunction()
+
+generate(plain --synthetic --shape ${shape} --chunk l=64,m=64,frequency=4 --codec zstd:3)
+generate(sharded --synthetic --shape ${shape} --chunk l=32,m=128,frequency=2,polarization=2
+         --shard l=128,m=128,frequency=8 --codec blosc:lz4:5:bitshuffle --no-consolidate --block-mib 1)
+generate(flagged --synthetic --shape ${shape} --chunk l=64,m=64,frequency=4 --flag)
+generate(rewritten --source "${SOURCE_DIR}/tests/data/images/zarr/xradio/pixels" --crop l=1:4
+         --chunk l=3,m=2,frequency=2 --codec gzip:1)

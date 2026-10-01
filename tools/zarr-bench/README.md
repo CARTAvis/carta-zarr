@@ -38,6 +38,11 @@ Or synthesize one, when there is no real cube to hand:
 - **`--output-root`** names the dataset after a hash of everything that decides its bytes, and
   reuses one that is already complete. `--output` names it yourself.
 
+- **Memory:** each worker holds about three times what it writes at once -- `--block-mib`, or one
+  whole shard when shards are larger than that. Lower `--workers` for large shards.
+- **Python:** the script runs on uv's own Python build, never the system's. Ubuntu 24.04's 3.12.3
+  segfaults as soon as zarr starts its event-loop thread.
+
 Each dataset carries `bench-manifest.json`: its source, layout, striping as the filesystem reports
 it, file count and compression ratio. The manifest is written last, so a dataset without one is
 unfinished. The last line on stdout is the dataset's path.

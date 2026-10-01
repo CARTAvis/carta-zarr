@@ -5,6 +5,12 @@
 #   "numpy==2.3.1",
 #   "zarr==3.2.1",
 # ]
+#
+# [tool.uv]
+# # Never the system interpreter. Ubuntu 24.04's Python 3.12.3 segfaults the moment zarr starts its
+# # event-loop thread, where uv's own 3.12 build does not -- and a measurement tool should not
+# # depend on which Python a server happens to ship.
+# python-preference = "only-managed"
 # ///
 
 """Write one XRADIO image dataset in a chosen storage layout, for measuring that layout.
@@ -954,21 +960,27 @@ def main(argv: list[str] | None = None) -> int:
 
     out.parent.mkdir(parents=True, exist_ok=True)
     out.mkdir()
-    filesystem = filesystem_of(out)
-    if stripe:
-        if filesystem not in ("unknown", stripe.filesystem):
-            raise SystemExit(f"--stripe is for {stripe.filesystem}, but {out} is on {filesystem}")
-        set_command, _ = stripe_commands(stripe, out)
-        log(f"striping: {' '.join(set_command)}")
-        run(set_command)
+    # Anything short of a manifest is removed again: an unfinished dataset is of no use to a
+    # measurement, and left behind it would make the same command refuse to run a second time.
+    try:
+        filesystem = filesystem_of(out)
+        if stripe:
+            if filesystem not in ("unknown", stripe.filesystem):
+                raise SystemExit(f"--stripe is for {stripe.filesystem}, but {out} is on {filesystem}")
+            set_command, _ = stripe_commands(stripe, out)
+            log(f"striping: {' '.join(set_command)}")
+            run(set_command)
 
-    started = time.monotonic()
-    made = rewrite_source(args, out) if args.source else synthesize(args, out)
-    if made["consolidate"]:
-        with warnings.catch_warnings():
-            warnings.simplefilter("ignore")
-            zarr.consolidate_metadata(str(out))
-    seconds = time.monotonic() - started
+        started = time.monotonic()
+        made = rewrite_source(args, out) if args.source else synthesize(args, out)
+        if made["consolidate"]:
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore")
+                zarr.consolidate_metadata(str(out))
+        seconds = time.monotonic() - started
+    except BaseException:
+        shutil.rmtree(out, ignore_errors=True)
+        raise
 
     layout: Layout = made["layout"]
     image_bytes, image_files = tree_size(out / made["image"])

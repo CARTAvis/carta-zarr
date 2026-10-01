@@ -10,6 +10,7 @@
 
 #include "schema/xradio/linear_axis.h"
 
+#include <algorithm>
 #include <cmath>
 #include <exception>
 #include <iostream>

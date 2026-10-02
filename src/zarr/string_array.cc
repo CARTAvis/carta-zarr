@@ -6,6 +6,7 @@
 
 #include "string_array.h"
 
+#include <algorithm>
 #include <array>
 #include <cstdint>
 #include <fstream>
@@ -14,6 +15,7 @@
 #include <mutex>
 #include <optional>
 #include <stdexcept>
+#include <string>
 #include <utility>
 
 #include <blosc.h>
@@ -310,8 +312,8 @@ StringArrayLayout ParseStringArrayLayout(const ArrayMetadata& array_metadata) {
     if (array_metadata.shape.size() != 1 || array_metadata.chunk_shape.size() != 1) {
         Fail(ErrorCode::unsupported_data_type, "Only 1-D string arrays are supported");
     }
-    if (array_metadata.shape.front() > array_metadata.chunk_shape.front()) {
-        Fail(ErrorCode::unsupported_codec, "String array is multi-chunk; unsupported for string decode");
+    if (array_metadata.chunk_shape.front() == 0) {
+        Fail(ErrorCode::invalid_metadata, "String array has a chunk of no elements");
     }
 
     return StringArrayLayout{static_cast<std::size_t>(array_metadata.shape.front()),
@@ -319,7 +321,9 @@ StringArrayLayout ParseStringArrayLayout(const ArrayMetadata& array_metadata) {
                              array_metadata.data_type_configuration.at("length_bytes").get<std::size_t>()};
 }
 
-std::filesystem::path GetStringChunkPath(const std::filesystem::path& array_dir, const nlohmann::json& encoding) {
+// Where chunk `index` of a 1-D array is kept, under the default or v2 key encoding.
+std::filesystem::path GetStringChunkPath(const std::filesystem::path& array_dir, const nlohmann::json& encoding,
+                                         std::size_t index) {
     std::string key_encoding = "default";
     std::string separator = "/";
     if (encoding.contains("name") && encoding.at("name").is_string()) {
@@ -334,10 +338,10 @@ std::filesystem::path GetStringChunkPath(const std::filesystem::path& array_dir,
         if (separator != "/" && separator != ".") {
             Fail(ErrorCode::unsupported_codec, "String array has invalid chunk key separator '" + separator + "'");
         }
-        return array_dir / ("c" + separator + "0");
+        return array_dir / ("c" + separator + std::to_string(index));
     }
     if (key_encoding == "v2") {
-        return array_dir / "0";
+        return array_dir / std::to_string(index);
     }
     Fail(ErrorCode::unsupported_codec, "String array uses unsupported chunk key encoding '" + key_encoding + "'");
 }
@@ -392,27 +396,51 @@ std::vector<std::uint8_t> DecodeStringChunk(std::vector<std::uint8_t> bytes, con
 
 }  // namespace
 
+Result<void> CheckFixedLengthUtf32StringArray(const ArrayMetadata& array_metadata, std::string_view node) {
+    try {
+        ParseStringArrayLayout(array_metadata);
+        ParseStringCodecs(array_metadata.codecs);
+        GetStringChunkPath({}, array_metadata.chunk_key_encoding, 0);
+        return {};
+    } catch (const DecodeFailure& failure) {
+        return Error{failure.code, failure.what(), std::string(node)};
+    } catch (const std::exception& error) {
+        return Error{ErrorCode::invalid_metadata, error.what(), std::string(node)};
+    }
+}
+
 Result<std::vector<std::string>> ReadFixedLengthUtf32StringArray(const std::filesystem::path& array_directory,
                                                                  const ArrayMetadata& array_metadata,
                                                                  std::string_view node) {
     try {
         const StringArrayLayout layout = ParseStringArrayLayout(array_metadata);
-        const std::filesystem::path chunk_path = GetStringChunkPath(array_directory, array_metadata.chunk_key_encoding);
-
-        // Missing chunk: all elements take the (empty) fill value.
-        std::error_code error;
-        if (!std::filesystem::exists(chunk_path, error)) {
-            if (error) {
-                return Error{ErrorCode::io_error, "Unable to inspect string array chunk: " + error.message(),
-                             std::string(node)};
-            }
-            return std::vector<std::string>(layout.num_elements, std::string());
-        }
-
-        std::vector<std::uint8_t> bytes = ReadChunkFile(chunk_path);
         const StringCodecInfo codec_info = ParseStringCodecs(array_metadata.codecs);
-        bytes = DecodeStringChunk(std::move(bytes), codec_info, layout);
-        return DecodeFixedLengthUtf32(bytes, layout.num_elements, layout.length_bytes, codec_info.little_endian);
+
+        std::vector<std::string> values;
+        values.reserve(layout.num_elements);
+        for (std::size_t index = 0; values.size() < layout.num_elements; ++index) {
+            const std::filesystem::path chunk_path =
+                GetStringChunkPath(array_directory, array_metadata.chunk_key_encoding, index);
+            // The last chunk may overhang the array; what lies past its end is not an element.
+            const std::size_t count = std::min(layout.chunk_elements, layout.num_elements - values.size());
+
+            // Missing chunk: its elements take the (empty) fill value.
+            std::error_code error;
+            if (!std::filesystem::exists(chunk_path, error)) {
+                if (error) {
+                    return Error{ErrorCode::io_error, "Unable to inspect string array chunk: " + error.message(),
+                                 std::string(node)};
+                }
+                values.resize(values.size() + count);
+                continue;
+            }
+
+            auto decoded = DecodeFixedLengthUtf32(DecodeStringChunk(ReadChunkFile(chunk_path), codec_info, layout),
+                                                  count, layout.length_bytes, codec_info.little_endian);
+            values.insert(values.end(), std::make_move_iterator(decoded.begin()),
+                          std::make_move_iterator(decoded.end()));
+        }
+        return values;
     } catch (const DecodeFailure& failure) {
         return Error{failure.code, failure.what(), std::string(node)};
     } catch (const std::exception& error) {

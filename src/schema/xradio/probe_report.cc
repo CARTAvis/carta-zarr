@@ -7,6 +7,7 @@
 #include "probe_report.h"
 
 #include "direction.h"
+#include "zarr/string_array.h"
 
 #include <utility>
 
@@ -129,6 +130,13 @@ bool ProbeReport::RequireCoordinateOf(const zarr::ArrayMetadata& image, std::str
                                                       : zarr_metadata::IsRealDataType(coordinate.data_type);
     if (!typed) {
         return Fail(DiagnosticCode::unsupported_data_type, "Coordinate array has an unsupported data type", node);
+    }
+    if (kind == CoordinateKind::labels) {
+        // Labels are decoded by this library rather than TensorStore, and only in the layouts it
+        // knows; one it cannot decode fails every image that opens, so it fails the probe instead.
+        if (auto decodable = zarr_metadata::CheckFixedLengthUtf32StringArray(coordinate, node); !decodable) {
+            return Fail(DiagnosticCodeFor(decodable.error().code), decodable.error().message, node);
+        }
     }
     return true;
 }

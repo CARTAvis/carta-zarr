@@ -132,6 +132,43 @@ def generate_string_fixtures() -> None:
     truncated_bytes = chunk_path(truncated).read_bytes()
     chunk_path(truncated).write_bytes(truncated_bytes[:-4])
 
+    # A label array of several chunks, as zarr-python writes when chunks are asked for smaller than
+    # the array: one element a chunk, a last chunk that overhangs the array, the v2 key spelling,
+    # and a chunk in the middle that was never written.
+    labels = np.asarray(["I", "Q", "U"], dtype="U1")
+    create_string_array(
+        output_dir / "multi_chunk",
+        serializer=BytesCodec(endian="little"),
+        compressors=[ZstdCodec(level=1)],
+        shape=(3,),
+        chunks=(1,),
+        values=labels,
+    )
+    create_string_array(
+        output_dir / "multi_chunk_overhang",
+        serializer=BytesCodec(endian="little"),
+        shape=(3,),
+        chunks=(2,),
+        values=labels,
+    )
+    create_string_array(
+        output_dir / "multi_chunk_v2_key",
+        serializer=BytesCodec(endian="little"),
+        chunk_key_encoding={"name": "v2", "configuration": {"separator": "."}},
+        shape=(3,),
+        chunks=(1,),
+        values=labels,
+    )
+    multi_chunk_missing = output_dir / "multi_chunk_missing"
+    create_string_array(
+        multi_chunk_missing,
+        serializer=BytesCodec(endian="little"),
+        shape=(3,),
+        chunks=(1,),
+        values=labels,
+    )
+    (multi_chunk_missing / "c" / "1").unlink()
+
     invalid_unicode = output_dir / "invalid_unicode"
     create_string_array(invalid_unicode, serializer=BytesCodec(endian="little"))
     invalid_bytes = bytearray(chunk_path(invalid_unicode).read_bytes())

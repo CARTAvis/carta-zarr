@@ -265,6 +265,22 @@ void TestCoordinateDataTypeIsChecked() {
             "the polarization data type produced no diagnostic");
 }
 
+// Labels this library cannot decode are refused when the dataset is probed, not when an image is
+// opened: the probe is what a listing of openable images rests on, so a polarization coordinate in
+// a codec the string reader does not run would otherwise list SKY as openable and fail it on open.
+void TestUndecodableLabelsAreInvalid() {
+    auto nodes = CompleteStore();
+    nodes["polarization"] =
+        R"({"shape":[2],"data_type":{"name":"fixed_length_utf32","configuration":{"length_bytes":4}},)"
+        R"("chunk_grid":{"name":"regular","configuration":{"chunk_shape":[2]}},)"
+        R"("codecs":[{"name":"bytes","configuration":{"endian":"little"}},{"name":"bz2"}],)"
+        R"("attributes":{},"dimension_names":["polarization"],"zarr_format":3,"node_type":"array"})";
+    const auto probe = Probe(nodes);
+    Require(probe.kind == SchemaMatchKind::invalid, "polarization labels in a codec this library cannot run were accepted");
+    Require(HasDiagnostic(probe.diagnostics, carta::zarr::DiagnosticCode::invalid_metadata),
+            "the undecodable polarization labels produced no diagnostic");
+}
+
 void TestMalformedCoordinateSystemIsInvalid() {
     auto nodes = CompleteStore();
     nodes[""] = R"({"attributes":{"coordinate_system_info":{}},"zarr_format":3,"node_type":"group"})";
@@ -1059,6 +1075,7 @@ int main() {
         TestMissingCoordinateIsInvalid();
         TestCoordinateShapeMismatchIsInvalid();
         TestCoordinateDataTypeIsChecked();
+        TestUndecodableLabelsAreInvalid();
         TestMalformedCoordinateSystemIsInvalid();
         TestAMissingCoordinateSystemIsInvalid();
         TestFirstFaultIsTheOnlyDiagnostic();

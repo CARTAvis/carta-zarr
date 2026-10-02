@@ -321,7 +321,7 @@ if(CARTA_ZARR_BUILD_TESTS AND BUILD_TESTING)
     # whatever the pool, and whether or not the cache asked.
     carta_zarr_add_test(carta_zarr_store_context_tests INTERNAL
         TEST_NAME carta-zarr-store-context
-        SOURCES tests/store_context_test.cc src/zarr/store_context.cc
+        SOURCES tests/store_context_test.cc src/zarr/store_context.cc ${CARTA_ZARR_METADATA_SOURCES}
         DEFINITIONS ${CARTA_ZARR_WIDE_FIXTURE}
         LIBRARIES
             nlohmann_json::nlohmann_json

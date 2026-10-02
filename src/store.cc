@@ -371,12 +371,16 @@ Result<std::vector<double>> Store::ReadNumericArray(std::string_view node) const
 }
 
 Result<std::vector<double>> Store::ReadNumericArrayUncached(std::string_view node) const {
+    const auto& metadata = ReadArrayMetadata(node);
+    if (!metadata) {
+        return metadata.error();
+    }
     auto array_path = ResolveArrayDirectory(node);
     if (!array_path) {
         return array_path.error();
     }
     try {
-        return zarr_metadata::ReadNumericValues(array_path.value(), _context, node);
+        return zarr_metadata::ReadNumericValues(array_path.value(), _context, metadata.value(), node);
     } catch (const std::exception& e) {
         return Error{ErrorCode::io_error, e.what(), std::string(node)};
     }

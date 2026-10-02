@@ -303,7 +303,21 @@ struct StringArrayLayout {
     std::size_t num_elements;
     std::size_t chunk_elements;
     std::size_t length_bytes;
+    // What each element of a chunk never written reads as.
+    std::string fill_value;
 };
+
+// A fixed_length_utf32 fill value is a string, as zarr-python writes it; none at all is the empty
+// string, which is what this reader assumed of every array before it asked.
+std::string ParseStringFillValue(const nlohmann::json& fill_value) {
+    if (fill_value.is_null()) {
+        return {};
+    }
+    if (!fill_value.is_string()) {
+        Fail(ErrorCode::invalid_metadata, "String array fill_value is not a string");
+    }
+    return fill_value.get<std::string>();
+}
 
 StringArrayLayout ParseStringArrayLayout(const ArrayMetadata& array_metadata) {
     if (!IsFixedLengthUtf32(array_metadata)) {
@@ -318,7 +332,8 @@ StringArrayLayout ParseStringArrayLayout(const ArrayMetadata& array_metadata) {
 
     return StringArrayLayout{static_cast<std::size_t>(array_metadata.shape.front()),
                              static_cast<std::size_t>(array_metadata.chunk_shape.front()),
-                             array_metadata.data_type_configuration.at("length_bytes").get<std::size_t>()};
+                             array_metadata.data_type_configuration.at("length_bytes").get<std::size_t>(),
+                             ParseStringFillValue(array_metadata.fill_value)};
 }
 
 // Where chunk `index` of a 1-D array is kept, under the default or v2 key encoding.
@@ -424,14 +439,14 @@ Result<std::vector<std::string>> ReadFixedLengthUtf32StringArray(const std::file
             // The last chunk may overhang the array; what lies past its end is not an element.
             const std::size_t count = std::min(layout.chunk_elements, layout.num_elements - values.size());
 
-            // Missing chunk: its elements take the (empty) fill value.
+            // Missing chunk: its elements take the array's fill value.
             std::error_code error;
             if (!std::filesystem::exists(chunk_path, error)) {
                 if (error) {
                     return Error{ErrorCode::io_error, "Unable to inspect string array chunk: " + error.message(),
                                  std::string(node)};
                 }
-                values.resize(values.size() + count);
+                values.insert(values.end(), count, layout.fill_value);
                 continue;
             }
 

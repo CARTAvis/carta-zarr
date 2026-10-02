@@ -85,6 +85,13 @@ void TestMultipleChunks() {
     ExpectValues("multi_chunk_missing", std::vector<std::string>{"I", "", "U"});
 }
 
+// A chunk never written reads as the fill value the array declares, as zarr-python reads it, rather
+// than as an empty string whatever was declared.
+void TestDeclaredFillValue() {
+    ExpectValues("missing_chunk_fill", std::vector<std::string>{"I", "I"});
+    ExpectValues("multi_chunk_missing_fill", std::vector<std::string>{"I", "V", "U"});
+}
+
 // Corrupted chunks must be reported, never decoded past the end of the buffer.
 void TestCorruptChunks() {
     ExpectError("crc_mismatch", ErrorCode::decode_error);
@@ -101,6 +108,7 @@ int main() {
         TestBigEndian();
         TestMissingChunk();
         TestMultipleChunks();
+        TestDeclaredFillValue();
         TestCorruptChunks();
         std::cout << "carta-zarr string array tests passed\n";
         return 0;

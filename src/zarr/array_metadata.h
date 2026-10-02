@@ -49,6 +49,11 @@ struct ArrayMetadata {
     // rather than guarded against.
     nlohmann::json codecs = nlohmann::json::array();
     nlohmann::json chunk_key_encoding = nlohmann::json::object();
+    // What a chunk never written reads as, carried as written for the same reason the codecs are:
+    // its spelling depends on the data type, and only a reader of that type can say what it means.
+    // TensorStore reads it for itself for every array it opens; the string decoder, which TensorStore
+    // cannot stand in for, is the one reader here that asks. Null when the document has none.
+    nlohmann::json fill_value;
 };
 
 Result<ArrayMetadata> ParseArrayMetadata(const nlohmann::json& metadata, std::string_view node);

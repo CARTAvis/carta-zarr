@@ -25,8 +25,8 @@ namespace carta::zarr::internal::zarr {
  * directly. 1-D arrays of any number of chunks using the default or v2 chunk key encoding are
  * supported, with a codec chain of: an optional identity transpose, bytes, at most one of
  * zstd/gzip/blosc, and any number of crc32c codecs (checksums are verified). This covers the layouts
- * produced by XRADIO for coordinate label arrays. A missing chunk yields the empty fill value for
- * each of its elements.
+ * produced by XRADIO for coordinate label arrays. A missing chunk yields the array's declared
+ * fill_value -- the empty string when it declares none -- for each of its elements.
  */
 Result<std::vector<std::string>> ReadFixedLengthUtf32StringArray(const std::filesystem::path& array_directory,
                                                                  const ArrayMetadata& array_metadata,

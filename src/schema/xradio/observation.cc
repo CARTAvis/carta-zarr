@@ -11,6 +11,7 @@
 #include <array>
 #include <cmath>
 #include <cstddef>
+#include <cstdint>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -24,44 +25,77 @@ constexpr double kSecondsPerDay = 86400.0;
 constexpr double kUnixEpochMjd = 40587.0;
 
 // Days from 1970-01-01 to a proleptic Gregorian date (Howard Hinnant's days_from_civil).
-long long DaysFromCivil(long long year, unsigned month, unsigned day) {
+std::int64_t DaysFromCivil(std::int64_t year, unsigned month, unsigned day) {
     year -= month <= 2 ? 1 : 0;
-    const long long era = (year >= 0 ? year : year - 399) / 400;
+    const std::int64_t era = (year >= 0 ? year : year - 399) / 400;
     const auto year_of_era = static_cast<unsigned>(year - (era * 400));
-    const unsigned day_of_year = ((153 * (month > 2 ? month - 3 : month + 9)) + 2) / 5 + day - 1;
+    const unsigned day_of_year = (((153 * (month > 2 ? month - 3 : month + 9)) + 2) / 5) + day - 1;
     const unsigned day_of_era = (year_of_era * 365) + (year_of_era / 4) - (year_of_era / 100) + day_of_year;
-    return (era * 146097) + static_cast<long long>(day_of_era) - 719468;
+    return (era * 146097) + static_cast<std::int64_t>(day_of_era) - 719468;
 }
 
-bool IsLeapYear(long long year) {
+bool IsLeapYear(std::int64_t year) {
     return (year % 4 == 0 && year % 100 != 0) || year % 400 == 0;
 }
 
-// Reads `width` decimal digits at `at`, advancing past them.
-std::optional<unsigned> Digits(std::string_view text, std::size_t& at, std::size_t width) {
-    if (at + width > text.size()) {
-        return std::nullopt;
+// A date read left to right, each step failing on anything that is not where it should be.
+class DateReader {
+public:
+    explicit DateReader(std::string_view text) : _text(text) {}
+
+    bool done() const { return _at == _text.size(); }
+
+    // Takes `wanted` when it is next.
+    bool Take(char wanted) {
+        if (_at < _text.size() && _text.at(_at) == wanted) {
+            ++_at;
+            return true;
+        }
+        return false;
     }
-    unsigned value = 0;
-    for (std::size_t i = 0; i < width; ++i) {
-        const char digit = text[at + i];
-        if (digit < '0' || digit > '9') {
+
+    // Exactly `width` decimal digits.
+    std::optional<unsigned> Digits(std::size_t width) {
+        if (_at + width > _text.size()) {
             return std::nullopt;
         }
-        value = (value * 10) + static_cast<unsigned>(digit - '0');
+        unsigned value = 0;
+        for (std::size_t i = 0; i < width; ++i) {
+            const char digit = _text.at(_at + i);
+            if (digit < '0' || digit > '9') {
+                return std::nullopt;
+            }
+            value = (value * 10) + static_cast<unsigned>(digit - '0');
+        }
+        _at += width;
+        return value;
     }
-    at += width;
-    return value;
-}
+
+    // One or more decimal digits read as the fraction they spell after a point.
+    std::optional<double> Fraction() {
+        double value = 0.0;
+        double scale = 0.1;
+        const std::size_t first = _at;
+        for (; _at < _text.size() && _text.at(_at) >= '0' && _text.at(_at) <= '9'; ++_at) {
+            value += (_text.at(_at) - '0') * scale;
+            scale /= 10.0;
+        }
+        return _at == first ? std::nullopt : std::optional<double>(value);
+    }
+
+private:
+    std::string_view _text;
+    std::size_t _at = 0;
+};
 
 // The MJD an ISO 8601 date names, read in whatever scale it was written in: YYYY-MM-DD, then
 // optionally a T or a space and hh:mm, :ss and a fraction, and a trailing Z. A zone offset is not
 // applied but refused, as is anything else, because an epoch guessed at is worse than none.
 std::optional<double> MjdOfIsoDate(std::string_view text) {
-    std::size_t at = 0;
-    const auto year = Digits(text, at, 4);
-    const auto month = at < text.size() && text[at++] == '-' ? Digits(text, at, 2) : std::nullopt;
-    const auto day = at < text.size() && text[at++] == '-' ? Digits(text, at, 2) : std::nullopt;
+    DateReader date(text);
+    const auto year = date.Digits(4);
+    const auto month = date.Take('-') ? date.Digits(2) : std::nullopt;
+    const auto day = date.Take('-') ? date.Digits(2) : std::nullopt;
     if (!year || !month || !day || *month < 1 || *month > 12 || *day < 1) {
         return std::nullopt;
     }
@@ -72,39 +106,31 @@ std::optional<double> MjdOfIsoDate(std::string_view text) {
     }
 
     double seconds = 0.0;
-    if (at < text.size() && (text[at] == 'T' || text[at] == ' ')) {
-        ++at;
-        const auto hour = Digits(text, at, 2);
-        const auto minute = at < text.size() && text[at++] == ':' ? Digits(text, at, 2) : std::nullopt;
+    if (date.Take('T') || date.Take(' ')) {
+        const auto hour = date.Digits(2);
+        const auto minute = date.Take(':') ? date.Digits(2) : std::nullopt;
         if (!hour || !minute || *hour > 23 || *minute > 59) {
             return std::nullopt;
         }
         seconds = (*hour * 3600.0) + (*minute * 60.0);
-        if (at < text.size() && text[at] == ':') {
-            ++at;
-            const auto second = Digits(text, at, 2);
+        if (date.Take(':')) {
+            const auto second = date.Digits(2);
             // 60 is a leap second, which UTC has.
             if (!second || *second > 60) {
                 return std::nullopt;
             }
             seconds += *second;
-            if (at < text.size() && text[at] == '.') {
-                ++at;
-                double scale = 0.1;
-                const std::size_t first = at;
-                for (; at < text.size() && text[at] >= '0' && text[at] <= '9'; ++at, scale /= 10.0) {
-                    seconds += (text[at] - '0') * scale;
-                }
-                if (at == first) {
+            if (date.Take('.')) {
+                const auto fraction = date.Fraction();
+                if (!fraction) {
                     return std::nullopt;
                 }
+                seconds += *fraction;
             }
         }
-        if (at < text.size() && text[at] == 'Z') {
-            ++at;
-        }
+        date.Take('Z');
     }
-    if (at != text.size()) {
+    if (!date.done()) {
         return std::nullopt;
     }
     return static_cast<double>(DaysFromCivil(*year, *month, *day)) + kUnixEpochMjd + (seconds / kSecondsPerDay);

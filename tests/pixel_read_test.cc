@@ -18,7 +18,9 @@
 #include <cstdint>
 #include <exception>
 #include <filesystem>
+#include <fstream>
 #include <iostream>
+#include <iterator>
 #include <string>
 #include <thread>
 #include <utility>
@@ -567,6 +569,67 @@ void TestAPrefetchedPlaneIsReadFromThePool(const char* fixture) {
             "a plane that was not prefetched still read from emptied chunks, so this shows nothing about the prefetch");
 }
 
+std::string ReadText(const std::filesystem::path& path) {
+    std::ifstream in(path);
+    return {std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>()};
+}
+
+void WriteText(const std::filesystem::path& path, const std::string& text) {
+    std::ofstream(path) << text;
+}
+
+// A coordinate is the image's only when it is the array the image was qualified against. With
+// consolidated metadata the store qualifies an image on the root's copy, while the coordinate's
+// values come from the array's own document; here the copy says two channels, as the image has,
+// and the array's own says one. That image used to open describing two channels with one
+// frequency. It is refused as the pixels would be, for an array that is not what the store said.
+void TestACoordinateDisagreeingWithItsConsolidatedCopyIsRefused(const char* fixture) {
+    const auto copy =
+        std::filesystem::temp_directory_path() / ("carta-zarr-coordinate-copy-" + std::to_string(getpid()));
+    std::filesystem::remove_all(copy);
+    std::filesystem::copy(fixture, copy, std::filesystem::copy_options::recursive);
+    struct Remove {
+        std::filesystem::path path;
+        ~Remove() {
+            std::error_code ignored;
+            std::filesystem::remove_all(path, ignored);
+        }
+    } const remove{copy};
+
+    std::string consolidated;
+    for (const auto& entry : std::filesystem::directory_iterator(copy)) {
+        if (entry.is_directory() && std::filesystem::exists(entry.path() / "zarr.json")) {
+            consolidated += (consolidated.empty() ? "\"" : ",\"") + entry.path().filename().string() +
+                            "\":" + ReadText(entry.path() / "zarr.json");
+        }
+    }
+    auto root = ReadText(copy / "zarr.json");
+    const auto end = root.find_last_of('}');
+    Require(end != std::string::npos, "the fixture's root metadata is not an object");
+    root.insert(end, ",\"consolidated_metadata\":{\"kind\":\"inline\",\"must_understand\":false,\"metadata\":{" +
+                         consolidated + "}}");
+    WriteText(copy / "zarr.json", root);
+
+    auto frequency = ReadText(copy / "frequency" / "zarr.json");
+    const auto shape = frequency.find("\"shape\"");
+    const auto two = frequency.find('2', shape);
+    Require(shape != std::string::npos && two != std::string::npos, "the fixture's frequency has no shape of 2");
+    frequency.at(two) = '1';
+    WriteText(copy / "frequency" / "zarr.json", frequency);
+
+    const auto context = carta::zarr::Context::Create();
+    Require(static_cast<bool>(context), "Context::Create failed");
+    const auto dataset = carta::zarr::Dataset::Open(context.value(), copy.string());
+    Require(static_cast<bool>(dataset), "Dataset::Open failed on the consolidated copy");
+    const auto image = dataset->OpenImage("SKY");
+    Require(!image, "SKY opened with a frequency coordinate that disagrees with the metadata it qualified on (" +
+                        (image ? std::to_string(image->descriptor().spectral->channel_frequencies.size()) : "") +
+                        " frequencies)");
+    Require(image.error().code == carta::zarr::ErrorCode::invalid_metadata,
+            "a coordinate disagreeing with its consolidated copy was refused as something else: " +
+                image.error().message);
+}
+
 }  // namespace
 
 int main() {
@@ -592,6 +655,7 @@ int main() {
     try {
         TestAnOpenImageOutlivesTheWorkingDirectory(kFixtures[0]);
         TestAPrefetchedPlaneIsReadFromThePool(kFixtures[0]);
+        TestACoordinateDisagreeingWithItsConsolidatedCopyIsRefused(kFixtures[0]);
         Require(fast_axes.size() == 2 && fast_axes.at(0) != fast_axes.at(1),
                 "the two fixtures should disagree about which spatial axis the store varies fastest; "
                 "if they agree, one of them was regenerated wrongly and half of this is untested");

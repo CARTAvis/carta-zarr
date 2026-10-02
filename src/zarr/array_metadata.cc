@@ -249,6 +249,9 @@ Result<ArrayMetadata> ParseArrayMetadata(const nlohmann::json& metadata, std::st
             return Error{ErrorCode::invalid_metadata, "Zarr codec names must be strings", node_path};
         }
     }
+    if (metadata.contains("fill_value")) {
+        result.fill_value = metadata.at("fill_value");
+    }
     if (metadata.contains("chunk_key_encoding") && metadata.at("chunk_key_encoding").is_object()) {
         result.chunk_key_encoding = metadata.at("chunk_key_encoding");
     }

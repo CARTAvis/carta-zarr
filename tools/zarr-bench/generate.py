@@ -1028,6 +1028,24 @@ def check_stripe(argv: list[str]) -> int:
     return 0
 
 
+def overlaps(a: Path, b: Path) -> bool:
+    """Whether either resolved path is the other or lies beneath it.
+
+    Compared by file identity as well as by spelling, so that a hard-linked or case-folded alias of
+    a directory is the directory, as resolve() alone does not settle on a case-insensitive disk.
+    """
+
+    def within(inner: Path, outer: Path) -> bool:
+        for candidate in (inner, *inner.parents):
+            if candidate == outer:
+                return True
+            if candidate.exists() and outer.exists() and os.path.samefile(candidate, outer):
+                return True
+        return False
+
+    return within(a, b) or within(b, a)
+
+
 def main(argv: list[str] | None = None) -> int:
     arguments = sys.argv[1:] if argv is None else argv
     if any(argument.split("=", 1)[0] == "--check-stripe" for argument in arguments):
@@ -1041,6 +1059,12 @@ def main(argv: list[str] | None = None) -> int:
     else:
         stem = "synthetic" if args.synthetic else Path(args.source).resolve().name.removesuffix(".zarr")
         out = Path(args.output_root).resolve() / f"{stem}-{digest}"
+    # --force deletes what is at the output before the source is read, so an output that is the
+    # source, or holds it, would take the source with it; one inside the source would be written
+    # into the dataset being read.
+    for read, flag in ((args.source, "--source"), (None if args.source else args.template, "--template")):
+        if read and overlaps(out, Path(read).resolve()):
+            raise SystemExit(f"{out} overlaps {flag} {read}; write the dataset somewhere else")
 
     if out.exists():
         manifest = read_manifest(out)

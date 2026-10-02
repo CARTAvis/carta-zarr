@@ -32,3 +32,32 @@ generate(rewritten --source "${SOURCE_DIR}/tests/data/images/zarr/xradio/pixels"
          --chunk l=3,m=2,frequency=2 --codec gzip:1)
 generate(current --source "${SOURCE_DIR}/tests/data/images/zarr/xradio/pixels_wide" --crop frequency=1:3
          --layout-from-source)
+
+# --force replaces whatever is at --output, so an --output that is the source, an alias of it, or a
+# directory around it would delete the source before a byte of it was read. Each is refused, and the
+# source is still there afterwards. A copy of a fixture stands in for the source, so that a
+# regression costs the build tree rather than the repository.
+set(overlap "${OUTPUT_DIR}/overlap")
+set(victim "${overlap}/victim.zarr")
+file(MAKE_DIRECTORY "${overlap}")
+file(COPY "${SOURCE_DIR}/tests/data/images/zarr/xradio/pixels/" DESTINATION "${victim}")
+file(CREATE_LINK "${victim}" "${overlap}/alias.zarr" SYMBOLIC)
+
+function(refuse output)
+    execute_process(
+        COMMAND "${UV}" run --quiet --script "${generator}" --source "${victim}" --output "${output}" --force
+                --workers 1 --layout-from-source
+        RESULT_VARIABLE result
+        OUTPUT_QUIET ERROR_QUIET)
+    if(NOT result)
+        message(FATAL_ERROR "generate.py accepted --output ${output} over its own --source")
+    endif()
+    if(NOT EXISTS "${victim}/zarr.json")
+        message(FATAL_ERROR "generate.py deleted its --source writing --output ${output}")
+    endif()
+endfunction()
+
+refuse("${victim}")
+refuse("${overlap}/alias.zarr")
+refuse("${overlap}")
+refuse("${victim}/inside")

@@ -112,6 +112,19 @@ inline const StoreContextPtr& CachePoolAccess::StoreContextOf(const CachePool& p
 Result<tensorstore::TensorStore<>> OpenZarrArray(const std::filesystem::path& array_directory,
                                                  const StoreContextPtr& context, std::string_view node);
 
+/**
+ * Whether an opened array is the one the store's canonical metadata describes: its rank, its
+ * extent, the names and order of its dimensions, and its data type.
+ *
+ * The store decides what an image is from the document it parsed -- with consolidated metadata, the
+ * root's copy -- while TensorStore opens an array from the array's own. The two are meant to be the
+ * same document and are not always: a copy left stale by a rewrite, or a store written by hand. An
+ * array that disagrees is refused as invalid_metadata before any value of it is read, whether it
+ * holds pixels or a coordinate, because a coordinate of another length describes another image.
+ */
+Result<void> VerifyArrayMatchesMetadata(const tensorstore::TensorStore<>& array,
+                                        const zarr::ArrayMetadata& expected, std::string_view node);
+
 // Translate the public options into TensorStore context resources. A concurrency limit of zero
 // keeps TensorStore's default; a cache size is written whenever the caller gave one, zero included,
 // because zero is the pool that holds nothing rather than the absence of an answer.

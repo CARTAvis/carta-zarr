@@ -28,34 +28,10 @@
 namespace carta::zarr::internal::zarr {
 namespace {
 
-// The one thing about a data type that cannot go in the table beside the others: a
-// tensorstore::dtype_v is a template, so the mapping has to be written as code. It goes through the
-// shared table for the half that can be shared -- what the name means -- and spells out only the
-// half that cannot.
-//
-// A type this does not answer for is a type a pixel read refuses, which is why complex is absent:
-// nothing reaches here holding one, because an image is required to be real long before a pixel of
-// it is asked for.
-bool MatchesDataType(std::string_view expected, tensorstore::DataType actual) {
-    switch (ParseDataType(expected)) {
-        case DataType::boolean: return actual == tensorstore::dtype_v<bool>;
-        case DataType::int8: return actual == tensorstore::dtype_v<std::int8_t>;
-        case DataType::uint8: return actual == tensorstore::dtype_v<std::uint8_t>;
-        case DataType::int16: return actual == tensorstore::dtype_v<std::int16_t>;
-        case DataType::uint16: return actual == tensorstore::dtype_v<std::uint16_t>;
-        case DataType::int32: return actual == tensorstore::dtype_v<std::int32_t>;
-        case DataType::uint32: return actual == tensorstore::dtype_v<std::uint32_t>;
-        case DataType::int64: return actual == tensorstore::dtype_v<std::int64_t>;
-        case DataType::uint64: return actual == tensorstore::dtype_v<std::uint64_t>;
-        case DataType::float16: return actual == tensorstore::dtype_v<tensorstore::dtypes::float16_t>;
-        case DataType::float32: return actual == tensorstore::dtype_v<float>;
-        case DataType::float64: return actual == tensorstore::dtype_v<double>;
-        default: return false;
-    }
-}
-
 // What the array on disk has to agree with the store's canonical metadata about before a single
 // pixel of it is read: its rank, its extent, what its dimensions are called, and what it holds.
+// Every array read is held to all four, coordinates and beam tables included, so they are asked by
+// VerifyArrayMatchesMetadata; what is a pixel read's own is that the selection has the array's rank.
 //
 // Every one of those is asked of the one document the store parsed. The data type used to come from
 // there and the extent and names from the selection, which had copied them out of the descriptor --
@@ -72,40 +48,7 @@ Result<void> VerifyStoreMatchesMetadata(const tensorstore::TensorStore<>& store,
         return Error{ErrorCode::invalid_argument, "Selection rank does not match the array rank",
                      std::string(node)};
     }
-    if (static_cast<std::size_t>(store.rank()) != rank) {
-        return Error{ErrorCode::invalid_metadata, "Array rank differs between metadata sources",
-                     std::string(node)};
-    }
-    const auto actual_shape = store.domain().shape();
-    if (actual_shape.size() != rank) {
-        return Error{ErrorCode::invalid_metadata, "Array rank differs between metadata sources",
-                     std::string(node)};
-    }
-    for (std::size_t axis = 0; axis < rank; ++axis) {
-        if (actual_shape[axis] != static_cast<tensorstore::Index>(expected.shape.at(axis))) {
-            return Error{ErrorCode::invalid_metadata,
-                         "Array shape differs between canonical metadata and the array store",
-                         std::string(node)};
-        }
-    }
-    const auto actual_dimension_names = store.domain().labels();
-    if (actual_dimension_names.size() != rank || expected.dimension_names.size() != rank) {
-        return Error{ErrorCode::invalid_metadata, "Array dimension names differ between metadata sources",
-                     std::string(node)};
-    }
-    for (std::size_t axis = 0; axis < rank; ++axis) {
-        if (actual_dimension_names[axis] != expected.dimension_names.at(axis)) {
-            return Error{ErrorCode::invalid_metadata,
-                         "Array dimension names differ between canonical metadata and the array store",
-                         std::string(node)};
-        }
-    }
-    if (!MatchesDataType(expected.data_type, store.dtype())) {
-        return Error{ErrorCode::invalid_metadata,
-                     "Array data type differs between canonical metadata and the array store",
-                     std::string(node)};
-    }
-    return {};
+    return VerifyArrayMatchesMetadata(store, expected, node);
 }
 
 template <typename Element>

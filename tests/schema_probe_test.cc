@@ -12,6 +12,7 @@
 #include <filesystem>
 #include <fstream>
 #include <iostream>
+#include <iterator>
 #include <stdexcept>
 #include <string>
 #include <type_traits>
@@ -740,6 +741,48 @@ void TestBeamTableWithUnreadableLabels(const std::filesystem::path& root) {
             "beam labels naming no beam parameter were reported as an image with no beam");
 }
 
+// The beam table is read as one flat buffer and addressed by the dimension names the store parsed
+// -- with consolidated metadata, the root's copy. Here the BEAM array's own document names its axes
+// in another order, frequency and beam_params_label exchanged, and both are three long, so every
+// extent still agrees. Reading it addressed by the copy's names put a beam's parameters where its
+// channels should be: channel 1's major axis read as 0.003 rather than 0.00013. The array is not the
+// one the store described, so the read is refused, as one of another extent already is.
+void TestABeamTableWhoseAxesAreReorderedOnDiskIsRefused(const std::filesystem::path& root) {
+    std::filesystem::copy(CARTA_ZARR_REFERENCE_FIXTURE, root, std::filesystem::copy_options::recursive);
+    const auto metadata_path = root / "BEAM" / "zarr.json";
+    std::string text;
+    {
+        std::ifstream in(metadata_path);
+        text.assign(std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>());
+    }
+    const auto names = text.find("\"dimension_names\"");
+    const auto end = text.find(']', names);
+    Require(names != std::string::npos && end != std::string::npos, "the BEAM metadata names no dimensions");
+    auto listed = text.substr(names, end - names);
+    const auto swap = [&listed](const std::string& from, const std::string& to) {
+        const auto at = listed.find(from);
+        Require(at != std::string::npos, "the BEAM dimensions do not include " + from);
+        listed.replace(at, from.size(), to);
+    };
+    swap("\"frequency\"", "\"@\"");
+    swap("\"beam_params_label\"", "\"frequency\"");
+    swap("\"@\"", "\"beam_params_label\"");
+    text.replace(names, end - names, listed);
+    std::ofstream(metadata_path, std::ios::trunc) << text;
+
+    const auto context = carta::zarr::Context::Create();
+    Require(static_cast<bool>(context), "Context::Create failed");
+    const auto dataset = carta::zarr::Dataset::Open(context.value(), root.string());
+    Require(static_cast<bool>(dataset), "Dataset::Open failed on the copy with reordered BEAM axes");
+    const auto image = dataset.value().OpenImage("SKY");
+    Require(static_cast<bool>(image), "SKY did not open in the copy with reordered BEAM axes");
+    const auto beams = image.value().ReadBeams();
+    Require(!beams, "a beam table whose axes are ordered differently on disk was read");
+    Require(beams.error().code == ErrorCode::invalid_metadata,
+            "a beam table whose axes are ordered differently on disk was refused as something else: " +
+                beams.error().message);
+}
+
 void TestImageDatasetWithoutSky(const std::filesystem::path& root) {
     Write(root / "zarr.json", RootMetadata());
     Write(root / "RESIDUAL" / "zarr.json", SkyArray());
@@ -935,6 +978,7 @@ int main() {
         TestAShardingCodecThatDescribesNoChunks(root / "unusable-shard");
         TestEmptyAndOversizedMetadata(root / "metadata-bytes");
         TestBeamTableWithUnreadableLabels(root / "beam-labels");
+        TestABeamTableWhoseAxesAreReorderedOnDiskIsRefused(root / "beam-axis-order");
         TestANodeNameSpelledWithADotIsTheSameNode(root / "dotted-node");
         TestReferenceFixture();
         TestAnEntrySaysWhatOpeningWould();

@@ -134,6 +134,25 @@ Result<void> VerifyArrayMatchesMetadata(const tensorstore::TensorStore<>& array,
                          std::string(node)};
         }
     }
+    // Two axes of one length exchanged leave every extent agreeing, and a read addressed by the
+    // store's names then puts one axis's values where the other's should be. A 1-D array whose own
+    // document names nothing is let through: it has no order to get wrong.
+    const auto actual_dimension_names = array.domain().labels();
+    const bool unnamed_vector =
+        rank == 1 && actual_dimension_names.size() == 1 && actual_dimension_names[0].empty();
+    if (!unnamed_vector) {
+        if (actual_dimension_names.size() != rank || expected.dimension_names.size() != rank) {
+            return Error{ErrorCode::invalid_metadata, "Array dimension names differ between metadata sources",
+                         std::string(node)};
+        }
+        for (std::size_t axis = 0; axis < rank; ++axis) {
+            if (actual_dimension_names[axis] != expected.dimension_names.at(axis)) {
+                return Error{ErrorCode::invalid_metadata,
+                             "Array dimension names differ between canonical metadata and the array store",
+                             std::string(node)};
+            }
+        }
+    }
     if (!MatchesDataType(expected.data_type, array.dtype())) {
         return Error{ErrorCode::invalid_metadata,
                      "Array data type differs between canonical metadata and the array store",

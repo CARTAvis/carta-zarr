@@ -29,10 +29,9 @@ namespace carta::zarr::internal::zarr {
 namespace {
 
 // What the array on disk has to agree with the store's canonical metadata about before a single
-// pixel of it is read: its rank, its extent, what its dimensions are called, and what it holds. The
-// rank, extent and type are what every array read is held to, coordinates included, and are
-// checked by VerifyArrayMatchesMetadata; the names are a pixel read's own, because a selection
-// addresses its axes by them.
+// pixel of it is read: its rank, its extent, what its dimensions are called, and what it holds.
+// Every array read is held to all four, coordinates and beam tables included, so they are asked by
+// VerifyArrayMatchesMetadata; what is a pixel read's own is that the selection has the array's rank.
 //
 // Every one of those is asked of the one document the store parsed. The data type used to come from
 // there and the extent and names from the selection, which had copied them out of the descriptor --
@@ -49,22 +48,7 @@ Result<void> VerifyStoreMatchesMetadata(const tensorstore::TensorStore<>& store,
         return Error{ErrorCode::invalid_argument, "Selection rank does not match the array rank",
                      std::string(node)};
     }
-    if (auto agreed = VerifyArrayMatchesMetadata(store, expected, node); !agreed) {
-        return agreed.error();
-    }
-    const auto actual_dimension_names = store.domain().labels();
-    if (actual_dimension_names.size() != rank || expected.dimension_names.size() != rank) {
-        return Error{ErrorCode::invalid_metadata, "Array dimension names differ between metadata sources",
-                     std::string(node)};
-    }
-    for (std::size_t axis = 0; axis < rank; ++axis) {
-        if (actual_dimension_names[axis] != expected.dimension_names.at(axis)) {
-            return Error{ErrorCode::invalid_metadata,
-                         "Array dimension names differ between canonical metadata and the array store",
-                         std::string(node)};
-        }
-    }
-    return {};
+    return VerifyArrayMatchesMetadata(store, expected, node);
 }
 
 template <typename Element>

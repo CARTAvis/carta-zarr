@@ -113,8 +113,8 @@ Result<tensorstore::TensorStore<>> OpenZarrArray(const std::filesystem::path& ar
                                                  const StoreContextPtr& context, std::string_view node);
 
 /**
- * Whether an opened array is the one the store's canonical metadata describes: its rank, its extent
- * and its data type.
+ * Whether an opened array is the one the store's canonical metadata describes: its rank, its
+ * extent, the names and order of its dimensions, and its data type.
  *
  * The store decides what an image is from the document it parsed -- with consolidated metadata, the
  * root's copy -- while TensorStore opens an array from the array's own. The two are meant to be the

@@ -248,7 +248,10 @@ struct ObservationInfo {
     std::string observer;
     std::string telescope_name;
     std::string timesys;
+    // The observation date as the dataset wrote it, when it wrote a string; empty for a number.
     std::string date_obs;
+    // The observation date as an MJD in `timesys`, whichever way it was written: a number in the
+    // MJD or unix format, or a string date read as ISO 8601. Absent when neither could be read.
     std::optional<double> mjd_obs;
     std::optional<std::array<double, 3>> observatory_position;  // OBSGEO-X, Y, Z (meters)
 };

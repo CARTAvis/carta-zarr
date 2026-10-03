@@ -157,7 +157,8 @@ public:
      *
      * Costs reading the own document once for the life of the store, and only for a node the root's
      * copy accounted for: any other node's metadata was read from its own document in the first
-     * place, and is handed back as it is. Probing and listing never ask, so they keep what
+     * place, and is handed back as it is. Asked again, it is one lookup, without normalizing the
+     * name, because every piece of a pixel read asks. Probing and listing never ask, so they keep what
      * consolidated metadata saves; every value read does ask, and describing an image asks of the
      * image and its flag before any value is read. ADR 0017.
      */

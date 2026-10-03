@@ -299,17 +299,21 @@ const Result<zarr::ArrayMetadata>& Store::ReadArrayMetadata(std::string_view nod
 }
 
 const Result<zarr::ArrayMetadata>& Store::VerifyArray(std::string_view node) const {
-    const auto& copy = ReadArrayMetadata(node);
-    if (!copy) {
-        return copy;
-    }
-    // Normalizes, since the copy above was found under this name.
-    const std::string name = NormalizeNodeName(node).value();
-    // Read from its own document in the first place, so there is no other document to hold it to.
-    if (!std::binary_search(_consolidated_nodes.begin(), _consolidated_nodes.end(), name)) {
-        return copy;
-    }
-    return _caches->verified_arrays.GetOrCompute(name, [&]() -> Result<zarr::ArrayMetadata> {
+    // Keyed by the name as asked rather than normalized, unlike the tables below it: a pixel read
+    // asks once per piece, and normalizing a name costs more than the lookup -- enough to show in a
+    // whole-cube read. The names asked are the ones the inventory and the descriptor hand out, so a
+    // second spelling of a node is rare, and costs one more read of its document when it happens.
+    return _caches->verified_arrays.GetOrCompute(std::string(node), [&]() -> Result<zarr::ArrayMetadata> {
+        const auto& copy = ReadArrayMetadata(node);
+        if (!copy) {
+            return copy.error();
+        }
+        // Normalizes, since the copy above was found under this name.
+        const std::string name = NormalizeNodeName(node).value();
+        // Read from its own document in the first place, so there is no other document to hold it to.
+        if (!std::binary_search(_consolidated_nodes.begin(), _consolidated_nodes.end(), name)) {
+            return copy;
+        }
         // Asked of the transport rather than of ReadNodeMetadata, which for this node holds the copy.
         auto bytes = _transport->ReadNodeBytes(name);
         if (!bytes) {

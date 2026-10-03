@@ -730,11 +730,11 @@ void TestLabelsAreHeldToTheirOwnDocument(const char* fixture) {
             "labels whose copy names another compressor were not read as written");
 }
 
-// A node name is held to one rule, the store's. On POSIX a backslash is a character like any other
-// in a file name, and the store has always accepted one; the transport refused the same name when
-// asked where the array lives, so a variable named that way was listed, opened, and then failed
-// every read.
-void TestAVariableNamedWithABackslashIsRead(const char* fixture) {
+// What a backslash in a variable's name costs. On POSIX it is a character like any other in a file
+// name, and the store accepts the name, so the variable is listed and opens. TensorStore's file
+// kvstore reads it as a separator, so its pixels cannot be reached, and a read says so rather than
+// looking for the array somewhere else.
+void TestAVariableNamedWithABackslashSaysWhyItIsNotRead(const char* fixture) {
     const auto copy = std::filesystem::temp_directory_path() / ("carta-zarr-backslash-" + std::to_string(getpid()));
     std::filesystem::remove_all(copy);
     std::filesystem::copy(fixture, copy, std::filesystem::copy_options::recursive);
@@ -756,10 +756,10 @@ void TestAVariableNamedWithABackslashIsRead(const char* fixture) {
                                           (image ? std::string{} : image.error().message));
     std::vector<float> pixels(kL * kM * kFrequency * kPolarization * kTime);
     const auto read = image->Read(WholeImage(image->descriptor()), {pixels.data(), pixels.size()}, Unmasked());
-    Require(static_cast<bool>(read), "the variable named with a backslash was not read: " +
-                                         (read ? std::string{} : read.error().message));
-    Require(pixels.at(LogicalOffset(1, 2, 1, 0)) == ExpectedValue(1, 2, 1, 0, 0),
-            "the variable named with a backslash read the wrong pixels");
+    Require(!read, "the variable named with a backslash was read, from wherever TensorStore found it");
+    Require(read.error().code == carta::zarr::ErrorCode::invalid_argument &&
+                read.error().message.find("backslash") != std::string::npos,
+            "a read of the variable named with a backslash did not say why it was refused: " + read.error().message);
 }
 
 }  // namespace
@@ -790,7 +790,7 @@ int main() {
         TestACoordinateDisagreeingWithItsConsolidatedCopyIsRefused(kFixtures[0]);
         TestAnImageWhoseArraysDisagreeWithTheirCopiesDoesNotOpen(kFixtures[0]);
         TestLabelsAreHeldToTheirOwnDocument(kFixtures[0]);
-        TestAVariableNamedWithABackslashIsRead(kFixtures[0]);
+        TestAVariableNamedWithABackslashSaysWhyItIsNotRead(kFixtures[0]);
         Require(fast_axes.size() == 2 && fast_axes.at(0) != fast_axes.at(1),
                 "the two fixtures should disagree about which spatial axis the store varies fastest; "
                 "if they agree, one of them was regenerated wrongly and half of this is untested");

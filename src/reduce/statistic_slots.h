@@ -16,12 +16,13 @@
 // of the block. The block accumulator and each task's private partial are the same thing at two
 // extents, so they are one type here, and nothing outside this file indexes into either.
 //
-// Not the cube histogram's accumulator, although it counts the same six statistics. It keeps them
+// Not the cube histogram's accumulator, although it counts the same statistics. It keeps them
 // in registers for one region and one channel, decides an extremum is untouched by num_pixels being
 // zero rather than by it still being infinite, and is padded to a cache line beside its histogram,
 // which is a number ADR 0005 measured. Folding it into this would move that number for nothing.
 
 #include "carta-zarr/reduce.h"
+#include "reduce/deviations.h"
 #include "reduce/tuning.h"
 
 #include <algorithm>
@@ -44,6 +45,11 @@ struct RowTotals {
     double sum_sq = 0.0;
     double smallest = std::numeric_limits<double>::infinity();
     double largest = -std::numeric_limits<double>::infinity();
+    // The good pixels' mean, as a base and an offset, and their squared deviations from it; left at
+    // zero by a loop not asked for them. See reduce/deviations.h.
+    double base = 0.0;
+    double offset = 0.0;
+    double sum_sq_dev = 0.0;
 };
 
 // Which statistics a reduction accumulates, and the slot each one has.
@@ -51,7 +57,13 @@ class StatisticLayout {
 public:
     // The statistics in `requested`, in kStatisticOrder. A request for none has been refused before
     // anything asks for its layout.
+    //
+    // sum_sq_dev brings num_pixels and sum with it: two sets' deviations are put together from their
+    // counts and means, so a fold or a merge without them would have nothing to do it with.
     static StatisticLayout Of(StatisticSet requested) {
+        if (requested.Contains(Statistic::sum_sq_dev)) {
+            requested |= Statistic::num_pixels | Statistic::sum;
+        }
         StatisticLayout layout;
         layout._slot_of.fill(-1);
         for (std::size_t i = 0; i < kStatisticOrder.size(); ++i) {
@@ -66,8 +78,13 @@ public:
     std::size_t count() const noexcept { return _count; }
     // count() of them, in the order a block reports them.
     const Statistic* statistics() const noexcept { return _statistics.data(); }
+    // Whether the per-pixel loop has deviations to take.
+    bool Deviations() const noexcept { return _slot_of.back() >= 0; }
+    // How many values one region keeps at one channel: the statistics, and with sum_sq_dev the base
+    // and offset of the mean its merges need, which no block reports. See reduce/deviations.h.
+    std::size_t Stored() const noexcept { return _count + (Deviations() ? 2 : 0); }
     // What one channel of a block over `regions` regions occupies.
-    std::size_t BytesPerChannel(std::size_t regions) const noexcept { return regions * _count * sizeof(double); }
+    std::size_t BytesPerChannel(std::size_t regions) const noexcept { return regions * Stored() * sizeof(double); }
 
     bool operator==(const StatisticLayout& other) const noexcept { return _slot_of == other._slot_of; }
 
@@ -95,7 +112,9 @@ public:
         _layout = layout;
         _regions = regions;
         _channels = static_cast<std::size_t>(channels);
-        _region_stride = layout.count() * _channels;
+        _region_stride = layout.Stored() * _channels;
+        _base_at = layout.count() * _channels;
+        _offset_at = _base_at + _channels;
         // Worked out once here rather than from the slot table on every fold: the fold runs once per
         // row, and these are loop invariants for all of them.
         for (std::size_t i = 0; i < kStatisticOrder.size(); ++i) {
@@ -119,6 +138,15 @@ public:
     void Fold(std::size_t region, std::uint64_t channel, const RowTotals& row) noexcept {
         assert(region < _regions && channel < _channels);
         double* at = _values.data() + (region * _region_stride) + static_cast<std::size_t>(channel);
+        // First, while the count is still that of what came before the row.
+        if (std::get<kSumSqDev>(_offset) != kAbsent) {
+            double& deviations = at[std::get<kSumSqDev>(_offset)];
+            Spread spread{at[std::get<kNumPixels>(_offset)], at[_base_at], at[_offset_at], deviations};
+            spread.Merge({static_cast<double>(row.good), row.base, row.offset, row.sum_sq_dev});
+            at[_base_at] = spread.base;
+            at[_offset_at] = spread.offset;
+            deviations = spread.sum_sq_dev;
+        }
         if (std::get<kNumPixels>(_offset) != kAbsent) {
             at[std::get<kNumPixels>(_offset)] += static_cast<double>(row.good);
         }
@@ -151,12 +179,32 @@ public:
             assert(partial._layout == _layout && partial._regions == _regions &&
                    offset + partial._channels <= _channels);
             for (std::size_t r = 0; r < _regions; ++r) {
+                // The deviations first, as in Fold: they need the counts from before.
+                if (std::get<kSumSqDev>(_offset) != kAbsent) {
+                    const double* from = partial._values.data() + (r * partial._region_stride);
+                    double* to = _values.data() + (r * _region_stride) + static_cast<std::size_t>(offset);
+                    const std::size_t from_count = std::get<kNumPixels>(partial._offset);
+                    const std::size_t from_deviations = std::get<kSumSqDev>(partial._offset);
+                    const std::size_t to_count = std::get<kNumPixels>(_offset);
+                    const std::size_t to_deviations = std::get<kSumSqDev>(_offset);
+                    for (std::size_t c = 0; c < partial._channels; ++c) {
+                        Spread spread{to[to_count + c], to[_base_at + c], to[_offset_at + c], to[to_deviations + c]};
+                        spread.Merge({from[from_count + c], from[partial._base_at + c], from[partial._offset_at + c],
+                                      from[from_deviations + c]});
+                        to[_base_at + c] = spread.base;
+                        to[_offset_at + c] = spread.offset;
+                        to[to_deviations + c] = spread.sum_sq_dev;
+                    }
+                }
                 for (std::size_t slot = 0; slot < _layout.count(); ++slot) {
                     const double* from =
                         partial._values.data() + (r * partial._region_stride) + (slot * partial._channels);
                     double* to =
                         _values.data() + (r * _region_stride) + (slot * _channels) + static_cast<std::size_t>(offset);
                     const Statistic statistic = _layout._statistics.at(slot);
+                    if (statistic == Statistic::sum_sq_dev) {
+                        continue;
+                    }
                     if (statistic == Statistic::min) {
                         for (std::size_t c = 0; c < partial._channels; ++c) {
                             to[c] = std::min(to[c], from[c]);
@@ -214,12 +262,14 @@ private:
     static constexpr std::size_t kSumSq = 3;
     static constexpr std::size_t kMin = 4;
     static constexpr std::size_t kMax = 5;
+    static constexpr std::size_t kSumSqDev = 6;
     static_assert(std::get<kNumPixels>(kStatisticOrder) == Statistic::num_pixels &&
                       std::get<kNanCount>(kStatisticOrder) == Statistic::nan_count &&
                       std::get<kSum>(kStatisticOrder) == Statistic::sum &&
                       std::get<kSumSq>(kStatisticOrder) == Statistic::sum_sq &&
                       std::get<kMin>(kStatisticOrder) == Statistic::min &&
-                      std::get<kMax>(kStatisticOrder) == Statistic::max,
+                      std::get<kMax>(kStatisticOrder) == Statistic::max &&
+                      std::get<kSumSqDev>(kStatisticOrder) == Statistic::sum_sq_dev,
                   "the positions above are kStatisticOrder's");
 
     struct Extremum {
@@ -255,6 +305,9 @@ private:
     std::size_t _channels = 0;
     std::size_t _region_stride = 0;
     std::array<std::size_t, kStatisticOrder.size()> _offset{};
+    // Where in a region the mean behind sum_sq_dev is kept, after every statistic a block reports.
+    std::size_t _base_at = 0;
+    std::size_t _offset_at = 0;
     std::vector<double> _values;
 };
 

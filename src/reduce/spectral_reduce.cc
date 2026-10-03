@@ -8,6 +8,7 @@
 
 #include "chunk_blocks.h"
 #include "axis_map.h"
+#include "reduce/deviations.h"
 #include "reduce/tuning.h"
 #include "reduce/occupancy.h"
 #include "reduce/pass.h"
@@ -40,7 +41,11 @@ constexpr double kInfinity = std::numeric_limits<double>::infinity();
 // The finiteness test is branchless for the same reason. A non-finite value contributes zero to the
 // sums and its own identity to the extrema, which is exactly what excluding it means, so there is
 // nothing an if would do that arithmetic does not.
-template <bool kUnitStride, bool kMasked>
+//
+// kDeviations is the third: the distances from a shift that Statistic::sum_sq_dev is made from cost
+// a subtraction and a multiply-add per pixel, which a reduction not asked for it does not pay. A
+// non-finite pixel's distance is zero, as its value is. See reduce/deviations.h.
+template <bool kUnitStride, bool kMasked, bool kDeviations>
 void AccumulateRow(const float* row, std::uint64_t stride, std::uint64_t count, const std::uint8_t* selected,
                    std::uint64_t mask_stride, RowTotals& totals) {
     std::uint64_t good = 0;
@@ -49,6 +54,9 @@ void AccumulateRow(const float* row, std::uint64_t stride, std::uint64_t count, 
     double sum_sq = 0.0;
     double smallest = kInfinity;
     double largest = -kInfinity;
+    const double shift = kDeviations ? DeviationShift<kMasked>(row, stride, count, selected, mask_stride) : 0.0;
+    double distance_sum = 0.0;
+    double distance_sum_sq = 0.0;
 
     for (std::uint64_t i = 0; i < count; ++i) {
         if (kMasked && selected[i * mask_stride] == 0) {
@@ -63,6 +71,20 @@ void AccumulateRow(const float* row, std::uint64_t stride, std::uint64_t count, 
         sum_sq += clean * clean;
         smallest = std::min(smallest, finite ? clean : kInfinity);
         largest = std::max(largest, finite ? clean : -kInfinity);
+        if (kDeviations) {
+            const double distance = finite ? clean - shift : 0.0;
+            distance_sum += distance;
+            distance_sum_sq += distance * distance;
+        }
+    }
+
+    if (kDeviations) {
+        // Before the count below takes this span in: the row so far is what came before it.
+        Spread row_so_far{static_cast<double>(totals.good), totals.base, totals.offset, totals.sum_sq_dev};
+        row_so_far.Merge(Spread::OfSpan(static_cast<double>(good), shift, distance_sum, distance_sum_sq));
+        totals.base = row_so_far.base;
+        totals.offset = row_so_far.offset;
+        totals.sum_sq_dev = row_so_far.sum_sq_dev;
     }
 
     // Added rather than assigned: a row described by runs is several spans, and they share one set
@@ -73,6 +95,24 @@ void AccumulateRow(const float* row, std::uint64_t stride, std::uint64_t count, 
     totals.sum_sq += sum_sq;
     totals.smallest = std::min(totals.smallest, smallest);
     totals.largest = std::max(totals.largest, largest);
+}
+
+// One span into a row's totals, by the loop its stride, its mask and the request call for. Every
+// combination is its own instantiation, so that each loop is free of the tests the others need.
+template <bool kDeviations>
+void AccumulateSpan(const float* pixels, std::uint64_t stride, std::uint64_t count, const std::uint8_t* selected,
+                    std::uint64_t mask_step, RowTotals& totals) {
+    if (stride == 1) {
+        if (selected == nullptr) {
+            AccumulateRow<true, false, kDeviations>(pixels, 1, count, nullptr, 1, totals);
+        } else {
+            AccumulateRow<true, true, kDeviations>(pixels, 1, count, selected, mask_step, totals);
+        }
+    } else if (selected == nullptr) {
+        AccumulateRow<false, false, kDeviations>(pixels, stride, count, nullptr, 1, totals);
+    } else {
+        AccumulateRow<false, true, kDeviations>(pixels, stride, count, selected, mask_step, totals);
+    }
 }
 
 }  // namespace
@@ -121,6 +161,7 @@ Result<void> ReduceSpectral(const ReducibleImage& image, const SpectralReduceReq
 
     // The requested statistics, in the one order a block reports them.
     const auto layout = StatisticLayout::Of(request.statistics);
+    const bool deviations = layout.Deviations();
 
     // The budget is over the chunk data a slab decodes, not the pixels it keeps. A one-pixel region
     // asks for almost nothing and still decodes an entire chunk per chunk it touches, so sizing by
@@ -229,16 +270,10 @@ Result<void> ReduceSpectral(const ReducibleImage& image, const SpectralReduceReq
                             // that is its whole box -- takes the loop with no test per pixel.
                             const float* pixels = row + ((first - u_begin) * stride_u);
                             const std::uint64_t count = last - first;
-                            if (stride_u == 1) {
-                                if (selected == nullptr) {
-                                    AccumulateRow<true, false>(pixels, 1, count, nullptr, 1, totals);
-                                } else {
-                                    AccumulateRow<true, true>(pixels, 1, count, selected, mask_step, totals);
-                                }
-                            } else if (selected == nullptr) {
-                                AccumulateRow<false, false>(pixels, stride_u, count, nullptr, 1, totals);
+                            if (deviations) {
+                                AccumulateSpan<true>(pixels, stride_u, count, selected, mask_step, totals);
                             } else {
-                                AccumulateRow<false, true>(pixels, stride_u, count, selected, mask_step, totals);
+                                AccumulateSpan<false>(pixels, stride_u, count, selected, mask_step, totals);
                             }
                         });
                     partial.Fold(r, channel, totals);

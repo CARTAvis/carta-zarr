@@ -21,6 +21,7 @@
 
 #include "carta-zarr/reduce.h"
 
+#include "reduce/deviations.h"
 #include "reduce/growing_histogram.h"
 #include "reduce/slab.h"
 #include "reduce/task_split.h"
@@ -112,7 +113,9 @@ public:
         auto& totals = result.totals;
         double smallest = std::numeric_limits<double>::infinity();
         double largest = -std::numeric_limits<double>::infinity();
+        Spread spread;
         for (const auto& accumulator : _accumulators) {
+            spread.Merge(accumulator.spread);
             totals.num_pixels += accumulator.num_pixels;
             totals.nan_count += accumulator.nan_count;
             totals.sum += accumulator.sum;
@@ -120,6 +123,7 @@ public:
             smallest = std::min(smallest, accumulator.minimum);
             largest = std::max(largest, accumulator.maximum);
         }
+        totals.sum_sq_dev = spread.sum_sq_dev;
 
         result.counts.assign(_bins, 0);
         // Nothing finite was read, so the extrema stay at the NaN SpectralTotals starts them at: the
@@ -142,7 +146,7 @@ public:
     }
 
 private:
-    // One task's provisional histogram and the six statistics beside it.
+    // One task's provisional histogram and the statistics beside it.
     //
     // Tasks are claimed from a shared counter rather than divided up front, so task n is run by a
     // different thread on each read and an accumulator does move between cores as the pass
@@ -163,6 +167,8 @@ private:
         double sum_sq = 0.0;
         double minimum = std::numeric_limits<double>::infinity();
         double maximum = -std::numeric_limits<double>::infinity();
+        // Of the num_pixels pixels counted.
+        Spread spread;
     };
 
     // Rows [first, last) of a read, numbered across its planes, into one accumulator.
@@ -183,8 +189,16 @@ private:
         double sum_sq = 0.0;
         double minimum = std::numeric_limits<double>::infinity();
         double maximum = -std::numeric_limits<double>::infinity();
+        // Each row's distances from a shift of its own, put together a row at a time: see
+        // reduce/deviations.h. Beside the sum rather than instead of any of it, so the sum is the
+        // same bits it always was.
+        Spread spread;
         for (std::uint64_t index = first; index < last; ++index) {
             const float* row = base + ((index / v_count) * stride_z) + ((index % v_count) * stride_v);
+            const double shift = DeviationShift<false>(row, stride_u, u_count, nullptr, 1);
+            double row_count = 0.0;
+            double distance_sum = 0.0;
+            double distance_sum_sq = 0.0;
             for (std::uint64_t u = 0; u < u_count; ++u) {
                 const float value = row[u * stride_u];
                 if (!std::isfinite(value)) {
@@ -192,14 +206,20 @@ private:
                     continue;
                 }
                 const double v_value = value;
-                num_pixels += 1.0;
                 sum += v_value;
                 sum_sq += v_value * v_value;
                 minimum = std::min(minimum, v_value);
                 maximum = std::max(maximum, v_value);
+                row_count += 1.0;
+                const double distance = v_value - shift;
+                distance_sum += distance;
+                distance_sum_sq += distance * distance;
                 into.growing.Add(value);
             }
+            spread.Merge(Spread::OfSpan(row_count, shift, distance_sum, distance_sum_sq));
+            num_pixels += row_count;
         }
+        into.spread.Merge(spread);
         into.num_pixels += num_pixels;
         into.nan_count += nan_count;
         into.sum += sum;

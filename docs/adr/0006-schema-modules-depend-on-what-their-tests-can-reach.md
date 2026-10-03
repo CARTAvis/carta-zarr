@@ -31,14 +31,17 @@ directory, opened, and read back, to check index arithmetic over a flat buffer.
 
 The rule that decides the shape is: **a module takes the narrowest thing its tests can stand up.**
 For flag selection that is a `Store`, because a `Store` over an in-memory transport is cheap. For
-the beam table it is two vectors, because the arrays behind them are not.
+the beam table it is the table and its labels, because the arrays behind them are not: a
+`NumericArray`, which a test makes from metadata and a vector with `NumericArray::Make`, and a vector
+of labels.
 
-`ReadBeams` keeps its name and its place in `image.h`. What it does now is three store reads and one
-call; everything it used to decide -- which dimension is which, that the labels name a major axis, a
-minor axis and a position angle, that a table missing a dimension is an error rather than an empty
-list, and that time varies slowest -- moved into `DescribeBeams` and is checked from two vectors.
-`DescribeBeams` takes the table's node name as well, only because `ArrayMetadata` does not carry the
-name of the node it came from and the error should say which variable it is about.
+`ReadBeams` keeps its name and its place in `image.h`. What it does now is store reads and one call;
+everything it used to decide -- which dimension is which, that the labels name a major axis, a minor
+axis and a position angle, one label a parameter, that a table missing a dimension is an error rather
+than an empty list, and that time varies slowest -- moved into `DescribeBeams` and is checked from a
+table and its labels. The table carries the name of the node it was read from, so an error says
+which variable it is about; `DescribeBeams` used to take that name as an argument of its own,
+because the metadata it was handed did not.
 
 `RequireUsableFlag` is inline in `flag.h` rather than beside `DetermineFlag` in the translation
 unit. This is the part that looks like a style choice and is not: `flag.cc` references `Store`, so a

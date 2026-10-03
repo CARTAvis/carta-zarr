@@ -1265,6 +1265,45 @@ void TestAPixelReadHoldsItsArrayToItsOwnDocument() {
     RequireRefusedAs(mask.error(), ErrorCode::invalid_metadata, "MASK_0", "a rewritten flag");
 }
 
+// An axis reports the unit its coordinate has, and there is one rule for what that is. XRADIO writes a
+// frequency's unit on its reference_frequency's attrs and nowhere else; the spectral coordinate read
+// it there while the axis read only a units attribute, so one image reported its spectral axis
+// unitless and its spectral coordinate in Hz. The listing reports the same axes as describing does.
+void TestAnAxisReportsItsCoordinatesUnit() {
+    using carta::zarr::AxisRole;
+    using carta::zarr::internal::xradio::CoordinateValues;
+    using carta::zarr::internal::xradio::DescribeImageFrom;
+
+    auto nodes = CompleteStore();
+    nodes["frequency"] = NumericArray("[3]", R"(["frequency"])", "float64",
+                                      R"({"reference_frequency":{"data":1.4e9,"attrs":{"units":"Hz","observer":"lsrk"}}})");
+    nodes["time"] = NumericArray("[1]", R"(["time"])", "float64", R"({"units":"s"})");
+    auto store = Open(nodes);
+    Require(static_cast<bool>(store), "the in-memory store failed to open");
+
+    const auto unit_of = [](const std::vector<carta::zarr::AxisDescriptor>& axes, AxisRole role) {
+        const auto index = carta::zarr::AxisIndex(axes, role);
+        Require(index.has_value(), "an axis the image carries was not reported");
+        return axes.at(*index).unit;
+    };
+
+    auto discovery = XradioProfile().Discover(store.value());
+    Require(static_cast<bool>(discovery) && !discovery.value().images.empty(), "SKY was not listed");
+    const auto& listed = discovery.value().images.front().axes;
+    Require(unit_of(listed, AxisRole::spectral) == "Hz",
+            "the listing reported the spectral axis in '" + unit_of(listed, AxisRole::spectral) + "', not Hz");
+    Require(unit_of(listed, AxisRole::time) == "s", "the listing lost the time axis's unit");
+
+    CoordinateValues values;
+    values.frequency = {1.4e9, 1.401e9, 1.402e9};
+    const auto described = DescribeImageFrom(store.value(), "SKY", values);
+    Require(static_cast<bool>(described), "SKY was not described");
+    const auto& descriptor = described.value().descriptor;
+    Require(descriptor.spectral && descriptor.spectral->unit == "Hz", "the spectral coordinate lost its unit");
+    Require(unit_of(descriptor.axes, AxisRole::spectral) == descriptor.spectral->unit,
+            "the spectral axis and the spectral coordinate disagree about the unit");
+}
+
 }  // namespace
 
 int main() {
@@ -1310,6 +1349,7 @@ int main() {
         TestCheckingAnArrayReadsItsOwnDocumentOnce();
         TestDescribingAnImageHoldsItsArraysToTheirOwnDocuments();
         TestAPixelReadHoldsItsArrayToItsOwnDocument();
+        TestAnAxisReportsItsCoordinatesUnit();
         std::cout << "carta-zarr schema profile tests passed\n";
         return 0;
     } catch (const std::exception& error) {

@@ -9,6 +9,7 @@
 #include "../../zarr/array_metadata.h"
 #include "attributes.h"
 #include "beam_table.h"
+#include "coordinates.h"
 #include "direction.h"
 #include "flag.h"
 #include "linear_axis.h"
@@ -39,13 +40,14 @@ int KnownImageRank(std::string_view image_id) {
     return found == known.end() ? static_cast<int>(known.size()) : static_cast<int>(found - known.begin());
 }
 
-// Every image carries a coordinate array for each axis it uses. Both XRADIO readers write all five
-// unconditionally (xds_from_casacore.py and xds_from_fits.py both assign coords["time"]), so a
-// missing coordinate means the store is malformed.
-void RequirePresentCoordinates(ProbeReport& report, const zarr_metadata::ArrayMetadata& image) {
-    for (const auto axis : kSkyAxes) {
-        report.RequireCoordinateOf(image, axis,
-                                   axis == "polarization" ? CoordinateKind::labels : CoordinateKind::numeric);
+// The dataset carries a well-formed array for every sky-plane coordinate. Both XRADIO readers write
+// all five unconditionally (xds_from_casacore.py and xds_from_fits.py both assign coords["time"]), so
+// a missing coordinate means the store is malformed.
+void RequirePresentCoordinates(ProbeReport& report) {
+    for (const auto& coordinate : kCoordinates) {
+        if (OnPlane(coordinate, Plane::sky)) {
+            report.RequireCoordinate(coordinate);
+        }
     }
 }
 
@@ -91,49 +93,6 @@ std::string ImageRoleOf(const zarr_metadata::ArrayMetadata& image) {
     return role;
 }
 
-// The order this profile reports an image's axes in, whatever order the store holds them in, and the
-// role each plays. The profile's choice, which is why it lives here: the public API promises only
-// that an axis can be found by its role (AxisIndex), not where.
-struct LogicalAxis {
-    std::string_view name;
-    AxisRole role;
-};
-constexpr std::array<LogicalAxis, 5> kLogicalAxes{{{"l", AxisRole::spatial_x},
-                                                   {"m", AxisRole::spatial_y},
-                                                   {"frequency", AxisRole::spectral},
-                                                   {"polarization", AxisRole::polarization},
-                                                   {"time", AxisRole::time}}};
-
-std::vector<AxisDescriptor> DescribeAxes(const Store& store, const zarr_metadata::ArrayMetadata& image) {
-    std::vector<AxisDescriptor> axes;
-    axes.reserve(kLogicalAxes.size());
-    for (const auto& [name, role] : kLogicalAxes) {
-        const auto index = zarr_metadata::FindDimensionIndex(image, name);
-        if (!index) {
-            continue;
-        }
-        std::string unit;
-        const auto& coordinate_metadata = store.ReadArrayMetadata(name);
-        if (coordinate_metadata) {
-            unit = AttributeString(coordinate_metadata.value().attributes, "units");
-        }
-        axes.push_back(AxisDescriptor{std::string(name), role, image.shape.at(*index),
-                                      std::move(unit), *index});
-    }
-    return axes;
-}
-
-Result<std::vector<double>> ReadNumericCoordinate(const Store& store, std::string_view name) {
-    const auto& metadata = store.ReadNodeMetadata(name);
-    if (!metadata) {
-        if (metadata.error().code == ErrorCode::not_found) {
-            return std::vector<double>{};
-        }
-        return metadata.error();
-    }
-    return store.ReadNumericArray(name);
-}
-
 std::optional<SpectralCoordinate> DescribeSpectralCoordinate(const Store& store,
                                                              const std::vector<double>& frequency_values,
                                                              ImageDescriptor& descriptor) {
@@ -150,16 +109,14 @@ std::optional<SpectralCoordinate> DescribeSpectralCoordinate(const Store& store,
         }
     }
 
-    spectral.unit = AttributeString(frequency_attributes, "units");
+    // The axis reports the same unit, from the same rule.
+    spectral.unit = CoordinateUnit(store, SkyCoordinate(AxisRole::spectral));
     // The channel a linear description is measured from, which is the first one unless the
-    // reference frequency names another. Both of what that measure carries -- its units and frame
-    // under `attrs`, its value under `data` -- are read from the one lookup.
+    // reference frequency names another. What that measure carries -- its frame under `attrs`, its
+    // value under `data` -- is read from the one lookup.
     double reference_value = spectral.channel_frequencies.front();
     if (const auto* const reference_frequency = MemberObject(frequency_attributes, "reference_frequency")) {
         if (const auto* const attributes = MemberObject(*reference_frequency, "attrs")) {
-            if (spectral.unit.empty()) {
-                spectral.unit = AttributeString(*attributes, "units");
-            }
             spectral.system = Upper(AttributeString(*attributes, "observer"));
         }
         if (const auto value = MemberNumber(*reference_frequency, "data")) {
@@ -303,38 +260,13 @@ Result<SchemaInspection> InspectImages(const Store& store) {
     const auto& first_image = *discovery.default_image_id;
     const auto& array_result = store.ReadArrayMetadata(first_image);
     if (report.RequireArrayMetadata(array_result, first_image)) {
-        RequirePresentCoordinates(report, array_result.value());
+        RequirePresentCoordinates(report);
         // Unconditionally: every XRADIO writes it, so a store without it is malformed rather than a
         // store with no direction to report.
         report.RequireCoordinateSystem(root_attributes);
     }
     return finish(report.ok() ? SchemaMatchKind::match : SchemaMatchKind::invalid);
 }
-
-namespace {
-
-Result<CoordinateValues> ReadCoordinateValues(const Store& store) {
-    CoordinateValues values;
-    const std::pair<std::string_view, std::vector<double>*> numeric[]{
-        {"l", &values.l}, {"m", &values.m}, {"frequency", &values.frequency}, {"time", &values.time}};
-    for (const auto& [name, into] : numeric) {
-        auto read = ReadNumericCoordinate(store, name);
-        if (!read) {
-            return read.error();
-        }
-        *into = std::move(read.value());
-    }
-    if (store.ReadNodeMetadata("polarization")) {
-        auto labels = store.ReadStringArray1D("polarization");
-        if (!labels) {
-            return labels.error();
-        }
-        values.polarization = std::move(labels.value());
-    }
-    return values;
-}
-
-}  // namespace
 
 Result<DescribedImage> DescribeImage(const Store& store, std::string_view image_id) {
     // Refused on its metadata before any value is read, so that an image this profile will not open
@@ -384,15 +316,15 @@ Result<DescribedImage> DescribeImageFrom(const Store& store, std::string_view im
     }
     descriptor.direction = std::move(direction.value());
 
-    // Absent because the image has none -- a continuum image has no frequency coordinate -- not
-    // because describing it failed. Same for the temporal one below.
+    // Absent only when no samples were handed in, which reading them never does: every coordinate is
+    // required, and the probe refused a dataset missing one. Same for the two below.
     if (auto spectral = DescribeSpectralCoordinate(store, values.frequency, descriptor); spectral) {
         descriptor.spectral = std::move(spectral);
     }
 
-    if (values.polarization) {
+    if (!values.polarization.empty()) {
         PolarizationCoordinate pol;
-        pol.labels = *values.polarization;
+        pol.labels = values.polarization;
         descriptor.polarization = std::move(pol);
     }
 

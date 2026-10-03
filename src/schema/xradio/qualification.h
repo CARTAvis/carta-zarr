@@ -24,20 +24,10 @@
 #include "carta-zarr/descriptor.h"
 #include "carta-zarr/result.h"
 
-#include <array>
 #include <optional>
 #include <string_view>
 
 namespace carta::zarr::internal::xradio {
-
-// The axes an image of the sky plane carries. Every one of them is required: XRADIO writes optional
-// coordinate arrays over the spatial pair alone -- right_ascension and declination are float64 over
-// (l, m) and carry no type attribute -- so a rule keyed on "has l and m" offers those to a consumer
-// as openable images. See ADR 0001.
-//
-// Shared with the probe, which checks that the dataset carries a well-formed coordinate array for
-// each of them.
-inline constexpr std::array<std::string_view, 5> kSkyAxes{"time", "frequency", "polarization", "l", "m"};
 
 /**
  * What this profile decided about one node of a store.

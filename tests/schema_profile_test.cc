@@ -16,9 +16,11 @@
 // store at all, and what happens when the store is consulted is checked here.
 
 #include "schema/profile.h"
+#include "schema/xradio/coordinates.h"
 #include "schema/xradio/flag.h"
 #include "schema/xradio/image.h"
 #include "store.h"
+#include "zarr/array_metadata.h"
 #include "zarr/pixel_selection.h"
 
 #include "support/check.h"
@@ -268,6 +270,15 @@ void TestCoordinateDataTypeIsChecked() {
     Require(probe.kind == SchemaMatchKind::invalid, "a numeric polarization coordinate was accepted");
     Require(HasDiagnostic(probe.diagnostics, carta::zarr::DiagnosticCode::unsupported_data_type),
             "the polarization data type produced no diagnostic");
+
+    // And a number has to be a real one. Labels are also held to being decodable, which refuses a
+    // numeric polarization on its own; nothing but the type check refuses a complex frequency.
+    auto complex = CompleteStore();
+    complex["frequency"] = NumericArray("[3]", R"(["frequency"])", "complex64");
+    const auto complex_probe = Probe(complex);
+    Require(complex_probe.kind == SchemaMatchKind::invalid, "a complex frequency coordinate was accepted");
+    Require(HasDiagnostic(complex_probe.diagnostics, carta::zarr::DiagnosticCode::unsupported_data_type),
+            "the frequency data type produced no diagnostic");
 }
 
 // Labels this library cannot decode are refused when the dataset is probed, not when an image is
@@ -1026,7 +1037,7 @@ void TestADescriptionIsBuiltFromTheValuesItIsGiven() {
     values.m = {-0.002, -0.001, 0.0, 0.001, 0.002};
     values.frequency = {1.4e9, 1.401e9, 1.402e9};
     values.time = {1.6e9};
-    values.polarization = std::vector<std::string>{"I", "Q"};
+    values.polarization = {"I", "Q"};
 
     const auto described = DescribeImageFrom(store.value(), "SKY", values);
     Require(static_cast<bool>(described),
@@ -1044,7 +1055,7 @@ void TestADescriptionIsBuiltFromTheValuesItIsGiven() {
             "and its pixel is that channel's, counted from one");
     Require(spectral.rest_frequency && *spectral.rest_frequency == 1.420405751e9, "the rest frequency is read");
 
-    Require(descriptor.polarization && descriptor.polarization->labels == *values.polarization,
+    Require(descriptor.polarization && descriptor.polarization->labels == values.polarization,
             "the polarization labels are the ones handed in");
     Require(descriptor.temporal.has_value(), "a time value makes a temporal coordinate");
     Require(descriptor.temporal->values == values.time, "the times are the values handed in");
@@ -1265,6 +1276,91 @@ void TestAPixelReadHoldsItsArrayToItsOwnDocument() {
     RequireRefusedAs(mask.error(), ErrorCode::invalid_metadata, "MASK_0", "a rewritten flag");
 }
 
+// An axis reports the unit its coordinate has, and there is one rule for what that is. XRADIO writes a
+// frequency's unit on its reference_frequency's attrs and nowhere else; the spectral coordinate read
+// it there while the axis read only a units attribute, so one image reported its spectral axis
+// unitless and its spectral coordinate in Hz. The listing reports the same axes as describing does.
+void TestAnAxisReportsItsCoordinatesUnit() {
+    using carta::zarr::AxisRole;
+    using carta::zarr::internal::xradio::CoordinateValues;
+    using carta::zarr::internal::xradio::DescribeImageFrom;
+
+    auto nodes = CompleteStore();
+    nodes["frequency"] = NumericArray("[3]", R"(["frequency"])", "float64",
+                                      R"({"reference_frequency":{"data":1.4e9,"attrs":{"units":"Hz","observer":"lsrk"}}})");
+    nodes["time"] = NumericArray("[1]", R"(["time"])", "float64", R"({"units":"s"})");
+    auto store = Open(nodes);
+    Require(static_cast<bool>(store), "the in-memory store failed to open");
+
+    const auto unit_of = [](const std::vector<carta::zarr::AxisDescriptor>& axes, AxisRole role) {
+        const auto index = carta::zarr::AxisIndex(axes, role);
+        Require(index.has_value(), "an axis the image carries was not reported");
+        return axes.at(*index).unit;
+    };
+
+    auto discovery = XradioProfile().Discover(store.value());
+    Require(static_cast<bool>(discovery) && !discovery.value().images.empty(), "SKY was not listed");
+    const auto& listed = discovery.value().images.front().axes;
+    Require(unit_of(listed, AxisRole::spectral) == "Hz",
+            "the listing reported the spectral axis in '" + unit_of(listed, AxisRole::spectral) + "', not Hz");
+    Require(unit_of(listed, AxisRole::time) == "s", "the listing lost the time axis's unit");
+
+    CoordinateValues values;
+    values.frequency = {1.4e9, 1.401e9, 1.402e9};
+    const auto described = DescribeImageFrom(store.value(), "SKY", values);
+    Require(static_cast<bool>(described), "SKY was not described");
+    const auto& descriptor = described.value().descriptor;
+    Require(descriptor.spectral && descriptor.spectral->unit == "Hz", "the spectral coordinate lost its unit");
+    Require(unit_of(descriptor.axes, AxisRole::spectral) == descriptor.spectral->unit,
+            "the spectral axis and the spectral coordinate disagree about the unit");
+}
+
+// The coordinates are said once, and every list the profile used to keep is read off that table. The
+// sky plane's are the five an image carries, in the order its axes are reported; the aperture plane
+// shares three of them and has its own two.
+void TestTheCoordinatesAreOneTable() {
+    using carta::zarr::internal::xradio::AxisCount;
+    using carta::zarr::internal::xradio::CoordinateKind;
+    using carta::zarr::internal::xradio::kCoordinates;
+    using carta::zarr::internal::xradio::OnPlane;
+    using carta::zarr::internal::xradio::Plane;
+    const auto on = [](Plane plane) {
+        std::vector<std::string> names;
+        for (const auto& coordinate : kCoordinates) {
+            if (OnPlane(coordinate, plane)) {
+                names.emplace_back(coordinate.name);
+            }
+        }
+        return names;
+    };
+    Require(on(Plane::sky) == std::vector<std::string>{"l", "m", "frequency", "polarization", "time"},
+            "the sky plane's coordinates are not the five, in the logical order");
+    Require(on(Plane::aperture) == std::vector<std::string>{"frequency", "polarization", "time", "u", "v"},
+            "the aperture plane's coordinates are not the three shared and u and v");
+    Require(AxisCount(Plane::sky) == 5 && AxisCount(Plane::aperture) == 5, "a plane is not five axes");
+
+    // What a coordinate array has to be, asked of its metadata alone. A two-dimensional one never
+    // reaches the probe -- qualification closes every image whose extent cannot agree with it -- so
+    // this is the only place the rule is seen to hold.
+    using carta::zarr::internal::xradio::CheckCoordinate;
+    using carta::zarr::internal::xradio::SkyCoordinate;
+    const auto parsed = [](const std::string& document) {
+        auto metadata = carta::zarr::internal::zarr::ParseArrayMetadata(nlohmann::json::parse(document), "frequency");
+        Require(static_cast<bool>(metadata), "a coordinate document did not parse");
+        return metadata.value();
+    };
+    const auto& frequency = SkyCoordinate(carta::zarr::AxisRole::spectral);
+    Require(static_cast<bool>(CheckCoordinate(parsed(NumericArray("[3]", R"(["frequency"])")), frequency)),
+            "a well-formed frequency coordinate was refused");
+    const auto two = CheckCoordinate(parsed(NumericArray("[3,2]", R"(["frequency","x"])")), frequency);
+    Require(!two && two.error().code == ErrorCode::invalid_metadata,
+            "a two-dimensional frequency coordinate was accepted");
+    for (const auto& coordinate : kCoordinates) {
+        Require((coordinate.kind == CoordinateKind::labels) == (coordinate.name == "polarization"),
+                "polarization is not the one coordinate holding labels");
+    }
+}
+
 }  // namespace
 
 int main() {
@@ -1310,6 +1406,8 @@ int main() {
         TestCheckingAnArrayReadsItsOwnDocumentOnce();
         TestDescribingAnImageHoldsItsArraysToTheirOwnDocuments();
         TestAPixelReadHoldsItsArrayToItsOwnDocument();
+        TestTheCoordinatesAreOneTable();
+        TestAnAxisReportsItsCoordinatesUnit();
         std::cout << "carta-zarr schema profile tests passed\n";
         return 0;
     } catch (const std::exception& error) {

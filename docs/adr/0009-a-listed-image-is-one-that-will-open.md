@@ -53,11 +53,16 @@ one-dimensional, that it names itself, that it holds the right kind of data, and
 `coordinate_system_info` describes a direction coordinate. These decide whether the store matches
 the profile at all.
 
-`RequireCoordinateOf` split along that line exactly: its length comparison went, the rest stayed. It
-still walks the default image's axes rather than the five unconditionally, because an axis the image
-does not carry is deliberately not required -- that is why a continuum image with no frequency
-coordinate opens. Nothing is lost by giving up the length there: the default image is the first one
-that qualified, so it agrees with every coordinate it can read before the probe sees it.
+`RequireCoordinateOf` split along that line exactly: its length comparison went, the rest stayed.
+Nothing is lost by giving up the length there: the default image is the first one that qualified, so
+it agrees with every coordinate it can read before the probe sees it.
+
+This said, until 2026-10-03, that the probe walked the default image's axes rather than the five
+unconditionally, so that a continuum image with no frequency coordinate would open. That stopped
+being true when qualification began requiring all five (an image is a variable carrying every
+coordinate of the sky plane, ADR 0001), and no image without one is listed, let alone opened. The
+probe now checks the five outright, and the rules for both halves live in one module,
+`schema/xradio/coordinates`.
 
 Ordering and default selection stayed where they were. Ranking `SKY` first is presentation, and the
 default is "the first qualified image", which is a consequence of qualification rather than part of

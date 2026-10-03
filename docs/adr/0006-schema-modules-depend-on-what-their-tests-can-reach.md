@@ -49,7 +49,8 @@ opening three stores on disk.
 
 `IsFlag` moved with the flag module, because it asks whether a variable is a flag. The rest of the
 taxonomy in `image.cc` -- `HasAllAxes`, `KnownImageRank`, and the three axis-name lists that
-disagree about order -- did not move, and is a separate question.
+disagree about order -- did not move, and is a separate question. (Answered since: the axis lists are
+one table in `schema/xradio/coordinates`, which takes a `Store` by this ADR's rule.)
 
 What the move is worth, in the terms it was chosen by: `schema_probe_test.cc` loses six cases and
 about a quarter of its length, and what is left there is what belongs there -- a store opens, it

@@ -13,6 +13,7 @@
 
 #include "memo.h"
 #include "zarr/array_metadata.h"
+#include "zarr/numeric_array.h"
 #include "zarr/transport.h"
 
 #include <nlohmann/json.hpp>
@@ -91,7 +92,7 @@ struct StoreCaches {
     Memo<std::string, Result<zarr::ArrayMetadata>> array_metadata;
     Memo<std::string, Result<zarr::ArrayMetadata>> verified_arrays;
     Lazy<Result<std::vector<NodeEntry>>> inventory;
-    Memo<std::string, Result<std::vector<double>>> double_arrays;
+    Memo<std::string, Result<zarr::NumericArray>> double_arrays;
     Memo<std::string, Result<std::vector<std::string>>> string_arrays;
 };
 
@@ -163,10 +164,13 @@ public:
      * image and its flag before any value is read. ADR 0017.
      */
     const Result<zarr::ArrayMetadata>& VerifyArray(std::string_view node) const;
-    // Values in C order, flattened. The rank is in the node's ArrayMetadata; ArrayView addresses
-    // them by dimension name rather than by offset. Both are held to the array's own document first,
-    // as every value read is; see VerifyArray.
-    Result<std::vector<double>> ReadNumericArray(std::string_view node) const;
+    // Both are held to the array's own document first, as every value read is; see VerifyArray.
+    //
+    // A numeric array comes back bound to that document, which is what its values were decoded
+    // with, so a caller addressing them by dimension name, or reading their unit, reads the same
+    // document the values came from. Read once for the life of the store and handed back by
+    // reference, as VerifyArray's answer is.
+    const Result<zarr::NumericArray>& ReadNumericArray(std::string_view node) const;
     Result<std::vector<std::string>> ReadStringArray1D(std::string_view node) const;
 
     // How many bytes this store occupies where it lives. Handed straight to the transport, which is
@@ -189,7 +193,7 @@ public:
 
 private:
     Result<std::filesystem::path> ResolveArrayDirectory(std::string_view node) const;
-    Result<std::vector<double>> ReadNumericArrayUncached(std::string_view node) const;
+    Result<zarr::NumericArray> ReadNumericArrayUncached(std::string_view node) const;
     Result<std::vector<std::string>> ReadStringArray1DUncached(std::string_view node) const;
 
     TransportPtr _transport;

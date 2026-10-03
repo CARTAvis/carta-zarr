@@ -7,7 +7,6 @@
 #include "image.h"
 
 #include "../../zarr/array_metadata.h"
-#include "../../zarr/numeric_array.h"
 #include "attributes.h"
 #include "beam_table.h"
 #include "coordinates.h"
@@ -373,9 +372,11 @@ Result<std::vector<Beam>> ReadBeams(const Store& store, std::string_view image_i
         return std::vector<Beam>{};
     }
 
-    const auto& beam_metadata = store.ReadArrayMetadata(beam_array_name);
-    if (!beam_metadata) {
-        return beam_metadata.error();
+    // Bound to the table's own document, so its layout and its unit are read from what its values
+    // were decoded with rather than from the root's copy of it.
+    const auto& table = store.ReadNumericArray(beam_array_name);
+    if (!table) {
+        return table.error();
     }
 
     // The image named a beam table, so what the table needs to be read is required rather than
@@ -387,16 +388,6 @@ Result<std::vector<Beam>> ReadBeams(const Store& store, std::string_view image_i
     if (!parameter_labels) {
         return parameter_labels.error();
     }
-
-    auto values = store.ReadNumericArray(beam_array_name);
-    if (!values) {
-        return values.error();
-    }
-    auto table = zarr_metadata::NumericArray::Make(beam_array_name, beam_metadata.value(), std::move(values.value()));
-    if (!table) {
-        return table.error();
-    }
-
     return DescribeBeams(table.value(), parameter_labels.value());
 }
 

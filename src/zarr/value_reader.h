@@ -18,18 +18,15 @@ namespace carta::zarr::internal::zarr {
 /**
  * Read a numeric Zarr array as doubles through TensorStore.
  *
- * This is the only translation unit that reads array data through TensorStore, so a consumer that
- * needs metadata but never coordinate values -- a schema profile and its tests -- can link without
- * it. A null context uses TensorStore's own default resources.
+ * One of the two translation units that read array data through TensorStore -- pixels are the
+ * other -- so a consumer that needs metadata but never values, a schema profile and its tests, can
+ * link without either. A null context uses TensorStore's own default resources.
  *
- * The array is held to `expected`, the store's own reading of its metadata, as a pixel read is: a
- * coordinate opened from a document that disagrees with the one its image qualified on is
- * refused rather than read.
+ * Nothing here asks whether the array is the one the store described: the store has, before it
+ * hands over the location. See Store::VerifyArray.
  */
 Result<std::vector<double>> ReadNumericValues(const std::filesystem::path& array_directory,
-                                              const StoreContextPtr& context,
-                                              const ArrayMetadata& expected,
-                                              std::string_view node);
+                                              const StoreContextPtr& context, std::string_view node);
 
 }  // namespace carta::zarr::internal::zarr
 

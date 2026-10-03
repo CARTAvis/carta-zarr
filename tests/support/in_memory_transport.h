@@ -41,6 +41,7 @@ public:
 
     Result<std::string> ReadNodeBytes(std::string_view node) const override {
         _nodes_read.insert(std::string(node));
+        ++_reads[std::string(node)];
         const auto found = _nodes.find(std::string(node));
         if (found == _nodes.end()) {
             return Error{ErrorCode::not_found, "Zarr node is missing zarr.json", std::string(node)};
@@ -79,10 +80,17 @@ public:
     std::size_t listings() const {
         return _listings;
     }
+    // How many times one node's bytes were asked for. Whether a node was read at all cannot tell a
+    // store that read a document once from one that went back for it.
+    std::size_t reads(const std::string& node) const {
+        const auto found = _reads.find(node);
+        return found == _reads.end() ? 0 : found->second;
+    }
 
 private:
     std::map<std::string, std::string> _nodes;
     mutable std::set<std::string> _nodes_read;
+    mutable std::map<std::string, std::size_t> _reads;
     mutable std::size_t _listings = 0;
 };
 

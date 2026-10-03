@@ -201,11 +201,21 @@ public:
         return total;
     }
 
+    // A backslash is refused here although NormalizeNodeName, the store's rule, accepts one: that
+    // is TensorStore's opinion rather than this transport's. Its file kvstore reads a backslash as
+    // a separator, so the array of a node named "SKY\2" would be looked for in "SKY/2". On POSIX the
+    // name is a legal file name and the node's metadata reads, so such a variable is listed and
+    // opens, and every read of it is refused here, saying why. No XRADIO writer names a variable
+    // that way; a listing that knew would need the store to know what TensorStore can locate.
     Result<std::filesystem::path> ArrayDirectory(std::string_view node) const override {
         const std::filesystem::path relative(node);
         if (relative.empty() || relative.is_absolute() || relative.has_root_name() ||
             node.find('\\') != std::string_view::npos) {
-            return Error{ErrorCode::invalid_argument, "Invalid Zarr array path " + std::string(node),
+            return Error{ErrorCode::invalid_argument,
+                         "Invalid Zarr array path " + std::string(node) +
+                             (node.find('\\') != std::string_view::npos
+                                  ? ": TensorStore reads a backslash as a path separator"
+                                  : ""),
                          std::string(node)};
         }
         for (const auto& component : relative) {

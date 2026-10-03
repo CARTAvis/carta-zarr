@@ -21,16 +21,11 @@
 namespace carta::zarr::internal::zarr {
 
 Result<std::vector<double>> ReadNumericValues(const std::filesystem::path& array_directory,
-                                              const StoreContextPtr& context,
-                                              const ArrayMetadata& expected,
-                                              std::string_view node) {
+                                              const StoreContextPtr& context, std::string_view node) {
     try {
         auto opened = OpenZarrArray(array_directory, context, node);
         if (!opened) {
             return opened.error();
-        }
-        if (auto agreed = VerifyArrayMatchesMetadata(opened.value(), expected, node); !agreed) {
-            return agreed.error();
         }
 
         // Every real Zarr type a coordinate may be stored in is read as double. Converting rather

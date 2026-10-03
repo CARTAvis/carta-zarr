@@ -20,6 +20,7 @@
 
 #include <algorithm>
 #include <chrono>
+#include <cstddef>
 #include <exception>
 #include <limits>
 #include <string>
@@ -28,33 +29,9 @@
 namespace carta::zarr::internal::zarr {
 namespace {
 
-// What the array on disk has to agree with the store's canonical metadata about before a single
-// pixel of it is read: its rank, its extent, what its dimensions are called, and what it holds.
-// Every array read is held to all four, coordinates and beam tables included, so they are asked by
-// VerifyArrayMatchesMetadata; what is a pixel read's own is that the selection has the array's rank.
-//
-// Every one of those is asked of the one document the store parsed. The data type used to come from
-// there and the extent and names from the selection, which had copied them out of the descriptor --
-// two sources for one check, agreeing only because the descriptor was once read from the same
-// document.
-//
-// Its own function because it is the one stretch of ReadInto that decides nothing about the read.
-// What is left reads as the seven steps it is: check the request, open the array, verify it, slice,
-// transpose, convert, read.
-Result<void> VerifyStoreMatchesMetadata(const tensorstore::TensorStore<>& store, const PixelSelection& selection,
-                                        const ArrayMetadata& expected, std::string_view node) {
-    const auto rank = expected.shape.size();
-    if (selection.start().size() != rank) {
-        return Error{ErrorCode::invalid_argument, "Selection rank does not match the array rank",
-                     std::string(node)};
-    }
-    return VerifyArrayMatchesMetadata(store, expected, node);
-}
-
 template <typename Element>
 Result<void> ReadInto(const std::filesystem::path& array_path, const StoreContextPtr& context,
-                      std::string_view node, const ArrayMetadata& expected, const PixelSelection& selection,
-                      tensorstore::DataType target_dtype,
+                      std::string_view node, const PixelSelection& selection, tensorstore::DataType target_dtype,
                       BufferView<Element> destination, const ReadControl& control) {
     if (destination.data == nullptr) {
         return Error{ErrorCode::invalid_argument, "Destination buffer is null", std::string(node)};
@@ -94,9 +71,9 @@ Result<void> ReadInto(const std::filesystem::path& array_path, const StoreContex
             return allowed.error();
         }
         auto const store = std::move(opened).value();
-        if (auto agreed = VerifyStoreMatchesMetadata(store, selection, expected, node); !agreed) {
-            return agreed.error();
-        }
+        // Whether this is the array the store described was settled before the store handed over
+        // where it lives -- its rank included, which is the selection's because the selection was
+        // built from the descriptor of that array.
         const auto rank = selection.start().size();
         std::vector<tensorstore::Index> start(rank);
         std::vector<tensorstore::Index> count(rank);
@@ -159,21 +136,20 @@ Result<void> ReadInto(const std::filesystem::path& array_path, const StoreContex
 }  // namespace
 
 Result<void> ReadFloat32(const std::filesystem::path& array_path, const StoreContextPtr& context,
-                         std::string_view node, const ArrayMetadata& expected, const PixelSelection& selection,
-                         BufferView<float> destination, const ReadControl& control) {
-    return ReadInto(array_path, context, node, expected, selection, tensorstore::dtype_v<float>, destination,
-                    control);
+                         std::string_view node, const PixelSelection& selection, BufferView<float> destination,
+                         const ReadControl& control) {
+    return ReadInto(array_path, context, node, selection, tensorstore::dtype_v<float>, destination, control);
 }
 
 Result<void> ReadMaskBytes(const std::filesystem::path& array_path, const StoreContextPtr& context,
-                           std::string_view node, const ArrayMetadata& expected, const PixelSelection& selection,
+                           std::string_view node, const PixelSelection& selection,
                            BufferView<std::uint8_t> destination, const ReadControl& control) {
     // The caller's buffer holds bytes, so the read converts into bytes. Asking TensorStore for
     // bool and writing it through a reinterpret_cast of that buffer assumed bool and uint8_t are
     // the same object, which C++ does not say they are; the conversion costs nothing here because
     // it rides the copy the read already performs.
-    return ReadInto(array_path, context, node, expected, selection, tensorstore::dtype_v<std::uint8_t>,
-                    destination, control);
+    return ReadInto(array_path, context, node, selection, tensorstore::dtype_v<std::uint8_t>, destination,
+                    control);
 }
 
 }  // namespace carta::zarr::internal::zarr

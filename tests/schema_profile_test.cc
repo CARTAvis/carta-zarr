@@ -19,6 +19,7 @@
 #include "schema/xradio/flag.h"
 #include "schema/xradio/image.h"
 #include "store.h"
+#include "zarr/pixel_selection.h"
 
 #include "support/check.h"
 
@@ -26,6 +27,7 @@
 
 #include <algorithm>
 #include <chrono>
+#include <cstdint>
 #include <exception>
 #include <iostream>
 #include <map>
@@ -130,9 +132,11 @@ std::map<std::string, std::string> CompleteStore() {
 // reader which ignores it still reads the same hierarchy. A store whose children exist only in the
 // root is malformed, and no reader but this one could open it -- the array data behind those names
 // is read by TensorStore, which needs each array's own metadata.
-std::map<std::string, std::string> ConsolidatedStore() {
-    auto nodes = CompleteStore();
-
+//
+// `copies` replaces what the root's copy says about a node, leaving the node's own document as it
+// was: the store a rewrite leaves behind when it does not consolidate again.
+std::map<std::string, std::string> ConsolidatedStore(std::map<std::string, std::string> nodes = CompleteStore(),
+                                                     const std::map<std::string, std::string>& copies = {}) {
     std::string metadata;
     for (const auto& child : nodes) {
         if (child.first.empty()) {
@@ -141,7 +145,8 @@ std::map<std::string, std::string> ConsolidatedStore() {
         if (!metadata.empty()) {
             metadata += ",";
         }
-        metadata += "\"" + child.first + "\":" + child.second;
+        const auto copy = copies.find(child.first);
+        metadata += "\"" + child.first + "\":" + (copy != copies.end() ? copy->second : child.second);
     }
     nodes[""] = "{\"attributes\":{\"coordinate_system_info\":{"
                 "\"projection\":\"SIN\","
@@ -1064,6 +1069,202 @@ void TestARoleNotSpelledAsTypeFallsBackToImageType() {
             "with no type attribute the role is image_type's, got '" + described.value().descriptor.image_role + "'");
 }
 
+// A numeric array spelled out field by field, for the cases where the array's own document has to
+// differ from the root's copy in one of them and nothing else.
+std::string ArrayDocument(const std::string& shape, const std::string& chunks, const std::string& dimensions,
+                          const std::string& data_type = "float64", const std::string& codecs = "",
+                          const std::string& fill_value = "") {
+    return "{\"shape\":" + shape + ",\"data_type\":\"" + data_type +
+           "\",\"chunk_grid\":{\"name\":\"regular\",\"configuration\":{\"chunk_shape\":" + chunks +
+           "}},\"attributes\":{},\"dimension_names\":" + dimensions + (codecs.empty() ? "" : ",\"codecs\":" + codecs) +
+           (fill_value.empty() ? "" : ",\"fill_value\":" + fill_value) + ",\"zarr_format\":3,\"node_type\":\"array\"}";
+}
+
+void RequireRefusedAs(const carta::zarr::Error& error, ErrorCode code, const std::string& node,
+                      const std::string& what) {
+    Require(error.code == code, what + " was refused as " + carta::zarr::ErrorCodeName(error.code) +
+                                    " rather than " + carta::zarr::ErrorCodeName(code) + ": " + error.message);
+    Require(error.node_path == node, what + " was refused naming '" + error.node_path + "' rather than '" + node + "'");
+}
+
+// The store decides what an image is from the root's copy of each array's document, and every value
+// is decoded from the array's own: TensorStore opens an array from its own document, and so does
+// the label decoder. Where a rewrite left the two disagreeing about what the library derives from
+// the copy -- extent, dimension names and order, data type, how it is chunked -- the array is not
+// the one the store described, and every read of it says so before it asks where the array lives.
+// Here that is before the in-memory transport says it holds no array data, which is the only other
+// answer a read gets from it.
+void TestAnArrayDisagreeingWithTheRootsCopyIsRefused() {
+    const std::vector<std::pair<std::string, std::string>> rewritten{
+        {"another extent", ArrayDocument("[6]", "[4]", R"(["l"])")},
+        {"another dimension name", ArrayDocument("[4]", "[4]", R"(["x"])")},
+        {"another data type", ArrayDocument("[4]", "[4]", R"(["l"])", "float32")},
+        {"another chunk", ArrayDocument("[4]", "[2]", R"(["l"])")},
+        {"shards", ArrayDocument("[4]", "[4]", R"(["l"])", "float64",
+                                 R"([{"name":"sharding_indexed","configuration":{"chunk_shape":[2],
+                                      "codecs":[{"name":"bytes","configuration":{"endian":"little"}}],
+                                      "index_codecs":[{"name":"bytes","configuration":{"endian":"little"}}]}}])")},
+        // The same chunks, each now read out of a shard the copy does not mention: the chunk shape
+        // agrees and the shard shape a read is planned around does not.
+        {"shards around the same chunks", ArrayDocument("[4]", "[4]", R"(["l"])", "float64",
+                                                        R"([{"name":"sharding_indexed","configuration":{"chunk_shape":[4],
+                                                             "codecs":[{"name":"bytes","configuration":{"endian":"little"}}],
+                                                             "index_codecs":[{"name":"bytes","configuration":{"endian":"little"}}]}}])")},
+        {"a document that will not parse", "{"},
+        {"a group", R"({"zarr_format":3,"node_type":"group"})"},
+    };
+    for (const auto& [how, own] : rewritten) {
+        auto nodes = ConsolidatedStore();
+        nodes["l"] = own;
+        auto store = Open(nodes);
+        Require(static_cast<bool>(store), "the store whose l was rewritten with " + how + " did not open");
+        const auto read = store.value().ReadNumericArray("l");
+        Require(!read, "l rewritten with " + how + " was read");
+        RequireRefusedAs(read.error(), ErrorCode::invalid_metadata, "l", "l rewritten with " + how);
+    }
+
+    // The copy names an array whose own document is not there: a store that only a reader honouring
+    // the copy alone could open, which ADR 0004 calls malformed.
+    auto missing = ConsolidatedStore();
+    missing.erase("l");
+    auto missing_store = Open(missing);
+    Require(static_cast<bool>(missing_store), "the store missing l's own document did not open");
+    const auto missing_read = missing_store.value().ReadNumericArray("l");
+    Require(!missing_read, "an array whose own document is missing was read");
+    RequireRefusedAs(missing_read.error(), ErrorCode::invalid_metadata, "l", "an array whose own document is missing");
+
+    // Labels are decoded without TensorStore, and are held to the same rule.
+    auto labels = ConsolidatedStore();
+    labels["polarization"] = R"({"shape":[2],"data_type":{"name":"fixed_length_utf32","configuration":{"length_bytes":4}},
+        "chunk_grid":{"name":"regular","configuration":{"chunk_shape":[1]}},"attributes":{},
+        "dimension_names":["polarization"],"zarr_format":3,"node_type":"array"})";
+    auto labels_store = Open(labels);
+    Require(static_cast<bool>(labels_store), "the store whose labels were rechunked did not open");
+    const auto label_read = labels_store.value().ReadStringArray1D("polarization");
+    Require(!label_read, "labels chunked differently from the root's copy were read");
+    RequireRefusedAs(label_read.error(), ErrorCode::invalid_metadata, "polarization",
+                     "labels chunked differently from the root's copy");
+}
+
+// What the copy is not held to. A reader decodes with the array's own document, so how its chunks
+// are compressed and what an unwritten one reads as are the own document's business, and a copy
+// spelling them otherwise -- a later zarr-python writing a default out, a level changed -- is not a
+// different array. Passing the check, the read goes on to ask where the array lives.
+void TestAnArrayIsNotHeldToHowItsChunksAreEncoded() {
+    auto nodes = ConsolidatedStore();
+    nodes["l"] = ArrayDocument("[4]", "[4]", R"(["l"])", "float64",
+                               R"([{"name":"bytes","configuration":{"endian":"little"}},
+                                   {"name":"zstd","configuration":{"level":3,"checksum":false}}])",
+                               "\"NaN\"");
+    nodes["polarization"] = R"({"shape":[2],"data_type":{"name":"fixed_length_utf32","configuration":{"length_bytes":4}},
+        "chunk_grid":{"name":"regular","configuration":{"chunk_shape":[2]}},"attributes":{},"fill_value":"V",
+        "codecs":[{"name":"bytes","configuration":{"endian":"little"}},{"name":"zstd","configuration":{"level":1}}],
+        "dimension_names":["polarization"],"zarr_format":3,"node_type":"array"})";
+    auto store = Open(nodes);
+    Require(static_cast<bool>(store), "the store whose encodings were respelled did not open");
+    const auto values = store.value().ReadNumericArray("l");
+    Require(!values && values.error().code == ErrorCode::unsupported_transport,
+            "an array encoded differently from the root's copy did not pass the check: " +
+                (values ? std::string("it was read") : values.error().message));
+    const auto labels = store.value().ReadStringArray1D("polarization");
+    Require(!labels && labels.error().code == ErrorCode::unsupported_transport,
+            "labels encoded differently from the root's copy did not pass the check: " +
+                (labels ? std::string("they were read") : labels.error().message));
+}
+
+// Checking an array costs reading its own document, and only where the store had not read it: the
+// root's copy saved that read, and an array whose metadata came from its own document has nothing to
+// be checked against. Either way it is read once for the life of the store, and probing reads none.
+void TestCheckingAnArrayReadsItsOwnDocumentOnce() {
+    {
+        const auto transport = MakeInMemoryTransport(ConsolidatedStore());
+        auto store = carta::zarr::internal::OpenStore(transport);
+        Require(static_cast<bool>(store), "the consolidated store did not open");
+        Require(static_cast<bool>(XradioProfile().Probe(store.value())), "the consolidated store did not probe");
+        Require(transport->reads("l") == 0, "probing a consolidated store read an array's own document");
+        (void)store.value().ReadNumericArray("l");
+        (void)store.value().ReadNumericArray("l");
+        Require(transport->reads("l") == 1, "a consolidated array's own document was read " +
+                                                std::to_string(transport->reads("l")) + " times, not once");
+    }
+    {
+        const auto transport = MakeInMemoryTransport(CompleteStore());
+        auto store = carta::zarr::internal::OpenStore(transport);
+        Require(static_cast<bool>(store), "the plain store did not open");
+        (void)store.value().ReadNumericArray("l");
+        (void)store.value().ReadNumericArray("l");
+        Require(transport->reads("l") == 1, "an array the store read for itself was read " +
+                                                std::to_string(transport->reads("l")) + " times, not once");
+    }
+}
+
+// Describing an image holds the image's own array to the store's copy before any value is read, so
+// an image that opens can be read: its own document disagreeing used to open, and then fail every
+// read. Its flag is held to it as soon as the flag is known.
+void TestDescribingAnImageHoldsItsArraysToTheirOwnDocuments() {
+    using carta::zarr::internal::xradio::CoordinateValues;
+    using carta::zarr::internal::xradio::DescribeImage;
+    using carta::zarr::internal::xradio::DescribeImageFrom;
+    const std::string sky_dimensions = R"(["time","frequency","polarization","l","m"])";
+
+    auto sky = ConsolidatedStore();
+    sky["SKY"] = SkyArray("float64");
+    auto sky_store = Open(sky);
+    Require(static_cast<bool>(sky_store), "the store whose SKY was rewritten did not open");
+    const auto described = DescribeImage(sky_store.value(), "SKY");
+    Require(!described, "an image whose own document disagrees with the root's copy was described");
+    RequireRefusedAs(described.error(), ErrorCode::invalid_metadata, "SKY",
+                     "an image whose own document disagrees with the root's copy");
+
+    auto flagged = CompleteStore();
+    flagged["SKY"] = SkyArray("float32", R"({"units":"Jy/beam","flag":"MASK_0"})");
+    flagged["MASK_0"] = NumericArray("[1,3,2,4,5]", sky_dimensions, "bool", R"({"type":"flag"})");
+    auto flagged_nodes = ConsolidatedStore(flagged);
+    flagged_nodes["MASK_0"] = NumericArray("[1,3,2,4,5]", sky_dimensions, "uint8", R"({"type":"flag"})");
+    auto flag_store = Open(flagged_nodes);
+    Require(static_cast<bool>(flag_store), "the store whose flag was rewritten did not open");
+    const auto with_flag = DescribeImageFrom(flag_store.value(), "SKY", CoordinateValues{});
+    Require(!with_flag, "an image whose flag's own document disagrees with the root's copy was described");
+    RequireRefusedAs(with_flag.error(), ErrorCode::invalid_metadata, "MASK_0",
+                     "a flag whose own document disagrees with the root's copy");
+}
+
+// The pixels and the flag are read through the same check as every other array, whatever was
+// described before: a read is the last place an array the store did not describe could get through.
+void TestAPixelReadHoldsItsArrayToItsOwnDocument() {
+    using carta::zarr::internal::xradio::CoordinateValues;
+    using carta::zarr::internal::xradio::DescribeImageFrom;
+    const std::string sky_dimensions = R"(["time","frequency","polarization","l","m"])";
+
+    auto agreeing = CompleteStore();
+    agreeing["MASK_0"] = NumericArray("[1,3,2,4,5]", sky_dimensions, "bool", R"({"type":"flag"})");
+    auto agreeing_store = Open(agreeing);
+    Require(static_cast<bool>(agreeing_store), "the agreeing store did not open");
+    const auto described = DescribeImageFrom(agreeing_store.value(), "SKY", CoordinateValues{});
+    Require(static_cast<bool>(described), "the agreeing store's SKY was not described");
+    carta::zarr::ReadRequest request;
+    for (std::size_t axis = 0; axis < described.value().descriptor.axes.size(); ++axis) {
+        request.axes.push_back(carta::zarr::Range{0, 1, 1});
+    }
+    const auto selection = carta::zarr::internal::zarr::BuildSelection(
+        described.value().descriptor, request, carta::zarr::internal::zarr::DestinationOrder::logical);
+    Require(static_cast<bool>(selection), "a one-pixel selection was refused");
+
+    auto rewritten = ConsolidatedStore(agreeing);
+    rewritten["SKY"] = SkyArray("float64");
+    rewritten["MASK_0"] = NumericArray("[1,3,2,4,5]", sky_dimensions, "uint8", R"({"type":"flag"})");
+    auto store = Open(rewritten);
+    Require(static_cast<bool>(store), "the rewritten store did not open");
+    float pixel = 0.0F;
+    const auto pixels = store.value().ReadPixelsInto<float>("SKY", selection.value(), {&pixel, 1}, {});
+    Require(!pixels, "pixels of an array disagreeing with the root's copy were read");
+    RequireRefusedAs(pixels.error(), ErrorCode::invalid_metadata, "SKY", "pixels of a rewritten array");
+    std::uint8_t good = 0;
+    const auto mask = store.value().ReadPixelsInto<std::uint8_t>("MASK_0", selection.value(), {&good, 1}, {});
+    Require(!mask, "a flag disagreeing with the root's copy was read");
+    RequireRefusedAs(mask.error(), ErrorCode::invalid_metadata, "MASK_0", "a rewritten flag");
+}
+
 }  // namespace
 
 int main() {
@@ -1104,6 +1305,11 @@ int main() {
         TestSizeRefusesAStoreWithNoArrays();
         TestADescriptionIsBuiltFromTheValuesItIsGiven();
         TestARoleNotSpelledAsTypeFallsBackToImageType();
+        TestAnArrayDisagreeingWithTheRootsCopyIsRefused();
+        TestAnArrayIsNotHeldToHowItsChunksAreEncoded();
+        TestCheckingAnArrayReadsItsOwnDocumentOnce();
+        TestDescribingAnImageHoldsItsArraysToTheirOwnDocuments();
+        TestAPixelReadHoldsItsArrayToItsOwnDocument();
         std::cout << "carta-zarr schema profile tests passed\n";
         return 0;
     } catch (const std::exception& error) {

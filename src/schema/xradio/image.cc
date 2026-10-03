@@ -342,6 +342,12 @@ Result<DescribedImage> DescribeImage(const Store& store, std::string_view image_
     if (auto qualified = RequireQualified(store, image_id); !qualified) {
         return qualified.error();
     }
+    // And held to its own document, which is what its pixels are read from. Nothing below reads
+    // them, so without this an image whose own document disagreed with the root's copy opened and
+    // then failed every read. Its coordinates are held to theirs as they are read.
+    if (const auto& verified = store.VerifyArray(image_id); !verified) {
+        return verified.error();
+    }
     auto values = ReadCoordinateValues(store);
     if (!values) {
         return values.error();
@@ -408,6 +414,13 @@ Result<DescribedImage> DescribeImageFrom(const Store& store, std::string_view im
     }
     descriptor.pixel_mask_id = pixel_mask.value();
     descriptor.has_pixel_mask = !descriptor.pixel_mask_id.empty();
+    // The flag is read only by a masked read, so an image whose flag disagreed with the root's copy
+    // opened, read unmasked, and failed every masked read.
+    if (descriptor.has_pixel_mask) {
+        if (const auto& verified = store.VerifyArray(descriptor.pixel_mask_id); !verified) {
+            return verified.error();
+        }
+    }
 
     auto geometry = BuildChunkGeometry(descriptor, layout);
     return DescribedImage{std::move(descriptor), std::move(geometry)};

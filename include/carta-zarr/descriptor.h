@@ -233,7 +233,9 @@ struct SpectralCoordinate {
 };
 
 struct TemporalCoordinate {
-    std::vector<double> values;  // XRADIO unix seconds
+    // As the dataset wrote them: `unit`, `scale` and `format` say how to read them. XRADIO writes
+    // MJD days as often as unix seconds, and nothing here converts one to the other.
+    std::vector<double> values;
     std::string unit;
     std::string scale;
     std::string format;

@@ -50,9 +50,11 @@ consolidated metadata was invented for.
 
 The seam is partial, and honestly so. Everything a probe needs is metadata, so a probe runs entirely
 in memory; a descriptor that reports coordinate values still wants a store on disk. That asymmetry
-is visible in the file layout: the single TensorStore-touching read lives alone in
-`src/zarr/value_reader.cc`, so a consumer needing metadata but not values links without TensorStore
-at all.
+is visible in the file layout: the reads that touch TensorStore live in `src/zarr/value_reader.cc`
+and `src/zarr/pixel_reader.cc` and nowhere else, so a consumer needing metadata but not values links
+without TensorStore at all. Whether the array a value read opens is the one the store described is
+asked above the seam, of the array's own document, and needs no TensorStore either: see
+[ADR 0017](0017-an-array-is-held-to-its-own-document-once.md).
 
 Transport is a seam with two adapters, not one. The filesystem transport serves production; the
 in-memory transport in `tests/support/` serves the schema profile tests. A third — HTTP or S3 — is

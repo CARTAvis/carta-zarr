@@ -20,19 +20,19 @@ namespace carta::zarr::internal::zarr {
 /**
  * Read pixels as float32, converting from the stored type during the read.
  *
- * `expected` is the array's metadata as the store parsed it. The array on disk is held to it --
- * rank, extent, dimension names and data type -- before anything is read.
+ * The array is opened from its own document, which the store has already held to the one it
+ * described the image from (Store::VerifyArray); nothing here asks again.
  *
  * Missing chunks resolve to the array's fill value, which is what a Zarr reader is required to do
  * and is the only definition of "absent pixel" the format offers.
  */
 Result<void> ReadFloat32(const std::filesystem::path& array_directory, const StoreContextPtr& context,
-                         std::string_view node, const ArrayMetadata& expected, const PixelSelection& selection,
-                         BufferView<float> destination, const ReadControl& control);
+                         std::string_view node, const PixelSelection& selection, BufferView<float> destination,
+                         const ReadControl& control);
 
 // Read a boolean array as one byte per element, true meaning a good pixel.
 Result<void> ReadMaskBytes(const std::filesystem::path& array_directory, const StoreContextPtr& context,
-                           std::string_view node, const ArrayMetadata& expected, const PixelSelection& selection,
+                           std::string_view node, const PixelSelection& selection,
                            BufferView<std::uint8_t> destination, const ReadControl& control);
 
 }  // namespace carta::zarr::internal::zarr

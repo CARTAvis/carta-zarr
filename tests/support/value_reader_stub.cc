@@ -15,7 +15,7 @@ namespace carta::zarr::internal::zarr {
 // unsupported_transport is the honest one. Probing and discovery read metadata only, so nothing
 // under test reaches this.
 Result<std::vector<double>> ReadNumericValues(const std::filesystem::path&, const StoreContextPtr&,
-                                              const ArrayMetadata&, std::string_view node) {
+                                              std::string_view node) {
     return Error{ErrorCode::unsupported_transport, "This build reads no array values", std::string(node)};
 }
 

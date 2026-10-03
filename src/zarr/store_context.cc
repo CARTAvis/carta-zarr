@@ -6,8 +6,6 @@
 
 #include "store_context.h"
 
-#include <tensorstore/data_type.h>
-#include <tensorstore/index.h>
 #include <tensorstore/open.h>
 #include <tensorstore/open_mode.h>
 #include <tensorstore/spec.h>
@@ -15,7 +13,6 @@
 #include <nlohmann/json.hpp>
 
 #include <cstddef>
-#include <cstdint>
 #include <memory>
 #include <utility>
 
@@ -46,32 +43,6 @@ Result<tensorstore::TensorStore<>> OpenZarr3File(const std::string& path, const 
                      std::string(node)};
     }
     return std::move(opened).value();
-}
-
-// The one thing about a data type that cannot go in the table beside the others: a
-// tensorstore::dtype_v is a template, so the mapping has to be written as code. It goes through the
-// shared table for the half that can be shared -- what the name means -- and spells out only the
-// half that cannot.
-//
-// A type this does not answer for is a type no read accepts, which is why complex is absent: nothing
-// reaches here holding one, because an image and its coordinates are required to be real long
-// before a value of them is asked for.
-bool MatchesDataType(std::string_view expected, tensorstore::DataType actual) {
-    switch (zarr::ParseDataType(expected)) {
-        case DataType::boolean: return actual == tensorstore::dtype_v<bool>;
-        case DataType::int8: return actual == tensorstore::dtype_v<std::int8_t>;
-        case DataType::uint8: return actual == tensorstore::dtype_v<std::uint8_t>;
-        case DataType::int16: return actual == tensorstore::dtype_v<std::int16_t>;
-        case DataType::uint16: return actual == tensorstore::dtype_v<std::uint16_t>;
-        case DataType::int32: return actual == tensorstore::dtype_v<std::int32_t>;
-        case DataType::uint32: return actual == tensorstore::dtype_v<std::uint32_t>;
-        case DataType::int64: return actual == tensorstore::dtype_v<std::int64_t>;
-        case DataType::uint64: return actual == tensorstore::dtype_v<std::uint64_t>;
-        case DataType::float16: return actual == tensorstore::dtype_v<tensorstore::dtypes::float16_t>;
-        case DataType::float32: return actual == tensorstore::dtype_v<float>;
-        case DataType::float64: return actual == tensorstore::dtype_v<double>;
-        default: return false;
-    }
 }
 
 // A pool of `bytes`, said once for the session's pool and for a read's own.
@@ -113,52 +84,6 @@ Result<tensorstore::TensorStore<>> OpenZarrArray(const std::filesystem::path& ar
         return context->OpenArray(array_directory, node);
     }
     return OpenZarr3File(array_directory.string(), tensorstore::Context::Default(), node);
-}
-
-Result<void> VerifyArrayMatchesMetadata(const tensorstore::TensorStore<>& array,
-                                        const zarr::ArrayMetadata& expected, std::string_view node) {
-    const auto rank = expected.shape.size();
-    if (static_cast<std::size_t>(array.rank()) != rank) {
-        return Error{ErrorCode::invalid_metadata, "Array rank differs between metadata sources",
-                     std::string(node)};
-    }
-    const auto actual_shape = array.domain().shape();
-    if (actual_shape.size() != rank) {
-        return Error{ErrorCode::invalid_metadata, "Array rank differs between metadata sources",
-                     std::string(node)};
-    }
-    for (std::size_t axis = 0; axis < rank; ++axis) {
-        if (actual_shape[axis] != static_cast<tensorstore::Index>(expected.shape.at(axis))) {
-            return Error{ErrorCode::invalid_metadata,
-                         "Array shape differs between canonical metadata and the array store",
-                         std::string(node)};
-        }
-    }
-    // Two axes of one length exchanged leave every extent agreeing, and a read addressed by the
-    // store's names then puts one axis's values where the other's should be. A 1-D array whose own
-    // document names nothing is let through: it has no order to get wrong.
-    const auto actual_dimension_names = array.domain().labels();
-    const bool unnamed_vector =
-        rank == 1 && actual_dimension_names.size() == 1 && actual_dimension_names[0].empty();
-    if (!unnamed_vector) {
-        if (actual_dimension_names.size() != rank || expected.dimension_names.size() != rank) {
-            return Error{ErrorCode::invalid_metadata, "Array dimension names differ between metadata sources",
-                         std::string(node)};
-        }
-        for (std::size_t axis = 0; axis < rank; ++axis) {
-            if (actual_dimension_names[axis] != expected.dimension_names.at(axis)) {
-                return Error{ErrorCode::invalid_metadata,
-                             "Array dimension names differ between canonical metadata and the array store",
-                             std::string(node)};
-            }
-        }
-    }
-    if (!MatchesDataType(expected.data_type, array.dtype())) {
-        return Error{ErrorCode::invalid_metadata,
-                     "Array data type differs between canonical metadata and the array store",
-                     std::string(node)};
-    }
-    return {};
 }
 
 Result<StoreContextPtr> StoreContext::WithCachePool(std::size_t bytes) const {

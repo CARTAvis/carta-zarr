@@ -133,6 +133,37 @@ Result<void> CollectConsolidatedMetadata(nlohmann::json& metadata, const std::st
     return {};
 }
 
+// What the store takes from the root's copy of an array's document rather than from the array's own,
+// and so what the two must agree about: an image is qualified and described from the copy -- its
+// extent, its dimensions and their order, its data type -- and its reads are planned from the chunks
+// and shards the copy says it has. See Store::VerifyArray for what is left out and why.
+Result<void> RequireSameArray(const zarr_metadata::ArrayMetadata& copy, const zarr_metadata::ArrayMetadata& own,
+                              const std::string& node) {
+    const auto differs = [&node](const std::string& what) {
+        return Error{ErrorCode::invalid_metadata,
+                     "The array's " + what + " in the root's consolidated metadata differs from its own zarr.json",
+                     node};
+    };
+    if (copy.shape != own.shape) {
+        return differs("shape");
+    }
+    // Two axes of one length exchanged leave every extent agreeing, and a read addressed by the
+    // copy's names then puts one axis's values where the other's should be.
+    if (copy.dimension_names != own.dimension_names) {
+        return differs("dimension names");
+    }
+    if (copy.data_type != own.data_type) {
+        return differs("data type");
+    }
+    const auto copy_layout = zarr_metadata::ParseStorageLayout(copy);
+    const auto own_layout = zarr_metadata::ParseStorageLayout(own);
+    if (copy_layout.sharded != own_layout.sharded || copy_layout.chunk_shape != own_layout.chunk_shape ||
+        copy_layout.shard_shape != own_layout.shard_shape) {
+        return differs("chunk layout");
+    }
+    return {};
+}
+
 }  // namespace
 
 Store::Store(TransportPtr transport, nlohmann::json root_attributes,
@@ -267,6 +298,43 @@ const Result<zarr::ArrayMetadata>& Store::ReadArrayMetadata(std::string_view nod
     });
 }
 
+const Result<zarr::ArrayMetadata>& Store::VerifyArray(std::string_view node) const {
+    const auto& copy = ReadArrayMetadata(node);
+    if (!copy) {
+        return copy;
+    }
+    // Normalizes, since the copy above was found under this name.
+    const std::string name = NormalizeNodeName(node).value();
+    // Read from its own document in the first place, so there is no other document to hold it to.
+    if (!std::binary_search(_consolidated_nodes.begin(), _consolidated_nodes.end(), name)) {
+        return copy;
+    }
+    return _caches->verified_arrays.GetOrCompute(name, [&]() -> Result<zarr::ArrayMetadata> {
+        // Asked of the transport rather than of ReadNodeMetadata, which for this node holds the copy.
+        auto bytes = _transport->ReadNodeBytes(name);
+        if (!bytes) {
+            if (bytes.error().code == ErrorCode::not_found) {
+                return Error{ErrorCode::invalid_metadata,
+                             "The root's consolidated metadata describes this array, but its own zarr.json is missing",
+                             name};
+            }
+            return bytes.error();
+        }
+        auto document = ParseNodeMetadata(bytes.value(), name);
+        if (!document) {
+            return document.error();
+        }
+        auto own = zarr_metadata::ParseArrayMetadata(document.value(), name);
+        if (!own) {
+            return own.error();
+        }
+        if (auto same = RequireSameArray(copy.value(), own.value(), name); !same) {
+            return same.error();
+        }
+        return own;
+    });
+}
+
 const Result<std::vector<NodeEntry>>& Store::Inventory() const {
     using Listing = Result<std::vector<NodeEntry>>;
     return _caches->inventory.GetOrCompute([&]() -> Listing {
@@ -371,16 +439,15 @@ Result<std::vector<double>> Store::ReadNumericArray(std::string_view node) const
 }
 
 Result<std::vector<double>> Store::ReadNumericArrayUncached(std::string_view node) const {
-    const auto& metadata = ReadArrayMetadata(node);
-    if (!metadata) {
-        return metadata.error();
+    if (const auto& verified = VerifyArray(node); !verified) {
+        return verified.error();
     }
     auto array_path = ResolveArrayDirectory(node);
     if (!array_path) {
         return array_path.error();
     }
     try {
-        return zarr_metadata::ReadNumericValues(array_path.value(), _context, metadata.value(), node);
+        return zarr_metadata::ReadNumericValues(array_path.value(), _context, node);
     } catch (const std::exception& e) {
         return Error{ErrorCode::io_error, e.what(), std::string(node)};
     }
@@ -402,20 +469,18 @@ template <typename T>
 Result<void> Store::ReadPixelsInto(std::string_view node, const zarr::PixelSelection& selection,
                                    BufferView<T> destination, const ReadControl& control) const {
     try {
-        const auto& metadata = ReadArrayMetadata(node);
-        if (!metadata) {
-            return metadata.error();
+        if (const auto& verified = VerifyArray(node); !verified) {
+            return verified.error();
         }
         auto target_path = ResolveArrayDirectory(node);
         if (!target_path) {
             return target_path.error();
         }
         if constexpr (std::is_same_v<T, float>) {
-            return zarr_metadata::ReadFloat32(target_path.value(), _context, node, metadata.value(),
-                                              selection, destination, control);
+            return zarr_metadata::ReadFloat32(target_path.value(), _context, node, selection, destination, control);
         } else {
-            return zarr_metadata::ReadMaskBytes(target_path.value(), _context, node, metadata.value(),
-                                                selection, destination, control);
+            return zarr_metadata::ReadMaskBytes(target_path.value(), _context, node, selection, destination,
+                                                control);
         }
     } catch (const std::exception& e) {
         return Error{ErrorCode::io_error, e.what(), std::string(node)};
@@ -436,10 +501,10 @@ Result<std::vector<std::string>> Store::ReadStringArray1D(std::string_view node)
 }
 
 Result<std::vector<std::string>> Store::ReadStringArray1DUncached(std::string_view node) const {
-    const auto& array_meta_res = ReadArrayMetadata(node);
-    if (!array_meta_res) {
-        return array_meta_res.error();
+    if (const auto& verified = VerifyArray(node); !verified) {
+        return verified.error();
     }
+    const auto& array_meta_res = ReadArrayMetadata(node);
     auto array_path = ResolveArrayDirectory(node);
     if (!array_path) {
         return array_path.error();

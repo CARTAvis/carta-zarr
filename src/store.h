@@ -71,19 +71,25 @@ struct NodeEntry {
 // metadata, taking the inventory reads every node's metadata and parses every array's. One shared
 // lock would deadlock. The nesting forms a DAG, and a reader added later must not add an edge back:
 //
-//     string_arrays ---> array_metadata ---> node_metadata ---> transport
-//     inventory -------> array_metadata
-//     inventory ---------------------------> node_metadata
-//     double_arrays -------------------------------------------> transport
+//     string_arrays --+
+//                     +--> verified_arrays ---> array_metadata ---> node_metadata ---> transport
+//     double_arrays --+          |
+//                                +---------------------------------------------------> transport
+//     inventory -----------------------------> array_metadata
+//     inventory -------------------------------------------------> node_metadata
+//
+// verified_arrays reads an array's own document straight from the transport rather than through
+// node_metadata, because for a node the root's copy accounted for, node_metadata holds the copy.
 //
 // These locks are not the store's concurrency story. Descriptor construction is serialized a level
-// up, by the mutex Dataset::OpenImage holds across the whole of DescribeSchema, so today only two
-// concurrent Image::ReadBeams calls on one Dataset reach these tables at the same time. When pixel
-// reads arrive that changes, and holding a lock across a TensorStore read becomes worth revisiting
-// -- in here, rather than in five hand-written places as before.
+// up, by the mutex Dataset::OpenImage holds across the whole of DescribeSchema. Pixel reads are not:
+// they reach verified_arrays from every thread reading, but find it computed -- describing the image
+// verified it -- so they take its lock only for the lookup, and no lock is held across a TensorStore
+// read of pixels.
 struct StoreCaches {
     Memo<std::string, Result<nlohmann::json>> node_metadata;
     Memo<std::string, Result<zarr::ArrayMetadata>> array_metadata;
+    Memo<std::string, Result<zarr::ArrayMetadata>> verified_arrays;
     Lazy<Result<std::vector<NodeEntry>>> inventory;
     Memo<std::string, Result<std::vector<double>>> double_arrays;
     Memo<std::string, Result<std::vector<std::string>>> string_arrays;
@@ -130,8 +136,35 @@ public:
     // asks Inventory() first. Another spelling of the name is not looked up: a caller holding a
     // node's name got it from here.
     const NodeEntry* FindNode(std::string_view name) const;
+    /**
+     * An array's metadata as its own document gives it, once that document is known to describe the
+     * array this store does.
+     *
+     * The store decides what an array is -- what images there are, what a descriptor reports, how a
+     * read is planned -- from ReadArrayMetadata, which for a store that consolidated its metadata is
+     * the root's copy. The values are decoded from the array's own document: TensorStore opens an
+     * array from there, and so does the label decoder. A copy left stale by a rewrite, or written by
+     * hand, describes an array that is not the one on disk, and every value read from it would be
+     * answered for an array nobody described. So the two are held to each other on what the store
+     * takes from the copy: the extent, the names and order of the dimensions, the data type, and the
+     * chunks and shards. How the chunks are encoded -- codecs, chunk keys, the fill value -- is not
+     * compared, because the copy is never used to decode one; what comes back here is the own
+     * document's, and that is what a reader decodes with.
+     *
+     * Reports invalid_metadata, naming the node, when the two disagree, when the copy names an array
+     * whose own document is missing (ADR 0004: such a store is malformed), and when the own document
+     * is not an array's. A transport that fails to read it reports what it reported.
+     *
+     * Costs reading the own document once for the life of the store, and only for a node the root's
+     * copy accounted for: any other node's metadata was read from its own document in the first
+     * place, and is handed back as it is. Probing and listing never ask, so they keep what
+     * consolidated metadata saves; every value read does ask, and describing an image asks of the
+     * image and its flag before any value is read. ADR 0017.
+     */
+    const Result<zarr::ArrayMetadata>& VerifyArray(std::string_view node) const;
     // Values in C order, flattened. The rank is in the node's ArrayMetadata; ArrayView addresses
-    // them by dimension name rather than by offset.
+    // them by dimension name rather than by offset. Both are held to the array's own document first,
+    // as every value read is; see VerifyArray.
     Result<std::vector<double>> ReadNumericArray(std::string_view node) const;
     Result<std::vector<std::string>> ReadStringArray1D(std::string_view node) const;
 
@@ -145,8 +178,8 @@ public:
     // works at chunk granularity and is sized by the consumer's Context.
     //
     // One function rather than two, because reading an image's pixels and reading its flag differed
-    // only in the element type: both find the array's metadata, ask the transport where its bytes
-    // are, and hand both to the reader. `float` is pixels, converted from whatever the array holds;
+    // only in the element type: both hold the array to its own document, ask the transport where its
+    // bytes are, and hand that to the reader. `float` is pixels, converted from whatever the array holds;
     // `std::uint8_t` is a flag, one byte an element, true meaning a good pixel. Instantiated for
     // those two in store.cc and for nothing else.
     template <typename T>
@@ -160,8 +193,9 @@ private:
 
     TransportPtr _transport;
     nlohmann::json _root_attributes;
-    // The names the root's copy accounted for. The documents themselves went into the node metadata
-    // table at construction, so there is one place a node's metadata is looked up rather than two.
+    // The names the root's copy accounted for, sorted. The documents themselves went into the node
+    // metadata table at construction, so there is one place a node's metadata is looked up rather
+    // than two.
     std::vector<std::string> _consolidated_nodes;
     bool _has_consolidated_metadata = false;
     StoreContextPtr _context;

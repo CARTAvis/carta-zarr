@@ -66,7 +66,7 @@ Timing TimeIt(unsigned int repeats, Body&& body) {
 }
 
 void Report(const std::string& label, const Timing& timing) {
-    std::cout << std::left << std::setw(22) << label;
+    std::cout << std::left << std::setw(30) << label;
     if (!timing.ok) {
         std::cout << "FAILED  " << timing.failure << '\n';
         return;
@@ -148,7 +148,9 @@ int main(int argc, char** argv) {
         {0, 0, x, y},
         {x / 4, y / 4, x / 2, y / 2},
     };
-    const auto reduce_over = [&](const std::vector<carta::zarr::RegionMask>& over) {
+    // The six statistics there were before sum_sq_dev, and with `spread` that too: what the
+    // distances it is made of cost the per-pixel loop. See ADR 0018.
+    const auto reduce_over = [&](const std::vector<carta::zarr::RegionMask>& over, bool spread = false) {
         return TimeIt(repeats, [&]() -> std::string {
             carta::zarr::SpectralReduceRequest request;
             request.planes.spectral = {0, channels, 1};
@@ -156,6 +158,9 @@ int main(int argc, char** argv) {
             request.statistics = carta::zarr::Statistic::num_pixels | carta::zarr::Statistic::nan_count |
                                  carta::zarr::Statistic::sum | carta::zarr::Statistic::sum_sq |
                                  carta::zarr::Statistic::min | carta::zarr::Statistic::max;
+            if (spread) {
+                request.statistics |= carta::zarr::Statistic::sum_sq_dev;
+            }
             const auto outcome = sky.ReduceSpectral(request, [](const carta::zarr::SpectralBlock&) { return true; });
             return outcome ? std::string{} : outcome.error().message;
         });
@@ -189,6 +194,12 @@ int main(int argc, char** argv) {
     }
     const auto reduce_masked = reduce_over({carta::zarr::RegionMask{0, 0, x, y, {ellipse.data(), ellipse.size()}}});
 
+    const auto spread = reduce_over(regions, true);
+    const auto spread_whole = reduce_over({regions.front()}, true);
+    const auto spread_boxes = reduce_over(boxes, true);
+    const auto spread_masked =
+        reduce_over({carta::zarr::RegionMask{0, 0, x, y, {ellipse.data(), ellipse.size()}}}, true);
+
     const auto histogram = TimeIt(repeats, [&]() -> std::string {
         carta::zarr::HistogramRequest request;
         request.planes.spectral = {0, channels, 1};
@@ -212,10 +223,15 @@ int main(int argc, char** argv) {
     Report("ReduceSpectral x1", reduce_whole);
     Report("ReduceSpectral x64", reduce_boxes);
     Report("ReduceSpectral masked", reduce_masked);
+    Report("ReduceSpectral +spread", spread);
+    Report("ReduceSpectral x1 +spread", spread_whole);
+    Report("ReduceSpectral x64 +spread", spread_boxes);
+    Report("ReduceSpectral masked +spread", spread_masked);
     Report("ComputeHistogram", histogram);
     Report("ComputeCubeHistogram", cube);
 
-    const bool all_ok = read.ok && reduce.ok && reduce_whole.ok && reduce_boxes.ok && reduce_masked.ok &&
+    const bool all_ok = read.ok && reduce.ok && reduce_whole.ok && reduce_boxes.ok && reduce_masked.ok && spread.ok &&
+                        spread_whole.ok && spread_boxes.ok && spread_masked.ok &&
                         histogram.ok && cube.ok;
     return all_ok ? 0 : 1;
 }

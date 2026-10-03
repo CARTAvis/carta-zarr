@@ -157,8 +157,8 @@ Result<void> RequireSameArray(const zarr_metadata::ArrayMetadata& copy, const za
     }
     const auto copy_layout = zarr_metadata::ParseStorageLayout(copy);
     const auto own_layout = zarr_metadata::ParseStorageLayout(own);
-    if (copy_layout.sharded != own_layout.sharded || copy_layout.chunk_shape != own_layout.chunk_shape ||
-        copy_layout.shard_shape != own_layout.shard_shape) {
+    // An unsharded layout has no shard shape, so comparing it also says whether both are sharded.
+    if (copy_layout.chunk_shape != own_layout.chunk_shape || copy_layout.shard_shape != own_layout.shard_shape) {
         return differs("chunk layout");
     }
     return {};

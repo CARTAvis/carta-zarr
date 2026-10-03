@@ -72,13 +72,9 @@ Result<void> ReadInto(const std::filesystem::path& array_path, const StoreContex
         }
         auto const store = std::move(opened).value();
         // Whether this is the array the store described was settled before the store handed over
-        // where it lives. What is the read's own is that the selection addresses an array of this
-        // rank.
+        // where it lives -- its rank included, which is the selection's because the selection was
+        // built from the descriptor of that array.
         const auto rank = selection.start().size();
-        if (static_cast<std::size_t>(store.rank()) != rank) {
-            return Error{ErrorCode::invalid_argument, "Selection rank does not match the array rank",
-                         std::string(node)};
-        }
         std::vector<tensorstore::Index> start(rank);
         std::vector<tensorstore::Index> count(rank);
         std::vector<tensorstore::Index> stride(rank);

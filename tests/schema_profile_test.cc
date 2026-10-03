@@ -1096,7 +1096,7 @@ void RequireRefusedAs(const carta::zarr::Error& error, ErrorCode code, const std
 // answer a read gets from it.
 void TestAnArrayDisagreeingWithTheRootsCopyIsRefused() {
     const std::vector<std::pair<std::string, std::string>> rewritten{
-        {"another extent", ArrayDocument("[6]", "[6]", R"(["l"])")},
+        {"another extent", ArrayDocument("[6]", "[4]", R"(["l"])")},
         {"another dimension name", ArrayDocument("[4]", "[4]", R"(["x"])")},
         {"another data type", ArrayDocument("[4]", "[4]", R"(["l"])", "float32")},
         {"another chunk", ArrayDocument("[4]", "[2]", R"(["l"])")},
@@ -1104,6 +1104,12 @@ void TestAnArrayDisagreeingWithTheRootsCopyIsRefused() {
                                  R"([{"name":"sharding_indexed","configuration":{"chunk_shape":[2],
                                       "codecs":[{"name":"bytes","configuration":{"endian":"little"}}],
                                       "index_codecs":[{"name":"bytes","configuration":{"endian":"little"}}]}}])")},
+        // The same chunks, each now read out of a shard the copy does not mention: the chunk shape
+        // agrees and the shard shape a read is planned around does not.
+        {"shards around the same chunks", ArrayDocument("[4]", "[4]", R"(["l"])", "float64",
+                                                        R"([{"name":"sharding_indexed","configuration":{"chunk_shape":[4],
+                                                             "codecs":[{"name":"bytes","configuration":{"endian":"little"}}],
+                                                             "index_codecs":[{"name":"bytes","configuration":{"endian":"little"}}]}}])")},
         {"a document that will not parse", "{"},
         {"a group", R"({"zarr_format":3,"node_type":"group"})"},
     };

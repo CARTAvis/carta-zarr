@@ -1027,7 +1027,7 @@ void TestADescriptionIsBuiltFromTheValuesItIsGiven() {
     values.m = {-0.002, -0.001, 0.0, 0.001, 0.002};
     values.frequency = {1.4e9, 1.401e9, 1.402e9};
     values.time = {1.6e9};
-    values.polarization = std::vector<std::string>{"I", "Q"};
+    values.polarization = {"I", "Q"};
 
     const auto described = DescribeImageFrom(store.value(), "SKY", values);
     Require(static_cast<bool>(described),
@@ -1045,7 +1045,7 @@ void TestADescriptionIsBuiltFromTheValuesItIsGiven() {
             "and its pixel is that channel's, counted from one");
     Require(spectral.rest_frequency && *spectral.rest_frequency == 1.420405751e9, "the rest frequency is read");
 
-    Require(descriptor.polarization && descriptor.polarization->labels == *values.polarization,
+    Require(descriptor.polarization && descriptor.polarization->labels == values.polarization,
             "the polarization labels are the ones handed in");
     Require(descriptor.temporal.has_value(), "a time value makes a temporal coordinate");
     Require(descriptor.temporal->values == values.time, "the times are the values handed in");

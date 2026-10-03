@@ -316,15 +316,15 @@ Result<DescribedImage> DescribeImageFrom(const Store& store, std::string_view im
     }
     descriptor.direction = std::move(direction.value());
 
-    // Absent because the image has none -- a continuum image has no frequency coordinate -- not
-    // because describing it failed. Same for the temporal one below.
+    // Absent only when no samples were handed in, which reading them never does: every coordinate is
+    // required, and the probe refused a dataset missing one. Same for the two below.
     if (auto spectral = DescribeSpectralCoordinate(store, values.frequency, descriptor); spectral) {
         descriptor.spectral = std::move(spectral);
     }
 
-    if (values.polarization) {
+    if (!values.polarization.empty()) {
         PolarizationCoordinate pol;
-        pol.labels = *values.polarization;
+        pol.labels = values.polarization;
         descriptor.polarization = std::move(pol);
     }
 

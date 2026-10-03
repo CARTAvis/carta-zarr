@@ -17,15 +17,17 @@ namespace {
 
 namespace zarr_metadata = ::carta::zarr::internal::zarr;
 
-Result<std::vector<double>> ReadNumericCoordinate(const Store& store, std::string_view name) {
-    const auto& metadata = store.ReadNodeMetadata(name);
-    if (!metadata) {
-        if (metadata.error().code == ErrorCode::not_found) {
-            return std::vector<double>{};
-        }
-        return metadata.error();
+// Where a numeric coordinate's samples go, by the axis it is.
+std::vector<double>* NumericValuesOf(CoordinateValues& values, AxisRole role) {
+    switch (role) {
+        case AxisRole::spatial_x: return &values.l;
+        case AxisRole::spatial_y: return &values.m;
+        case AxisRole::spectral: return &values.frequency;
+        case AxisRole::time: return &values.time;
+        case AxisRole::polarization:
+        case AxisRole::other: return nullptr;
     }
-    return store.ReadNumericArray(name);
+    return nullptr;
 }
 
 }  // namespace
@@ -112,22 +114,28 @@ std::vector<AxisDescriptor> DescribeAxes(const Store& store, const zarr_metadata
 }
 
 Result<CoordinateValues> ReadCoordinateValues(const Store& store) {
+    // Every one of them, because every one is required: the probe refused a dataset missing one
+    // before an image of it could be described. A coordinate that cannot be read fails describing
+    // rather than leaving a hole -- the polarization labels used to be skipped when their metadata
+    // failed to read for any reason, an I/O error included.
     CoordinateValues values;
-    const std::pair<std::string_view, std::vector<double>*> numeric[]{
-        {"l", &values.l}, {"m", &values.m}, {"frequency", &values.frequency}, {"time", &values.time}};
-    for (const auto& [name, into] : numeric) {
-        auto read = ReadNumericCoordinate(store, name);
-        if (!read) {
-            return read.error();
+    for (const auto& coordinate : kCoordinates) {
+        if (!OnPlane(coordinate, Plane::sky)) {
+            continue;
         }
-        *into = std::move(read.value());
-    }
-    if (store.ReadNodeMetadata("polarization")) {
-        auto labels = store.ReadStringArray1D("polarization");
-        if (!labels) {
-            return labels.error();
+        if (coordinate.kind == CoordinateKind::labels) {
+            auto labels = store.ReadStringArray1D(coordinate.name);
+            if (!labels) {
+                return labels.error();
+            }
+            values.polarization = std::move(labels.value());
+            continue;
         }
-        values.polarization = std::move(labels.value());
+        auto samples = store.ReadNumericArray(coordinate.name);
+        if (!samples) {
+            return samples.error();
+        }
+        *NumericValuesOf(values, coordinate.role) = std::move(samples.value());
     }
     return values;
 }

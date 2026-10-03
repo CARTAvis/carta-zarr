@@ -127,14 +127,14 @@ std::string CoordinateUnit(const Store& store, const Coordinate& coordinate);
 std::vector<AxisDescriptor> DescribeAxes(const Store& store, const zarr::ArrayMetadata& image);
 
 // The samples of the dataset's coordinates, which is everything a description reads besides
-// metadata. A numeric coordinate the dataset does not hold is empty; the polarization labels are
-// absent rather than empty when there is no polarization coordinate at all.
+// metadata. Read, every one is there; one left empty is one handed in that way, and describes no
+// coordinate of that kind.
 struct CoordinateValues {
     std::vector<double> l;
     std::vector<double> m;
     std::vector<double> frequency;
     std::vector<double> time;
-    std::optional<std::vector<std::string>> polarization;
+    std::vector<std::string> polarization;
 };
 
 // Every sky-plane coordinate's samples, each read through the store and so held to its own document

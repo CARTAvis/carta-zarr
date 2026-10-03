@@ -42,7 +42,8 @@ The layout is named per axis, in XRADIO's axis names, and an axis left out is 1:
 Each dataset carries bench-manifest.json beside its zarr.json: what it was made from, the layout,
 the striping it got, and what it came to on disk. The manifest is written last, so a dataset with
 one is complete. With --output-root the directory is named after a hash of everything that decides
-its bytes, and an existing complete one is reused rather than rewritten.
+its bytes, and an existing complete one is reused rather than rewritten, unless --force asks for it
+to be written again.
 
 The last line on stdout is the dataset's path. Everything else goes to stderr.
 """
@@ -888,6 +889,22 @@ def take_layout_from_source(args: argparse.Namespace) -> None:
 # -- Identity and reuse ---------------------------------------------------------------------------
 
 
+def source_content(source: Path) -> str:
+    """What every file of a source dataset is, as far as the filesystem says without reading it: its
+    path, size and modification time. A rewrite reads pixels, flags and coordinates as well as
+    metadata, and a source edited in place keeps its path and, as often as not, its metadata, so
+    without this the rewrite of what it used to hold is reused.
+
+    Stated rather than read because a source can be terabytes: walking it costs a stat per file, and
+    hashing it would cost reading all of it. A file copied without its times looks changed, which
+    costs a rewrite and never a wrong measurement."""
+    digest = hashlib.sha256()
+    for path in sorted(entry for entry in source.rglob("*") if entry.is_file()):
+        stat = path.stat()
+        digest.update(f"{path.relative_to(source).as_posix()}\0{stat.st_size}\0{stat.st_mtime_ns}\n".encode())
+    return digest.hexdigest()
+
+
 def identity(args: argparse.Namespace) -> dict[str, Any]:
     """Everything that decides the bytes of the dataset, and nothing that does not (workers, block
     size, where it is written)."""
@@ -899,6 +916,7 @@ def identity(args: argparse.Namespace) -> dict[str, Any]:
             "path": str(source),
             "image": args.image,
             "image_metadata": hashlib.sha256(json.dumps(image_metadata, sort_keys=True).encode()).hexdigest(),
+            "content": source_content(source),
             "crop": args.crop,
         }
     else:
@@ -981,7 +999,8 @@ def parse_arguments(argv: list[str] | None) -> argparse.Namespace:
     execution = parser.add_argument_group("execution")
     execution.add_argument("--workers", type=int, default=os.cpu_count() or 1)
     execution.add_argument("--block-mib", type=int, default=64, help="how much each worker writes at a time")
-    execution.add_argument("--force", action="store_true", help="replace an existing dataset that is not this one")
+    execution.add_argument("--force", action="store_true",
+                           help="replace whatever dataset is at the output, this one included, rather than reuse it")
 
     args = parser.parse_args(argv)
     if args.synthetic and not args.shape:
@@ -1072,14 +1091,18 @@ class Output:
 
     @classmethod
     def claim(cls, path: Path, reads: list[tuple[str, Path]], digest: str, force: bool) -> Output:
-        """Refuse an output over `reads`; reuse a finished dataset whose manifest says `digest`; replace
-        any other only when `force`; and leave an empty directory to write in."""
+        """Refuse an output over `reads`; with `force`, replace whatever is there; without it, reuse a
+        finished dataset whose manifest says `digest` and refuse any other; and leave an empty
+        directory to write in.
+
+        `force` replaces even this dataset: it is how to write one again when what the identity can
+        see of its origin is not all there is to it."""
         for flag, read in reads:
             if overlaps(path, read):
                 raise SystemExit(f"{path} overlaps {flag} {read}; write the dataset somewhere else")
         if path.exists():
             manifest = read_manifest(path)
-            if manifest and manifest.get("identity_hash") == digest and manifest.get("complete"):
+            if not force and manifest and manifest.get("identity_hash") == digest and manifest.get("complete"):
                 return cls(path, reused=True)
             if not force:
                 raise SystemExit(f"{path} exists and is not this dataset; --force replaces it")

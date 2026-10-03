@@ -22,6 +22,7 @@ each kind of output, and what is left when writing fails part-way."""
 from __future__ import annotations
 
 import json
+import os
 import sys
 import tempfile
 import unittest
@@ -89,6 +90,12 @@ class ClaimTest(unittest.TestCase):
         self.assertFalse(claimed.reused)
         self.assertTrue(output.is_dir() and list(output.iterdir()) == [], "--force did not leave an empty output")
 
+    def test_the_same_dataset_is_written_again_when_forced(self) -> None:
+        output = dataset(self.root / "out.zarr")
+        claimed = self.claim(output, force=True)
+        self.assertFalse(claimed.reused, "--force reused what it was asked to replace")
+        self.assertEqual(list(output.iterdir()), [], "--force did not leave an empty output")
+
     def test_a_new_output_is_made_with_its_parents(self) -> None:
         output = self.root / "a" / "b" / "out.zarr"
         claimed = self.claim(output, force=False)
@@ -119,6 +126,49 @@ class ClaimTest(unittest.TestCase):
         synthetic = generate.parse_arguments(["--synthetic", "--shape", "l=4,m=4", "--template", str(template),
                                               "--output", "out", "--chunk", "l=1"])
         self.assertEqual(generate.inputs_read(synthetic), [("--template", template)])
+
+
+
+class IdentityTest(unittest.TestCase):
+    """A rewrite is known by what it was made from, and that is the source's pixels, flags and
+    coordinates as much as its metadata: a source that changes under the same path is another
+    dataset, and reusing the old rewrite would measure pixels that are no longer there."""
+
+    def setUp(self) -> None:
+        self._directory = tempfile.TemporaryDirectory()
+        self.source = Path(self._directory.name).resolve() / "source.zarr"
+        (self.source / "SKY" / "c" / "0").mkdir(parents=True)
+        (self.source / "l" / "c").mkdir(parents=True)
+        (self.source / "zarr.json").write_text("{}")
+        (self.source / "SKY" / "zarr.json").write_text(json.dumps({"shape": [4]}))
+        (self.source / "SKY" / "c" / "0" / "0").write_bytes(b"pixel 11")
+        (self.source / "l" / "c" / "0").write_bytes(b"coordinates")
+
+    def tearDown(self) -> None:
+        self._directory.cleanup()
+
+    def identity(self) -> dict:
+        return generate.identity(generate.parse_arguments(
+            ["--source", str(self.source), "--output", "out", "--chunk", "l=1"]))
+
+    def test_a_source_whose_pixels_change_is_another_dataset(self) -> None:
+        before = self.identity()
+        self.assertEqual(self.identity(), before, "the same source came to two identities")
+        for changed in (self.source / "SKY" / "c" / "0" / "0", self.source / "l" / "c" / "0"):
+            with self.subTest(changed=str(changed.relative_to(self.source))):
+                was = self.identity()
+                stat = changed.stat()
+                changed.write_bytes(changed.read_bytes().replace(b"1", b"2"))
+                # The same size, and a time a coarse filesystem could not tell apart from the old one
+                # had it not been moved on: what is left to tell them apart is that it was written.
+                os.utime(changed, ns=(stat.st_atime_ns, stat.st_mtime_ns + 1_000_000_000))
+                self.assertNotEqual(self.identity(), was, f"{changed.name} changed and the identity did not")
+
+    def test_where_it_is_written_and_how_fast_are_not_its_identity(self) -> None:
+        here = self.identity()
+        elsewhere = generate.identity(generate.parse_arguments(
+            ["--source", str(self.source), "--output", "elsewhere", "--chunk", "l=1", "--workers", "3"]))
+        self.assertEqual(here, elsewhere)
 
 
 if __name__ == "__main__":

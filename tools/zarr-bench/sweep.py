@@ -41,6 +41,7 @@ import argparse
 import csv
 import dataclasses
 import datetime
+import hashlib
 import json
 import math
 import os
@@ -615,6 +616,21 @@ def cold_method(config: dict[str, Any]) -> str:
 # -- Running --------------------------------------------------------------------------------------
 
 
+# The measure settings a run's key already says, or that decide nothing measured: changing these
+# resumes a sweep, where changing any other measure setting is another measurement.
+RESUMABLE_MEASURE = ("modes", "trials", "histogram_reference", "generator_workers")
+
+
+def workload(config: dict[str, Any]) -> str:
+    """What every run of a sweep measures beside what its key says: the source, and how the bench is
+    told to read it. A run is done only for the workload it measured, and its key alone would let a
+    sweep asked for seed 999 skip every run it made with seed 1."""
+    measure = {name: value for name, value in config["measure"].items() if name not in RESUMABLE_MEASURE}
+    said = json.dumps({"source": config["source"], "measure": measure}, sort_keys=True)
+    return hashlib.sha256(said.encode()).hexdigest()[:16]
+
+
+
 @dataclasses.dataclass(frozen=True)
 class Run:
     """One invocation of carta-zarr-bench."""
@@ -654,6 +670,18 @@ class Sweep:
         self.state: dict[str, Any] = {"runs": {}, "datasets": {}, "failures": {}}
         if self.state_path.is_file():
             self.state = json.loads(self.state_path.read_text())
+
+    def adopt_workload(self) -> None:
+        """Take up the state there is only when it measured this workload. Mixing two in one
+        results.csv would rank layouts on measurements of different things, so another workload is
+        refused rather than resumed: it belongs in an output directory of its own."""
+        current = workload(self.config)
+        recorded = self.state.get("workload")
+        if recorded is not None and recorded != current and (self.state["runs"] or self.state["datasets"]):
+            raise SystemExit(f"{self.output} holds runs of another workload: the source or the measure settings "
+                             f"({', '.join(sorted(set(self.config['measure']) - set(RESUMABLE_MEASURE)))}) "
+                             "differ from those it was measured with. Write this sweep to another output directory.")
+        self.state["workload"] = current
 
     def save(self) -> None:
         temporary = self.state_path.with_suffix(".partial")
@@ -1993,6 +2021,7 @@ def sweep_one(config: dict[str, Any], output: Path, args: argparse.Namespace) ->
             log(f"{sweep.csv} does not exist: there is nothing to report")
             return None
     else:
+        sweep.adopt_workload()
         sweep.logs.mkdir(exist_ok=True)
         # What failed last time is tried again: the cause may have been fixed since.
         sweep.state["failures"] = {}

@@ -51,6 +51,7 @@ from __future__ import annotations
 
 import argparse
 import concurrent.futures
+import contextlib
 import dataclasses
 import datetime
 import hashlib
@@ -65,7 +66,7 @@ import sys
 import time
 import warnings
 from pathlib import Path
-from typing import Any
+from typing import Any, Iterator
 
 import numpy as np
 import zarr
@@ -1046,6 +1047,59 @@ def overlaps(a: Path, b: Path) -> bool:
     return within(a, b) or within(b, a)
 
 
+def inputs_read(args: argparse.Namespace) -> list[tuple[str, Path]]:
+    """The datasets a run reads, each with the flag that named it: the source it rewrites, or the
+    template a synthetic cube takes its metadata from."""
+    if args.source:
+        return [("--source", Path(args.source).resolve())]
+    return [("--template", Path(args.template).resolve())]
+
+
+@dataclasses.dataclass(frozen=True)
+class Output:
+    """The dataset a run writes, claimed before anything at its path is deleted or made.
+
+    Claiming is the only way this script deletes or creates an output, and it refuses an output over
+    any dataset the run reads before it does either: --force deletes what is at the output, so an
+    output that is the source, an alias of it or a directory around it would take the source with
+    it, and one inside it would be written into the dataset being read. That used to be two
+    statements of main() that had to stay in that order.
+    """
+
+    path: Path
+    # Already this dataset, finished: nothing is to be written.
+    reused: bool
+
+    @classmethod
+    def claim(cls, path: Path, reads: list[tuple[str, Path]], digest: str, force: bool) -> Output:
+        """Refuse an output over `reads`; reuse a finished dataset whose manifest says `digest`; replace
+        any other only when `force`; and leave an empty directory to write in."""
+        for flag, read in reads:
+            if overlaps(path, read):
+                raise SystemExit(f"{path} overlaps {flag} {read}; write the dataset somewhere else")
+        if path.exists():
+            manifest = read_manifest(path)
+            if manifest and manifest.get("identity_hash") == digest and manifest.get("complete"):
+                return cls(path, reused=True)
+            if not force:
+                raise SystemExit(f"{path} exists and is not this dataset; --force replaces it")
+            shutil.rmtree(path)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.mkdir()
+        return cls(path, reused=False)
+
+    @contextlib.contextmanager
+    def writing(self) -> Iterator[Path]:
+        """The output to write in. Anything short of finishing removes it again, an interrupt or a
+        refusal part-way included: an unfinished dataset is of no use to a measurement, and left
+        behind it would make the same command refuse to run a second time."""
+        try:
+            yield self.path
+        except BaseException:
+            shutil.rmtree(self.path, ignore_errors=True)
+            raise
+
+
 def main(argv: list[str] | None = None) -> int:
     arguments = sys.argv[1:] if argv is None else argv
     if any(argument.split("=", 1)[0] == "--check-stripe" for argument in arguments):
@@ -1059,28 +1113,13 @@ def main(argv: list[str] | None = None) -> int:
     else:
         stem = "synthetic" if args.synthetic else Path(args.source).resolve().name.removesuffix(".zarr")
         out = Path(args.output_root).resolve() / f"{stem}-{digest}"
-    # --force deletes what is at the output before the source is read, so an output that is the
-    # source, or holds it, would take the source with it; one inside the source would be written
-    # into the dataset being read.
-    for read, flag in ((args.source, "--source"), (None if args.source else args.template, "--template")):
-        if read and overlaps(out, Path(read).resolve()):
-            raise SystemExit(f"{out} overlaps {flag} {read}; write the dataset somewhere else")
+    output = Output.claim(out, inputs_read(args), digest, args.force)
+    if output.reused:
+        log(f"{out} is already this dataset; reusing it")
+        print(out)
+        return 0
 
-    if out.exists():
-        manifest = read_manifest(out)
-        if manifest and manifest.get("identity_hash") == digest and manifest.get("complete"):
-            log(f"{out} is already this dataset; reusing it")
-            print(out)
-            return 0
-        if not args.force:
-            raise SystemExit(f"{out} exists and is not this dataset; --force replaces it")
-        shutil.rmtree(out)
-
-    out.parent.mkdir(parents=True, exist_ok=True)
-    out.mkdir()
-    # Anything short of a manifest is removed again: an unfinished dataset is of no use to a
-    # measurement, and left behind it would make the same command refuse to run a second time.
-    try:
+    with output.writing():
         filesystem = filesystem_of(out)
         if stripe:
             if filesystem not in ("unknown", stripe.filesystem):
@@ -1096,9 +1135,6 @@ def main(argv: list[str] | None = None) -> int:
                 warnings.simplefilter("ignore")
                 zarr.consolidate_metadata(str(out))
         seconds = time.monotonic() - started
-    except BaseException:
-        shutil.rmtree(out, ignore_errors=True)
-        raise
 
     layout: Layout = made["layout"]
     image_bytes, image_files = tree_size(out / made["image"])

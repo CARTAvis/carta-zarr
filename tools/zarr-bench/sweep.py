@@ -709,6 +709,7 @@ class Sweep:
         probe = subprocess.run([self.bench, "probe", str(path)], capture_output=True, text=True)
         if probe.returncode != 0:
             self.fail(dataset, f"carta-zarr-bench probe refused it: {probe.stdout.strip() or probe.stderr.strip()}")
+            # What generate.py printed, which it claimed before writing: never the source or around it.
             shutil.rmtree(path, ignore_errors=True)
             return None
         self.state["datasets"][dataset] = {
@@ -806,6 +807,7 @@ class Sweep:
                 self.bench_run(path, layout, run, validate)
         finally:
             if not self.config["paths"]["keep_datasets"]:
+                # A dataset generate.py claimed, so one that overlaps nothing it read. See Output.claim.
                 shutil.rmtree(path, ignore_errors=True)
 
     # -- Stages

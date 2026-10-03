@@ -592,6 +592,10 @@ if(CARTA_ZARR_BUILD_TESTS AND BUILD_TESTING)
     if(CARTA_ZARR_UV)
         add_test(NAME carta-zarr-sweep-results
             COMMAND ${CARTA_ZARR_UV} run --quiet --script ${CMAKE_CURRENT_SOURCE_DIR}/tests/sweep_results_test.py)
+        # What generate.py may do to the place it writes a dataset: that an output over what it reads is
+        # refused before anything is deleted, and that one it could not finish is not left behind.
+        add_test(NAME carta-zarr-generate
+            COMMAND ${CARTA_ZARR_UV} run --quiet --script ${CMAKE_CURRENT_SOURCE_DIR}/tests/generate_test.py)
     endif()
 
     #[[

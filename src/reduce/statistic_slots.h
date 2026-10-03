@@ -135,11 +135,17 @@ public:
 
     // One row's totals into one region at one channel. The hot path: it runs once for every row of
     // every region in every chunk, so it stays inline and asks only the questions Reset answered.
+    //
+    // kDeviations says whether the layout has sum_sq_dev, which the caller knows once for every row
+    // it folds: as a question asked here, of every row, it cost a reduction of one-pixel strips 2%
+    // whether or not it was asked for the spread.
+    template <bool kDeviations>
     void Fold(std::size_t region, std::uint64_t channel, const RowTotals& row) noexcept {
         assert(region < _regions && channel < _channels);
         double* at = _values.data() + (region * _region_stride) + static_cast<std::size_t>(channel);
         // First, while the count is still that of what came before the row.
-        if (std::get<kSumSqDev>(_offset) != kAbsent) {
+        assert(kDeviations == (std::get<kSumSqDev>(_offset) != kAbsent));
+        if constexpr (kDeviations) {
             double& deviations = at[std::get<kSumSqDev>(_offset)];
             Spread spread{at[std::get<kNumPixels>(_offset)], at[_base_at], at[_offset_at], deviations};
             spread.Merge({static_cast<double>(row.good), row.base, row.offset, row.sum_sq_dev});

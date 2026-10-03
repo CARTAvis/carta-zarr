@@ -162,7 +162,7 @@ void TestAResetHoldsNothing() {
     }
 
     // And a reset to another shape starts again rather than keeping what was there.
-    slots.Fold(1, 2, Row(4, 1, 10.0, 30.0, 1.0, 4.0));
+    slots.Fold<true>(1, 2, Row(4, 1, 10.0, 30.0, 1.0, 4.0));
     slots.Reset(StatisticLayout::Of(kEverything), 3, 2);
     const auto again = HandOver(slots);
     Require(again.region_count == 3 && again.channel_count == 2, "the block has the new shape");
@@ -176,9 +176,9 @@ void TestAResetHoldsNothing() {
 void TestAFoldAddsTheCountsAndKeepsTheExtrema() {
     StatisticSlots slots;
     slots.Reset(StatisticLayout::Of(kEverything), 2, 3);
-    slots.Fold(1, 2, Row(3, 1, 6.0, 14.0, 1.0, 3.0));
-    slots.Fold(1, 2, Row(2, 0, 9.0, 41.0, 4.0, 5.0));
-    slots.Fold(1, 2, Row(1, 2, -2.0, 4.0, -2.0, -2.0));
+    slots.Fold<true>(1, 2, Row(3, 1, 6.0, 14.0, 1.0, 3.0));
+    slots.Fold<true>(1, 2, Row(2, 0, 9.0, 41.0, 4.0, 5.0));
+    slots.Fold<true>(1, 2, Row(1, 2, -2.0, 4.0, -2.0, -2.0));
 
     const auto seen = HandOver(slots);
     RequireTotals(Totals(6, 3, 13.0, 59.0, -2.0, 5.0), seen.totals.at(1).at(2), "three rows into one channel");
@@ -191,7 +191,7 @@ void TestAFoldAddsTheCountsAndKeepsTheExtrema() {
 void TestOnlyWhatWasAskedForIsCarried() {
     StatisticSlots slots;
     slots.Reset(StatisticLayout::Of(Statistic::num_pixels | Statistic::max), 1, 2);
-    slots.Fold(0, 1, Row(3, 1, 6.0, 14.0, 1.0, 3.0));
+    slots.Fold<false>(0, 1, Row(3, 1, 6.0, 14.0, 1.0, 3.0));
 
     bool called = false;
     slots.HandOver(0, true, 1.0, [&](const SpectralBlock& block) {
@@ -224,7 +224,7 @@ void TestPartialsMergeInOrderAtTheirOffset() {
     for (std::size_t task = 0; task < 3; ++task) {
         for (std::uint64_t c = 0; c < 4; ++c) {
             const double v = parts.at(task) + static_cast<double>(c);
-            partials.at(task).Fold(1, c, Row(task + 1, task, v, v * v, v - 1.0, v + 1.0));
+            partials.at(task).Fold<true>(1, c, Row(task + 1, task, v, v * v, v - 1.0, v + 1.0));
         }
     }
 
@@ -261,21 +261,21 @@ void TestPartialsMergeInOrderAtTheirOffset() {
 void TestAHandOverPutsTheIdentitiesBack() {
     StatisticSlots slots;
     slots.Reset(StatisticLayout::Of(kEverything), 1, 2);
-    slots.Fold(0, 0, Row(1, 0, 5.0, 25.0, 5.0, 5.0));
+    slots.Fold<true>(0, 0, Row(1, 0, 5.0, 25.0, 5.0, 5.0));
 
     const auto early = HandOver(slots, false);
     Require(!early.complete && early.completeness == 0.5, "the block says it is unfinished");
     Require(std::isnan(early.totals.at(0).at(1).min), "an untouched minimum is reported as NaN");
 
-    slots.Fold(0, 1, Row(1, 0, 3.0, 9.0, 3.0, 3.0));
-    slots.Fold(0, 0, Row(1, 0, 7.0, 49.0, 7.0, 7.0));
+    slots.Fold<true>(0, 1, Row(1, 0, 3.0, 9.0, 3.0, 3.0));
+    slots.Fold<true>(0, 0, Row(1, 0, 7.0, 49.0, 7.0, 7.0));
     const auto late = HandOver(slots, true);
     RequireTotals(Totals(2, 0, 12.0, 74.0, 5.0, 7.0), late.totals.at(0).at(0), "refined");
     RequireTotals(Totals(1, 0, 3.0, 9.0, 3.0, 3.0), late.totals.at(0).at(1), "first touched after a hand-over");
 
     // Every hand-over puts them back, not only an unfinished one: what a finished block leaves
     // behind is the same accumulator an unfinished one does.
-    slots.Fold(0, 1, Row(1, 0, 1.0, 1.0, 1.0, 1.0));
+    slots.Fold<true>(0, 1, Row(1, 0, 1.0, 1.0, 1.0, 1.0));
     const auto after = HandOver(slots, true);
     RequireTotals(Totals(2, 0, 4.0, 10.0, 1.0, 3.0), after.totals.at(0).at(1), "folded into after a finished block");
 }
@@ -341,7 +341,7 @@ void TestDeviationsFoldAsOneSetOfPixels() {
     // Asked for alone: the count and the sum it is merged with come with it.
     slots.Reset(StatisticLayout::Of(Statistic::sum_sq_dev), 1, 2);
     for (const auto& pixels : kRows) {
-        slots.Fold(0, 1, pixels.empty() ? RowTotals{} : RowOf(pixels));
+        slots.Fold<true>(0, 1, pixels.empty() ? RowTotals{} : RowOf(pixels));
     }
     const auto seen = HandOver(slots);
     RequireDeviations(seen.totals.at(0).at(1).sum_sq_dev, DeviationsOf(kRows), "four rows, one of them empty");
@@ -354,14 +354,14 @@ void TestDeviationsMergeInOrderAsOneSetOfPixels() {
     std::vector<StatisticSlots> partials(3);
     for (std::size_t task = 0; task < partials.size(); ++task) {
         partials.at(task).Reset(layout, 1, 2);
-        partials.at(task).Fold(0, 0, RowOf(kRows.at(task)));
+        partials.at(task).Fold<true>(0, 0, RowOf(kRows.at(task)));
     }
     // A partial that saw nothing at a channel, and one that saw something only there.
-    partials.at(2).Fold(0, 1, RowOf({4.0, 5.0}));
+    partials.at(2).Fold<true>(0, 1, RowOf({4.0, 5.0}));
 
     StatisticSlots block;
     block.Reset(layout, 1, 6);
-    block.Fold(0, 3, RowOf({1.0e7 + 10.0}));
+    block.Fold<true>(0, 3, RowOf({1.0e7 + 10.0}));
     block.MergeInOrder(partials.data(), partials.size(), 3);
     const auto seen = HandOver(block);
     RequireDeviations(seen.totals.at(0).at(3).sum_sq_dev,
@@ -378,7 +378,7 @@ void TestASinkThatSaysNoIsReported() {
     const bool kept_going = slots.HandOver(0, false, 0.5, [](const SpectralBlock&) { return false; });
     Require(!kept_going, "a sink that says no stops the reduction");
 
-    slots.Fold(0, 0, Row(1, 0, 2.0, 4.0, 2.0, 2.0));
+    slots.Fold<true>(0, 0, Row(1, 0, 2.0, 4.0, 2.0, 2.0));
     RequireTotals(Totals(1, 0, 2.0, 4.0, 2.0, 2.0), HandOver(slots).totals.at(0).at(0), "and still leaves identities");
 }
 

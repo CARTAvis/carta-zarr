@@ -22,6 +22,7 @@
 #include <cstdint>
 #include <limits>
 #include <string>
+#include <type_traits>
 #include <vector>
 
 namespace carta::zarr::internal {
@@ -235,8 +236,12 @@ Result<void> ReduceSpectral(const ReducibleImage& image, const SpectralReduceReq
         // length of this slab. Private because two units of the same channel can touch the
         // same region -- a region wider than a chunk spans several cells -- so they would
         // otherwise be adding to one double.
-        const auto accumulate_unit = [&](std::uint64_t channel, std::uint64_t cell_cv,
+        //
+        // `deviations` arrives as a type, so that each of the two instantiations is free of the
+        // question for every row and every span below it: see AccumulateSpan and Fold.
+        const auto accumulate_unit = [&](auto deviations, std::uint64_t channel, std::uint64_t cell_cv,
                                          std::uint64_t cell_cu, StatisticSlots& partial) {
+            constexpr bool kDeviations = decltype(deviations)::value;
             const float* plane = slab_pixels + (channel * stride_z);
 
             const std::uint64_t chunk_cv = cell_cv;
@@ -269,14 +274,9 @@ Result<void> ReduceSpectral(const ReducibleImage& image, const SpectralReduceReq
                             // A span whose every pixel is selected -- a run, or a region
                             // that is its whole box -- takes the loop with no test per pixel.
                             const float* pixels = row + ((first - u_begin) * stride_u);
-                            const std::uint64_t count = last - first;
-                            if (deviations) {
-                                AccumulateSpan<true>(pixels, stride_u, count, selected, mask_step, totals);
-                            } else {
-                                AccumulateSpan<false>(pixels, stride_u, count, selected, mask_step, totals);
-                            }
+                            AccumulateSpan<kDeviations>(pixels, stride_u, last - first, selected, mask_step, totals);
                         });
-                    partial.Fold(r, channel, totals);
+                    partial.Fold<kDeviations>(r, channel, totals);
                 }
             }
         };
@@ -312,8 +312,13 @@ Result<void> ReduceSpectral(const ReducibleImage& image, const SpectralReduceReq
             for (std::uint64_t unit = first; unit < last; ++unit) {
                 const std::uint64_t channel = unit / cells;
                 const std::uint64_t cell = unit % cells;
-                accumulate_unit(channel, chunk_cv_begin + (cell / cu_span),
-                                chunk_cu_begin + (cell % cu_span), partial);
+                const std::uint64_t cell_cv = chunk_cv_begin + (cell / cu_span);
+                const std::uint64_t cell_cu = chunk_cu_begin + (cell % cu_span);
+                if (deviations) {
+                    accumulate_unit(std::true_type{}, channel, cell_cv, cell_cu, partial);
+                } else {
+                    accumulate_unit(std::false_type{}, channel, cell_cv, cell_cu, partial);
+                }
             }
         });
 

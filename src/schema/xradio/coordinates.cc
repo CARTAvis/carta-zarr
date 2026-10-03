@@ -45,8 +45,8 @@ bool CarriesPlane(const zarr_metadata::ArrayMetadata& variable, Plane plane) {
 
 Result<void> CheckCoordinate(const zarr_metadata::ArrayMetadata& array, const Coordinate& coordinate) {
     const std::string node(coordinate.name);
-    if (array.shape.size() != 1 || array.dimension_names.size() != 1 ||
-        array.dimension_names.front() != coordinate.name) {
+    // One name, so one dimension: ParseArrayMetadata holds dimension_names to the rank.
+    if (array.dimension_names.size() != 1 || array.dimension_names.front() != coordinate.name) {
         return Error{ErrorCode::invalid_metadata, "Coordinate shape or dimension name does not match image dataset",
                      node};
     }

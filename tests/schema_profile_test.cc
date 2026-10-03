@@ -20,6 +20,7 @@
 #include "schema/xradio/flag.h"
 #include "schema/xradio/image.h"
 #include "store.h"
+#include "zarr/array_metadata.h"
 #include "zarr/pixel_selection.h"
 
 #include "support/check.h"
@@ -269,6 +270,15 @@ void TestCoordinateDataTypeIsChecked() {
     Require(probe.kind == SchemaMatchKind::invalid, "a numeric polarization coordinate was accepted");
     Require(HasDiagnostic(probe.diagnostics, carta::zarr::DiagnosticCode::unsupported_data_type),
             "the polarization data type produced no diagnostic");
+
+    // And a number has to be a real one. Labels are also held to being decodable, which refuses a
+    // numeric polarization on its own; nothing but the type check refuses a complex frequency.
+    auto complex = CompleteStore();
+    complex["frequency"] = NumericArray("[3]", R"(["frequency"])", "complex64");
+    const auto complex_probe = Probe(complex);
+    Require(complex_probe.kind == SchemaMatchKind::invalid, "a complex frequency coordinate was accepted");
+    Require(HasDiagnostic(complex_probe.diagnostics, carta::zarr::DiagnosticCode::unsupported_data_type),
+            "the frequency data type produced no diagnostic");
 }
 
 // Labels this library cannot decode are refused when the dataset is probed, not when an image is
@@ -1328,6 +1338,23 @@ void TestTheCoordinatesAreOneTable() {
     Require(on(Plane::aperture) == std::vector<std::string>{"frequency", "polarization", "time", "u", "v"},
             "the aperture plane's coordinates are not the three shared and u and v");
     Require(AxisCount(Plane::sky) == 5 && AxisCount(Plane::aperture) == 5, "a plane is not five axes");
+
+    // What a coordinate array has to be, asked of its metadata alone. A two-dimensional one never
+    // reaches the probe -- qualification closes every image whose extent cannot agree with it -- so
+    // this is the only place the rule is seen to hold.
+    using carta::zarr::internal::xradio::CheckCoordinate;
+    using carta::zarr::internal::xradio::SkyCoordinate;
+    const auto parsed = [](const std::string& document) {
+        auto metadata = carta::zarr::internal::zarr::ParseArrayMetadata(nlohmann::json::parse(document), "frequency");
+        Require(static_cast<bool>(metadata), "a coordinate document did not parse");
+        return metadata.value();
+    };
+    const auto& frequency = SkyCoordinate(carta::zarr::AxisRole::spectral);
+    Require(static_cast<bool>(CheckCoordinate(parsed(NumericArray("[3]", R"(["frequency"])")), frequency)),
+            "a well-formed frequency coordinate was refused");
+    const auto two = CheckCoordinate(parsed(NumericArray("[3,2]", R"(["frequency","x"])")), frequency);
+    Require(!two && two.error().code == ErrorCode::invalid_metadata,
+            "a two-dimensional frequency coordinate was accepted");
     for (const auto& coordinate : kCoordinates) {
         Require((coordinate.kind == CoordinateKind::labels) == (coordinate.name == "polarization"),
                 "polarization is not the one coordinate holding labels");

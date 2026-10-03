@@ -25,11 +25,16 @@ endif()
 
 add_library(carta_zarr_bench_core STATIC
     cold.cc
+    mode.cc
+    modes/animation.cc
+    modes/histogram.cc
+    modes/open.cc
+    modes/read.cc
+    modes/region.cc
     options.cc
     plan.cc
     record.cc
-    trial.cc
-    workload.cc)
+    trial.cc)
 target_compile_features(carta_zarr_bench_core PUBLIC cxx_std_17)
 target_include_directories(carta_zarr_bench_core PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 target_link_libraries(carta_zarr_bench_core

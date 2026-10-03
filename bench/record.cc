@@ -6,6 +6,8 @@
 
 #include "record.h"
 
+#include "mode.h"
+
 #include <unistd.h>
 
 #include <nlohmann/json.hpp>
@@ -246,21 +248,7 @@ Row RowTemplate(const RunOptions& options, Mode mode, ColdMethod cold, const Dat
     row.read_budget_bytes = options.read_budget_bytes;
     row.seed = options.seed;
     row.ops = options.OpsFor(mode);
-    if (mode == Mode::region) {
-        std::array<char, 32> fraction{};
-        std::snprintf(fraction.data(), fraction.size(), "%.4f", options.region.fraction);
-        row.region_fraction = fraction.data();
-    }
-    if (mode == Mode::cube_histogram) {
-        row.histogram_method = options.histogram.Spell();
-    }
-    if (mode == Mode::animation) {
-        row.animation_frames = std::to_string(options.animation.frames);
-        std::array<char, 32> fps{};
-        std::snprintf(fps.data(), fps.size(), "%g", options.animation.fps);
-        row.animation_fps = fps.data();
-        row.animation_prefetch = Bool(options.animation.prefetch);
-    }
+    Workload::For(mode, options)->WriteSettings(row);
     row.trial_timeout_s = options.trial_timeout.count();
     row.cold_method = ColdMethodName(cold);
 
@@ -417,6 +405,72 @@ void CsvOutput::Write(const std::vector<std::string>& rows) {
         std::fprintf(_file, "%s\n", row.c_str());
     }
     std::fflush(_file);
+}
+
+std::size_t ItemSize(DataType type) {
+    switch (type) {
+        case DataType::boolean:
+        case DataType::int8:
+        case DataType::uint8:
+            return 1;
+        case DataType::int16:
+        case DataType::uint16:
+        case DataType::float16:
+            return 2;
+        case DataType::int32:
+        case DataType::uint32:
+        case DataType::float32:
+            return 4;
+        case DataType::int64:
+        case DataType::uint64:
+        case DataType::float64:
+        case DataType::complex64:
+            return 8;
+        case DataType::complex128:
+            return 16;
+        case DataType::unknown:
+            break;
+    }
+    return 0;
+}
+
+namespace {
+
+std::string Shape(const std::vector<AxisDescriptor>& axes, const std::vector<std::uint64_t>& lengths) {
+    std::string text;
+    for (std::size_t index = 0; index < axes.size() && index < lengths.size(); ++index) {
+        if (!text.empty()) {
+            text += ';';
+        }
+        text += axes[index].name + "=" + std::to_string(lengths[index]);
+    }
+    return text;
+}
+
+}  // namespace
+
+void DescribeImage(Row& row, const Image& image) {
+    const auto& descriptor = image.descriptor();
+    const auto& geometry = image.chunk_geometry();
+    std::vector<std::uint64_t> lengths;
+    for (const auto& axis : descriptor.axes) {
+        lengths.push_back(axis.length);
+    }
+    row.image_id = descriptor.id;
+    row.shape = Shape(descriptor.axes, lengths);
+    row.chunk_shape = Shape(descriptor.axes, geometry.chunk_shape);
+    row.shard_shape = geometry.sharded ? Shape(descriptor.axes, geometry.shard_shape) : "";
+    if (row.codec.empty()) {
+        row.codec = geometry.compressor;
+    }
+}
+
+std::string Describe(const Error& error) {
+    std::string text = std::string(ErrorCodeName(error.code)) + ": " + error.message;
+    if (!error.node_path.empty()) {
+        text += " (" + error.node_path + ")";
+    }
+    return text;
 }
 
 }  // namespace carta::zarr::bench

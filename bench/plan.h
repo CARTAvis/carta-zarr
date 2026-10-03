@@ -24,7 +24,6 @@
 #include <cstddef>
 #include <cstdint>
 #include <optional>
-#include <string>
 #include <vector>
 
 namespace carta::zarr::bench {
@@ -48,9 +47,9 @@ struct CubeAxes {
     static Result<CubeAxes> Of(const ImageDescriptor& descriptor);
 };
 
-// One operation, as planned before the trial starts.
+// One operation, as planned before the trial starts. Which of the position's fields mean anything is
+// the mode's to say; see Workload::Describe.
 struct Operation {
-    Mode mode = Mode::plane;
     std::uint64_t x = 0;
     std::uint64_t y = 0;
     std::uint64_t width = 0;
@@ -66,9 +65,6 @@ struct Operation {
     // storage's -- the earlier read brought the chunk in, or the other process is bringing it in
     // now -- so it is not a first touch however fresh its cache pool. See MarkSharedChunks.
     bool shares_chunks = false;
-
-    // Where it reads, for the CSV: semicolon-separated, so that it stays one field.
-    std::string Describe() const;
 };
 
 // Which process of which trial a plan is for, and of how many.
@@ -133,12 +129,8 @@ std::vector<Operation> PlanDraws(Mode mode, const PlanSeed& at, unsigned ops, st
     const auto draws = DistinctSample(positions, pool, total);
 
     std::vector<Operation> operations(ops);
-    for (auto& operation : operations) {
-        operation.mode = mode;
-    }
     for (std::uint64_t index = 0; index < total; ++index) {
         Operation operation;
-        operation.mode = mode;
         operation.overlap = draws[index].overlap;
         place(draws[index].value, details, operation);
         if (index >= first && index < first + ops) {

@@ -14,7 +14,7 @@
 #include "options.h"
 #include "record.h"
 #include "trial.h"
-#include "workload.h"
+#include "plan.h"
 
 #include <carta-zarr/carta_zarr.h>
 

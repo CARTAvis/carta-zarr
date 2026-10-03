@@ -501,16 +501,19 @@ Result<std::vector<std::string>> Store::ReadStringArray1D(std::string_view node)
 }
 
 Result<std::vector<std::string>> Store::ReadStringArray1DUncached(std::string_view node) const {
-    if (const auto& verified = VerifyArray(node); !verified) {
-        return verified.error();
+    // Decoded with the array's own document, as TensorStore decodes a numeric one: it is what wrote
+    // the chunks. The root's copy was what this decoded with, so a copy naming a compressor the labels
+    // were never written with failed to read labels that were fine.
+    const auto& own = VerifyArray(node);
+    if (!own) {
+        return own.error();
     }
-    const auto& array_meta_res = ReadArrayMetadata(node);
     auto array_path = ResolveArrayDirectory(node);
     if (!array_path) {
         return array_path.error();
     }
     try {
-        return zarr_metadata::ReadFixedLengthUtf32StringArray(array_path.value(), array_meta_res.value(), node);
+        return zarr_metadata::ReadFixedLengthUtf32StringArray(array_path.value(), own.value(), node);
     } catch (const std::exception& e) {
         // io_error, as in every other read on this Store. What the decoder itself refuses comes back
         // as a Result with its own code; what escapes as an exception is a file or an allocation,

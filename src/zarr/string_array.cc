@@ -405,6 +405,12 @@ std::vector<std::uint8_t> DecodeStringChunk(std::vector<std::uint8_t> bytes, con
     if (bytes_size < expected_chunk_bytes) {
         Fail(ErrorCode::decode_error, "String array chunk is smaller than expected");
     }
+    // A chunk is written whole, the last one included, so one holding more than its chunk shape
+    // accounts for is not the chunk the document describes -- and what lies past the end is not a
+    // label of this array, whatever it decodes to.
+    if (bytes_size > expected_chunk_bytes) {
+        Fail(ErrorCode::decode_error, "String array chunk is larger than its chunk shape accounts for");
+    }
     bytes.resize(bytes_size);
     return bytes;
 }

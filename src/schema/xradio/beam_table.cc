@@ -6,11 +6,11 @@
 
 #include "beam_table.h"
 
-#include "../../zarr/array_view.h"
 #include "attributes.h"
 
 #include <cstdint>
 #include <optional>
+#include <string>
 #include <string_view>
 #include <utility>
 
@@ -38,21 +38,21 @@ BeamParameterIndices FindBeamParameterIndices(const std::vector<std::string>& la
     return indices;
 }
 
-Result<double> ReadBeamValue(const zarr::ArrayView& values, std::uint64_t channel, std::uint64_t polarization,
+Result<double> ReadBeamValue(const zarr::NumericArray& table, std::uint64_t channel, std::uint64_t polarization,
                              std::uint64_t parameter, bool has_time_dimension, std::uint64_t time) {
-    std::vector<zarr::ArrayView::NamedIndex> indices{
+    std::vector<zarr::NumericArray::NamedIndex> indices{
         {"frequency", channel}, {"polarization", polarization}, {"beam_params_label", parameter}};
     if (has_time_dimension) {
         indices.emplace_back("time", time);
     }
-    return values.At(indices);
+    return table.At(indices);
 }
 
 }  // namespace
 
-Result<std::vector<Beam>> DescribeBeams(const zarr::ArrayMetadata& beam_metadata, std::string_view beam_node,
-                                        const std::vector<std::string>& parameter_labels,
-                                        const std::vector<double>& values) {
+Result<std::vector<Beam>> DescribeBeams(const zarr::NumericArray& table,
+                                        const std::vector<std::string>& parameter_labels) {
+    const auto& beam_metadata = table.metadata();
     const std::string beam_unit = AttributeString(beam_metadata.attributes, "units");
     const auto parameter_indices = FindBeamParameterIndices(parameter_labels);
 
@@ -64,7 +64,16 @@ Result<std::vector<Beam>> DescribeBeams(const zarr::ArrayMetadata& beam_metadata
     if (!freq_dim || !pol_dim || !param_dim) {
         return Error{ErrorCode::invalid_metadata,
                      "Beam table does not carry the frequency, polarization and parameter dimensions",
-                     std::string(beam_node)};
+                     table.node()};
+    }
+    // The labels are the coordinate of the parameter dimension, so there is one for each parameter.
+    // A count of either other than the other's is labels written for another table.
+    if (parameter_labels.size() != beam_metadata.shape.at(*param_dim)) {
+        return Error{ErrorCode::invalid_metadata,
+                     "Beam parameter labels are " + std::to_string(parameter_labels.size()) +
+                         " where the beam table has " + std::to_string(beam_metadata.shape.at(*param_dim)) +
+                         " parameters",
+                     "beam_params_label"};
     }
     if (!parameter_indices.major || !parameter_indices.minor || !parameter_indices.position_angle) {
         return Error{ErrorCode::invalid_metadata,
@@ -77,7 +86,6 @@ Result<std::vector<Beam>> DescribeBeams(const zarr::ArrayMetadata& beam_metadata
     const std::uint64_t n_pol = beam_metadata.shape.at(*pol_dim);
 
     // Time varies slowest so that a single-plane beam table reads back in the order it always has.
-    const zarr::ArrayView beam_values(beam_metadata, values);
     std::vector<Beam> beams;
     beams.reserve(static_cast<std::size_t>(n_time * n_chan * n_pol));
     for (std::uint64_t t = 0; t < n_time; ++t) {
@@ -93,7 +101,7 @@ Result<std::vector<Beam>> DescribeBeams(const zarr::ArrayMetadata& beam_metadata
                      {std::pair{*parameter_indices.major, &beam.major},
                       std::pair{*parameter_indices.minor, &beam.minor},
                       std::pair{*parameter_indices.position_angle, &beam.position_angle}}) {
-                    auto value = ReadBeamValue(beam_values, c, p, parameter, time_dim.has_value(), t);
+                    auto value = ReadBeamValue(table, c, p, parameter, time_dim.has_value(), t);
                     if (!value) {
                         return value.error();
                     }

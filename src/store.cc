@@ -434,24 +434,32 @@ const NodeEntry* Store::FindNode(std::string_view name) const {
     return found != entries.end() && found->name == name ? &*found : nullptr;
 }
 
-Result<std::vector<double>> Store::ReadNumericArray(std::string_view node) const {
+const Result<zarr::NumericArray>& Store::ReadNumericArray(std::string_view node) const {
+    // A rejected name is remembered under the name as asked for, as ReadArrayMetadata remembers it,
+    // so that what is handed back is always something the store owns. Reading it refuses it the way
+    // ReadArrayMetadata does, because VerifyArray asks that first.
     auto key = NormalizeNodeName(node);
-    if (!key) {
-        return key.error();
-    }
-    return _caches->double_arrays.GetOrCompute(key.value(), [&] { return ReadNumericArrayUncached(node); });
+    const std::string cache_key = key ? key.value() : std::string(node);
+    return _caches->double_arrays.GetOrCompute(cache_key, [&] { return ReadNumericArrayUncached(node); });
 }
 
-Result<std::vector<double>> Store::ReadNumericArrayUncached(std::string_view node) const {
-    if (const auto& verified = VerifyArray(node); !verified) {
-        return verified.error();
+Result<zarr::NumericArray> Store::ReadNumericArrayUncached(std::string_view node) const {
+    // Bound to the array's own document, which is what TensorStore decodes the values with: the
+    // root's copy agrees with it on every field that addresses them, but not on its attributes.
+    const auto& own = VerifyArray(node);
+    if (!own) {
+        return own.error();
     }
     auto array_path = ResolveArrayDirectory(node);
     if (!array_path) {
         return array_path.error();
     }
     try {
-        return zarr_metadata::ReadNumericValues(array_path.value(), _context, node);
+        auto values = zarr_metadata::ReadNumericValues(array_path.value(), _context, node);
+        if (!values) {
+            return values.error();
+        }
+        return zarr_metadata::NumericArray::Make(std::string(node), own.value(), std::move(values.value()));
     } catch (const std::exception& e) {
         return Error{ErrorCode::io_error, e.what(), std::string(node)};
     }

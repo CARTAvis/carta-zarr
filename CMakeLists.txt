@@ -70,7 +70,7 @@ add_library(carta_zarr SHARED
     src/schema/xradio/coordinates.cc
     src/schema/xradio/image.cc
     src/zarr/array_metadata.cc
-    src/zarr/array_view.cc
+    src/zarr/numeric_array.cc
     src/zarr/pixel_reader.cc
     src/zarr/pixel_selection.cc
     src/zarr/store_context.cc
@@ -279,15 +279,13 @@ if(CARTA_ZARR_BUILD_TESTS AND BUILD_TESTING)
             src/schema/xradio/qualification.cc
             src/schema/xradio/coordinates.cc
             src/schema/xradio/image.cc
-            src/zarr/array_view.cc
+            src/zarr/numeric_array.cc
             src/zarr/pixel_selection.cc
             src/zarr/string_array.cc
             src/zarr/transport.cc
             ${CARTA_ZARR_METADATA_SOURCES}
         LIBRARIES nlohmann_json::nlohmann_json ZLIB::ZLIB Zstd::Zstd Blosc::blosc)
 
-    # ArrayView addresses a flat Zarr buffer by dimension name. It needs only its own metadata type,
-    # so it is tested directly rather than through a store.
     # What an array's document says about how it is stored. Links only nlohmann: ParseStorageLayout
     # was a Store method reading the raw node metadata, so its sharding rules could be reached only
     # by writing a store to a directory and opening an image out of it, and two of its refusals
@@ -297,9 +295,11 @@ if(CARTA_ZARR_BUILD_TESTS AND BUILD_TESTING)
         SOURCES tests/array_metadata_test.cc ${CARTA_ZARR_METADATA_SOURCES}
         LIBRARIES nlohmann_json::nlohmann_json)
 
-    carta_zarr_add_test(carta_zarr_array_view_tests INTERNAL
-        TEST_NAME carta-zarr-array-view
-        SOURCES tests/array_view_test.cc src/zarr/array_view.cc ${CARTA_ZARR_METADATA_SOURCES}
+    # NumericArray binds a flat Zarr buffer to its metadata and addresses it by dimension name. It
+    # needs only its own metadata type, so it is tested directly rather than through a store.
+    carta_zarr_add_test(carta_zarr_numeric_array_tests INTERNAL
+        TEST_NAME carta-zarr-numeric-array
+        SOURCES tests/numeric_array_test.cc src/zarr/numeric_array.cc ${CARTA_ZARR_METADATA_SOURCES}
         LIBRARIES nlohmann_json::nlohmann_json)
 
     # Memo is a header-only utility, so this target compiles only the test. It pins the two
@@ -376,13 +376,13 @@ if(CARTA_ZARR_BUILD_TESTS AND BUILD_TESTING)
         LIBRARIES nlohmann_json::nlohmann_json)
 
     # The beam table's indexing, against the arrays already read rather than a store. It needs
-    # ArrayView, which is what addresses the flat buffer by dimension name.
+    # NumericArray, which is what addresses the flat buffer by dimension name.
     carta_zarr_add_test(carta_zarr_beam_table_tests INTERNAL
         TEST_NAME carta-zarr-beam-table
         SOURCES
             tests/beam_table_test.cc
             src/schema/xradio/beam_table.cc
-            src/zarr/array_view.cc
+            src/zarr/numeric_array.cc
             ${CARTA_ZARR_METADATA_SOURCES}
         LIBRARIES nlohmann_json::nlohmann_json)
 

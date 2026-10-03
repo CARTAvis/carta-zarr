@@ -131,11 +131,11 @@ Result<CoordinateValues> ReadCoordinateValues(const Store& store) {
             values.polarization = std::move(labels.value());
             continue;
         }
-        auto samples = store.ReadNumericArray(coordinate.name);
+        const auto& samples = store.ReadNumericArray(coordinate.name);
         if (!samples) {
             return samples.error();
         }
-        *NumericValuesOf(values, coordinate.role) = std::move(samples.value());
+        *NumericValuesOf(values, coordinate.role) = samples.value().values();
     }
     return values;
 }

@@ -36,7 +36,9 @@ Held to each other on what the store takes from the copy: the extent, the names 
 dimensions, the data type, and the chunks and shards a read is planned from. Not on how the chunks
 are encoded -- codecs, chunk keys, fill value, a string's length -- because the copy is never used to
 decode one. What `VerifyArray` hands back is the own document, and that is what a reader decodes
-with. A stricter rule, the two documents equal but for attributes, was considered and not taken: a
+with. A numeric array comes back bound to it, as a `NumericArray`, so whatever is read
+beside its values -- the dimension names they are addressed by, a beam table's unit -- comes from the
+document they were decoded with and never from the copy, whose attributes are compared with nothing. A stricter rule, the two documents equal but for attributes, was considered and not taken: a
 child rewritten by a later zarr-python that spells a default out is the same array, and refusing it
 would refuse a store every other reader opens.
 

@@ -739,6 +739,15 @@ void TestBeamTableWithUnreadableLabels(const std::filesystem::path& root) {
     const auto unnamed = open_sky(root / "unnamed");
     Require(!unnamed && unnamed.error().code == ErrorCode::invalid_metadata,
             "beam labels naming no beam parameter were reported as an image with no beam");
+
+    // Neither the table nor its labels: the table is what the image named, so it is what is missing.
+    CreateValidStore(root / "neither");
+    Write(root / "neither" / "SKY" / "zarr.json", sky_with_beam);
+    const auto neither = open_sky(root / "neither");
+    Require(!neither, "a beam table that is not there was reported as an image with no beam");
+    Require(neither.error().node_path.find("BEAM") != std::string::npos &&
+                neither.error().node_path.find("beam_params_label") == std::string::npos,
+            "a missing beam table was reported naming '" + neither.error().node_path + "' rather than the table");
 }
 
 // The beam table is read as one flat buffer and addressed by the dimension names the store parsed
@@ -781,6 +790,37 @@ void TestABeamTableWhoseAxesAreReorderedOnDiskIsRefused(const std::filesystem::p
     Require(beams.error().code == ErrorCode::invalid_metadata,
             "a beam table whose axes are ordered differently on disk was refused as something else: " +
                 beams.error().message);
+}
+
+// A beam table's values are decoded with its own document, so its unit is read from the same one.
+// The root's copy of it was what the unit used to come from: here the copy says rad and the array's
+// own document says deg, which the two can because attributes are not something the copy is held to.
+// One table is one document, its layout, its values and its unit alike.
+void TestABeamTablesUnitIsItsOwnDocuments(const std::filesystem::path& root) {
+    std::filesystem::copy(CARTA_ZARR_REFERENCE_FIXTURE, root, std::filesystem::copy_options::recursive);
+    const auto metadata_path = root / "BEAM" / "zarr.json";
+    std::string text;
+    {
+        std::ifstream in(metadata_path);
+        text.assign(std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>());
+    }
+    const auto unit = text.find("\"units\": \"rad\"");
+    Require(unit != std::string::npos, "the BEAM metadata does not say its unit is rad");
+    text.replace(unit, std::string("\"units\": \"rad\"").size(), "\"units\": \"deg\"");
+    std::ofstream(metadata_path, std::ios::trunc) << text;
+
+    const auto context = carta::zarr::Context::Create();
+    Require(static_cast<bool>(context), "Context::Create failed");
+    const auto dataset = carta::zarr::Dataset::Open(context.value(), root.string());
+    Require(static_cast<bool>(dataset), "Dataset::Open failed on the copy with another BEAM unit");
+    const auto image = dataset.value().OpenImage("SKY");
+    Require(static_cast<bool>(image), "SKY did not open in the copy with another BEAM unit");
+    const auto beams = image.value().ReadBeams();
+    Require(beams && !beams.value().empty(), "the beam table with another unit was not read");
+    for (const auto& beam : beams.value()) {
+        Require(beam.unit == "deg", "a beam's unit was read from the root's copy, '" + beam.unit +
+                                        "', rather than from the document its values were decoded with");
+    }
 }
 
 void TestImageDatasetWithoutSky(const std::filesystem::path& root) {
@@ -979,6 +1019,7 @@ int main() {
         TestEmptyAndOversizedMetadata(root / "metadata-bytes");
         TestBeamTableWithUnreadableLabels(root / "beam-labels");
         TestABeamTableWhoseAxesAreReorderedOnDiskIsRefused(root / "beam-axis-order");
+        TestABeamTablesUnitIsItsOwnDocuments(root / "beam-unit");
         TestANodeNameSpelledWithADotIsTheSameNode(root / "dotted-node");
         TestReferenceFixture();
         TestAnEntrySaysWhatOpeningWould();

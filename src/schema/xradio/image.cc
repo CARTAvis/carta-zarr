@@ -372,9 +372,11 @@ Result<std::vector<Beam>> ReadBeams(const Store& store, std::string_view image_i
         return std::vector<Beam>{};
     }
 
-    const auto& beam_metadata = store.ReadArrayMetadata(beam_array_name);
-    if (!beam_metadata) {
-        return beam_metadata.error();
+    // Bound to the table's own document, so its layout and its unit are read from what its values
+    // were decoded with rather than from the root's copy of it.
+    const auto& table = store.ReadNumericArray(beam_array_name);
+    if (!table) {
+        return table.error();
     }
 
     // The image named a beam table, so what the table needs to be read is required rather than
@@ -386,13 +388,7 @@ Result<std::vector<Beam>> ReadBeams(const Store& store, std::string_view image_i
     if (!parameter_labels) {
         return parameter_labels.error();
     }
-
-    auto values = store.ReadNumericArray(beam_array_name);
-    if (!values) {
-        return values.error();
-    }
-
-    return DescribeBeams(beam_metadata.value(), beam_array_name, parameter_labels.value(), values.value());
+    return DescribeBeams(table.value(), parameter_labels.value());
 }
 
 }  // namespace carta::zarr::internal::xradio

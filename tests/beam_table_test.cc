@@ -143,10 +143,10 @@ void TestLabelsMustNameEveryParameter() {
 }
 
 // The labels are the coordinate of the table's parameter dimension, one label a parameter. More
-// labels than parameters used to read every one they could still find, and fewer read the
-// parameters they named and left the rest unaccounted for; either way the labels were another
-// table's. Fewer used to be refused only when a parameter fell past the end, and then as a slice
-// out of range rather than as the store being malformed.
+// labels than parameters used to describe beams whenever the three it needed fell inside the
+// dimension, and were refused only when one fell past its end -- as a slice out of range rather than
+// as the store being malformed. Fewer always described beams, and left the rest unaccounted for.
+// Either way the labels were another table's.
 void TestLabelsAreOneAParameter() {
     const auto more = DescribeBeams(
         Table({1, 3, 2, 3}, {"time", "frequency", "polarization", "beam_params_label"}, Values(1, 3, 2)),

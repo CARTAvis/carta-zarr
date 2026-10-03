@@ -26,6 +26,7 @@ endif()
 add_library(carta_zarr_bench_core STATIC
     cold.cc
     options.cc
+    plan.cc
     record.cc
     trial.cc
     workload.cc)

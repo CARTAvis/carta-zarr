@@ -8,13 +8,9 @@
 #define CARTA_ZARR_BENCH_WORKLOAD_H_
 
 // Where each operation of a trial reads, and the reading itself.
-//
-// Positions are a function of the seed, the mode, the trial and the cube's logical shape -- never of
-// its layout -- so every layout of one cube is asked for the same pixels, and a difference in time is
-// the layout's. They come from a generator written out here rather than from <random>, whose
-// distributions are free to differ between standard libraries, so the Mac and a Linux server agree.
 
 #include "options.h"
+#include "plan.h"
 
 #include <carta-zarr/carta_zarr.h>
 
@@ -24,48 +20,6 @@
 #include <vector>
 
 namespace carta::zarr::bench {
-
-// The axes the operations address, as logical indices into ImageDescriptor::axes. An image with no
-// polarization or time axis reads as one with a single plane of each.
-struct CubeAxes {
-    std::size_t rank = 0;
-    std::size_t x = 0;
-    std::size_t y = 0;
-    std::size_t spectral = 0;
-    std::optional<std::size_t> polarization;
-    std::optional<std::size_t> time;
-
-    std::uint64_t width = 1;
-    std::uint64_t height = 1;
-    std::uint64_t channels = 1;
-    std::uint64_t polarizations = 1;
-
-    // The image's axes, or an error naming the role it lacks.
-    static Result<CubeAxes> Of(const ImageDescriptor& descriptor);
-};
-
-// One operation, as planned before the trial starts.
-struct Operation {
-    Mode mode = Mode::plane;
-    std::uint64_t x = 0;
-    std::uint64_t y = 0;
-    std::uint64_t width = 0;
-    std::uint64_t height = 0;
-    std::uint64_t channel = 0;
-    std::uint64_t channel_count = 0;
-    std::uint64_t polarization = 0;
-    // Whether another operation of this trial, in any process, reads the same position: there were
-    // more operations than distinct positions to give them.
-    bool overlap = false;
-    // Whether it reads a chunk that an earlier operation of its own process read, or that any
-    // operation of another process reads. Its time may then be the page cache's rather than the
-    // storage's -- the earlier read brought the chunk in, or the other process is bringing it in
-    // now -- so it is not a first touch however fresh its cache pool. See MarkSharedChunks.
-    bool shares_chunks = false;
-
-    // Where it reads, for the CSV: semicolon-separated, so that it stays one field.
-    std::string Describe() const;
-};
 
 // The operations one process makes in one trial. Process p takes the p-th run of `ops` positions from
 // one sequence drawn for the whole trial, so processes never share one while there are enough, and
@@ -189,10 +143,6 @@ private:
     std::vector<double> _exact;
     std::vector<std::uint64_t> _counts;
 };
-
-// FNV-1a over a run of values, with every NaN hashed as the one quiet NaN.
-std::uint64_t Fingerprint(const float* values, std::size_t count);
-std::uint64_t Fingerprint(const double* values, std::size_t count);
 
 }  // namespace carta::zarr::bench
 

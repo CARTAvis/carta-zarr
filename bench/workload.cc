@@ -14,92 +14,13 @@
 #include <thread>
 #include <cmath>
 #include <cstdio>
-#include <cstring>
 #include <limits>
-#include <numeric>
 #include <optional>
-#include <unordered_set>
 #include <utility>
 
 namespace carta::zarr::bench {
 
 namespace {
-
-// SplitMix64: small, fast, and the same sequence everywhere.
-class Stream {
-public:
-    Stream(std::uint64_t seed, Mode mode, unsigned trial, std::uint64_t salt)
-        : _state(seed * 0x9E3779B97F4A7C15ull + (static_cast<std::uint64_t>(mode) << 48) +
-                 (static_cast<std::uint64_t>(trial) << 16) + salt) {}
-
-    std::uint64_t Next() {
-        std::uint64_t z = (_state += 0x9E3779B97F4A7C15ull);
-        z = (z ^ (z >> 30)) * 0xBF58476D1CE4E5B9ull;
-        z = (z ^ (z >> 27)) * 0x94D049BB133111EBull;
-        return z ^ (z >> 31);
-    }
-
-    // Uniform in [0, bound), by the multiply-shift of Lemire without its rejection step: the bias is
-    // bound / 2^64, far below anything a benchmark could notice.
-    std::uint64_t Below(std::uint64_t bound) {
-        if (bound <= 1) {
-            return 0;
-        }
-        return static_cast<std::uint64_t>((static_cast<unsigned __int128>(Next()) * bound) >> 64);
-    }
-
-private:
-    std::uint64_t _state;
-};
-
-struct Draw {
-    std::uint64_t value = 0;
-    bool overlap = false;
-};
-
-// `count` values from [0, pool), distinct while the pool lasts and repeating it after. Each prefix
-// of the result is the same whatever `count` is, which is what keeps process 0's positions fixed as
-// processes are added.
-std::vector<Draw> DistinctSample(Stream& stream, std::uint64_t pool, std::uint64_t count) {
-    std::vector<Draw> draws(count);
-    if (pool == 0) {
-        return draws;
-    }
-    constexpr std::uint64_t kMaterialize = std::uint64_t{1} << 20;
-    if (pool <= kMaterialize || count > pool / 2) {
-        // A partial Fisher-Yates shuffle, which only ever touches the first min(count, pool) slots.
-        std::vector<std::uint64_t> values(pool);
-        std::iota(values.begin(), values.end(), std::uint64_t{0});
-        const auto distinct = std::min(count, pool);
-        for (std::uint64_t index = 0; index < distinct; ++index) {
-            std::swap(values[index], values[index + stream.Below(pool - index)]);
-        }
-        const auto repeats = count > pool ? count - pool : 0;
-        for (std::uint64_t index = 0; index < count; ++index) {
-            draws[index] = {values[index % pool], index < repeats || index >= pool};
-        }
-        return draws;
-    }
-    std::unordered_set<std::uint64_t> taken;
-    for (auto& draw : draws) {
-        do {
-            draw.value = stream.Below(pool);
-        } while (!taken.insert(draw.value).second);
-    }
-    return draws;
-}
-
-constexpr std::uint64_t kQuietNaN32 = 0x7FC00000u;
-constexpr std::uint64_t kQuietNaN64 = 0x7FF8000000000000ull;
-constexpr std::uint64_t kFnvOffset = 0xCBF29CE484222325ull;
-constexpr std::uint64_t kFnvPrime = 0x100000001B3ull;
-
-void Mix(std::uint64_t& hash, std::uint64_t bits, unsigned bytes) {
-    for (unsigned byte = 0; byte < bytes; ++byte) {
-        hash ^= (bits >> (8 * byte)) & 0xFFu;
-        hash *= kFnvPrime;
-    }
-}
 
 // CARTA's automatic bin count for a plane: the square root of its pixel count, and at least two.
 std::uint32_t AutomaticBins(const CubeAxes& axes) {
@@ -115,31 +36,6 @@ std::uint64_t GridCells(std::uint64_t length, double side) {
 }
 
 }  // namespace
-
-Result<CubeAxes> CubeAxes::Of(const ImageDescriptor& descriptor) {
-    const auto& axes = descriptor.axes;
-    const auto x = AxisIndex(axes, AxisRole::spatial_x);
-    const auto y = AxisIndex(axes, AxisRole::spatial_y);
-    const auto spectral = AxisIndex(axes, AxisRole::spectral);
-    if (!x || !y || !spectral) {
-        return Error{ErrorCode::invalid_argument,
-                     "the bench reads cubes, and image " + descriptor.id + " has no " +
-                         (!x ? "spatial x" : !y ? "spatial y" : "spectral") + " axis",
-                     descriptor.id};
-    }
-    CubeAxes cube;
-    cube.rank = axes.size();
-    cube.x = *x;
-    cube.y = *y;
-    cube.spectral = *spectral;
-    cube.polarization = AxisIndex(axes, AxisRole::polarization);
-    cube.time = AxisIndex(axes, AxisRole::time);
-    cube.width = axes[*x].length;
-    cube.height = axes[*y].length;
-    cube.channels = axes[*spectral].length;
-    cube.polarizations = cube.polarization ? axes[*cube.polarization].length : 1;
-    return cube;
-}
 
 std::string Operation::Describe() const {
     const auto pol = "pol=" + std::to_string(polarization);
@@ -171,13 +67,6 @@ std::vector<Operation> PlanOperations(Mode mode, const CubeAxes& axes, std::uint
         return operations;
     }
 
-    // Two streams: one for which position, one for everything about it. Kept apart so that adding a
-    // draw to one never shifts the other.
-    Stream positions(seed, mode, trial, 1);
-    Stream details(seed, mode, trial, 2);
-    const std::uint64_t total = static_cast<std::uint64_t>(processes) * ops;
-    const std::uint64_t first = static_cast<std::uint64_t>(process_index) * ops;
-
     if (mode == Mode::cube_histogram) {
         // Contiguous runs of channels, one per process; with more processes than channels, each
         // takes one channel and some of them share it.
@@ -188,6 +77,7 @@ std::vector<Operation> PlanOperations(Mode mode, const CubeAxes& axes, std::uint
             start = axes.channels * process_index / processes;
             end = axes.channels * (process_index + 1) / processes;
         }
+        Stream details(seed, mode, trial, 2);
         const auto base = details.Below(axes.polarizations);
         for (unsigned index = 0; index < ops; ++index) {
             auto& operation = operations[index];
@@ -224,10 +114,7 @@ std::vector<Operation> PlanOperations(Mode mode, const CubeAxes& axes, std::uint
         default:
             break;
     }
-    const auto draws = DistinctSample(positions, pool, total);
 
-    // The details are drawn for every operation of the trial in order, including other processes',
-    // so that each process's are the same whatever process it is.
     const auto cell_width = axes.width / cells_x;
     const auto cell_height = axes.height / cells_y;
     const auto box_width =
@@ -235,61 +122,40 @@ std::vector<Operation> PlanOperations(Mode mode, const CubeAxes& axes, std::uint
     const auto box_height =
         std::clamp<std::uint64_t>(std::llround(side * static_cast<double>(axes.height)), 1, cell_height);
 
-    for (std::uint64_t index = 0; index < total; ++index) {
-        const auto& draw = draws[index];
-        Operation operation;
-        operation.mode = mode;
-        operation.overlap = draw.overlap;
-        switch (mode) {
-            case Mode::plane:
-                operation.channel = draw.value % axes.channels;
-                operation.polarization = draw.value / axes.channels;
-                break;
-            case Mode::spectrum:
-                operation.x = draw.value % axes.width;
-                operation.y = draw.value / axes.width;
-                operation.polarization = details.Below(axes.polarizations);
-                break;
-            case Mode::region: {
-                operation.width = box_width;
-                operation.height = box_height;
-                operation.x = (draw.value % cells_x) * cell_width + details.Below(cell_width - box_width + 1);
-                operation.y = (draw.value / cells_x) * cell_height + details.Below(cell_height - box_height + 1);
-                operation.polarization = details.Below(axes.polarizations);
-                break;
-            }
-            case Mode::animation:
-                operation.channel_count = frames;
-                operation.channel = (draw.value % runs) * run_cell + details.Below(run_cell - frames + 1);
-                operation.polarization = draw.value / runs;
-                break;
-            default:
-                break;
-        }
-        if (index >= first && index < first + ops) {
-            operations[index - first] = operation;
-        }
-    }
-    return operations;
+    return PlanDraws(mode, PlanSeed{seed, trial, processes, process_index}, ops, pool,
+                     [&](std::uint64_t value, Stream& details, Operation& operation) {
+                         switch (mode) {
+                             case Mode::plane:
+                                 operation.channel = value % axes.channels;
+                                 operation.polarization = value / axes.channels;
+                                 break;
+                             case Mode::spectrum:
+                                 operation.x = value % axes.width;
+                                 operation.y = value / axes.width;
+                                 operation.polarization = details.Below(axes.polarizations);
+                                 break;
+                             case Mode::region: {
+                                 operation.width = box_width;
+                                 operation.height = box_height;
+                                 operation.x = (value % cells_x) * cell_width + details.Below(cell_width - box_width + 1);
+                                 operation.y =
+                                     (value / cells_x) * cell_height + details.Below(cell_height - box_height + 1);
+                                 operation.polarization = details.Below(axes.polarizations);
+                                 break;
+                             }
+                             case Mode::animation:
+                                 operation.channel_count = frames;
+                                 operation.channel =
+                                     (value % runs) * run_cell + details.Below(run_cell - frames + 1);
+                                 operation.polarization = value / runs;
+                                 break;
+                             default:
+                                 break;
+                         }
+                     });
 }
 
 namespace {
-
-// The chunks an operation reads, as a range of chunk indices along each axis it moves on: the spatial
-// two, the spectral and the polarization. Every other axis is read at 0 by every operation.
-struct ChunkBox {
-    std::array<std::uint64_t, 4> first{};
-    std::array<std::uint64_t, 4> last{};
-
-    bool Meets(const ChunkBox& other) const {
-        for (std::size_t axis = 0; axis < first.size(); ++axis) {
-            if (last[axis] < other.first[axis] || other.last[axis] < first[axis]) {
-                return false;
-            }
-        }
-        return true;
-    }
-};
 
 ChunkBox ChunksOf(const Operation& operation, const CubeAxes& axes, const std::vector<std::uint64_t>& chunk_shape) {
     // From and to, in pixels, along x, y, spectral and polarization.
@@ -314,17 +180,7 @@ ChunkBox ChunksOf(const Operation& operation, const CubeAxes& axes, const std::v
             to = {axes.width, axes.height, operation.channel + operation.channel_count, operation.polarization + 1};
             break;
     }
-    const std::array<std::optional<std::size_t>, 4> index{axes.x, axes.y, axes.spectral, axes.polarization};
-    ChunkBox box;
-    for (std::size_t axis = 0; axis < index.size(); ++axis) {
-        std::uint64_t chunk = 1;
-        if (index[axis] && *index[axis] < chunk_shape.size()) {
-            chunk = std::max<std::uint64_t>(chunk_shape[*index[axis]], 1);
-        }
-        box.first[axis] = from[axis] / chunk;
-        box.last[axis] = (std::max(to[axis], from[axis] + 1) - 1) / chunk;
-    }
-    return box;
+    return ChunkBox::Spanning(from, to, axes, chunk_shape);
 }
 
 }  // namespace
@@ -701,26 +557,6 @@ std::uint64_t Runner::Fingerprint() const {
     auto hash = bench::Fingerprint(_exact.data(), _exact.size());
     for (const auto count : _counts) {
         Mix(hash, count, sizeof(count));
-    }
-    return hash;
-}
-
-std::uint64_t Fingerprint(const float* values, std::size_t count) {
-    std::uint64_t hash = kFnvOffset;
-    for (std::size_t index = 0; index < count; ++index) {
-        std::uint32_t bits = 0;
-        std::memcpy(&bits, &values[index], sizeof(bits));
-        Mix(hash, std::isnan(values[index]) ? kQuietNaN32 : bits, sizeof(bits));
-    }
-    return hash;
-}
-
-std::uint64_t Fingerprint(const double* values, std::size_t count) {
-    std::uint64_t hash = kFnvOffset;
-    for (std::size_t index = 0; index < count; ++index) {
-        std::uint64_t bits = 0;
-        std::memcpy(&bits, &values[index], sizeof(bits));
-        Mix(hash, std::isnan(values[index]) ? kQuietNaN64 : bits, sizeof(bits));
     }
     return hash;
 }

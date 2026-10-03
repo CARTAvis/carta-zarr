@@ -13,6 +13,7 @@
 
 #include <algorithm>
 #include <limits>
+#include <string>
 #include <utility>
 
 namespace carta::zarr::internal {
@@ -28,11 +29,55 @@ namespace {
 // chunk shape cannot tell in advance whether it is near it.
 constexpr std::size_t kMaxChunkIncidences = 1u << 26;
 
+// Why a region cannot be placed on the plane, or nothing when it can: an empty box, one off the
+// plane, or a raster not cut for it. Every one of these would be undefined further on -- an empty box
+// wraps its extent around zero, and a raster of another length is read past its end.
+Result<void> Placeable(const RegionMask& region, std::size_t index, PlaneExtent plane, const std::string& node) {
+    if (region.width == 0 || region.height == 0) {
+        return Error{ErrorCode::invalid_argument, "Region " + std::to_string(index) + " is empty", node};
+    }
+    if (region.x_start >= plane.width || region.width > plane.width - region.x_start ||
+        region.y_start >= plane.height || region.height > plane.height - region.y_start) {
+        return Error{ErrorCode::invalid_argument, "Region " + std::to_string(index) + " falls outside the image",
+                     node};
+    }
+    // Both inside the plane, so their product is a pixel count and cannot overflow.
+    const auto box = region.width * region.height;
+    const auto& mask = region.mask;
+    if (mask.data != nullptr ? mask.size != box : mask.size != 0) {
+        return Error{ErrorCode::invalid_argument,
+                     "Region " + std::to_string(index) + " has a mask of " + std::to_string(mask.size) +
+                         " elements for a box of " + std::to_string(box),
+                     node};
+    }
+    return {};
+}
+
 }  // namespace
 
-Result<Occupancy> Occupancy::Of(BufferView<const RegionMask> regions, std::uint64_t chunk_u, std::uint64_t chunk_v,
-                                AxisRole fastest_spatial_axis, const std::string& node) {
+Result<Occupancy> Occupancy::Of(BufferView<const RegionMask> regions, PlaneExtent plane, std::uint64_t chunk_u,
+                                std::uint64_t chunk_v, AxisRole fastest_spatial_axis, const std::string& node) {
     const std::size_t region_count = regions.size;
+    // The count first, so that no region past the first is read before it is known to be there to
+    // read. Bounded by what a reduction takes, which also keeps every region numbered by an
+    // incidence's 32 bits.
+    if (region_count == 0 || regions.data == nullptr) {
+        return Error{ErrorCode::invalid_argument, "A spectral reduction needs at least one region", node};
+    }
+    if (region_count > kMaxSpectralRegions) {
+        return Error{ErrorCode::invalid_argument,
+                     "A spectral reduction accepts at most " + std::to_string(kMaxSpectralRegions) +
+                         " regions, not " + std::to_string(region_count),
+                     node};
+    }
+    static_assert(kMaxSpectralRegions <= std::numeric_limits<std::uint32_t>::max(),
+                  "an incidence numbers its region in 32 bits");
+    for (std::size_t i = 0; i < region_count; ++i) {
+        if (auto placeable = Placeable(regions.data[i], i, plane, node); !placeable) {
+            return placeable.error();
+        }
+    }
+
     // The walk follows the store. Of the two spatial axes the one written last varies fastest, so
     // asking for it first is what keeps a plane from being transposed on its way into the
     // destination; everything below is in terms of that axis (u) and the other one (v).

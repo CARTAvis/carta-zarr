@@ -31,7 +31,8 @@ namespace carta::zarr::bench {
 // already decoded by the one before -- a median of cache hits, which says nothing about the layout
 // except that its chunks are deep. animation is where that reuse is the point, and measures it.
 //
-// The order is the one positions are drawn under, so a new mode goes at the end.
+// The order is the one positions are drawn under, so a new mode goes at the end. Everything else about
+// a mode is its Workload, in a file of its own under modes/; see mode.h.
 enum class Mode {
     plane,           // one whole l x m plane at a random channel
     spectrum,        // every channel at one random pixel
@@ -76,6 +77,24 @@ struct HistogramMethod {
     static std::optional<HistogramMethod> Parse(std::string_view text) noexcept;
 };
 
+// What shapes a region operation, and nothing else.
+struct RegionSettings {
+    // The share of the plane one region box covers.
+    double fraction = 0.05;
+};
+
+// What shapes an animation, and nothing else.
+struct AnimationSettings {
+    // The planes one animation operation reads, one after another.
+    unsigned frames = 32;
+    // Frames a second an animation is played at, each frame read no earlier than its turn; 0 reads
+    // them back to back. CARTA's animator plays at 5 unless the user changes it.
+    double fps = 5.0;
+    // Whether an animation reads the next run of chunks along the spectrum in the background as soon
+    // as it enters one, as a backend that prefetched would.
+    bool prefetch = false;
+};
+
 struct RunOptions {
     std::string dataset;
     // Empty for the dataset's default image.
@@ -86,16 +105,9 @@ struct RunOptions {
     // DefaultOps.
     std::optional<unsigned> ops;
     std::map<Mode, unsigned> mode_ops;
-    // The share of the plane one region box covers.
-    double region_fraction = 0.05;
-    // The planes one animation operation reads, one after another.
-    unsigned animation_frames = 32;
-    // Frames a second an animation is played at, each frame read no earlier than its turn; 0 reads
-    // them back to back. CARTA's animator plays at 5 unless the user changes it.
-    double animation_fps = 5.0;
-    // Whether an animation reads the next run of chunks along the spectrum in the background as soon
-    // as it enters one, as a backend that prefetched would.
-    bool animation_prefetch = false;
+    // Each only for the mode it shapes.
+    RegionSettings region;
+    AnimationSettings animation;
     HistogramMethod histogram;
     std::uint64_t seed = 1;
     ContextOptions context;

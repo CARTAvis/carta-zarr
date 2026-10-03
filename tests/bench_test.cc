@@ -21,7 +21,7 @@
 #include "cold.h"
 #include "options.h"
 #include "record.h"
-#include "workload.h"
+#include "mode.h"
 
 #include <chrono>
 #include <cmath>
@@ -31,6 +31,8 @@
 #include <fstream>
 #include <iostream>
 #include <limits>
+#include <map>
+#include <memory>
 #include <optional>
 #include <set>
 #include <string>
@@ -78,10 +80,31 @@ CubeAxes Cube(std::uint64_t width, std::uint64_t height, std::uint64_t channels,
     return axes;
 }
 
-std::vector<std::string> Positions(const std::vector<Operation>& operations) {
+// The settings a test's workloads read: the defaults, but for an animation played back to back.
+RunOptions Settings(double region_fraction = 0.05, unsigned animation_frames = 32) {
+    RunOptions options;
+    options.region.fraction = region_fraction;
+    options.animation.frames = animation_frames;
+    options.animation.fps = 0.0;
+    return options;
+}
+
+// One process's operations of one trial.
+std::vector<Operation> Plan(Mode mode, const CubeAxes& axes, std::uint64_t seed, unsigned trial, unsigned processes,
+                            unsigned process_index, unsigned ops, double region_fraction = 0.05,
+                            unsigned animation_frames = 32) {
+    return Workload::For(mode, Settings(region_fraction, animation_frames))
+        ->Plan(axes, PlanSeed{seed, trial, processes, process_index}, ops);
+}
+
+std::string Describe(Mode mode, const Operation& operation) {
+    return Workload::For(mode, Settings())->Describe(operation);
+}
+
+std::vector<std::string> Positions(Mode mode, const std::vector<Operation>& operations) {
     std::vector<std::string> positions;
     for (const auto& operation : operations) {
-        positions.push_back(operation.Describe());
+        positions.push_back(Describe(mode, operation));
     }
     return positions;
 }
@@ -91,10 +114,26 @@ std::vector<Operation> Trial(Mode mode, const CubeAxes& axes, unsigned processes
                              std::uint64_t seed = 1, unsigned trial = 0, double region_fraction = 0.05) {
     std::vector<Operation> all;
     for (unsigned process = 0; process < processes; ++process) {
-        const auto some = PlanOperations(mode, axes, seed, trial, processes, process, ops, region_fraction);
+        const auto some = Plan(mode, axes, seed, trial, processes, process, ops, region_fraction);
         all.insert(all.end(), some.begin(), some.end());
     }
     return all;
+}
+
+// A runner of `mode` over an image already open, with `options`' settings.
+std::unique_ptr<Runner> MakeRunner(Mode mode, const Context& context, const Image& image,
+                                   const RunOptions& options = Settings()) {
+    auto runner = Workload::For(mode, options)->MakeRunner(context, image);
+    Require(runner.has_value(), std::string(ModeName(mode)) + ": no runner over the image");
+    return std::move(runner).value();
+}
+
+// The columns a runner fills after an operation that covered `elements`.
+Row Recorded(const Runner& runner, std::uint64_t elements = 0) {
+    Row row;
+    row.elements = elements;
+    runner.Record(row);
+    return row;
 }
 
 template <typename T>
@@ -124,16 +163,16 @@ void TestSizesArePowersOf1024() {
 void TestTheCommandLine() {
     const auto defaults = Get<RunOptions>(Parse({"run", "cube.zarr"}));
     Require(defaults.dataset == "cube.zarr" && defaults.modes.size() == 6, "run does not default to every mode");
-    Require(defaults.OpsFor(Mode::animation) == 2 && defaults.animation_frames == 32,
+    Require(defaults.OpsFor(Mode::animation) == 2 && defaults.animation.frames == 32,
             "an animation does not default to two runs of 32 frames");
-    Require(defaults.animation_fps == 5.0 && !defaults.animation_prefetch,
+    Require(defaults.animation.fps == 5.0 && !defaults.animation.prefetch,
             "an animation does not default to CARTA's 5 frames a second without prefetch");
     const auto played = Get<RunOptions>(Parse({"run", "cube.zarr", "--animation-fps", "0", "--animation-prefetch"}));
-    Require(played.animation_fps == 0.0 && played.animation_prefetch, "--animation-fps or --animation-prefetch was lost");
+    Require(played.animation.fps == 0.0 && played.animation.prefetch, "--animation-fps or --animation-prefetch was lost");
     Require(Get<Usage>(Parse({"run", "cube.zarr", "--animation-fps", "-1"})).error, "a negative frame rate was accepted");
     Require(defaults.FirstTouchCacheBytes() == std::size_t{1} << 30,
             "a first touch does not get the backend's default cache when the context's is left to TensorStore");
-    Require(Get<RunOptions>(Parse({"run", "cube.zarr", "--animation-frames", "8"})).animation_frames == 8,
+    Require(Get<RunOptions>(Parse({"run", "cube.zarr", "--animation-frames", "8"})).animation.frames == 8,
             "--animation-frames was lost");
     Require(Get<Usage>(Parse({"run", "cube.zarr", "--animation-frames", "0"})).error,
             "an animation of no frames was accepted");
@@ -158,7 +197,7 @@ void TestTheCommandLine() {
             "--ops does not give a mode its own count over the one for every mode");
     Require(Get<RunOptions>(Parse({"run", "cube.zarr", "--ops", "spectrum=64"})).OpsFor(Mode::plane) == 16,
             "a count for one mode moved another mode off its default");
-    Require(shaped.region_fraction == 0.2, "--region-fraction was lost");
+    Require(shaped.region.fraction == 0.2, "--region-fraction was lost");
     Require(shaped.histogram.kind == HistogramMethod::Kind::sampled && shaped.histogram.stride == 8,
             "--histogram-method sampled:8 was lost");
     Require(defaults.histogram.kind == HistogramMethod::Kind::exact,
@@ -191,8 +230,8 @@ void TestTheCommandLine() {
 void TestProcessZeroReadsTheSameWhateverTheCount() {
     const auto axes = Cube(1000, 900, 300, 2);
     for (const auto mode : kPositionedModes) {
-        const auto alone = Positions(PlanOperations(mode, axes, 7, 3, 1, 0, 6));
-        const auto among = Positions(PlanOperations(mode, axes, 7, 3, 16, 0, 6));
+        const auto alone = Positions(mode, Plan(mode, axes, 7, 3, 1, 0, 6));
+        const auto among = Positions(mode, Plan(mode, axes, 7, 3, 16, 0, 6));
         Require(alone == among, std::string(ModeName(mode)) + ": process 0 moved when processes were added");
     }
 }
@@ -200,10 +239,10 @@ void TestProcessZeroReadsTheSameWhateverTheCount() {
 void TestPositionsDependOnTheSeedAndTheTrial() {
     const auto axes = Cube(1000, 900, 300, 2);
     for (const auto mode : kPositionedModes) {
-        const auto base = Positions(Trial(mode, axes, 2, 4, 1, 0));
-        Require(base == Positions(Trial(mode, axes, 2, 4, 1, 0)), "the same seed and trial planned differently");
-        Require(base != Positions(Trial(mode, axes, 2, 4, 2, 0)), "the seed does not move the positions");
-        Require(base != Positions(Trial(mode, axes, 2, 4, 1, 1)), "every trial reads the same positions");
+        const auto base = Positions(mode, Trial(mode, axes, 2, 4, 1, 0));
+        Require(base == Positions(mode, Trial(mode, axes, 2, 4, 1, 0)), "the same seed and trial planned differently");
+        Require(base != Positions(mode, Trial(mode, axes, 2, 4, 2, 0)), "the seed does not move the positions");
+        Require(base != Positions(mode, Trial(mode, axes, 2, 4, 1, 1)), "every trial reads the same positions");
     }
 }
 
@@ -211,7 +250,7 @@ void TestProcessesDoNotShareAPosition() {
     const auto axes = Cube(1000, 900, 300, 2);
     for (const auto mode : {Mode::plane, Mode::spectrum}) {
         const auto all = Trial(mode, axes, 4, DefaultOps(mode));
-        const auto positions = Positions(all);
+        const auto positions = Positions(mode, all);
         Require(std::set<std::string>(positions.begin(), positions.end()).size() == all.size(),
                 std::string(ModeName(mode)) + ": two operations of a trial share a position");
         for (const auto& operation : all) {
@@ -295,7 +334,7 @@ void TestACubeHistogramSplitsTheChannels() {
                 "the channels were not split into one run per process");
         Require(!all[process].overlap, "disjoint runs of channels were marked as overlapping");
     }
-    const auto several = PlanOperations(Mode::cube_histogram, axes, 1, 0, 1, 0, 5);
+    const auto several = Plan(Mode::cube_histogram, axes, 1, 0, 1, 0, 5);
     std::set<std::uint64_t> polarizations;
     for (const auto& operation : several) {
         polarizations.insert(operation.polarization);
@@ -360,7 +399,7 @@ void TestTheRunKeyIsTheSettings() {
 
     // A setting that shapes one mode moves that mode's key and no other's.
     auto wider = options;
-    wider.region_fraction = 0.2;
+    wider.region.fraction = 0.2;
     auto binned = options;
     binned.histogram.kind = HistogramMethod::Kind::binned;
     Require(key == RowTemplate(wider, Mode::plane, ColdMethod::fadvise, facts, "run-a").run_key &&
@@ -450,21 +489,21 @@ void TestAnAnimationPlaysConsecutiveChannels() {
     Require(all.size() == 4, "an animation trial did not plan an operation per process per run");
     for (std::size_t one = 0; one < all.size(); ++one) {
         Require(all[one].channel_count == 32 && all[one].channel + 32 <= axes.channels,
-                "an animation is not 32 channels inside the cube: " + all[one].Describe());
+                "an animation is not 32 channels inside the cube: " + Describe(Mode::animation, all[one]));
         Require(!all[one].overlap, "an animation was marked as repeating another with channels to spare");
         for (std::size_t other = 0; other < one; ++other) {
             const auto& a = all[one];
             const auto& b = all[other];
             const bool apart = a.polarization != b.polarization || a.channel + a.channel_count <= b.channel ||
                                b.channel + b.channel_count <= a.channel;
-            Require(apart, "two animations of one trial play the same planes: " + a.Describe() + " and " +
-                               b.Describe());
+            Require(apart, "two animations of one trial play the same planes: " + Describe(Mode::animation, a) +
+                               " and " + Describe(Mode::animation, b));
         }
     }
-    const auto short_cube = PlanOperations(Mode::animation, Cube(100, 90, 10, 1), 1, 0, 1, 0, 1, 0.05, 32);
+    const auto short_cube = Plan(Mode::animation, Cube(100, 90, 10, 1), 1, 0, 1, 0, 1, 0.05, 32);
     Require(short_cube.front().channel == 0 && short_cube.front().channel_count == 10,
             "an animation longer than the cube does not play the whole of it");
-    const auto shorter = PlanOperations(Mode::animation, axes, 1, 0, 1, 0, 1, 0.05, 5);
+    const auto shorter = Plan(Mode::animation, axes, 1, 0, 1, 0, 1, 0.05, 5);
     Require(shorter.front().channel_count == 5, "--animation-frames does not set the frames");
 }
 
@@ -473,13 +512,13 @@ void TestSharedChunksAreMarked() {
     const auto axes = Cube(256, 256, 300, 2);
     const auto plane = [](std::uint64_t channel, std::uint64_t polarization = 0) {
         Operation operation;
-        operation.mode = Mode::plane;
         operation.channel = channel;
         operation.polarization = polarization;
         return operation;
     };
-    const auto marks = [&](std::vector<std::vector<Operation>> plans, std::vector<std::uint64_t> chunk) {
-        MarkSharedChunks(plans, axes, chunk);
+    const auto marks = [&](std::vector<std::vector<Operation>> plans, std::vector<std::uint64_t> chunk,
+                           Mode mode = Mode::plane) {
+        MarkSharedChunks(*Workload::For(mode, Settings()), plans, axes, chunk);
         std::vector<bool> marked;
         for (const auto& plan : plans) {
             for (const auto& operation : plan) {
@@ -503,12 +542,11 @@ void TestSharedChunksAreMarked() {
 
     const auto spectrum = [](std::uint64_t x, std::uint64_t y) {
         Operation operation;
-        operation.mode = Mode::spectrum;
         operation.x = x;
         operation.y = y;
         return operation;
     };
-    Require(marks({{spectrum(10, 10), spectrum(50, 50), spectrum(100, 10)}}, {64, 64, 300, 1}) ==
+    Require(marks({{spectrum(10, 10), spectrum(50, 50), spectrum(100, 10)}}, {64, 64, 300, 1}, Mode::spectrum) ==
                 Marks{false, true, false},
             "spectra in one spatial chunk were not marked, or ones in different chunks were");
 
@@ -516,9 +554,9 @@ void TestSharedChunksAreMarked() {
     const auto slabs = [&](std::uint64_t depth) {
         std::vector<std::vector<Operation>> plans;
         for (unsigned process = 0; process < 2; ++process) {
-            plans.push_back(PlanOperations(Mode::cube_histogram, axes, 1, 0, 2, process, 1));
+            plans.push_back(Plan(Mode::cube_histogram, axes, 1, 0, 2, process, 1));
         }
-        MarkSharedChunks(plans, axes, {64, 64, depth, 1});
+        MarkSharedChunks(*Workload::For(Mode::cube_histogram, Settings()), plans, axes, {64, 64, depth, 1});
         return plans[0][0].shares_chunks && plans[1][0].shares_chunks;
     };
     Require(slabs(16), "cube histograms whose runs meet inside a chunk were not marked");
@@ -526,10 +564,33 @@ void TestSharedChunksAreMarked() {
 
     auto animations = std::vector<std::vector<Operation>>{Trial(Mode::animation, axes, 1, 2)};
     animations[0].push_back(animations[0].front());
-    MarkSharedChunks(animations, axes, {256, 256, 300, 2});
+    MarkSharedChunks(*Workload::For(Mode::animation, Settings()), animations, axes, {256, 256, 300, 2});
     for (const auto& operation : animations[0]) {
         Require(!operation.shares_chunks, "an animation was marked: it reuses chunks on purpose");
     }
+}
+
+// A mode writes the settings that shape it, and no other mode's: the run key is made from these
+// columns, so a column another mode wrote would move a key on a setting that does not shape it.
+void TestAModeWritesOnlyItsOwnSettings() {
+    auto options = Settings(0.2, 8);
+    options.animation.prefetch = true;
+    options.histogram = *HistogramMethod::Parse("sampled:4");
+    const auto written = [&](Mode mode) {
+        Row row;
+        Workload::For(mode, options)->WriteSettings(row);
+        return std::vector<std::string>{row.region_fraction, row.histogram_method, row.animation_frames,
+                                        row.animation_fps, row.animation_prefetch};
+    };
+    using Columns = std::vector<std::string>;
+    const Columns none{"", "", "", "", ""};
+    Require(written(Mode::plane) == none && written(Mode::spectrum) == none && written(Mode::open) == none,
+            "a mode no setting shapes wrote a setting");
+    Require(written(Mode::region) == Columns{"0.2000", "", "", "", ""}, "region wrote other than its fraction");
+    Require(written(Mode::cube_histogram) == Columns{"", "sampled:4", "", "", ""},
+            "cube-histogram wrote other than its method");
+    Require(written(Mode::animation) == Columns{"", "", "8", "0", "true"},
+            "animation wrote other than its frames, frame rate and prefetch");
 }
 
 // What this process has asked the kernel to read, page cache or not, as /proc/self/io counts it.
@@ -572,19 +633,20 @@ void TestAFirstTouchReadsItsChunksAgain() {
         Require(runner.Run(operation, {}).has_value(), "a read failed the second time");
         return *BytesAskedFor() - before;
     };
-    Runner fresh(*context, *image, {}, std::size_t{64} << 20);
-    Runner shared(*context, *image);
+    auto fresh_pools = Settings();
+    fresh_pools.context.cache_bytes = std::size_t{64} << 20;
     constexpr std::uint64_t kSome = 4096;
     for (const auto mode : {Mode::plane, Mode::spectrum}) {
-        const auto operation = PlanOperations(mode, *axes, 1, 0, 1, 0, 1).front();
-        Require(read_twice(fresh, operation) >= kSome,
+        const auto fresh = MakeRunner(mode, *context, *image, fresh_pools);
+        const auto operation = Plan(mode, *axes, 1, 0, 1, 0, 1).front();
+        Require(read_twice(*fresh, operation) >= kSome,
                 std::string(ModeName(mode)) + " found its chunks in a cache rather than reading them");
     }
     // An animation of one frame reads the plane through the context's cache.
-    auto frame = PlanOperations(Mode::plane, *axes, 1, 0, 1, 0, 1).front();
-    frame.mode = Mode::animation;
+    const auto shared = MakeRunner(Mode::animation, *context, *image);
+    auto frame = Plan(Mode::plane, *axes, 1, 0, 1, 0, 1).front();
     frame.channel_count = 1;
-    Require(read_twice(shared, frame) < kSome,
+    Require(read_twice(*shared, frame) < kSome,
             "the shared cache read the plane's chunks again, so this test shows nothing about a fresh pool");
 }
 
@@ -595,11 +657,18 @@ void TestEachModeReads() {
     const auto axes = CubeAxes::Of(image.descriptor());
     Require(axes.has_value(), "the wide fixture is not a cube");
     const std::uint64_t plane = axes->width * axes->height;
-    Runner runner(SharedContext(), image);
+    std::map<Mode, std::unique_ptr<Runner>> runners;
+    const auto runner = [&](Mode mode) -> Runner& {
+        auto& made = runners[mode];
+        if (!made) {
+            made = MakeRunner(mode, SharedContext(), image);
+        }
+        return *made;
+    };
 
     const auto read = [&](Mode mode, unsigned processes = 1) {
-        const auto operation = PlanOperations(mode, *axes, 1, 0, processes, 0, 1).front();
-        const auto elements = runner.Run(operation, {});
+        const auto operation = Plan(mode, *axes, 1, 0, processes, 0, 1).front();
+        const auto elements = runner(mode).Run(operation, {});
         Require(elements.has_value(), std::string(ModeName(mode)) + " failed: " +
                                           (elements ? std::string() : elements.error().message));
         return std::make_pair(operation, *elements);
@@ -615,30 +684,29 @@ void TestEachModeReads() {
     request.axes[*axes->polarization] = {planar.polarization, 1, 1};
     std::vector<float> direct(plane);
     Require(image.Read(request, {direct.data(), direct.size()}).has_value(), "the plane did not read directly");
-    Require(runner.Fingerprint() == Fingerprint(direct.data(), direct.size()),
+    Require(runner(Mode::plane).Fingerprint() == Fingerprint(direct.data(), direct.size()),
             "the plane's fingerprint is not the fingerprint of the plane");
 
     Require(read(Mode::spectrum).second == axes->channels, "a spectrum is not every channel");
 
     // An animation's fingerprint is its frames', each as a plane read alone fingerprints, in order.
-    const auto animation = PlanOperations(Mode::animation, *axes, 1, 0, 1, 0, 1, 0.05, 3).front();
-    const auto played = runner.Run(animation, {});
+    const auto animation = Plan(Mode::animation, *axes, 1, 0, 1, 0, 1, 0.05, 3).front();
+    const auto played = runner(Mode::animation).Run(animation, {});
     Require(played.has_value() && *played == 3 * plane, "an animation did not read three planes");
-    const auto frames = runner.Fingerprint();
+    const auto frames = runner(Mode::animation).Fingerprint();
     std::uint64_t expected = 0xCBF29CE484222325ull;
     Operation frame = animation;
-    frame.mode = Mode::plane;
     for (std::uint64_t index = 0; index < 3; ++index) {
         frame.channel = animation.channel + index;
-        Require(runner.Run(frame, {}).has_value(), "a frame did not read alone");
-        const auto one = runner.Fingerprint();
+        Require(runner(Mode::plane).Run(frame, {}).has_value(), "a frame did not read alone");
+        const auto one = runner(Mode::plane).Fingerprint();
         for (unsigned byte = 0; byte < 8; ++byte) {
             expected ^= (one >> (8 * byte)) & 0xFFu;
             expected *= 0x100000001B3ull;
         }
     }
     Require(frames == expected, "an animation did not read the planes from its channel on, in order");
-    Require(runner.frame_stats().has_value() == false, "a plane read alone left an animation's frame times behind");
+    Require(!Recorded(runner(Mode::plane)).frames_played, "a plane read alone said how an animation's frames went");
 
     // Prefetching the next run of chunks changes when they are read, not what any frame reads; played
     // at a frame rate, every frame after the first is timed and none is late at a rate this slow on a
@@ -652,45 +720,56 @@ void TestEachModeReads() {
     Require(cached_dataset.has_value(), "the wide fixture did not open through a cache");
     const auto cached_image = cached_dataset->OpenImage(cached_dataset->descriptor().default_image_id.value_or(""));
     Require(cached_image.has_value(), "the wide fixture's image did not open through a cache");
-    Runner prefetching(*cached, *cached_image);
-    prefetching.SetAnimation(0.0, true);
-    const auto whole = PlanOperations(Mode::animation, *axes, 1, 0, 1, 0, 1, 0.05, 4).front();
-    Require(runner.Run(whole, {}).has_value() && prefetching.Run(whole, {}).has_value(), "an animation failed");
-    Require(prefetching.Fingerprint() == runner.Fingerprint(), "prefetching changed what an animation read");
+    auto reading_ahead = Settings();
+    reading_ahead.animation.prefetch = true;
+    const auto prefetching = MakeRunner(Mode::animation, *cached, *cached_image, reading_ahead);
+    const auto whole = Plan(Mode::animation, *axes, 1, 0, 1, 0, 1, 0.05, 4).front();
+    Require(runner(Mode::animation).Run(whole, {}).has_value() && prefetching->Run(whole, {}).has_value(),
+            "an animation failed");
+    Require(prefetching->Fingerprint() == runner(Mode::animation).Fingerprint(),
+            "prefetching changed what an animation read");
     // The fixture's chunks are two channels deep, so four frames are two runs: the first frame
     // prefetches the second run, and the second run has none after it to prefetch.
-    Require(prefetching.frame_stats()->prefetches == 1 && runner.frame_stats()->prefetches == 0,
+    const auto ahead = Recorded(*prefetching);
+    Require(ahead.prefetches == 1u && Recorded(runner(Mode::animation)).prefetches == 0u,
             "an animation of two runs did not prefetch the second, or prefetched without being asked");
-    Require(prefetching.frame_stats()->late_prefetches <= 1, "more prefetches were late than were started");
-    Runner uncached(SharedContext(), image);
-    uncached.SetAnimation(0.0, true);
-    Require(uncached.Run(whole, {}).has_value() && uncached.frame_stats()->prefetches == 0,
+    Require(ahead.late_prefetches <= 1u, "more prefetches were late than were started");
+    const auto uncached = MakeRunner(Mode::animation, SharedContext(), image, reading_ahead);
+    Require(uncached->Run(whole, {}).has_value() && Recorded(*uncached).prefetches == 0u,
             "an animation read ahead into a cache that holds nothing");
-    Runner paced(SharedContext(), image);
-    paced.SetAnimation(20.0, true);
-    Require(paced.Run(whole, {}).has_value() && paced.frame_stats().has_value(), "a paced animation kept no frame times");
-    const auto& stats = *paced.frame_stats();
-    Require(stats.first_s > 0.0 && stats.median_s > 0.0 && stats.max_s >= stats.median_s,
+    auto pacing = reading_ahead;
+    pacing.animation.fps = 20.0;
+    const auto paced = MakeRunner(Mode::animation, SharedContext(), image, pacing);
+    Require(paced->Run(whole, {}).has_value() && Recorded(*paced).frames_played.has_value(),
+            "a paced animation kept no frame times");
+    const auto stats = Recorded(*paced);
+    Require(*stats.frame_first_s > 0.0 && *stats.frame_median_s > 0.0 && *stats.frame_max_s >= *stats.frame_median_s,
             "a paced animation's frame times are not times");
-    Require(stats.late <= whole.channel_count - 1, "more frames were late than were played");
-    Require(stats.frames == whole.channel_count, "an animation did not say how many frames it played");
+    Require(*stats.late_frames <= whole.channel_count - 1, "more frames were late than were played");
+    Require(*stats.frames_played == whole.channel_count, "an animation did not say how many frames it played");
     const auto [box, region_elements] = read(Mode::region);
     Require(region_elements == box.width * box.height * axes->channels, "a region did not cover its box");
-    const auto region = runner.Fingerprint();
+    const auto region = runner(Mode::region).Fingerprint();
     Require(read(Mode::cube_histogram, 2).second == plane * (axes->channels / 2),
             "a cube histogram did not cover its share of the channels");
-    const auto exact = runner.Fingerprint();
+    const auto exact = runner(Mode::cube_histogram).Fingerprint();
     Require(exact != region, "a cube histogram fingerprinted as the region before it");
 
     // One pass over the same channels: its extremes and pixel count are the exact ones, but it carries
     // no counts into the fingerprint, so it cannot fingerprint as the two-pass histogram does.
-    Runner one_pass(SharedContext(), image, *HistogramMethod::Parse("binned"));
-    const auto histogram = PlanOperations(Mode::cube_histogram, *axes, 1, 0, 2, 0, 1).front();
-    Require(one_pass.Run(histogram, {}).has_value(), "a one-pass cube histogram failed");
-    Require(one_pass.Fingerprint() != exact, "a one-pass histogram fingerprinted as an exact one");
+    auto binned = Settings();
+    binned.histogram = *HistogramMethod::Parse("binned");
+    const auto one_pass = MakeRunner(Mode::cube_histogram, SharedContext(), image, binned);
+    const auto histogram = Plan(Mode::cube_histogram, *axes, 1, 0, 2, 0, 1).front();
+    Require(one_pass->Run(histogram, {}).has_value(), "a one-pass cube histogram failed");
+    Require(one_pass->Fingerprint() != exact, "a one-pass histogram fingerprinted as an exact one");
 
-    Runner opener(ContextOptions{}, kWide, "");
-    Require(opener.Run(Operation{Mode::open}, {}).has_value() && opener.image().has_value(),
+    auto opening = Settings();
+    opening.dataset = kWide;
+    Row row;
+    auto opener = Workload::For(Mode::open, opening)->Begin(0, 0, row);
+    Require(opener.has_value() && opener->plan.size() == opening.OpsFor(Mode::open), "open planned nothing to open");
+    Require(opener->runner->Run(opener->plan.front(), {}).has_value() && !Recorded(*opener->runner).shape.empty(),
             "open did not open the default image");
 }
 
@@ -713,16 +792,18 @@ void TestLayoutsFingerprintAlike(const std::string& generated) {
     Require(axes.has_value(), "the plain layout is not a cube");
     for (const char* layout : {"sharded", "flagged"}) {
         for (const char* method : {"exact", "binned", "sampled:2"}) {
-            const auto histogram = *HistogramMethod::Parse(method);
-            Runner left(SharedContext(), plain, histogram);
-            Runner right(SharedContext(), OpenDefault(generated + "/" + layout), histogram);
+            auto settings = Settings();
+            settings.histogram = *HistogramMethod::Parse(method);
+            const auto other = OpenDefault(generated + "/" + layout);
             for (const auto mode : {Mode::plane, Mode::spectrum, Mode::region, Mode::cube_histogram}) {
+                const auto left = MakeRunner(mode, SharedContext(), plain, settings);
+                const auto right = MakeRunner(mode, SharedContext(), other, settings);
                 for (const auto& operation : Trial(mode, *axes, 3, mode == Mode::cube_histogram ? 2 : 3)) {
                     const auto where = std::string(layout) + ", " + method + ": " + ModeName(mode) + " at " +
-                                       operation.Describe();
-                    Require(left.Run(operation, {}).has_value() && right.Run(operation, {}).has_value(),
+                                       Describe(mode, operation);
+                    Require(left->Run(operation, {}).has_value() && right->Run(operation, {}).has_value(),
                             where + " failed");
-                    Require(left.Fingerprint() == right.Fingerprint(), where + " reads differently from plain");
+                    Require(left->Fingerprint() == right->Fingerprint(), where + " reads differently from plain");
                 }
             }
         }
@@ -748,6 +829,7 @@ int main(int argc, char** argv) {
         TestACubeHistogramSplitsTheChannels();
         TestAnAnimationPlaysConsecutiveChannels();
         TestSharedChunksAreMarked();
+        TestAModeWritesOnlyItsOwnSettings();
         TestAFingerprintHasOneNaN();
         TestTheRunKeyIsTheSettings();
         TestARowIsOneLine();

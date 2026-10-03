@@ -7,7 +7,7 @@
 #include "trial.h"
 
 #include "cold.h"
-#include "workload.h"
+#include "mode.h"
 
 #include <carta-zarr/carta_zarr.h>
 
@@ -124,69 +124,6 @@ std::string UtcNow() {
     return buffer.data();
 }
 
-std::size_t ItemSize(DataType type) {
-    switch (type) {
-        case DataType::boolean:
-        case DataType::int8:
-        case DataType::uint8:
-            return 1;
-        case DataType::int16:
-        case DataType::uint16:
-        case DataType::float16:
-            return 2;
-        case DataType::int32:
-        case DataType::uint32:
-        case DataType::float32:
-            return 4;
-        case DataType::int64:
-        case DataType::uint64:
-        case DataType::float64:
-        case DataType::complex64:
-            return 8;
-        case DataType::complex128:
-            return 16;
-        case DataType::unknown:
-            break;
-    }
-    return 0;
-}
-
-std::string Shape(const std::vector<AxisDescriptor>& axes, const std::vector<std::uint64_t>& lengths) {
-    std::string text;
-    for (std::size_t index = 0; index < axes.size() && index < lengths.size(); ++index) {
-        if (!text.empty()) {
-            text += ';';
-        }
-        text += axes[index].name + "=" + std::to_string(lengths[index]);
-    }
-    return text;
-}
-
-// The columns only an opened image can answer.
-void DescribeImage(Row& row, const Image& image) {
-    const auto& descriptor = image.descriptor();
-    const auto& geometry = image.chunk_geometry();
-    std::vector<std::uint64_t> lengths;
-    for (const auto& axis : descriptor.axes) {
-        lengths.push_back(axis.length);
-    }
-    row.image_id = descriptor.id;
-    row.shape = Shape(descriptor.axes, lengths);
-    row.chunk_shape = Shape(descriptor.axes, geometry.chunk_shape);
-    row.shard_shape = geometry.sharded ? Shape(descriptor.axes, geometry.shard_shape) : "";
-    if (row.codec.empty()) {
-        row.codec = geometry.compressor;
-    }
-}
-
-std::string Describe(const Error& error) {
-    std::string text = std::string(ErrorCodeName(error.code)) + ": " + error.message;
-    if (!error.node_path.empty()) {
-        text += " (" + error.node_path + ")";
-    }
-    return text;
-}
-
 // The operations of one process: open what it reads, say it is ready, wait to be released, read, and
 // report each operation as it ends. Never returns.
 [[noreturn]] void Child(const RunOptions& options, Mode mode, unsigned trial, unsigned process_index, Row row,
@@ -202,51 +139,13 @@ std::string Describe(const Error& error) {
         _exit(1);
     };
     row.process_index = process_index;
-    const unsigned ops = options.OpsFor(mode);
-
-    std::optional<Runner> runner;
-    std::vector<Operation> plan;
-    std::size_t item_size = 4;
-    if (mode == Mode::open) {
-        runner.emplace(options.context, options.dataset, options.image_id);
-        plan = PlanOperations(mode, CubeAxes{}, options.seed, trial, options.processes, process_index, ops);
-    } else {
-        auto context = Context::Create(options.context);
-        if (!context) {
-            fail("Context::Create: " + Describe(context.error()));
-        }
-        auto dataset = Dataset::Open(*context, options.dataset);
-        if (!dataset) {
-            fail("Dataset::Open: " + Describe(dataset.error()));
-        }
-        auto id = options.image_id;
-        if (id.empty()) {
-            if (!dataset->descriptor().default_image_id) {
-                fail("the dataset lists no image that opens");
-            }
-            id = *dataset->descriptor().default_image_id;
-        }
-        auto image = dataset->OpenImage(id);
-        if (!image) {
-            fail("OpenImage: " + Describe(image.error()));
-        }
-        const auto axes = CubeAxes::Of(image->descriptor());
-        if (!axes) {
-            fail(Describe(axes.error()));
-        }
-        DescribeImage(row, *image);
-        item_size = ItemSize(image->descriptor().stored_type);
-        // Every process's plan, to tell which of this one's operations share a chunk with another's.
-        std::vector<std::vector<Operation>> plans;
-        for (unsigned process = 0; process < options.processes; ++process) {
-            plans.push_back(PlanOperations(mode, *axes, options.seed, trial, options.processes, process, ops,
-                                           options.region_fraction, options.animation_frames));
-        }
-        MarkSharedChunks(plans, *axes, image->chunk_geometry().chunk_shape);
-        plan = std::move(plans[process_index]);
-        runner.emplace(*context, std::move(image).value(), options.histogram, options.FirstTouchCacheBytes());
-        runner->SetAnimation(options.animation_fps, options.animation_prefetch);
+    const auto workload = Workload::For(mode, options);
+    auto planned = workload->Begin(trial, process_index, row);
+    if (!planned) {
+        fail(planned.error().message);
     }
+    const auto& plan = planned->plan;
+    auto& runner = *planned->runner;
 
     send(kReady);
     std::int64_t released_ns = 0;
@@ -268,7 +167,7 @@ std::string Describe(const Error& error) {
         const auto& operation = plan[index];
         Row result = row;
         result.op_index = index;
-        result.position = operation.Describe();
+        result.position = workload->Describe(operation);
         result.overlap = operation.overlap;
         result.shares_chunks = operation.shares_chunks;
         if (Clock::now() >= deadline) {
@@ -277,7 +176,7 @@ std::string Describe(const Error& error) {
             send(kRow + FormatRow(result));
             continue;
         }
-        if (auto prepared = runner->Prepare(operation); !prepared) {
+        if (auto prepared = runner.Prepare(operation); !prepared) {
             result.status = "error";
             result.error = "preparing: " + Describe(prepared.error());
             send(kRow + FormatRow(result));
@@ -288,7 +187,7 @@ std::string Describe(const Error& error) {
         const auto use_before = Resources();
         result.timestamp_utc = UtcNow();
         const auto start = Clock::now();
-        auto elements = runner->Run(operation, read_options);
+        auto elements = runner.Run(operation, read_options);
         const auto end = Clock::now();
         const auto use_after = Resources();
         const auto storage_after = StorageReadBytes();
@@ -302,30 +201,16 @@ std::string Describe(const Error& error) {
         if (storage_before && storage_after) {
             result.storage_read_bytes = *storage_after - *storage_before;
         }
-        if (mode == Mode::open && runner->image()) {
-            DescribeImage(result, *runner->image());
-            item_size = ItemSize(runner->image()->descriptor().stored_type);
-        }
         if (elements) {
             result.status = "ok";
             result.elements = *elements;
-            result.logical_bytes = *elements * item_size;
-            result.checksum = runner->Fingerprint();
-            if (const auto& frames = runner->frame_stats()) {
-                result.frames_played = frames->frames;
-                result.frame_first_s = frames->first_s;
-                result.frame_median_s = frames->median_s;
-                result.frame_max_s = frames->max_s;
-                result.late_frames = frames->late;
-                result.late_max_s = frames->late_max_s;
-                result.prefetches = frames->prefetches;
-                result.late_prefetches = frames->late_prefetches;
-            }
+            result.checksum = runner.Fingerprint();
         } else {
             const bool expired = elements.error().code == ErrorCode::cancelled && end >= deadline;
             result.status = expired ? "timeout" : "error";
             result.error = Describe(elements.error());
         }
+        runner.Record(result);
         send(kRow + FormatRow(result));
     }
     _exit(0);

@@ -15,6 +15,8 @@
 
 #include "options.h"
 
+#include <carta-zarr/carta_zarr.h>
+
 #include <cstdint>
 #include <cstdio>
 #include <map>
@@ -154,6 +156,16 @@ private:
     std::FILE* _file = nullptr;
     std::map<std::string, std::set<unsigned>> _completed;
 };
+
+// The bytes one element of an image stored as `type` takes.
+std::size_t ItemSize(DataType type);
+
+// The columns only an opened image can answer: its id, shape, chunks, shards, and its codec when the
+// manifest did not say.
+void DescribeImage(Row& row, const Image& image);
+
+// An error as a row's error column says it: its code, its message and the node it is about.
+std::string Describe(const Error& error);
 
 }  // namespace carta::zarr::bench
 

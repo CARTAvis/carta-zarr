@@ -332,42 +332,51 @@ void TestAGridTooLargeToIndexIsRefused() {
 // of Of itself, so that nothing has to be checked before it is called.
 void TestRegionsThatCannotBePlacedAreRefused() {
     const PlaneExtent plane{8, 6};
-    const auto refuses = [&](BufferView<const RegionMask> regions, const std::string& what) {
+    // Refused for the reason given, rather than for whatever a region let through runs into later:
+    // an empty box, for one, goes on to wrap its extent around zero and comes back as too many chunks.
+    const auto refuses = [&](BufferView<const RegionMask> regions, const std::string& why, const std::string& what) {
         const auto refused = Occupancy::Of(regions, plane, 4, 4, AxisRole::spatial_x, "TEST");
         Require(!refused, what + " was placed");
-        Require(refused.error().code == ErrorCode::invalid_argument && refused.error().node_path == "TEST",
-                what + " was refused as something else: " + refused.error().message);
+        Require(refused.error().code == ErrorCode::invalid_argument && refused.error().node_path == "TEST" &&
+                    refused.error().message.find(why) != std::string::npos,
+                what + " was refused for another reason: " + refused.error().message);
     };
-    const auto refuses_one = [&](const RegionMask& region, const std::string& what) {
-        refuses({&region, 1}, what);
+    const auto refuses_one = [&](const RegionMask& region, const std::string& why, const std::string& what) {
+        refuses({&region, 1}, why, what);
     };
 
-    refuses_one(Box(7, 0, 2, 6), "a region hanging off the plane along x");
-    refuses_one(Box(0, 5, 8, 2), "a region hanging off the plane along y");
-    refuses_one(Box(8, 0, 1, 1), "a region starting past the plane");
-    refuses_one(Box(std::numeric_limits<std::uint64_t>::max(), 0, 2, 1), "a region whose end overflows");
-    refuses_one(Box(0, 0, 0, 6), "a region with no width");
-    refuses_one(Box(0, 0, 8, 0), "a region with no height");
+    const std::string outside = "falls outside the image";
+    refuses_one(Box(7, 0, 2, 6), outside, "a region hanging off the plane along x");
+    refuses_one(Box(0, 5, 8, 2), outside, "a region hanging off the plane along y");
+    refuses_one(Box(8, 0, 1, 1), outside, "a region starting at the plane's edge along x");
+    refuses_one(Box(9, 0, 1, 1), outside, "a region starting past the plane along x");
+    refuses_one(Box(0, 6, 1, 1), outside, "a region starting at the plane's edge along y");
+    refuses_one(Box(0, 7, 1, 1), outside, "a region starting past the plane along y");
+    refuses_one(Box(std::numeric_limits<std::uint64_t>::max(), 0, 2, 1), outside, "a region whose end overflows");
+    refuses_one(Box(0, 0, 0, 6), "is empty", "a region with no width");
+    refuses_one(Box(0, 0, 8, 0), "is empty", "a region with no height");
 
+    const std::string mismatched = "has a mask of";
     const std::vector<std::uint8_t> raster(8 * 6, 1);
     auto masked = Box(0, 0, 8, 6);
     masked.mask = {raster.data(), raster.size() - 1};
-    refuses_one(masked, "a raster shorter than its box");
+    refuses_one(masked, mismatched, "a raster shorter than its box");
     masked.mask = {raster.data(), raster.size()};
     masked.width = 4;
-    refuses_one(masked, "a raster longer than its box");
+    refuses_one(masked, mismatched, "a raster longer than its box");
     masked = Box(0, 0, 8, 6);
     masked.mask = {nullptr, raster.size()};
-    refuses_one(masked, "a raster with a length and no bytes");
+    refuses_one(masked, mismatched, "a raster with a length and no bytes");
     masked.mask = {raster.data(), 0};
-    refuses_one(masked, "a raster with bytes and no length");
+    refuses_one(masked, mismatched, "a raster with bytes and no length");
 
     const auto whole = Box(0, 0, 8, 6);
-    refuses({&whole, 0}, "no regions");
-    refuses({nullptr, 0}, "no regions at all");
+    refuses({&whole, 0}, "at least one region", "no regions");
+    refuses({nullptr, 0}, "at least one region", "no regions at all");
+    refuses({nullptr, 1}, "at least one region", "a region said to be there with nothing to read it from");
     // One region, said to be more than a reduction takes: refused on the count, before any past the
     // first is read.
-    refuses({&whole, carta::zarr::kMaxSpectralRegions + 1}, "more regions than a reduction takes");
+    refuses({&whole, carta::zarr::kMaxSpectralRegions + 1}, "at most", "more regions than a reduction takes");
 
     // The edges themselves are the plane's.
     masked = Box(0, 0, 8, 6);

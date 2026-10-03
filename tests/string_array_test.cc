@@ -96,6 +96,7 @@ void TestDeclaredFillValue() {
 void TestCorruptChunks() {
     ExpectError("crc_mismatch", ErrorCode::decode_error);
     ExpectError("truncated", ErrorCode::decode_error);
+    ExpectError("oversized", ErrorCode::decode_error);
     ExpectError("invalid_unicode", ErrorCode::decode_error);
 }
 

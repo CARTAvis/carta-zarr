@@ -133,6 +133,13 @@ def generate_string_fixtures() -> None:
     truncated_bytes = chunk_path(truncated).read_bytes()
     chunk_path(truncated).write_bytes(truncated_bytes[:-4])
 
+    # A chunk holding more than its chunk shape accounts for, which no Zarr writer produces: what is
+    # past the end is not a label, and the chunk is not the one the document describes.
+    oversized = output_dir / "oversized"
+    create_string_array(oversized, serializer=BytesCodec(endian="little"))
+    oversized_bytes = chunk_path(oversized).read_bytes()
+    chunk_path(oversized).write_bytes(oversized_bytes + "DE".encode("utf-32-le"))
+
     # A label array of several chunks, as zarr-python writes when chunks are asked for smaller than
     # the array: one element a chunk, a last chunk that overhangs the array, the v2 key spelling,
     # and a chunk in the middle that was never written.

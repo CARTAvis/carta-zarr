@@ -19,6 +19,7 @@
 #include <exception>
 #include <filesystem>
 #include <fstream>
+#include <functional>
 #include <iostream>
 #include <iterator>
 #include <string>
@@ -578,14 +579,163 @@ void WriteText(const std::filesystem::path& path, const std::string& text) {
     std::ofstream(path) << text;
 }
 
+// Replace the first `from` after `after` in a document's text. The fixtures are written by
+// zarr-python and this test links nothing that parses JSON, so a document is edited as the text it is.
+std::string Replaced(std::string text, const std::string& after, const std::string& from, const std::string& to) {
+    const auto anchor = text.find(after);
+    const auto at = anchor == std::string::npos ? anchor : text.find(from, anchor);
+    Require(at != std::string::npos, "no '" + from + "' after '" + after + "' to replace");
+    return text.replace(at, from.size(), to);
+}
+
+using Rewrite = std::function<std::string(std::string)>;
+
+// A copy of a fixture with the root's consolidated metadata written in, as zarr-python writes it --
+// every child's own document copied into the root -- and removed again with this object. `copies`
+// rewrites what the root's copy says about a node and leaves the node's own document as it was;
+// rewriting a node's own document afterwards makes the two disagree the other way round.
+class ConsolidatedCopy {
+public:
+    ConsolidatedCopy(const char* fixture, const std::string& name,
+                     const std::vector<std::pair<std::string, Rewrite>>& copies = {})
+        : _path(std::filesystem::temp_directory_path() / ("carta-zarr-" + name + "-" + std::to_string(getpid()))) {
+        std::filesystem::remove_all(_path);
+        std::filesystem::copy(fixture, _path, std::filesystem::copy_options::recursive);
+        std::string consolidated;
+        for (const auto& entry : std::filesystem::directory_iterator(_path)) {
+            if (entry.is_directory() && std::filesystem::exists(entry.path() / "zarr.json")) {
+                const auto node = entry.path().filename().string();
+                auto document = ReadText(entry.path() / "zarr.json");
+                for (const auto& [rewritten, rewrite] : copies) {
+                    if (rewritten == node) {
+                        document = rewrite(std::move(document));
+                    }
+                }
+                consolidated += (consolidated.empty() ? "\"" : ",\"") + node + "\":" + document;
+            }
+        }
+        auto root = ReadText(_path / "zarr.json");
+        const auto end = root.find_last_of('}');
+        Require(end != std::string::npos, "the fixture's root metadata is not an object");
+        root.insert(end, ",\"consolidated_metadata\":{\"kind\":\"inline\",\"must_understand\":false,\"metadata\":{" +
+                             consolidated + "}}");
+        WriteText(_path / "zarr.json", root);
+    }
+    ConsolidatedCopy(const ConsolidatedCopy&) = delete;
+    ConsolidatedCopy& operator=(const ConsolidatedCopy&) = delete;
+    ConsolidatedCopy(ConsolidatedCopy&&) = delete;
+    ConsolidatedCopy& operator=(ConsolidatedCopy&&) = delete;
+    ~ConsolidatedCopy() {
+        std::error_code ignored;
+        std::filesystem::remove_all(_path, ignored);
+    }
+
+    const std::filesystem::path& path() const {
+        return _path;
+    }
+
+    // Rewrite a node's own document, leaving the root's copy of it as it was.
+    void RewriteOwn(const std::string& node, const Rewrite& rewrite) const {
+        const auto document = _path / node / "zarr.json";
+        WriteText(document, rewrite(ReadText(document)));
+    }
+
+    carta::zarr::Result<carta::zarr::Image> OpenSky() const {
+        const auto context = carta::zarr::Context::Create();
+        Require(static_cast<bool>(context), "Context::Create failed");
+        const auto dataset = carta::zarr::Dataset::Open(context.value(), _path.string());
+        Require(static_cast<bool>(dataset), "Dataset::Open failed on " + _path.filename().string());
+        return dataset->OpenImage("SKY");
+    }
+
+private:
+    std::filesystem::path _path;
+};
+
+void RequireRefusedAtOpen(const carta::zarr::Result<carta::zarr::Image>& image, const std::string& node,
+                          const std::string& what) {
+    Require(!image, "SKY opened with " + what);
+    Require(image.error().code == carta::zarr::ErrorCode::invalid_metadata,
+            what + " was refused as something else: " + image.error().message);
+    Require(image.error().node_path == node, what + " was refused naming '" + image.error().node_path + "'");
+}
+
 // A coordinate is the image's only when it is the array the image was qualified against. With
 // consolidated metadata the store qualifies an image on the root's copy, while the coordinate's
 // values come from the array's own document; here the copy says two channels, as the image has,
 // and the array's own says one. That image used to open describing two channels with one
 // frequency. It is refused as the pixels would be, for an array that is not what the store said.
 void TestACoordinateDisagreeingWithItsConsolidatedCopyIsRefused(const char* fixture) {
-    const auto copy =
-        std::filesystem::temp_directory_path() / ("carta-zarr-coordinate-copy-" + std::to_string(getpid()));
+    const ConsolidatedCopy copy(fixture, "coordinate-copy");
+    copy.RewriteOwn("frequency", [](std::string text) { return Replaced(std::move(text), "\"shape\"", "2", "1"); });
+    RequireRefusedAtOpen(copy.OpenSky(), "frequency", "a frequency coordinate disagreeing with its copy");
+}
+
+// An image that opens can be read. Its own array and its flag disagreeing with the root's copy used
+// to open, and then fail every read -- and for the flag, only every masked one. Both are refused
+// when the image is opened, naming the array that disagrees.
+void TestAnImageWhoseArraysDisagreeWithTheirCopiesDoesNotOpen(const char* fixture) {
+    const ConsolidatedCopy sky(fixture, "sky-copy");
+    sky.RewriteOwn("SKY", [](std::string text) {
+        return Replaced(std::move(text), "\"data_type\"", "float32", "float64");
+    });
+    RequireRefusedAtOpen(sky.OpenSky(), "SKY", "a SKY whose own document holds another data type");
+
+    // Chunked otherwise, every pixel still reads -- TensorStore decodes with the array's own
+    // document -- but the chunk geometry the image reports, and every read planned from it, is the
+    // copy's.
+    const ConsolidatedCopy chunks(fixture, "chunk-copy");
+    chunks.RewriteOwn("SKY", [](std::string text) { return Replaced(std::move(text), "\"chunk_shape\"", "2", "1"); });
+    RequireRefusedAtOpen(chunks.OpenSky(), "SKY", "a SKY chunked otherwise than its copy says");
+
+    const ConsolidatedCopy flag(fixture, "flag-copy");
+    flag.RewriteOwn("FLAG", [](std::string text) { return Replaced(std::move(text), "\"data_type\"", "bool", "uint8"); });
+    RequireRefusedAtOpen(flag.OpenSky(), "FLAG", "a flag whose own document holds another data type");
+}
+
+// Labels are decoded by this library rather than by TensorStore, and were held to nothing. Decoded
+// with the root's copy of their document, a copy saying one label a chunk over chunks of three read
+// the first label and then the fill value for the rest, and a label array whose directory was gone
+// read as nothing but fill. Both opened an image with labels that were not the store's.
+void TestLabelsAreHeldToTheirOwnDocument(const char* fixture) {
+    const ConsolidatedCopy rechunked(fixture, "label-copy",
+                                     {{"polarization", [](std::string text) {
+                                           return Replaced(std::move(text), "\"chunk_shape\"", "3", "1");
+                                       }}});
+    RequireRefusedAtOpen(rechunked.OpenSky(), "polarization", "labels chunked otherwise than their copy says");
+
+    const ConsolidatedCopy missing(fixture, "label-gone");
+    std::filesystem::remove_all(missing.path() / "polarization");
+    RequireRefusedAtOpen(missing.OpenSky(), "polarization", "a label array whose own document is gone");
+
+    // How the chunks are compressed is not something the copy is held to: the labels are decoded with
+    // the document that wrote them, so a copy naming a compressor they were never written with
+    // reads them as they are.
+    const ConsolidatedCopy recompressed(
+        fixture, "label-codec", {{"polarization", [](std::string text) {
+                                      const auto codecs = text.find("\"codecs\"");
+                                      const auto end = text.find(']', codecs);
+                                      Require(codecs != std::string::npos && end != std::string::npos,
+                                              "the labels name no codecs");
+                                      return text.replace(
+                                          codecs, end + 1 - codecs,
+                                          R"("codecs":[{"name":"bytes","configuration":{"endian":"little"}},)"
+                                          R"({"name":"zstd","configuration":{"level":1,"checksum":false}}])");
+                                  }}});
+    const auto image = recompressed.OpenSky();
+    Require(static_cast<bool>(image), "labels whose copy names another compressor did not open: " +
+                                          (image ? std::string{} : image.error().message));
+    Require(image->descriptor().polarization &&
+                image->descriptor().polarization->labels == OpenSky(fixture).descriptor().polarization->labels,
+            "labels whose copy names another compressor were not read as written");
+}
+
+// A node name is held to one rule, the store's. On POSIX a backslash is a character like any other
+// in a file name, and the store has always accepted one; the transport refused the same name when
+// asked where the array lives, so a variable named that way was listed, opened, and then failed
+// every read.
+void TestAVariableNamedWithABackslashIsRead(const char* fixture) {
+    const auto copy = std::filesystem::temp_directory_path() / ("carta-zarr-backslash-" + std::to_string(getpid()));
     std::filesystem::remove_all(copy);
     std::filesystem::copy(fixture, copy, std::filesystem::copy_options::recursive);
     struct Remove {
@@ -595,39 +745,21 @@ void TestACoordinateDisagreeingWithItsConsolidatedCopyIsRefused(const char* fixt
             std::filesystem::remove_all(path, ignored);
         }
     } const remove{copy};
-
-    std::string consolidated;
-    for (const auto& entry : std::filesystem::directory_iterator(copy)) {
-        if (entry.is_directory() && std::filesystem::exists(entry.path() / "zarr.json")) {
-            consolidated += (consolidated.empty() ? "\"" : ",\"") + entry.path().filename().string() +
-                            "\":" + ReadText(entry.path() / "zarr.json");
-        }
-    }
-    auto root = ReadText(copy / "zarr.json");
-    const auto end = root.find_last_of('}');
-    Require(end != std::string::npos, "the fixture's root metadata is not an object");
-    root.insert(end, ",\"consolidated_metadata\":{\"kind\":\"inline\",\"must_understand\":false,\"metadata\":{" +
-                         consolidated + "}}");
-    WriteText(copy / "zarr.json", root);
-
-    auto frequency = ReadText(copy / "frequency" / "zarr.json");
-    const auto shape = frequency.find("\"shape\"");
-    const auto two = frequency.find('2', shape);
-    Require(shape != std::string::npos && two != std::string::npos, "the fixture's frequency has no shape of 2");
-    frequency.at(two) = '1';
-    WriteText(copy / "frequency" / "zarr.json", frequency);
+    std::filesystem::copy(copy / "SKY", copy / "SKY\\2", std::filesystem::copy_options::recursive);
 
     const auto context = carta::zarr::Context::Create();
     Require(static_cast<bool>(context), "Context::Create failed");
     const auto dataset = carta::zarr::Dataset::Open(context.value(), copy.string());
-    Require(static_cast<bool>(dataset), "Dataset::Open failed on the consolidated copy");
-    const auto image = dataset->OpenImage("SKY");
-    Require(!image, "SKY opened with a frequency coordinate that disagrees with the metadata it qualified on (" +
-                        (image ? std::to_string(image->descriptor().spectral->channel_frequencies.size()) : "") +
-                        " frequencies)");
-    Require(image.error().code == carta::zarr::ErrorCode::invalid_metadata,
-            "a coordinate disagreeing with its consolidated copy was refused as something else: " +
-                image.error().message);
+    Require(static_cast<bool>(dataset), "Dataset::Open failed on the copy with a backslash in a name");
+    const auto image = dataset->OpenImage("SKY\\2");
+    Require(static_cast<bool>(image), "the variable named with a backslash did not open: " +
+                                          (image ? std::string{} : image.error().message));
+    std::vector<float> pixels(kL * kM * kFrequency * kPolarization * kTime);
+    const auto read = image->Read(WholeImage(image->descriptor()), {pixels.data(), pixels.size()}, Unmasked());
+    Require(static_cast<bool>(read), "the variable named with a backslash was not read: " +
+                                         (read ? std::string{} : read.error().message));
+    Require(pixels.at(LogicalOffset(1, 2, 1, 0)) == ExpectedValue(1, 2, 1, 0, 0),
+            "the variable named with a backslash read the wrong pixels");
 }
 
 }  // namespace
@@ -656,6 +788,9 @@ int main() {
         TestAnOpenImageOutlivesTheWorkingDirectory(kFixtures[0]);
         TestAPrefetchedPlaneIsReadFromThePool(kFixtures[0]);
         TestACoordinateDisagreeingWithItsConsolidatedCopyIsRefused(kFixtures[0]);
+        TestAnImageWhoseArraysDisagreeWithTheirCopiesDoesNotOpen(kFixtures[0]);
+        TestLabelsAreHeldToTheirOwnDocument(kFixtures[0]);
+        TestAVariableNamedWithABackslashIsRead(kFixtures[0]);
         Require(fast_axes.size() == 2 && fast_axes.at(0) != fast_axes.at(1),
                 "the two fixtures should disagree about which spatial axis the store varies fastest; "
                 "if they agree, one of them was regenerated wrongly and half of this is untested");

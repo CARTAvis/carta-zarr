@@ -783,6 +783,37 @@ void TestABeamTableWhoseAxesAreReorderedOnDiskIsRefused(const std::filesystem::p
                 beams.error().message);
 }
 
+// A beam table's values are decoded with its own document, so its unit is read from the same one.
+// The root's copy of it was what the unit used to come from: here the copy says rad and the array's
+// own document says deg, which the two can because attributes are not something the copy is held to.
+// One table is one document, its layout, its values and its unit alike.
+void TestABeamTablesUnitIsItsOwnDocuments(const std::filesystem::path& root) {
+    std::filesystem::copy(CARTA_ZARR_REFERENCE_FIXTURE, root, std::filesystem::copy_options::recursive);
+    const auto metadata_path = root / "BEAM" / "zarr.json";
+    std::string text;
+    {
+        std::ifstream in(metadata_path);
+        text.assign(std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>());
+    }
+    const auto unit = text.find("\"units\": \"rad\"");
+    Require(unit != std::string::npos, "the BEAM metadata does not say its unit is rad");
+    text.replace(unit, std::string("\"units\": \"rad\"").size(), "\"units\": \"deg\"");
+    std::ofstream(metadata_path, std::ios::trunc) << text;
+
+    const auto context = carta::zarr::Context::Create();
+    Require(static_cast<bool>(context), "Context::Create failed");
+    const auto dataset = carta::zarr::Dataset::Open(context.value(), root.string());
+    Require(static_cast<bool>(dataset), "Dataset::Open failed on the copy with another BEAM unit");
+    const auto image = dataset.value().OpenImage("SKY");
+    Require(static_cast<bool>(image), "SKY did not open in the copy with another BEAM unit");
+    const auto beams = image.value().ReadBeams();
+    Require(beams && !beams.value().empty(), "the beam table with another unit was not read");
+    for (const auto& beam : beams.value()) {
+        Require(beam.unit == "deg", "a beam's unit was read from the root's copy, '" + beam.unit +
+                                        "', rather than from the document its values were decoded with");
+    }
+}
+
 void TestImageDatasetWithoutSky(const std::filesystem::path& root) {
     Write(root / "zarr.json", RootMetadata());
     Write(root / "RESIDUAL" / "zarr.json", SkyArray());
@@ -979,6 +1010,7 @@ int main() {
         TestEmptyAndOversizedMetadata(root / "metadata-bytes");
         TestBeamTableWithUnreadableLabels(root / "beam-labels");
         TestABeamTableWhoseAxesAreReorderedOnDiskIsRefused(root / "beam-axis-order");
+        TestABeamTablesUnitIsItsOwnDocuments(root / "beam-unit");
         TestANodeNameSpelledWithADotIsTheSameNode(root / "dotted-node");
         TestReferenceFixture();
         TestAnEntrySaysWhatOpeningWould();

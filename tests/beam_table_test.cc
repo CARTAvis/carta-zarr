@@ -136,6 +136,26 @@ void TestLabelsMustNameEveryParameter() {
     Require(beams.error().node_path == "beam_params_label", "the error did not name the label array");
 }
 
+// The labels are the coordinate of the table's parameter dimension, one label a parameter. More
+// labels than parameters used to read every one they could still find, and fewer read the
+// parameters they named and left the rest unaccounted for; either way the labels were another
+// table's. Fewer used to be refused only when a parameter fell past the end, and then as a slice
+// out of range rather than as the store being malformed.
+void TestLabelsAreOneAParameter() {
+    const auto more = DescribeBeams(Table({1, 3, 2, 3}, {"time", "frequency", "polarization", "beam_params_label"}),
+                                    "BEAM", {"minor", "major", "pa", "extra"}, Values(1, 3, 2));
+    Require(!more && more.error().code == ErrorCode::invalid_metadata,
+            "more labels than the table has parameters produced beams anyway");
+    Require(more.error().node_path == "beam_params_label", "the error did not name the label array");
+
+    const std::vector<double> four_parameters(static_cast<std::size_t>(1 * 3 * 2 * 4), 1.0);
+    const auto fewer = DescribeBeams(Table({1, 3, 2, 4}, {"time", "frequency", "polarization", "beam_params_label"}),
+                                     "BEAM", kLabels, four_parameters);
+    Require(!fewer && fewer.error().code == ErrorCode::invalid_metadata,
+            "fewer labels than the table has parameters produced beams anyway");
+    Require(fewer.error().node_path == "beam_params_label", "the error did not name the label array");
+}
+
 }  // namespace
 
 int main() {
@@ -145,6 +165,7 @@ int main() {
         TestAnAbsentTimeDimensionIsOnePlane();
         TestATableMissingADimensionIsAnError();
         TestLabelsMustNameEveryParameter();
+        TestLabelsAreOneAParameter();
         std::cout << "carta-zarr beam table tests passed\n";
         return 0;
     } catch (const std::exception& error) {

@@ -252,5 +252,48 @@ class Recommending(unittest.TestCase):
         self.assertEqual((now.layout.name, after.layout.name), ("current", "better"))
 
 
+
+class ResumingASweep(unittest.TestCase):
+    """A sweep resumes by skipping the runs its state says are done, and a run is done only for the
+    workload it measured: another seed, other operation counts or another source is another
+    measurement, and skipping it leaves results.csv holding the old one under the new name."""
+
+    def setUp(self) -> None:
+        self._directory = tempfile.TemporaryDirectory()
+        self.output = Path(self._directory.name)
+
+    def tearDown(self) -> None:
+        self._directory.cleanup()
+
+    def start(self, **given: Any) -> sweep.Sweep:
+        """A sweep in self.output that takes up the state there, and has measured one run."""
+        started = sweep.Sweep(config(**given), self.output)
+        started.adopt_workload()
+        started.state["runs"]["a run"] = {"seconds": 1.0}
+        started.save()
+        return started
+
+    def test_the_same_workload_resumes(self) -> None:
+        self.start()
+        resumed = sweep.Sweep(config(), self.output)
+        resumed.adopt_workload()
+        self.assertIn("a run", resumed.state["runs"])
+
+    def test_more_trials_or_modes_resume_since_the_runs_say_them(self) -> None:
+        self.start()
+        sweep.Sweep(config(measure={"trials": 9, "modes": ["plane"]}), self.output).adopt_workload()
+
+    def test_another_workload_is_refused_and_says_where(self) -> None:
+        for changed in ({"measure": {"seed": 999}}, {"measure": {"ops": {"plane": 3}}},
+                        {"measure": {"region_fraction": 0.5}}, {"source": {"crop": "l=0:4"}}):
+            with self.subTest(changed=changed):
+                for leftover in self.output.iterdir():
+                    leftover.unlink()
+                self.start()
+                with self.assertRaises(SystemExit) as refused:
+                    sweep.Sweep(config(**changed), self.output).adopt_workload()
+                self.assertIn(str(self.output), str(refused.exception))
+
+
 if __name__ == "__main__":
     unittest.main()

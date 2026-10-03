@@ -7,6 +7,7 @@
 #include "image.h"
 
 #include "../../zarr/array_metadata.h"
+#include "../../zarr/numeric_array.h"
 #include "attributes.h"
 #include "beam_table.h"
 #include "coordinates.h"
@@ -391,8 +392,12 @@ Result<std::vector<Beam>> ReadBeams(const Store& store, std::string_view image_i
     if (!values) {
         return values.error();
     }
+    auto table = zarr_metadata::NumericArray::Make(beam_array_name, beam_metadata.value(), std::move(values.value()));
+    if (!table) {
+        return table.error();
+    }
 
-    return DescribeBeams(beam_metadata.value(), beam_array_name, parameter_labels.value(), values.value());
+    return DescribeBeams(table.value(), parameter_labels.value());
 }
 
 }  // namespace carta::zarr::internal::xradio

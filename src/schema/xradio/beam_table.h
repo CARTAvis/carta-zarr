@@ -7,13 +7,12 @@
 #ifndef CARTA_ZARR_SRC_SCHEMA_XRADIO_BEAM_TABLE_H_
 #define CARTA_ZARR_SRC_SCHEMA_XRADIO_BEAM_TABLE_H_
 
-#include "../../zarr/array_metadata.h"
+#include "../../zarr/numeric_array.h"
 
 #include "carta-zarr/descriptor.h"
 #include "carta-zarr/result.h"
 
 #include <string>
-#include <string_view>
 #include <vector>
 
 namespace carta::zarr::internal::xradio {
@@ -26,18 +25,14 @@ namespace carta::zarr::internal::xradio {
  * without an array on disk. Handed the values instead, everything this decides -- which dimension is
  * which, that the labels name a major axis, a minor axis and a position angle, that a table missing
  * a dimension is an error rather than an empty list, and the order the three loops emit in -- is
- * checkable from two vectors. See ADR 0006.
+ * checkable from a table and its labels. See ADR 0006.
  *
- * `values` is the table's flat C-order buffer, addressed through the metadata by dimension name.
- * A table with no time dimension reads as a single plane. The unit comes from the table's own
- * `units` attribute, so a caller passes nothing it would have to read twice.
- *
- * `beam_node` is passed only because ArrayMetadata does not carry the name of the node it came
- * from, and an error about the table should say which variable it is about.
+ * `table` is addressed by dimension name, through the document its values were decoded with. A
+ * table with no time dimension reads as a single plane. The unit comes from the table's own `units`
+ * attribute, so a caller passes nothing it would have to read twice.
  */
-Result<std::vector<Beam>> DescribeBeams(const zarr::ArrayMetadata& beam_metadata, std::string_view beam_node,
-                                        const std::vector<std::string>& parameter_labels,
-                                        const std::vector<double>& values);
+Result<std::vector<Beam>> DescribeBeams(const zarr::NumericArray& table,
+                                        const std::vector<std::string>& parameter_labels);
 
 }  // namespace carta::zarr::internal::xradio
 

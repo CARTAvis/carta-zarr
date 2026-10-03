@@ -9,7 +9,7 @@
 // The table is a three- or four-dimensional array read through a flat buffer, and what decides
 // which element is which beam is dimension names against parameter labels. That used to be checked
 // by writing a store, opening it and calling ReadBeams; DescribeBeams takes the arrays already
-// read, so a case is two vectors.
+// read, so a case is a table and its labels.
 //
 // Every plane and parameter gets a value that identifies it -- major = 100*frequency +
 // 10*polarization, minor and the position angle one and two above it -- so a pair of transposed
@@ -21,6 +21,7 @@
 #include <exception>
 #include <iostream>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "support/check.h"
@@ -30,19 +31,11 @@ namespace {
 using carta::zarr::Beam;
 using carta::zarr::ErrorCode;
 using carta::zarr::internal::xradio::DescribeBeams;
-using ArrayMetadata = carta::zarr::internal::zarr::ArrayMetadata;
+using carta::zarr::internal::zarr::ArrayMetadata;
+using carta::zarr::internal::zarr::NumericArray;
 
 using carta::zarr::testing::Require;
 
-ArrayMetadata Table(std::vector<std::uint64_t> shape, std::vector<std::string> dimensions,
-                    const std::string& unit = "rad") {
-    ArrayMetadata metadata;
-    metadata.shape = std::move(shape);
-    metadata.dimension_names = std::move(dimensions);
-    metadata.data_type = "float64";
-    metadata.attributes = nlohmann::json{{"units", unit}};
-    return metadata;
-}
 
 // The value a plane's parameters are built from, so that every beam identifies where it came from.
 double Base(std::uint64_t time, std::uint64_t frequency, std::uint64_t polarization) {
@@ -66,6 +59,19 @@ std::vector<double> Values(std::uint64_t times, std::uint64_t frequencies, std::
     return values;
 }
 
+// A table as Store::ReadNumericArray hands it back: its values bound to its own document.
+NumericArray Table(std::vector<std::uint64_t> shape, std::vector<std::string> dimensions, std::vector<double> values,
+                   const std::string& unit = "rad") {
+    ArrayMetadata metadata;
+    metadata.shape = std::move(shape);
+    metadata.dimension_names = std::move(dimensions);
+    metadata.data_type = "float64";
+    metadata.attributes = nlohmann::json{{"units", unit}};
+    auto table = NumericArray::Make("BEAM", std::move(metadata), std::move(values));
+    Require(static_cast<bool>(table), "the table's values are not as many as its shape declares");
+    return std::move(table.value());
+}
+
 // Deliberately not in major/minor/pa order: a parameter is located by its label, not by position.
 const std::vector<std::string> kLabels{"minor", "major", "pa"};
 
@@ -78,8 +84,8 @@ void RequireBeamMatchesItsPlane(const Beam& beam, const std::string& what) {
 }
 
 void TestParametersAreLocatedByLabel() {
-    const auto beams = DescribeBeams(Table({1, 3, 2, 3}, {"time", "frequency", "polarization", "beam_params_label"}),
-                                     "BEAM", kLabels, Values(1, 3, 2));
+    const auto beams = DescribeBeams(
+        Table({1, 3, 2, 3}, {"time", "frequency", "polarization", "beam_params_label"}, Values(1, 3, 2)), kLabels);
     Require(static_cast<bool>(beams), "a well-formed beam table was not read");
     Require(beams.value().size() == 6, "the beam table did not decode one beam per frequency and polarization");
     for (const auto& beam : beams.value()) {
@@ -91,8 +97,8 @@ void TestParametersAreLocatedByLabel() {
 // A table with more than one time plane used to be read as its first plane only, silently. Time
 // varies slowest, so a single-plane table reads back in the order it always did.
 void TestEveryTimePlaneIsReported() {
-    const auto beams = DescribeBeams(Table({2, 3, 2, 3}, {"time", "frequency", "polarization", "beam_params_label"}),
-                                     "BEAM", kLabels, Values(2, 3, 2));
+    const auto beams = DescribeBeams(
+        Table({2, 3, 2, 3}, {"time", "frequency", "polarization", "beam_params_label"}, Values(2, 3, 2)), kLabels);
     Require(static_cast<bool>(beams), "a multi-plane beam table was not read");
     Require(beams.value().size() == 12, "the multi-plane beam table did not report every plane");
     for (const auto& beam : beams.value()) {
@@ -106,8 +112,8 @@ void TestEveryTimePlaneIsReported() {
 // A table need not carry a time dimension; an absent one is a single implicit plane. Addressing the
 // array must not insist on naming a dimension the array lacks.
 void TestAnAbsentTimeDimensionIsOnePlane() {
-    const auto beams = DescribeBeams(Table({3, 2, 3}, {"frequency", "polarization", "beam_params_label"}), "BEAM",
-                                     kLabels, Values(1, 3, 2));
+    const auto beams = DescribeBeams(
+        Table({3, 2, 3}, {"frequency", "polarization", "beam_params_label"}, Values(1, 3, 2)), kLabels);
     Require(static_cast<bool>(beams), "a beam table without a time dimension was not readable");
     Require(beams.value().size() == 6, "the time-less beam table did not report one beam per plane");
     for (const auto& beam : beams.value()) {
@@ -119,8 +125,7 @@ void TestAnAbsentTimeDimensionIsOnePlane() {
 // The image named a beam table, so a table that cannot be addressed is an error rather than an
 // empty list -- an empty list is the answer for an image with no beam at all, which this is not.
 void TestATableMissingADimensionIsAnError() {
-    const auto beams =
-        DescribeBeams(Table({3, 3}, {"frequency", "beam_params_label"}), "BEAM", kLabels, Values(1, 3, 1));
+    const auto beams = DescribeBeams(Table({3, 3}, {"frequency", "beam_params_label"}, Values(1, 3, 1)), kLabels);
     Require(!beams && beams.error().code == ErrorCode::invalid_metadata,
             "a beam table with no polarization dimension was read anyway");
     Require(beams.error().node_path == "BEAM", "the error did not name the beam table");
@@ -129,8 +134,9 @@ void TestATableMissingADimensionIsAnError() {
 // Same reasoning for the labels: parameters that cannot be located are a failure to read a beam,
 // not an image without one.
 void TestLabelsMustNameEveryParameter() {
-    const auto beams = DescribeBeams(Table({1, 3, 2, 3}, {"time", "frequency", "polarization", "beam_params_label"}),
-                                     "BEAM", {"minor", "major", "angle"}, Values(1, 3, 2));
+    const auto beams = DescribeBeams(
+        Table({1, 3, 2, 3}, {"time", "frequency", "polarization", "beam_params_label"}, Values(1, 3, 2)),
+        {"minor", "major", "angle"});
     Require(!beams && beams.error().code == ErrorCode::invalid_metadata,
             "labels that do not name a position angle produced beams anyway");
     Require(beams.error().node_path == "beam_params_label", "the error did not name the label array");
@@ -142,15 +148,16 @@ void TestLabelsMustNameEveryParameter() {
 // table's. Fewer used to be refused only when a parameter fell past the end, and then as a slice
 // out of range rather than as the store being malformed.
 void TestLabelsAreOneAParameter() {
-    const auto more = DescribeBeams(Table({1, 3, 2, 3}, {"time", "frequency", "polarization", "beam_params_label"}),
-                                    "BEAM", {"minor", "major", "pa", "extra"}, Values(1, 3, 2));
+    const auto more = DescribeBeams(
+        Table({1, 3, 2, 3}, {"time", "frequency", "polarization", "beam_params_label"}, Values(1, 3, 2)),
+        {"minor", "major", "pa", "extra"});
     Require(!more && more.error().code == ErrorCode::invalid_metadata,
             "more labels than the table has parameters produced beams anyway");
     Require(more.error().node_path == "beam_params_label", "the error did not name the label array");
 
     const std::vector<double> four_parameters(static_cast<std::size_t>(1 * 3 * 2 * 4), 1.0);
-    const auto fewer = DescribeBeams(Table({1, 3, 2, 4}, {"time", "frequency", "polarization", "beam_params_label"}),
-                                     "BEAM", kLabels, four_parameters);
+    const auto fewer = DescribeBeams(
+        Table({1, 3, 2, 4}, {"time", "frequency", "polarization", "beam_params_label"}, four_parameters), kLabels);
     Require(!fewer && fewer.error().code == ErrorCode::invalid_metadata,
             "fewer labels than the table has parameters produced beams anyway");
     Require(fewer.error().node_path == "beam_params_label", "the error did not name the label array");

@@ -50,9 +50,23 @@ is the first span's shift, a pixel, so two bases are near each other and their d
 The base and the offset are two values per region and channel that a block keeps and never reports.
 
 The loop takes distances only when `sum_sq_dev` was asked for; otherwise it is the loop it was, an
-instantiation of its own. Asking for it brings `num_pixels` and `sum` with it, since a merge needs
-both, and a block reports them. A cube histogram always takes them: its loop is bound by the branch
-on finiteness and the histogram it writes, not by arithmetic.
+instantiation of its own -- and so is everything under one unit of the walk, the folds included,
+since asking the question once per row cost a reduction of one-pixel strips 2% whether or not it
+wanted the spread. Asking for it brings `num_pixels` and `sum` with it, since a merge needs both, and
+a block reports them. A cube histogram always takes them: its loop is bound by the branch on
+finiteness and the histogram it writes, not by arithmetic.
+
+What it costs, measured with `carta_zarr_pass_timing` on the Apple-silicon Mac against the ASKAP cube
+(aligned builds, six interleaved rounds, median of seven repeats each, paired by round):
+
+| entry | 1 thread | 4 threads |
+|---|---|---|
+| ReduceSpectral, two regions, with `sum_sq_dev` | +5.8% | +6.2% |
+| ReduceSpectral, the whole plane, with it | +5.5% | +6.8% |
+| ReduceSpectral, 64 one-pixel strips, with it | +3.9% | +4.3% |
+| ReduceSpectral, a masked ellipse, with it | +6.6% | +7.0% |
+| ComputeCubeHistogram, which always counts it | +3.8% | +3.4% |
+| every entry not asked for it | within ±0.4%, each round's difference either side of zero | |
 
 Nothing else moves. The sum, the sum of squares, the extrema, the counts and every histogram bin are
 the same bits they were, with or without `sum_sq_dev` in the request, which an A/B trace of every

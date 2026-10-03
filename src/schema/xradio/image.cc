@@ -109,16 +109,14 @@ std::optional<SpectralCoordinate> DescribeSpectralCoordinate(const Store& store,
         }
     }
 
-    spectral.unit = AttributeString(frequency_attributes, "units");
+    // The axis reports the same unit, from the same rule.
+    spectral.unit = CoordinateUnit(store, SkyCoordinate(AxisRole::spectral));
     // The channel a linear description is measured from, which is the first one unless the
-    // reference frequency names another. Both of what that measure carries -- its units and frame
-    // under `attrs`, its value under `data` -- are read from the one lookup.
+    // reference frequency names another. What that measure carries -- its frame under `attrs`, its
+    // value under `data` -- is read from the one lookup.
     double reference_value = spectral.channel_frequencies.front();
     if (const auto* const reference_frequency = MemberObject(frequency_attributes, "reference_frequency")) {
         if (const auto* const attributes = MemberObject(*reference_frequency, "attrs")) {
-            if (spectral.unit.empty()) {
-                spectral.unit = AttributeString(*attributes, "units");
-            }
             spectral.system = Upper(AttributeString(*attributes, "observer"));
         }
         if (const auto value = MemberNumber(*reference_frequency, "data")) {

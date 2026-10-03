@@ -82,7 +82,16 @@ std::string CoordinateUnit(const Store& store, const Coordinate& coordinate) {
     if (!metadata) {
         return {};
     }
-    return AttributeString(metadata.value().attributes, "units");
+    const auto& attributes = metadata.value().attributes;
+    auto unit = AttributeString(attributes, "units");
+    if (unit.empty() && coordinate.role == AxisRole::spectral) {
+        if (const auto* const reference = MemberObject(attributes, "reference_frequency")) {
+            if (const auto* const measure = MemberObject(*reference, "attrs")) {
+                unit = AttributeString(*measure, "units");
+            }
+        }
+    }
+    return unit;
 }
 
 std::vector<AxisDescriptor> DescribeAxes(const Store& store, const zarr_metadata::ArrayMetadata& image) {

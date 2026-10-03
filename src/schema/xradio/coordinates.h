@@ -82,6 +82,16 @@ constexpr bool OnPlane(const Coordinate& coordinate, Plane plane) noexcept {
     return coordinate.plane == Plane::both || coordinate.plane == plane;
 }
 
+// The sky-plane coordinate playing `role`. Every role but `other` has exactly one.
+constexpr const Coordinate& SkyCoordinate(AxisRole role) noexcept {
+    for (const auto& coordinate : kCoordinates) {
+        if (coordinate.role == role && OnPlane(coordinate, Plane::sky)) {
+            return coordinate;
+        }
+    }
+    return kCoordinates.front();
+}
+
 // How many coordinates a variable on `plane` carries: the whole of what it is described by, so a
 // variable with more dimensions than this is not one this profile can read.
 std::size_t AxisCount(Plane plane) noexcept;
@@ -107,7 +117,9 @@ Result<void> CheckCoordinate(const zarr::ArrayMetadata& array, const Coordinate&
 std::optional<Diagnostic> ExtentDisagreement(const Store& store, const zarr::ArrayMetadata& image,
                                              std::string_view node);
 
-// The unit a coordinate's samples are in, or empty when the dataset does not say.
+// The unit a coordinate's samples are in, or empty when the dataset does not say. Its units
+// attribute; for the spectral coordinate, failing that, its reference frequency's, which is where
+// XRADIO writes it. Both the axis and the spectral coordinate report this, so they cannot disagree.
 std::string CoordinateUnit(const Store& store, const Coordinate& coordinate);
 
 // The axes of an image, in logical order, each with its length, its unit and where it sits in the

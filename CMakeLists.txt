@@ -249,6 +249,10 @@ if(CARTA_ZARR_BUILD_TESTS AND BUILD_TESTING)
         TEST_NAME carta-zarr-result
         SOURCES tests/result_test.cc)
 
+    carta_zarr_add_test(carta_zarr_allocation_failure_tests PUBLIC
+        TEST_NAME carta-zarr-allocation-failure
+        SOURCES tests/allocation_failure_test.cc)
+
     # The string decoder is an internal component with hidden visibility, so this test compiles it
     # directly instead of linking the shared library.
     carta_zarr_add_test(carta_zarr_string_tests INTERNAL

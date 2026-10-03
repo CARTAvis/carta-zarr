@@ -115,11 +115,15 @@ Result<Context> Context::Create(const ContextOptions& options) {
 }
 
 Result<CachePool> Context::NewCachePool(std::size_t bytes) const {
-    auto store_context = _impl->store_context->WithCachePool(bytes);
-    if (!store_context) {
-        return store_context.error();
-    }
-    return CachePool{std::make_shared<const CachePool::Impl>(bytes, std::move(store_context.value()))};
+    // Guarded for the reason Create is: the pool's spec and its handle are both allocations, and
+    // one that fails is the machine refusing a resource, which a caller is told as a Result.
+    return Guarded(ErrorCode::io_error, {}, [&]() -> Result<CachePool> {
+        auto store_context = _impl->store_context->WithCachePool(bytes);
+        if (!store_context) {
+            return store_context.error();
+        }
+        return CachePool{std::make_shared<const CachePool::Impl>(bytes, std::move(store_context.value()))};
+    });
 }
 
 CachePool::CachePool(std::shared_ptr<const Impl> impl) : _impl(std::move(impl)) {}

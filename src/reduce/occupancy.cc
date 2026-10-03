@@ -30,8 +30,9 @@ constexpr std::size_t kMaxChunkIncidences = 1u << 26;
 
 }  // namespace
 
-Result<Occupancy> Occupancy::Of(BufferView<const RegionMask> regions, std::uint64_t chunk_u, std::uint64_t chunk_v,
-                                AxisRole fastest_spatial_axis, const std::string& node) {
+Result<Occupancy> Occupancy::Of(BufferView<const RegionMask> regions, PlaneExtent plane, std::uint64_t chunk_u,
+                                std::uint64_t chunk_v, AxisRole fastest_spatial_axis, const std::string& node) {
+    (void)plane;
     const std::size_t region_count = regions.size;
     // The walk follows the store. Of the two spatial axes the one written last varies fastest, so
     // asking for it first is what keeps a plane from being transposed on its way into the

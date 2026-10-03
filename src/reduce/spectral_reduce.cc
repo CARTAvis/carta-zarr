@@ -147,8 +147,9 @@ Result<void> ReduceSpectral(const ReducibleImage& image, const SpectralReduceReq
     // runs are the kind worth taking -- so the plan is asked for it once and the occupancy is told.
     // Asked of the plan rather than of the geometry: the plan applied that rule when it picked
     // axis_u, and working it out again here would be a second place for it to be got wrong.
+    const PlaneExtent plane{descriptor.axes.at(map.x).length, descriptor.axes.at(map.y).length};
     auto occupancy_result =
-        Occupancy::Of(request.regions, plan.chunk_u, plan.chunk_v,
+        Occupancy::Of(request.regions, plane, plan.chunk_u, plan.chunk_v,
                       plan.SwapsSpatial() ? AxisRole::spatial_y : AxisRole::spatial_x, node);
     if (!occupancy_result) {
         return occupancy_result.error();

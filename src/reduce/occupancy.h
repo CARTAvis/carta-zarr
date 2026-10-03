@@ -157,6 +157,14 @@ struct OccupiedFootprint {
     std::uint64_t chunk_cv_end = 0;
 };
 
+// The extent of an image's plane along its two spatial axes, in the caller's x and y, which is what a
+// region is placed on. A struct rather than two more numbers beside a chunk shape of two, so that
+// neither pair can be handed over in the other's place.
+struct PlaneExtent {
+    std::uint64_t width = 0;
+    std::uint64_t height = 0;
+};
+
 /**
  * Which chunks a set of regions occupies, and which of them touch each one.
  *
@@ -187,8 +195,8 @@ public:
     //
     // Assumes at least one region: an empty set is refused a step earlier, where the rest of the
     // request is checked.
-    static Result<Occupancy> Of(BufferView<const RegionMask> regions, std::uint64_t chunk_u, std::uint64_t chunk_v,
-                                AxisRole fastest_spatial_axis, const std::string& node);
+    static Result<Occupancy> Of(BufferView<const RegionMask> regions, PlaneExtent plane, std::uint64_t chunk_u,
+                                std::uint64_t chunk_v, AxisRole fastest_spatial_axis, const std::string& node);
 
     // The caller's regions on the walk's axes, in the order they were given. The accumulation
     // indexes this by what RegionsTouching hands back.

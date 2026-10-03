@@ -739,6 +739,15 @@ void TestBeamTableWithUnreadableLabels(const std::filesystem::path& root) {
     const auto unnamed = open_sky(root / "unnamed");
     Require(!unnamed && unnamed.error().code == ErrorCode::invalid_metadata,
             "beam labels naming no beam parameter were reported as an image with no beam");
+
+    // Neither the table nor its labels: the table is what the image named, so it is what is missing.
+    CreateValidStore(root / "neither");
+    Write(root / "neither" / "SKY" / "zarr.json", sky_with_beam);
+    const auto neither = open_sky(root / "neither");
+    Require(!neither, "a beam table that is not there was reported as an image with no beam");
+    Require(neither.error().node_path.find("BEAM") != std::string::npos &&
+                neither.error().node_path.find("beam_params_label") == std::string::npos,
+            "a missing beam table was reported naming '" + neither.error().node_path + "' rather than the table");
 }
 
 // The beam table is read as one flat buffer and addressed by the dimension names the store parsed

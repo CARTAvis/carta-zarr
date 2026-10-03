@@ -436,15 +436,11 @@ const NodeEntry* Store::FindNode(std::string_view name) const {
 
 const Result<zarr::NumericArray>& Store::ReadNumericArray(std::string_view node) const {
     // A rejected name is remembered under the name as asked for, as ReadArrayMetadata remembers it,
-    // so that what is handed back is always something the store owns.
+    // so that what is handed back is always something the store owns. Reading it refuses it the way
+    // ReadArrayMetadata does, because VerifyArray asks that first.
     auto key = NormalizeNodeName(node);
     const std::string cache_key = key ? key.value() : std::string(node);
-    return _caches->double_arrays.GetOrCompute(cache_key, [&]() -> Result<zarr::NumericArray> {
-        if (!key) {
-            return key.error();
-        }
-        return ReadNumericArrayUncached(node);
-    });
+    return _caches->double_arrays.GetOrCompute(cache_key, [&] { return ReadNumericArrayUncached(node); });
 }
 
 Result<zarr::NumericArray> Store::ReadNumericArrayUncached(std::string_view node) const {

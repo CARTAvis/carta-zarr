@@ -28,49 +28,6 @@ namespace {
 
 constexpr double kInfinity = std::numeric_limits<double>::infinity();
 
-Result<void> ValidateRequest(const ImageDescriptor& descriptor, const AxisMap& axes,
-                             const SpectralReduceRequest& request) {
-    const auto& node = descriptor.id;
-    const auto region_count = request.regions.size;
-    if (region_count == 0 || request.regions.data == nullptr) {
-        return Error{ErrorCode::invalid_argument, "A spectral reduction needs at least one region", node};
-    }
-    if (region_count > kMaxSpectralRegions) {
-        return Error{ErrorCode::invalid_argument,
-                     "A spectral reduction accepts at most " + std::to_string(kMaxSpectralRegions) +
-                         " regions, not " + std::to_string(region_count),
-                     node};
-    }
-    if (request.statistics.empty()) {
-        return Error{ErrorCode::invalid_argument, "A spectral reduction needs at least one statistic", node};
-    }
-
-    const auto width = descriptor.axes.at(axes.x).length;
-    const auto height = descriptor.axes.at(axes.y).length;
-    for (std::size_t i = 0; i < region_count; ++i) {
-        const auto& region = request.regions.data[i];
-        if (region.width == 0 || region.height == 0) {
-            return Error{ErrorCode::invalid_argument, "Region " + std::to_string(i) + " is empty", node};
-        }
-        if (region.x_start >= width || region.width > width - region.x_start || region.y_start >= height ||
-            region.height > height - region.y_start) {
-            return Error{ErrorCode::invalid_argument,
-                         "Region " + std::to_string(i) + " falls outside the image", node};
-        }
-        // Both inside the image, so their product is a pixel count and cannot overflow.
-        const auto box = region.width * region.height;
-        const auto& mask = region.mask;
-        if (mask.data != nullptr ? mask.size != box : mask.size != 0) {
-            return Error{ErrorCode::invalid_argument,
-                         "Region " + std::to_string(i) + " has a mask of " + std::to_string(mask.size) +
-                             " elements for a box of " + std::to_string(box),
-                         node};
-        }
-    }
-
-    return {};
-}
-
 // The per-pixel loop, written so that a compiler can vectorise it.
 //
 // Both template parameters are loop invariants that used to be runtime tests, and each one on its
@@ -130,8 +87,10 @@ Result<void> ReduceSpectral(const ReducibleImage& image, const SpectralReduceReq
         return Error{ErrorCode::invalid_argument, "A spectral reduction needs a sink", node};
     }
 
-    if (auto valid = ValidateRequest(descriptor, map, request); !valid) {
-        return valid.error();
+    // The regions are Occupancy::Of's to check, which places them; everything else about a request
+    // is checked by the plan.
+    if (request.statistics.empty()) {
+        return Error{ErrorCode::invalid_argument, "A spectral reduction needs at least one statistic", node};
     }
 
     // Checked here as well as inside each slab request, so that a bad range is one error naming the

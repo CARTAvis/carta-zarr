@@ -187,14 +187,14 @@ struct PlaneExtent {
  */
 class Occupancy {
 public:
-    // Reports invalid_argument for a region set touching more chunks than one reduction can index.
+    // Reports invalid_argument for a region set it cannot place: none, or more than
+    // kMaxSpectralRegions; a region that is empty, falls off `plane`, or carries a raster that is not
+    // width * height bytes; and a set touching more chunks than one reduction can index. Nothing is
+    // assumed of the regions, so nothing has to be checked before this is called.
     //
     // A region's raster is turned into runs here, along u, so that the walk
     // takes the unmasked loop for it and its chunks are found from the runs; see region_runs.h. That
     // is one pass over the raster per call, about 2 ms for a 7763x4742 bounding box.
-    //
-    // Assumes at least one region: an empty set is refused a step earlier, where the rest of the
-    // request is checked.
     static Result<Occupancy> Of(BufferView<const RegionMask> regions, PlaneExtent plane, std::uint64_t chunk_u,
                                 std::uint64_t chunk_v, AxisRole fastest_spatial_axis, const std::string& node);
 

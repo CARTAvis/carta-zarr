@@ -240,12 +240,12 @@ std::string Describe(const Error& error) {
         std::vector<std::vector<Operation>> plans;
         for (unsigned process = 0; process < options.processes; ++process) {
             plans.push_back(PlanOperations(mode, *axes, options.seed, trial, options.processes, process, ops,
-                                           options.region_fraction, options.animation_frames));
+                                           options.region.fraction, options.animation.frames));
         }
         MarkSharedChunks(plans, *axes, image->chunk_geometry().chunk_shape);
         plan = std::move(plans[process_index]);
         runner.emplace(*context, std::move(image).value(), options.histogram, options.FirstTouchCacheBytes());
-        runner->SetAnimation(options.animation_fps, options.animation_prefetch);
+        runner->SetAnimation(options.animation.fps, options.animation.prefetch);
     }
 
     send(kReady);

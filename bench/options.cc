@@ -210,7 +210,7 @@ Command ParseRun(Arguments& arguments) {
             continue;
         }
         if (word == "--animation-prefetch") {
-            options.animation_prefetch = true;
+            options.animation.prefetch = true;
             continue;
         }
 
@@ -249,7 +249,7 @@ Command ParseRun(Arguments& arguments) {
                 return bad();
             }
         } else if (word == "--animation-frames") {
-            if (!count(options.animation_frames, 1)) {
+            if (!count(options.animation.frames, 1)) {
                 return bad();
             }
         } else if (word == "--animation-fps") {
@@ -259,7 +259,7 @@ Command ParseRun(Arguments& arguments) {
             if (text.empty() || end != text.c_str() + text.size() || !(fps >= 0.0)) {
                 return bad();
             }
-            options.animation_fps = fps;
+            options.animation.fps = fps;
         } else if (word == "--region-fraction") {
             char* end = nullptr;
             const std::string text(*value);
@@ -267,7 +267,7 @@ Command ParseRun(Arguments& arguments) {
             if (text.empty() || end != text.c_str() + text.size() || !(fraction > 0.0 && fraction <= 1.0)) {
                 return bad();
             }
-            options.region_fraction = fraction;
+            options.region.fraction = fraction;
         } else if (word == "--histogram-method") {
             const auto method = HistogramMethod::Parse(*value);
             if (!method) {

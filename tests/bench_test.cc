@@ -124,16 +124,16 @@ void TestSizesArePowersOf1024() {
 void TestTheCommandLine() {
     const auto defaults = Get<RunOptions>(Parse({"run", "cube.zarr"}));
     Require(defaults.dataset == "cube.zarr" && defaults.modes.size() == 6, "run does not default to every mode");
-    Require(defaults.OpsFor(Mode::animation) == 2 && defaults.animation_frames == 32,
+    Require(defaults.OpsFor(Mode::animation) == 2 && defaults.animation.frames == 32,
             "an animation does not default to two runs of 32 frames");
-    Require(defaults.animation_fps == 5.0 && !defaults.animation_prefetch,
+    Require(defaults.animation.fps == 5.0 && !defaults.animation.prefetch,
             "an animation does not default to CARTA's 5 frames a second without prefetch");
     const auto played = Get<RunOptions>(Parse({"run", "cube.zarr", "--animation-fps", "0", "--animation-prefetch"}));
-    Require(played.animation_fps == 0.0 && played.animation_prefetch, "--animation-fps or --animation-prefetch was lost");
+    Require(played.animation.fps == 0.0 && played.animation.prefetch, "--animation-fps or --animation-prefetch was lost");
     Require(Get<Usage>(Parse({"run", "cube.zarr", "--animation-fps", "-1"})).error, "a negative frame rate was accepted");
     Require(defaults.FirstTouchCacheBytes() == std::size_t{1} << 30,
             "a first touch does not get the backend's default cache when the context's is left to TensorStore");
-    Require(Get<RunOptions>(Parse({"run", "cube.zarr", "--animation-frames", "8"})).animation_frames == 8,
+    Require(Get<RunOptions>(Parse({"run", "cube.zarr", "--animation-frames", "8"})).animation.frames == 8,
             "--animation-frames was lost");
     Require(Get<Usage>(Parse({"run", "cube.zarr", "--animation-frames", "0"})).error,
             "an animation of no frames was accepted");
@@ -158,7 +158,7 @@ void TestTheCommandLine() {
             "--ops does not give a mode its own count over the one for every mode");
     Require(Get<RunOptions>(Parse({"run", "cube.zarr", "--ops", "spectrum=64"})).OpsFor(Mode::plane) == 16,
             "a count for one mode moved another mode off its default");
-    Require(shaped.region_fraction == 0.2, "--region-fraction was lost");
+    Require(shaped.region.fraction == 0.2, "--region-fraction was lost");
     Require(shaped.histogram.kind == HistogramMethod::Kind::sampled && shaped.histogram.stride == 8,
             "--histogram-method sampled:8 was lost");
     Require(defaults.histogram.kind == HistogramMethod::Kind::exact,
@@ -360,7 +360,7 @@ void TestTheRunKeyIsTheSettings() {
 
     // A setting that shapes one mode moves that mode's key and no other's.
     auto wider = options;
-    wider.region_fraction = 0.2;
+    wider.region.fraction = 0.2;
     auto binned = options;
     binned.histogram.kind = HistogramMethod::Kind::binned;
     Require(key == RowTemplate(wider, Mode::plane, ColdMethod::fadvise, facts, "run-a").run_key &&

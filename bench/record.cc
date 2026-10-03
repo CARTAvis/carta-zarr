@@ -248,18 +248,18 @@ Row RowTemplate(const RunOptions& options, Mode mode, ColdMethod cold, const Dat
     row.ops = options.OpsFor(mode);
     if (mode == Mode::region) {
         std::array<char, 32> fraction{};
-        std::snprintf(fraction.data(), fraction.size(), "%.4f", options.region_fraction);
+        std::snprintf(fraction.data(), fraction.size(), "%.4f", options.region.fraction);
         row.region_fraction = fraction.data();
     }
     if (mode == Mode::cube_histogram) {
         row.histogram_method = options.histogram.Spell();
     }
     if (mode == Mode::animation) {
-        row.animation_frames = std::to_string(options.animation_frames);
+        row.animation_frames = std::to_string(options.animation.frames);
         std::array<char, 32> fps{};
-        std::snprintf(fps.data(), fps.size(), "%g", options.animation_fps);
+        std::snprintf(fps.data(), fps.size(), "%g", options.animation.fps);
         row.animation_fps = fps.data();
-        row.animation_prefetch = Bool(options.animation_prefetch);
+        row.animation_prefetch = Bool(options.animation.prefetch);
     }
     row.trial_timeout_s = options.trial_timeout.count();
     row.cold_method = ColdMethodName(cold);

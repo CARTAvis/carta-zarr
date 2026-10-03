@@ -9,17 +9,13 @@
 
 #include "../../store.h"
 #include "../../zarr/array_metadata.h"
+#include "coordinates.h"
 
 #include <string>
 #include <string_view>
 #include <vector>
 
 namespace carta::zarr::internal::xradio {
-
-enum class CoordinateKind {
-    numeric,  // a real-valued coordinate such as frequency, l, or m
-    labels,   // a fixed-length UTF-32 coordinate such as polarization
-};
 
 /**
  * What a probe found, accumulated as it goes.
@@ -40,9 +36,9 @@ public:
     // True while every requirement so far has been met and no read has failed.
     bool ok() const noexcept;
 
-    // The image's coordinate array for one axis must exist, match the image's length for that axis,
-    // and hold the right kind of data. An axis the image does not carry is not required.
-    bool RequireCoordinateOf(const zarr::ArrayMetadata& image, std::string_view axis, CoordinateKind kind);
+    // The dataset's array for one coordinate must exist, read, and be well formed (CheckCoordinate).
+    // Whether an image agrees with it is qualification's question, not the probe's.
+    bool RequireCoordinate(const Coordinate& coordinate);
 
     // The root attributes must describe a direction coordinate casacore can be built from.
     bool RequireCoordinateSystem(const nlohmann::json& root_attributes);

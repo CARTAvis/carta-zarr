@@ -8,9 +8,9 @@
 
 #include "../../zarr/array_metadata.h"
 #include "attributes.h"
+#include "coordinates.h"
 #include "flag.h"
 
-#include <algorithm>
 #include <cstddef>
 #include <string>
 
@@ -18,42 +18,6 @@ namespace carta::zarr::internal::xradio {
 namespace {
 
 namespace zarr_metadata = ::carta::zarr::internal::zarr;
-
-// The Fourier-conjugate plane. Variables on it are images in every other respect, which is why they
-// are listed with a reason rather than passed over in silence.
-constexpr std::array<std::string_view, 5> kApertureAxes{"time", "frequency", "polarization", "u", "v"};
-
-bool HasAllAxes(const zarr_metadata::ArrayMetadata& metadata, const std::array<std::string_view, 5>& axes) {
-    return std::all_of(axes.begin(), axes.end(), [&metadata](const auto axis) {
-        return zarr_metadata::FindDimensionIndex(metadata, axis).has_value();
-    });
-}
-
-// A dataset stores each coordinate once and every image references it by dimension name, so an
-// image whose own extent disagrees with the coordinate it names cannot be described with it -- it
-// would be reported with another image's coordinate vector, three channels' worth over seven
-// channels of pixels.
-//
-// A coordinate the dataset does not carry at all is the probe's business rather than this one's:
-// every image references it, so its absence closes the dataset instead of one variable.
-std::optional<Diagnostic> DisagreementWithCoordinates(const Store& store,
-                                                      const zarr_metadata::ArrayMetadata& image,
-                                                      std::string_view node) {
-    const auto rank = std::min(image.dimension_names.size(), image.shape.size());
-    for (std::size_t axis = 0; axis < rank; ++axis) {
-        const auto& name = image.dimension_names.at(axis);
-        const auto& coordinate = store.ReadArrayMetadata(name);
-        if (!coordinate) {
-            continue;
-        }
-        if (coordinate.value().shape.size() != 1 || coordinate.value().shape.front() != image.shape.at(axis)) {
-            return Diagnostic{DiagnosticCode::invalid_metadata,
-                              "Image dimension '" + name + "' is not the length of the coordinate of that name",
-                              std::string(node)};
-        }
-    }
-    return std::nullopt;
-}
 
 // Why the flag an image declares cannot mask it, or nothing when it declares none or one that can.
 // What DetermineFlag refuses an image over, asked of the listing so that the two agree; with nothing
@@ -117,7 +81,7 @@ NodeQualification QualifyNode(const Store& store, const NodeEntry& entry) {
         return NodeQualification{};
     }
 
-    if (HasAllAxes(array, kSkyAxes)) {
+    if (CarriesPlane(array, Plane::sky)) {
         if (!zarr_metadata::IsRealDataType(array.data_type)) {
             return NodeQualification{true, false,
                                      Diagnostic{DiagnosticCode::unsupported_data_type,
@@ -126,7 +90,7 @@ NodeQualification QualifyNode(const Store& store, const NodeEntry& entry) {
         }
         // The five axes are the whole of what an image is described by, so a sixth would be read with
         // a selection one rank short -- every read refused, from an image listed as openable.
-        if (array.dimension_names.size() != kSkyAxes.size()) {
+        if (array.dimension_names.size() != AxisCount(Plane::sky)) {
             return NodeQualification{true, false,
                                      Diagnostic{DiagnosticCode::invalid_metadata,
                                                 "Sky-plane variable has dimensions beyond time, frequency, "
@@ -134,7 +98,7 @@ NodeQualification QualifyNode(const Store& store, const NodeEntry& entry) {
                                                 std::string(node)},
                                      true};
         }
-        if (auto disagreement = DisagreementWithCoordinates(store, array, node); disagreement) {
+        if (auto disagreement = ExtentDisagreement(store, array, node); disagreement) {
             return NodeQualification{true, false, std::move(disagreement), true};
         }
         // A declared flag binds the image to it -- DetermineFlag closes one whose flag cannot mask it --
@@ -145,7 +109,9 @@ NodeQualification QualifyNode(const Store& store, const NodeEntry& entry) {
         return NodeQualification{true, true, std::nullopt, false};
     }
 
-    if (HasAllAxes(array, kApertureAxes)) {
+    // The Fourier-conjugate plane. Variables on it are images in every other respect, which is why
+    // they are listed with a reason rather than passed over in silence.
+    if (CarriesPlane(array, Plane::aperture)) {
         return NodeQualification{true, false,
                                  Diagnostic{DiagnosticCode::unsupported_coordinate_plane,
                                             "Aperture-plane variables are not openable", std::string(node)},

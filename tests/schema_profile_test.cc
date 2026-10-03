@@ -16,6 +16,7 @@
 // store at all, and what happens when the store is consulted is checked here.
 
 #include "schema/profile.h"
+#include "schema/xradio/coordinates.h"
 #include "schema/xradio/flag.h"
 #include "schema/xradio/image.h"
 #include "store.h"
@@ -1304,6 +1305,35 @@ void TestAnAxisReportsItsCoordinatesUnit() {
             "the spectral axis and the spectral coordinate disagree about the unit");
 }
 
+// The coordinates are said once, and every list the profile used to keep is read off that table. The
+// sky plane's are the five an image carries, in the order its axes are reported; the aperture plane
+// shares three of them and has its own two.
+void TestTheCoordinatesAreOneTable() {
+    using carta::zarr::internal::xradio::AxisCount;
+    using carta::zarr::internal::xradio::CoordinateKind;
+    using carta::zarr::internal::xradio::kCoordinates;
+    using carta::zarr::internal::xradio::OnPlane;
+    using carta::zarr::internal::xradio::Plane;
+    const auto on = [](Plane plane) {
+        std::vector<std::string> names;
+        for (const auto& coordinate : kCoordinates) {
+            if (OnPlane(coordinate, plane)) {
+                names.emplace_back(coordinate.name);
+            }
+        }
+        return names;
+    };
+    Require(on(Plane::sky) == std::vector<std::string>{"l", "m", "frequency", "polarization", "time"},
+            "the sky plane's coordinates are not the five, in the logical order");
+    Require(on(Plane::aperture) == std::vector<std::string>{"frequency", "polarization", "time", "u", "v"},
+            "the aperture plane's coordinates are not the three shared and u and v");
+    Require(AxisCount(Plane::sky) == 5 && AxisCount(Plane::aperture) == 5, "a plane is not five axes");
+    for (const auto& coordinate : kCoordinates) {
+        Require((coordinate.kind == CoordinateKind::labels) == (coordinate.name == "polarization"),
+                "polarization is not the one coordinate holding labels");
+    }
+}
+
 }  // namespace
 
 int main() {
@@ -1349,6 +1379,7 @@ int main() {
         TestCheckingAnArrayReadsItsOwnDocumentOnce();
         TestDescribingAnImageHoldsItsArraysToTheirOwnDocuments();
         TestAPixelReadHoldsItsArrayToItsOwnDocument();
+        TestTheCoordinatesAreOneTable();
         TestAnAxisReportsItsCoordinatesUnit();
         std::cout << "carta-zarr schema profile tests passed\n";
         return 0;

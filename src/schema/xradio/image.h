@@ -8,6 +8,7 @@
 #define CARTA_ZARR_SRC_SCHEMA_XRADIO_IMAGE_H_
 
 #include "../profile.h"
+#include "coordinates.h"
 
 #include <optional>
 #include <string>
@@ -20,17 +21,6 @@ Result<SchemaInspection> InspectImages(const Store& store);
 
 // Reads the coordinate values, then describes the image from them. See DescribeImageFrom.
 Result<DescribedImage> DescribeImage(const Store& store, std::string_view image_id);
-
-// The samples of the dataset's coordinates, which is everything a description reads besides
-// metadata. A numeric coordinate the dataset does not hold is empty; the polarization labels are
-// absent rather than empty when there is no polarization coordinate at all.
-struct CoordinateValues {
-    std::vector<double> l;
-    std::vector<double> m;
-    std::vector<double> frequency;
-    std::vector<double> time;
-    std::optional<std::vector<std::string>> polarization;
-};
 
 // Every rule that turns an image's metadata and its coordinates' values into a descriptor, with the
 // values handed in rather than read.

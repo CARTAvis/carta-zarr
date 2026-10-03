@@ -7,7 +7,6 @@
 #include "probe_report.h"
 
 #include "direction.h"
-#include "zarr/string_array.h"
 
 #include <utility>
 
@@ -89,18 +88,12 @@ bool ProbeReport::RequireArrayMetadata(const Result<zarr::ArrayMetadata>& metada
     return Fail(DiagnosticCodeFor(metadata.error().code), metadata.error().message, std::string(node));
 }
 
-bool ProbeReport::RequireCoordinateOf(const zarr::ArrayMetadata& image, std::string_view axis, CoordinateKind kind) {
+bool ProbeReport::RequireCoordinate(const Coordinate& coordinate) {
     if (!ok()) {
         return false;
     }
-    const auto index = zarr_metadata::FindDimensionIndex(image, axis);
-    if (!index) {
-        // An axis the image does not carry has nothing to validate against.
-        return true;
-    }
-
-    const std::string node(axis);
-    const auto& metadata_result = _store->ReadNodeMetadata(axis);
+    const std::string node(coordinate.name);
+    const auto& metadata_result = _store->ReadNodeMetadata(coordinate.name);
     if (!metadata_result) {
         if (metadata_result.error().code == ErrorCode::not_found) {
             return Fail(DiagnosticCode::invalid_metadata, "Missing required coordinate array", node);
@@ -111,32 +104,12 @@ bool ProbeReport::RequireCoordinateOf(const zarr::ArrayMetadata& image, std::str
 
     // ReadArrayMetadata reuses both the raw metadata and parsed array metadata caches. Keeping the
     // raw read above preserves the distinction between missing metadata and other I/O errors.
-    const auto& array_result = _store->ReadArrayMetadata(axis);
+    const auto& array_result = _store->ReadArrayMetadata(coordinate.name);
     if (!RequireArrayMetadata(array_result, node)) {
         return false;
     }
-
-    const auto& coordinate = array_result.value();
-    // The length the image expects is not checked here. Agreeing with it is part of being an image
-    // this profile opens, so the default image -- which is the first one that qualified -- agrees
-    // with every coordinate it can read before the probe ever sees it. What is left is whether the
-    // coordinate is well formed in itself, which is a fact about the dataset.
-    if (coordinate.shape.size() != 1 || coordinate.dimension_names.size() != 1 ||
-        coordinate.dimension_names.front() != axis) {
-        return Fail(DiagnosticCode::invalid_metadata,
-                    "Coordinate shape or dimension name does not match " + _profile_name, node);
-    }
-    const bool typed = kind == CoordinateKind::labels ? zarr_metadata::IsFixedLengthUtf32(coordinate)
-                                                      : zarr_metadata::IsRealDataType(coordinate.data_type);
-    if (!typed) {
-        return Fail(DiagnosticCode::unsupported_data_type, "Coordinate array has an unsupported data type", node);
-    }
-    if (kind == CoordinateKind::labels) {
-        // Labels are decoded by this library rather than TensorStore, and only in the layouts it
-        // knows; one it cannot decode fails every image that opens, so it fails the probe instead.
-        if (auto decodable = zarr_metadata::CheckFixedLengthUtf32StringArray(coordinate, node); !decodable) {
-            return Fail(DiagnosticCodeFor(decodable.error().code), decodable.error().message, node);
-        }
+    if (auto checked = CheckCoordinate(array_result.value(), coordinate); !checked) {
+        return Fail(DiagnosticCodeFor(checked.error().code), checked.error().message, node);
     }
     return true;
 }

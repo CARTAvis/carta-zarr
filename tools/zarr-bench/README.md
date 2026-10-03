@@ -86,6 +86,10 @@ open. `run` writes one CSV row per operation; `--help` lists its options.
 - **`shares_chunks`** marks an operation that reads a chunk an earlier operation of its process read,
   or one any other process reads. Its time may be the page cache's, so it is not a first touch however
   fresh its cache pool; sweep.py ranks `plane`, `spectrum` and `region` without such operations.
+  It is counted by chunk, not by shard. Two operations reading different chunks of one shard share
+  the shard's index, a few bytes a chunk, and whether reading ahead in the shard's file brought the
+  later one's chunks in is up to the file system; counting by shard would leave a layout sharded
+  across every channel with one first touch a trial to rank.
 - **Cube histograms** are computed as carta-backend computes them by default
   (`--zarr_histogram_method exact`): a reduction over whole planes for the range, then every plane
   binned over it -- two passes over the cube, through a cache pool that keeps nothing, as the

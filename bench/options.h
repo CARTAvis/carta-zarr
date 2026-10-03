@@ -31,7 +31,8 @@ namespace carta::zarr::bench {
 // already decoded by the one before -- a median of cache hits, which says nothing about the layout
 // except that its chunks are deep. animation is where that reuse is the point, and measures it.
 //
-// The order is the one positions are drawn under, so a new mode goes at the end.
+// The order is the one positions are drawn under, so a new mode goes at the end. Everything else about
+// a mode is its Workload, in a file of its own under modes/; see mode.h.
 enum class Mode {
     plane,           // one whole l x m plane at a random channel
     spectrum,        // every channel at one random pixel

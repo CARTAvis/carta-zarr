@@ -102,13 +102,15 @@ ReadRequest OneElementPerChunk(const ChunkGeometry& geometry, const ReadRequest&
  * Decode the chunks a read of `request` would decode, keeping them wherever options.control's
  * cache pool says, and hand back nothing but how many there were.
  *
- * A read of OneElementPerChunk(request) through ReadInPieces, so it is checked, cancelled and masked
- * exactly as a read is: with the mask applied the flag's chunks are decoded too, which a read that
- * follows will want.
+ * A read of OneElementPerChunk(request) through ReadInPieces, so it is checked and cancelled
+ * exactly as a read is. With the mask applied the flag's chunks are decoded too, which a read that
+ * follows will want, sampled by `flag_geometry` rather than by the pixels': a flag chunked finer
+ * than its image, sampled where the pixels are, had half its chunks left to read from storage. The
+ * count is of both.
  */
 Result<std::uint64_t> PrefetchChunks(const PixelSource& source, const ImageDescriptor& descriptor,
-                                     const ChunkGeometry& geometry, const ReadRequest& request,
-                                     const ReadOptions& options);
+                                     const ChunkGeometry& geometry, const ChunkGeometry& flag_geometry,
+                                     const ReadRequest& request, const ReadOptions& options);
 
 
 }  // namespace carta::zarr::internal

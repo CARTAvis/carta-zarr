@@ -34,6 +34,8 @@ shape or the wrong values. One chunk is deleted and the flag marks a known patte
 fill-value and pixel-mask paths have a definition to be checked against.
 `images/zarr/xradio/pixels_l_fastest` is the same image stored with `l` rather than `m` last, for a
 reader that decides anything from where an axis sits rather than from its name.
+`images/zarr/xradio/pixels_fine_flag` is `pixels` with its flag chunked half as long along `l`, for
+a prefetch that must decode the flag's chunks by the flag's own layout.
 `images/zarr/xradio/pixels_wide`, 512 x 520 x 4 x 2, is large enough for the reductions to divide a
 plane or a chunk between workers, which the small ones never are; it has no absent chunk and no
 flag, since the small ones cover those.

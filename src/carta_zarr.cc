@@ -135,13 +135,15 @@ std::size_t CachePool::bytes() const noexcept {
 class Image::Impl {
 public:
     Impl(std::shared_ptr<Context::Impl> context, std::string location, internal::SchemaProfile profile,
-         std::shared_ptr<internal::Store> store, ImageDescriptor descriptor, ChunkGeometry geometry)
+         std::shared_ptr<internal::Store> store, ImageDescriptor descriptor, ChunkGeometry geometry,
+         ChunkGeometry flag_geometry)
         : context(std::move(context)),
           location(std::move(location)),
           profile(profile),
           store(std::move(store)),
           descriptor(std::move(descriptor)),
           geometry(std::move(geometry)),
+          flag_geometry(std::move(flag_geometry)),
           source(*this->store, this->descriptor) {}
 
     std::shared_ptr<Context::Impl> context;
@@ -153,6 +155,8 @@ public:
     std::shared_ptr<internal::Store> store;
     ImageDescriptor descriptor;
     ChunkGeometry geometry;
+    // The flag's own, which a prefetch samples the flag by. See DescribedImage.
+    ChunkGeometry flag_geometry;
     // Built once, from members rather than from the constructor's arguments, and declared last so
     // that both of those are already initialised. A PixelSource cannot be copied or moved, which is
     // why it lives here rather than being made at each entry point.
@@ -187,7 +191,8 @@ Result<std::size_t> Image::Read(const ReadRequest& request, BufferView<float> de
 
 Result<std::uint64_t> Image::Prefetch(const ReadRequest& request, const ReadOptions& options) const {
     return Guarded(ErrorCode::io_error, _impl->descriptor.id, [&] {
-        return internal::PrefetchChunks(_impl->source, _impl->descriptor, _impl->geometry, request, options);
+        return internal::PrefetchChunks(_impl->source, _impl->descriptor, _impl->geometry, _impl->flag_geometry,
+                                        request, options);
     });
 }
 
@@ -388,7 +393,8 @@ Result<Image> Dataset::OpenImage(std::string_view image_id) const {
         const std::string image_name(image_id);
         const auto make_image = [&](const internal::DescribedImage& described) {
             return Image{std::make_shared<Image::Impl>(_impl->context, _impl->location, _impl->profile,
-                                                      _impl->store, described.descriptor, described.geometry)};
+                                                      _impl->store, described.descriptor, described.geometry,
+                                                      described.flag_geometry)};
         };
         const auto cached = _impl->image_descriptors.find(image_name);
         if (cached != _impl->image_descriptors.end()) {

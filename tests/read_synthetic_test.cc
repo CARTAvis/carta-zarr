@@ -356,7 +356,7 @@ void TestAPrefetchDecodesWhatAReadWould() {
             "the box could not be read");
 
     SyntheticPixelSource source(image, geometry, Value);
-    const auto chunks = PrefetchChunks(source, image, geometry, UnalignedBox(), ReadOptions{});
+    const auto chunks = PrefetchChunks(source, image, geometry, geometry, UnalignedBox(), ReadOptions{});
     Require(chunks && *chunks == 4, "a prefetch of the box did not say it decoded its four chunks");
     Require(source.chunks_touched() == read_source.chunks_touched(),
             "a prefetch touched " + std::to_string(source.chunks_touched()) + " chunks where a read touches " +
@@ -371,21 +371,21 @@ void TestAPrefetchIsMaskedAndCheckedAsAReadIs() {
     const auto image = MakeImage(true);
     const auto geometry = MakeGeometry();
     SyntheticPixelSource source(image, geometry, Value);
-    Require(static_cast<bool>(PrefetchChunks(source, image, geometry, UnalignedBox(), ReadOptions{})),
+    Require(static_cast<bool>(PrefetchChunks(source, image, geometry, geometry, UnalignedBox(), ReadOptions{})),
             "a prefetch of a masked image failed");
     Require(source.mask_reads() == 1, "a prefetch of a masked image did not decode the flag's chunks");
 
     ReadOptions unmasked;
     unmasked.apply_pixel_mask = false;
     SyntheticPixelSource declined(image, geometry, Value);
-    Require(static_cast<bool>(PrefetchChunks(declined, image, geometry, UnalignedBox(), unmasked)) &&
+    Require(static_cast<bool>(PrefetchChunks(declined, image, geometry, geometry, UnalignedBox(), unmasked)) &&
                 declined.mask_reads() == 0,
             "a prefetch that declined the mask decoded the flag's chunks");
 
     ReadRequest beyond = UnalignedBox();
     beyond.axes.at(2) = Range{4, 3, 1};
     SyntheticPixelSource refused(image, geometry, Value);
-    const auto past = PrefetchChunks(refused, image, geometry, beyond, ReadOptions{});
+    const auto past = PrefetchChunks(refused, image, geometry, geometry, beyond, ReadOptions{});
     Require(!past && past.error().code == ErrorCode::invalid_argument,
             "a prefetch past the end of an axis was not refused");
     Require(refused.pixel_reads() == 0 && refused.mask_reads() == 0, "a refused prefetch read something");

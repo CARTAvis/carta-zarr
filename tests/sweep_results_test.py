@@ -359,6 +359,34 @@ class ResumingASweep(unittest.TestCase):
             self.assertNotEqual(sweep.workload(config(**warm)), sweep.workload(config(**given)),
                                 "a warm variant's build is not part of what the sweep measures")
 
+    def test_another_generator_is_another_workload(self) -> None:
+        # The bench reads what the generator writes: a generator rewritten to write other pixels keeps
+        # every setting, and the layouts it writes after the change measure other data. So does one
+        # whose helper beside it changed, since that is part of what runs.
+        with tempfile.TemporaryDirectory() as directory:
+            generator = Path(directory) / "generate.py"
+            helper = Path(directory) / "helper.py"
+            unrelated = Path(directory) / "unrelated.py"
+            generator.write_text("import json\nfrom helper import pixels\n")
+            helper.write_text("def pixels(): return 1\n")
+            unrelated.write_text("x = 1\n")
+            given = {"paths": {"generator": str(generator)}}
+            self.start(**given)
+            sweep.Sweep(config(**given), self.output).adopt_workload()
+
+            unrelated.write_text("x = 2\n")
+            sweep.Sweep(config(**given), self.output).adopt_workload()
+
+            for changed, text in ((generator, "import json\nfrom helper import pixels  # other\n"),
+                                  (helper, "def pixels(): return 2\n")):
+                with self.subTest(changed=changed.name):
+                    original = changed.read_text()
+                    changed.write_text(text)
+                    with self.assertRaises(SystemExit) as refused:
+                        sweep.Sweep(config(**given), self.output).adopt_workload()
+                    self.assertIn(str(self.output), str(refused.exception))
+                    changed.write_text(original)
+
     def test_a_bench_that_cannot_say_what_it_is_is_refused(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             bench = Path(directory) / "carta-zarr-bench"

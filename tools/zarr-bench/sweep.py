@@ -38,6 +38,7 @@ the top-level summary.md compares them and says what one layout and one setting 
 from __future__ import annotations
 
 import argparse
+import ast
 import csv
 import dataclasses
 import datetime
@@ -647,6 +648,26 @@ def bench_identity(bench: str) -> str:
     return identity
 
 
+def generator_identity(generator: str) -> str:
+    """The generator as the code it runs: its own bytes, which carry its pinned dependencies in the
+    script header, and those of each module beside it that it imports -- fingerprint.py for
+    generate.py. The path alone would say nothing of an edit, and an edit that writes other pixels is
+    another workload for every layout written after it."""
+    script = Path(generator)
+    digest = hashlib.sha256(script.read_bytes())
+    imported: set[str] = set()
+    for node in ast.walk(ast.parse(script.read_bytes())):
+        if isinstance(node, ast.Import):
+            imported.update(alias.name.split(".")[0] for alias in node.names)
+        elif isinstance(node, ast.ImportFrom) and node.module and node.level == 0:
+            imported.add(node.module.split(".")[0])
+    for name in sorted(imported):
+        beside = script.parent / f"{name}.py"
+        if beside.is_file():
+            digest.update(name.encode() + b"\0" + beside.read_bytes())
+    return digest.hexdigest()[:16]
+
+
 def workload(config: dict[str, Any]) -> str:
     """What every run of a sweep measures beside what its key says: the source, how the bench is told
     to read it, and the builds that read it. A run is done only for the workload it measured, and its
@@ -659,11 +680,12 @@ def workload(config: dict[str, Any]) -> str:
 
     A bench is the build it is, not the path it is at: rebuilt with a reader changed, the same path
     measures something else, and the runs it measured before would be skipped as done. So is each
-    warm variant."""
+    warm variant, and so is the generator, whose pixels are what every one of them reads."""
     measure = {name: value for name, value in config["measure"].items() if name not in RESUMABLE_MEASURE}
     path = config["source"]["path"]
     content = source_content(Path(path)) if path else ""
     builds = {"bench": bench_identity(config["paths"]["bench"]),
+              "generator": generator_identity(config["paths"]["generator"]),
               "warm": {variant["name"]: bench_identity(variant["bench"]) for variant in config["warm"]["variants"]}}
     said = json.dumps({"source": config["source"], "content": content, "measure": measure, "builds": builds},
                       sort_keys=True)
@@ -726,7 +748,7 @@ class Sweep:
             raise SystemExit(f"{self.output} holds runs from before sweeps recorded what they measured, so they "
                              "cannot be told from another workload's. Write this sweep to another output directory.")
         if measured and recorded != current:
-            raise SystemExit(f"{self.output} holds runs of another workload: the source, what it holds, the builds of the bench, or the measure settings "
+            raise SystemExit(f"{self.output} holds runs of another workload: the source, what it holds, the builds of the bench or the generator, or the measure settings "
                              f"({', '.join(sorted(set(self.config['measure']) - set(RESUMABLE_MEASURE)))}) "
                              "differ from those it was measured with. Write this sweep to another output directory.")
         self.state["workload"] = current

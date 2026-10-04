@@ -25,23 +25,6 @@ std::uint64_t ChunksAlong(std::uint64_t length, std::uint64_t chunk) {
     return chunk == 0 ? 1 : std::max<std::uint64_t>(1, (length + chunk - 1) / chunk);
 }
 
-// The most flag chunks one pixel chunk along an axis crosses: one when the two are chunked alike, more
-// when the flag's are shorter or their boundaries fall inside a pixel chunk. Asked of every pixel
-// chunk rather than bounded, since a bound that assumes the worst alignment doubles the count of two
-// chunk shapes that line up; an axis is at most a few thousand chunks long.
-std::uint64_t FlagChunksAcrossARun(std::uint64_t length, std::uint64_t pixel_chunk, std::uint64_t flag_chunk) {
-    if (flag_chunk == 0 || length == 0) {
-        return 1;
-    }
-    const std::uint64_t step = pixel_chunk == 0 ? length : pixel_chunk;
-    std::uint64_t most = 1;
-    for (std::uint64_t first = 0; first < length; first += step) {
-        const std::uint64_t last = std::min(first + step, length) - 1;
-        most = std::max(most, (last / flag_chunk) - (first / flag_chunk) + 1);
-    }
-    return most;
-}
-
 }  // namespace
 
 Run RunOf(const ChunkGeometry& geometry, const ReadRequest& request) {
@@ -96,7 +79,7 @@ std::uint64_t PlaneRunBytes(const ImageDescriptor& descriptor, const ChunkGeomet
         if (axis == *x || axis == *y) {
             flag_chunks *= ChunksAlong(length, flag_chunk);
         } else {
-            flag_chunks *= FlagChunksAcrossARun(length, chunk(geometry, axis), flag_chunk);
+            flag_chunks *= FlagChunksAcross(length, chunk(geometry, axis), flag_chunk);
         }
     }
     return pixels + (flag_chunks * ChunkElements(flag));

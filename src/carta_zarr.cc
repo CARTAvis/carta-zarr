@@ -168,7 +168,8 @@ public:
     std::shared_ptr<internal::Store> store;
     ImageDescriptor descriptor;
     ChunkGeometry geometry;
-    // The flag's own, which a prefetch samples the flag by. See DescribedImage.
+    // The flag's own, which a prefetch samples the flag by and every read and reduction is sized by
+    // beside the pixels'. See DescribedImage.
     ChunkGeometry flag_geometry;
     // Built once, from members rather than from the constructor's arguments, and declared last so
     // that both of those are already initialised. A PixelSource cannot be copied or moved, which is
@@ -179,7 +180,7 @@ public:
     // fails the reduction that needed them rather than the open -- which is where that failure has
     // always reached the caller.
     Result<internal::ReducibleImage> Reducible() const {
-        return internal::ReducibleImage::Of(source, descriptor, geometry, *context->workers);
+        return internal::ReducibleImage::Of(source, descriptor, geometry, flag_geometry, *context->workers);
     }
 };
 
@@ -197,8 +198,8 @@ const ChunkGeometry& Image::chunk_geometry() const noexcept {
 Result<std::size_t> Image::Read(const ReadRequest& request, BufferView<float> destination,
                                 const ReadOptions& options, const ProgressCallback& progress) const {
     return Guarded(ErrorCode::io_error, _impl->descriptor.id, [&] {
-        return internal::ReadInPieces(_impl->source, _impl->descriptor, _impl->geometry, request, destination,
-                                      options, progress);
+        return internal::ReadInPieces(_impl->source, _impl->descriptor, _impl->geometry, _impl->flag_geometry,
+                                      request, destination, options, progress);
     });
 }
 

@@ -50,9 +50,9 @@ Result<zarr::PixelSelection> CheckRead(const ImageDescriptor& descriptor, const 
 }  // namespace
 
 Result<std::size_t> ReadInPieces(const PixelSource& source, const ImageDescriptor& descriptor,
-                                 const ChunkGeometry& geometry, const ReadRequest& request,
-                                 BufferView<float> destination, const ReadOptions& options,
-                                 const ProgressCallback& progress) {
+                                 const ChunkGeometry& geometry, const ChunkGeometry& flag_geometry,
+                                 const ReadRequest& request, BufferView<float> destination,
+                                 const ReadOptions& options, const ProgressCallback& progress) {
     const auto checked = CheckRead(descriptor, request, destination.size, options.control);
     if (!checked) {
         return checked.error();
@@ -62,7 +62,7 @@ Result<std::size_t> ReadInPieces(const PixelSource& source, const ImageDescripto
     const auto elements = checked.value().elements();
 
     const bool apply_mask = AppliesPixelMask(options, descriptor);
-    const auto pieces = PlanPieces(descriptor, geometry, request, options, static_cast<bool>(progress));
+    const auto pieces = PlanPieces(descriptor, geometry, flag_geometry, request, options, static_cast<bool>(progress));
 
     std::vector<std::uint8_t> mask;
     for (const auto& piece : pieces) {
@@ -142,7 +142,8 @@ Result<std::uint64_t> PrefetchChunks(const PixelSource& source, const ImageDescr
     pixels_only.apply_pixel_mask = false;
     std::vector<float> discarded(static_cast<std::size_t>(chunks));
     auto read =
-        ReadInPieces(source, descriptor, geometry, sample, {discarded.data(), discarded.size()}, pixels_only, {});
+        ReadInPieces(source, descriptor, geometry, flag_geometry, sample, {discarded.data(), discarded.size()},
+                     pixels_only, {});
     if (!read) {
         return read.error();
     }

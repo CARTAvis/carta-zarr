@@ -49,12 +49,14 @@ struct Piece {
  * all happen here. They used to be handed to the one caller as a plan to carry out -- the cut axis,
  * the unit count, the elements per unit, the chunk extent -- and the caller did the arithmetic,
  * rewrote each piece's range and worked out where it landed. Whether the flag is decoded beside the
- * pixels, which the sizing counts, is asked of AppliesPixelMask rather than of the caller.
+ * pixels, which the sizing counts, is asked of AppliesPixelMask rather than of the caller; what it
+ * costs is asked of the flag's own layout, `flag_geometry`, which need not be the pixels'.
  *
  * The request has been checked against the descriptor already: it is a selection of this image.
  */
 std::vector<Piece> PlanPieces(const ImageDescriptor& descriptor, const ChunkGeometry& geometry,
-                              const ReadRequest& request, const ReadOptions& options, bool watching);
+                              const ChunkGeometry& flag_geometry, const ReadRequest& request,
+                              const ReadOptions& options, bool watching);
 
 /**
  * Read a densely packed float32 result, one piece at a time.
@@ -64,7 +66,7 @@ std::vector<Piece> PlanPieces(const ImageDescriptor& descriptor, const ChunkGeom
  * folds the flag in, and reports progress. The caller supplies the source and translates whatever
  * comes back; it does not need to know that any of this happened.
  *
- * It takes the source, the descriptor and the geometry, which are all it uses, rather than the
+ * It takes the source, the descriptor and the two geometries, which are all it uses, rather than the
  * ReducibleImage a reduction is handed: that also carries an axis map and a pool, and a read has no
  * use for either.
  *
@@ -76,9 +78,9 @@ std::vector<Piece> PlanPieces(const ImageDescriptor& descriptor, const ChunkGeom
  * buffer exceeds a ceiling that no further splitting gets under.
  */
 Result<std::size_t> ReadInPieces(const PixelSource& source, const ImageDescriptor& descriptor,
-                                 const ChunkGeometry& geometry, const ReadRequest& request,
-                                 BufferView<float> destination, const ReadOptions& options,
-                                 const ProgressCallback& progress);
+                                 const ChunkGeometry& geometry, const ChunkGeometry& flag_geometry,
+                                 const ReadRequest& request, BufferView<float> destination,
+                                 const ReadOptions& options, const ProgressCallback& progress);
 
 /**
  * One selected element in every chunk that `request` touches, and no more.

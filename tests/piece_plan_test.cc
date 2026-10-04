@@ -84,8 +84,15 @@ std::uint64_t ElementCount(const ReadRequest& request) {
 }
 
 std::vector<Piece> Pieces(const ImageDescriptor& descriptor, const ChunkGeometry& geometry,
+                          const ChunkGeometry& flag_geometry, const ReadRequest& request,
+                          const ReadOptions& options, bool watching = false) {
+    return PlanPieces(descriptor, geometry, flag_geometry, request, options, watching);
+}
+
+// A flag chunked as its pixels are, which is every image here but one.
+std::vector<Piece> Pieces(const ImageDescriptor& descriptor, const ChunkGeometry& geometry,
                           const ReadRequest& request, const ReadOptions& options, bool watching = false) {
-    return PlanPieces(descriptor, geometry, request, options, watching);
+    return Pieces(descriptor, geometry, geometry, request, options, watching);
 }
 
 bool SameRange(const Range& a, const Range& b) {
@@ -286,6 +293,32 @@ void TestApplyingTheFlagCostsTheBudget() {
             "a read that also decodes the flag cannot afford as much of the spectrum per piece");
 }
 
+// A flag chunked coarser than its pixels decodes the whole of a flag chunk beside each pixel chunk,
+// and a piece is sized against that. Two pixel chunks of 2 x 5 float32 cover the row, and the flag is
+// one chunk of 4 x 5: a piece of both decodes 80 bytes of pixels and 40 of flag, so a 100-byte budget
+// buys one pixel chunk -- 40 and the 40 of flag beside it -- not both, which counting the flag in the
+// pixels' chunks at 10 bytes each said it did.
+void TestACoarseFlagCostsItsOwnChunks() {
+    const auto image = MakeImage(4, 5, 2, /*has_mask=*/true);
+    const auto geometry = MakeGeometry(2, 5, 1);
+    ChunkGeometry flag;
+    flag.chunk_shape = {4, 5, 2, 1, 1};
+    auto request = WholeImage(image);
+    request.axes.at(1) = Range{0, 1, 1};
+    request.axes.at(2) = Range{0, 1, 1};
+
+    ReadOptions budget;
+    budget.read_budget_bytes = 100;
+    Require(Pieces(image, geometry, geometry, request, budget).size() == 1,
+            "a flag chunked alike costs a byte an element, so both pixel chunks fit");
+    const auto pieces = Pieces(image, geometry, flag, request, budget);
+    Require(pieces.size() == 2, "a piece was sized as if the flag beside it were chunked as its pixels");
+    RequireTheyFillTheDestination(pieces, request, "a coarse flag");
+
+    budget.apply_pixel_mask = false;
+    Require(Pieces(image, geometry, flag, request, budget).size() == 1, "an unmasked read paid for a flag");
+}
+
 // A stride of a chunk or more along an axis the read is not cut on steps over whole chunks, and the
 // chunks it steps over are not decoded -- so they are not what a piece's budget is spent on. Every
 // other column of 16-wide chunks is two chunks across the image, not the three its first and last
@@ -335,6 +368,7 @@ int main() {
         TestATighterCeilingBuysFewerChunks();
         TestNoChunkIsReadByTwoPieces();
         TestApplyingTheFlagCostsTheBudget();
+        TestACoarseFlagCostsItsOwnChunks();
         TestChunksAStrideStepsOverCostNothing();
         TestAStrideOverWholeChunksAlongTheCutIsAChunkAnElement();
     } catch (const std::exception& error) {

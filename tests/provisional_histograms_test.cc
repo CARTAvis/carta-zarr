@@ -84,7 +84,7 @@ struct Fixture {
         : image(MakeImage()), geometry(MakeGeometry()), source(image, geometry, Unused), pool(workers) {}
 
     ReducibleImage Reducible() {
-        auto reducible = ReducibleImage::Of(source, image, geometry, pool);
+        auto reducible = ReducibleImage::Of(source, image, geometry, geometry, pool);
         Require(static_cast<bool>(reducible), "the image's axes could not be mapped");
         return reducible.value();
     }

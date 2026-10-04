@@ -135,7 +135,7 @@ void TestAFailedFlagLeavesTheDestinationAlone() {
     source.fail_mask_read(1, ErrorCode::io_error);
 
     std::vector<float> destination(kElements, kUntouched);
-    const auto read = ReadInPieces(source, image, geometry, WholeCube(),
+    const auto read = ReadInPieces(source, image, geometry, geometry, WholeCube(),
                                    BufferView<float>{destination.data(), destination.size()}, ReadOptions{}, ProgressCallback{});
 
     Require(!read && read.error().code == ErrorCode::io_error, "a failed flag read was not reported");
@@ -156,7 +156,7 @@ void TestACeilingTooLowToFitIsRefused() {
     ReadOptions options;
     options.read_budget_bytes = 1;
     std::vector<float> destination(kElements, kUntouched);
-    const auto read = ReadInPieces(source, image, geometry, WholeCube(),
+    const auto read = ReadInPieces(source, image, geometry, geometry, WholeCube(),
                                    BufferView<float>{destination.data(), destination.size()}, options, ProgressCallback{});
 
     Require(!read && read.error().code == ErrorCode::buffer_too_small,
@@ -182,7 +182,7 @@ void TestProgressCountsElementsAndFinishesAtTheTotal() {
     };
 
     std::vector<float> destination(kElements, kUntouched);
-    const auto read = ReadInPieces(source, image, geometry, WholeCube(),
+    const auto read = ReadInPieces(source, image, geometry, geometry, WholeCube(),
                                    BufferView<float>{destination.data(), destination.size()}, options, progress);
     Require(static_cast<bool>(read) && read.value() == kElements, "a watched read did not produce the whole cube");
 
@@ -206,7 +206,7 @@ void TestProgressCanStopTheRead() {
     const ProgressCallback progress = [](std::size_t, std::size_t) { return false; };
 
     std::vector<float> destination(kElements, kUntouched);
-    const auto read = ReadInPieces(source, image, geometry, WholeCube(),
+    const auto read = ReadInPieces(source, image, geometry, geometry, WholeCube(),
                                    BufferView<float>{destination.data(), destination.size()}, options, progress);
     Require(!read && read.error().code == ErrorCode::cancelled, "a progress callback returning false did not cancel");
     Require(source.pixel_reads() == 1, "the read carried on past the piece its caller stopped it at");
@@ -220,7 +220,7 @@ void TestASplitReadAgreesWithAnUnsplitOne() {
 
     SyntheticPixelSource whole_source(image, geometry, Value);
     std::vector<float> whole(kElements, kUntouched);
-    const auto unsplit = ReadInPieces(whole_source, image, geometry, WholeCube(),
+    const auto unsplit = ReadInPieces(whole_source, image, geometry, geometry, WholeCube(),
                                       BufferView<float>{whole.data(), whole.size()}, ReadOptions{}, ProgressCallback{});
     Require(static_cast<bool>(unsplit), "the unsplit read failed");
     Require(whole_source.pixel_reads() == 1, "a read with no reason to split was issued in pieces");
@@ -230,7 +230,7 @@ void TestASplitReadAgreesWithAnUnsplitOne() {
     ReadOptions options;
     options.read_budget_bytes = kThreePieces;
     std::vector<float> split(kElements, kUntouched);
-    const auto in_pieces = ReadInPieces(split_source, image, geometry, WholeCube(),
+    const auto in_pieces = ReadInPieces(split_source, image, geometry, geometry, WholeCube(),
                                         BufferView<float>{split.data(), split.size()}, options, ProgressCallback{});
     Require(static_cast<bool>(in_pieces), "the split read failed");
     Require(split_source.pixel_reads() == 3, "the split read was issued in one piece after all");
@@ -253,7 +253,7 @@ void TestEachPieceIsHandedTheRestOfTheBuffer() {
     ReadOptions options;
     options.read_budget_bytes = kThreePieces;
     std::vector<float> destination(kElements + kSpare, kUntouched);
-    const auto read = ReadInPieces(source, image, geometry, WholeCube(),
+    const auto read = ReadInPieces(source, image, geometry, geometry, WholeCube(),
                                    BufferView<float>{destination.data(), destination.size()}, options,
                                    ProgressCallback{});
     Require(static_cast<bool>(read) && read.value() == kElements, "a read into a roomier buffer failed");
@@ -279,7 +279,7 @@ void TestAFlaggedPixelArrivesAsNaN() {
     source.set_flags([](const std::vector<std::uint64_t>& logical) { return logical.at(0) % 2 == 0; });
 
     std::vector<float> destination(kElements, kUntouched);
-    const auto read = ReadInPieces(source, image, geometry, WholeCube(),
+    const auto read = ReadInPieces(source, image, geometry, geometry, WholeCube(),
                                    BufferView<float>{destination.data(), destination.size()}, ReadOptions{}, ProgressCallback{});
     Require(static_cast<bool>(read), "a masked read failed");
     Require(source.mask_reads() > 0, "the flag was never read");
@@ -309,7 +309,7 @@ void TestDecliningTheMaskReadsNoFlag() {
     ReadOptions options;
     options.apply_pixel_mask = false;
     std::vector<float> destination(kElements, kUntouched);
-    const auto read = ReadInPieces(source, image, geometry, WholeCube(),
+    const auto read = ReadInPieces(source, image, geometry, geometry, WholeCube(),
                                    BufferView<float>{destination.data(), destination.size()}, options, ProgressCallback{});
     Require(static_cast<bool>(read), "declining the mask still failed on a flag that cannot be read");
     Require(source.mask_reads() == 0, "declining the mask still read the flag");
@@ -351,7 +351,7 @@ void TestAPrefetchDecodesWhatAReadWould() {
     const auto geometry = MakeGeometry();
     SyntheticPixelSource read_source(image, geometry, Value);
     std::vector<float> box(25 * 10 * 3, kUntouched);
-    Require(static_cast<bool>(ReadInPieces(read_source, image, geometry, UnalignedBox(),
+    Require(static_cast<bool>(ReadInPieces(read_source, image, geometry, geometry, UnalignedBox(),
                                            BufferView<float>{box.data(), box.size()}, ReadOptions{}, ProgressCallback{})),
             "the box could not be read");
 

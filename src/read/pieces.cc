@@ -70,7 +70,8 @@ std::uint64_t UnitsPerPiece(const ReadRequest& request, const ChunkGeometry& geo
 }  // namespace
 
 std::vector<Piece> PlanPieces(const ImageDescriptor& descriptor, const ChunkGeometry& geometry,
-                              const ReadRequest& request, const ReadOptions& options, bool watching) {
+                              const ChunkGeometry& flag_geometry, const ReadRequest& request,
+                              const ReadOptions& options, bool watching) {
     const auto axis = SlowestSelectedAxis(request);
     if (!axis || (!watching && options.read_budget_bytes == 0)) {
         return {Piece{request, 0}};
@@ -79,8 +80,10 @@ std::vector<Piece> PlanPieces(const ImageDescriptor& descriptor, const ChunkGeom
     // The flag is decoded beside the pixels when this read will apply it, so both halves of the
     // sizing count it: the budget the library chooses for itself, and the per-row cost that budget
     // is divided by. ReadCost counts it in both, from the one chunk cost, which is what keeps a piece
-    // from being sized against a cost the read does not have.
-    const auto units_per_piece = UnitsPerPiece(request, geometry, *axis, ReadCost::Of(descriptor, geometry, options));
+    // from being sized against a cost the read does not have -- and counts it in the flag's own
+    // chunks, which a piece decodes whole.
+    const auto units_per_piece =
+        UnitsPerPiece(request, geometry, *axis, ReadCost::Of(descriptor, geometry, flag_geometry, options));
     const auto chunk = *axis < geometry.chunk_shape.size() ? geometry.chunk_shape.at(*axis) : 0;
 
     // Every axis faster than the cut is whole in every piece, so one unit of the cut axis is worth

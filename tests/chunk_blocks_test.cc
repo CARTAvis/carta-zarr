@@ -11,9 +11,11 @@
 
 #include "chunk_blocks.h"
 
+#include <cstdint>
 #include <cstdio>
 #include <exception>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "support/check.h"
@@ -27,6 +29,20 @@ using carta::zarr::internal::kMinChunksPerRead;
 constexpr std::uint64_t kMiB = 1u << 20;
 
 using carta::zarr::testing::Require;
+
+// An image with a flag, of `lengths` along its axes in order -- all a cost asks of one.
+carta::zarr::ImageDescriptor Image(carta::zarr::DataType type, const std::vector<std::uint64_t>& lengths) {
+    carta::zarr::ImageDescriptor image;
+    image.stored_type = type;
+    image.has_pixel_mask = true;
+    image.pixel_mask_id = "FLAG";
+    for (const auto length : lengths) {
+        carta::zarr::AxisDescriptor axis;
+        axis.length = length;
+        image.axes.push_back(axis);
+    }
+    return image;
+}
 
 std::uint64_t ChunksPerRead(std::uint64_t chunk_bytes) {
     return DefaultReadBytes(chunk_bytes) / chunk_bytes;
@@ -84,29 +100,68 @@ void TestASmallChunkKeepsTheByteBudget() {
 // prevent.
 void TestAMaskCostsOneByteAnElement() {
     using carta::zarr::internal::ChunkElements;
-    using carta::zarr::internal::DecodedChunkBytes;
+    using carta::zarr::internal::ReadCost;
 
     carta::zarr::ChunkGeometry geometry;
     geometry.chunk_shape = {256, 260, 2, 1, 1};
     const std::uint64_t elements = 256ULL * 260ULL * 2ULL;
     Require(ChunkElements(geometry) == elements, "a chunk holds the product of its extents");
 
-    carta::zarr::ImageDescriptor image;
-    image.stored_type = carta::zarr::DataType::float32;
-    Require(DecodedChunkBytes(image, geometry, false) == elements * 4, "float32 is four bytes an element");
-    Require(DecodedChunkBytes(image, geometry, true) == elements * 5,
+    const auto image = Image(carta::zarr::DataType::float32, {512, 520, 32, 1, 1});
+    carta::zarr::ReadOptions masked;
+    carta::zarr::ReadOptions unmasked;
+    unmasked.apply_pixel_mask = false;
+    const auto chunk_bytes = [&](const carta::zarr::ImageDescriptor& of, const carta::zarr::ReadOptions& options) {
+        return ReadCost::Of(of, geometry, geometry, options).chunk_bytes;
+    };
+    Require(chunk_bytes(image, unmasked) == elements * 4, "float32 is four bytes an element");
+    Require(chunk_bytes(image, masked) == elements * 5,
             "four bytes of pixels and one of flag, so a masked float32 chunk is a quarter more");
 
     // The ratio is the image's, not a constant: the flag costs the same whatever the pixels are.
-    carta::zarr::ImageDescriptor doubles;
-    doubles.stored_type = carta::zarr::DataType::float64;
-    Require(DecodedChunkBytes(doubles, geometry, true) == elements * 9,
+    Require(chunk_bytes(Image(carta::zarr::DataType::float64, {512, 520, 32, 1, 1}), masked) == elements * 9,
             "beside float64 the same flag is an eighth more, not a doubling");
-
-    carta::zarr::ImageDescriptor bytes;
-    bytes.stored_type = carta::zarr::DataType::int8;
-    Require(DecodedChunkBytes(bytes, geometry, true) == elements * 2,
+    Require(chunk_bytes(Image(carta::zarr::DataType::int8, {512, 520, 32, 1, 1}), masked) == elements * 2,
             "only a one-byte image is actually doubled by its flag");
+}
+
+// A flag need share nothing with its image but the shape, and what decoding a pixel chunk brings
+// with it is the flag chunks that chunk lies across, whole. In the pixels' own chunks a flag kept in
+// one chunk was a byte an element beside each of them -- the coarse-flag fixture's row of two pixel
+// chunks counted 100 bytes and decoded 200.
+void TestAFlagIsCountedInItsOwnChunks() {
+    using carta::zarr::internal::DecodedFlagBytes;
+    using carta::zarr::internal::ReadCost;
+
+    const auto image = Image(carta::zarr::DataType::float32, {10, 5, 8, 4});
+    carta::zarr::ChunkGeometry pixels;
+    pixels.chunk_shape = {4, 4, 2, 2};
+    const auto flag = [](std::vector<std::uint64_t> shape) {
+        carta::zarr::ChunkGeometry geometry;
+        geometry.chunk_shape = std::move(shape);
+        return geometry;
+    };
+    Require(DecodedFlagBytes(image, pixels, pixels) == 64, "a flag chunked alike is a byte an element");
+    Require(DecodedFlagBytes(image, pixels, {}) == 64, "a flag with no layout of its own is the pixels'");
+    Require(DecodedFlagBytes(image, pixels, flag({2, 4, 1, 2})) == 64,
+            "a finer flag lined up with the pixels is the pixel chunk's elements, in more chunks");
+    Require(DecodedFlagBytes(image, pixels, flag({10, 5, 8, 4})) == 1600,
+            "a flag kept whole in one chunk is all of it beside every pixel chunk");
+    // Channels 2 and 3 are one pixel chunk across two flag chunks of three, so six channels deep.
+    Require(DecodedFlagBytes(image, pixels, flag({4, 4, 3, 2})) == 4ULL * 4 * 6 * 2,
+            "a flag chunk boundary inside a pixel chunk was not counted on both sides");
+
+    // The coarse-flag fixture: time, frequency, polarization, l, m of 1, 2, 3, 4, 5, the pixels in
+    // chunks of 1 x 1 x 1 x 2 x 5 and the flag in one chunk of all of it.
+    const auto fixture = Image(carta::zarr::DataType::float32, {1, 2, 3, 4, 5});
+    carta::zarr::ChunkGeometry fixture_pixels;
+    fixture_pixels.chunk_shape = {1, 1, 1, 2, 5};
+    const auto cost = ReadCost::Of(fixture, fixture_pixels, flag({1, 2, 3, 4, 5}), carta::zarr::ReadOptions{});
+    Require(cost.chunk_bytes == 40 + 120, "a pixel chunk of the coarse-flag fixture decodes the whole flag");
+    carta::zarr::ReadOptions unmasked;
+    unmasked.apply_pixel_mask = false;
+    Require(ReadCost::Of(fixture, fixture_pixels, flag({1, 2, 3, 4, 5}), unmasked).chunk_bytes == 40,
+            "a read that does not apply the flag does not decode it");
 }
 
 // What a walk decodes along the spectrum, which is what its progress is counted in. The chunks a
@@ -159,6 +214,7 @@ int main() {
         TestAnOversizedChunkIsCappedRatherThanMultiplied();
         TestASmallChunkKeepsTheByteBudget();
         TestAMaskCostsOneByteAnElement();
+        TestAFlagIsCountedInItsOwnChunks();
         TestASampleNamesTheChunksItTouches();
         TestAStrideCountsOnlyTheChunksItLandsIn();
     } catch (const std::exception& error) {

@@ -115,7 +115,9 @@ open. `run` writes one CSV row per operation; `--help` lists its options.
 - **Resuming.** Rows are written a trial at a time, so an interrupted run loses at most the trial it
   was in. `--resume` skips the trials the CSV already holds for the same settings -- the `run_key`
   column -- whose rows cover every operation of every process and hold no error. A trial run again
-  replaces the rows its earlier attempt left, so the CSV holds one attempt at each trial.
+  replaces the rows its earlier attempt left, so the CSV holds one attempt at each trial. A last line
+  cut short -- one without its newline, which the bench always writes -- is dropped before anything
+  is appended; any other line that is not a row stops the run rather than being written after.
 - **`checksum`** fingerprints what each operation returned, taken after the clock stops: the pixels
   for a read, the pixel counts and extremes for a reduction or a histogram, and an exact histogram's
   counts, which every layout of the same pixels must agree on exactly. Sums are left out, because

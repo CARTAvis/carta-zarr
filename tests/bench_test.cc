@@ -526,6 +526,109 @@ void TestResumingSkipsOnlyWholeTrials() {
     std::filesystem::remove(path);
 }
 
+// A CSV cut short in the middle of a row ends in a line with no newline, which the bench never
+// writes: every row it writes ends in one. That line is a row lost, not a row, and resuming drops it
+// before appending -- otherwise the next row is appended to it, and the sweep reading the CSV fails
+// on a line that is half of one row and all of another. With no whole row left at all there is no
+// trial to see as partial, and the line is dropped all the same. A malformed line that does end in a
+// newline was not cut short by a write stopping, and is refused rather than guessed at.
+void TestResumingDropsARowCutShort() {
+    const auto path =
+        (std::filesystem::temp_directory_path() / ("carta-zarr-bench-cut-" + std::to_string(getpid()) + ".csv"))
+            .string();
+    const auto base = RowTemplate(SomeOptions(), Mode::plane, ColdMethod::off, {}, "run");
+    const auto trial_rows = [&](unsigned trial) {
+        std::vector<std::string> rows;
+        for (unsigned process = 0; process < base.processes; ++process) {
+            for (unsigned op = 0; op < base.ops; ++op) {
+                auto row = base;
+                row.trial = trial;
+                row.process_index = process;
+                row.op_index = op;
+                row.status = "ok";
+                row.seconds = 0.5;
+                rows.push_back(FormatRow(row));
+            }
+        }
+        return rows;
+    };
+    const auto write_text = [&](const std::string& text) { std::ofstream(path, std::ios::trunc) << text; };
+    const auto lines_of = [&] {
+        std::ifstream written(path);
+        std::vector<std::string> lines;
+        for (std::string line; std::getline(written, line);) {
+            lines.push_back(line);
+        }
+        return lines;
+    };
+    const auto every_line_is_a_row = [&](const std::string& what) {
+        const auto lines = lines_of();
+        Require(!lines.empty() && lines.front() == CsvHeader(), what + ": the header is not the first line");
+        for (std::size_t i = 1; i < lines.size(); ++i) {
+            Require(SummariseRow(lines[i]).has_value(), what + ": line " + std::to_string(i + 1) + " is not a row");
+        }
+        return lines.size() - 1;
+    };
+    const auto join = [](const std::vector<std::string>& rows) {
+        std::string text;
+        for (const auto& row : rows) {
+            text += row + "\n";
+        }
+        return text;
+    };
+
+    // Cut in the middle of the last row of trial 1, after a whole trial 0.
+    {
+        const auto first = trial_rows(0);
+        const auto second = trial_rows(1);
+        write_text(CsvHeader() + "\n" + join(first) + join({second.begin(), second.end() - 1}) +
+                   second.back().substr(0, second.back().size() / 2));
+        std::string error;
+        auto output = CsvOutput::Open(path, error);
+        Require(output.has_value(), "a CSV cut short mid-row did not open: " + error);
+        const auto done = output->completed().find(base.run_key);
+        Require(done != output->completed().end() && done->second == std::set<unsigned>{0},
+                "a trial whose last row was cut short was taken as whole");
+        output->Write(base.run_key, 1, second);
+        Require(every_line_is_a_row("a trial rerun after its last row was cut short") == 2 * second.size(),
+                "a trial rerun after its last row was cut short did not leave exactly two trials of rows");
+    }
+
+    // Cut in the middle of the very first row: nothing whole to see a trial in.
+    {
+        const auto rows = trial_rows(0);
+        write_text(CsvHeader() + "\n" + rows.front().substr(0, 40));
+        std::string error;
+        auto output = CsvOutput::Open(path, error);
+        Require(output.has_value(), "a CSV cut short in its first row did not open: " + error);
+        Require(output->completed().empty(), "a CSV with no whole row held a whole trial");
+        output->Write(base.run_key, 0, rows);
+        Require(every_line_is_a_row("a trial run after the first row was cut short") == rows.size(),
+                "a trial run after the first row was cut short did not leave exactly its rows");
+    }
+
+    // Cut in the header itself: the file holds nothing yet, and gets its header.
+    {
+        write_text(CsvHeader().substr(0, 20));
+        std::string error;
+        auto output = CsvOutput::Open(path, error);
+        Require(output.has_value(), "a CSV cut short in its header did not open: " + error);
+        output->Write(base.run_key, 0, trial_rows(0));
+        Require(every_line_is_a_row("a trial run after the header was cut short") == trial_rows(0).size(),
+                "a trial run after the header was cut short did not leave exactly its rows");
+    }
+
+    // A malformed line that ends in a newline is not a write cut short.
+    {
+        const auto rows = trial_rows(0);
+        write_text(CsvHeader() + "\n" + rows.front().substr(0, 40) + "\n" + join({rows.begin() + 1, rows.end()}));
+        std::string error;
+        Require(!CsvOutput::Open(path, error) && error.find(path) != std::string::npos,
+                "a CSV with a malformed row in the middle was appended to, or refused without naming it");
+    }
+    std::filesystem::remove(path);
+}
+
 // An animation plays consecutive channels, and two of one trial never play the same ones while the
 // cube has channels enough for both.
 void TestAnAnimationPlaysConsecutiveChannels() {
@@ -879,6 +982,7 @@ int main(int argc, char** argv) {
         TestTheRunKeyIsTheSettings();
         TestARowIsOneLine();
         TestResumingSkipsOnlyWholeTrials();
+        TestResumingDropsARowCutShort();
         TestEachModeReads();
         TestAFirstTouchReadsItsChunksAgain();
         TestTheColdMethodIsChosenOrRefused();

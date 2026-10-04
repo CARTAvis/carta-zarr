@@ -575,6 +575,54 @@ void TestAPrefetchedPlaneIsReadFromThePool(const char* fixture, std::uint64_t ex
             "a plane that was not prefetched still read from emptied chunks, so this shows nothing about the prefetch");
 }
 
+// A pool outlives the datasets read through it, and what it keeps of one is not the next one's. Here a
+// dataset is read through a pool, closed, rewritten -- every pixel chunk removed, so every pixel is the
+// fill value -- and opened again through the same pool: it reads the fill value, as a read through the
+// session's pool does. The array handle the pool used to keep by path answered with the chunks it had
+// decoded before, since a chunk cached after a handle was opened is never asked about again (ADR 0015).
+void TestAPoolDoesNotCarryOneDatasetsArraysIntoTheNext(const char* fixture) {
+    const auto copy = std::filesystem::temp_directory_path() / ("carta-zarr-pool-reopen-" + std::to_string(getpid()));
+    std::filesystem::remove_all(copy);
+    std::filesystem::copy(fixture, copy, std::filesystem::copy_options::recursive);
+    struct Remove {
+        std::filesystem::path path;
+        ~Remove() {
+            std::error_code ignored;
+            std::filesystem::remove_all(path, ignored);
+        }
+    } const remove{copy};
+
+    carta::zarr::ReadRequest plane;
+    plane.axes = {{0, kL, 1}, {0, kM, 1}, {0, 1, 1}, {0, 1, 1}, {0, 1, 1}};
+    const auto context = carta::zarr::Context::Create();
+    Require(static_cast<bool>(context), "Context::Create failed");
+    const auto pool = context->NewCachePool(std::size_t{64} << 20);
+    Require(static_cast<bool>(pool), "NewCachePool failed");
+    auto options = Unmasked();
+    options.control.cache_pool = *pool;
+    const auto read = [&](const carta::zarr::ReadOptions& with) {
+        const auto dataset = carta::zarr::Dataset::Open(context.value(), copy.string());
+        Require(static_cast<bool>(dataset), "Dataset::Open failed on the copy of the fixture");
+        const auto sky = dataset->OpenImage("SKY");
+        Require(static_cast<bool>(sky), "SKY could not be opened in the copy");
+        std::vector<float> pixels(kL * kM, 123.0F);
+        const auto outcome = sky->Read(plane, {pixels.data(), pixels.size()}, with);
+        Require(static_cast<bool>(outcome), "the plane did not read" + (outcome ? std::string{} : ": " + outcome.error().message));
+        return pixels;
+    };
+    const auto before = read(options);
+    Require(std::none_of(before.begin(), before.end(), [](float value) { return std::isnan(value); }),
+            "the plane read is all fill value already, so removing its chunks shows nothing");
+
+    std::filesystem::remove_all(copy / "SKY" / "c");
+    const auto after = read(options);
+    Require(std::all_of(after.begin(), after.end(), [](float value) { return std::isnan(value); }),
+            "a dataset opened again through the same pool read what the pool kept of the one before it");
+    const auto session = read(Unmasked());
+    Require(std::all_of(session.begin(), session.end(), [](float value) { return std::isnan(value); }),
+            "the session's pool did not read the rewritten dataset as rewritten");
+}
+
 std::string ReadText(const std::filesystem::path& path) {
     std::ifstream in(path);
     return {std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>()};
@@ -795,6 +843,7 @@ int main() {
         // chunked half as long.
         TestAPrefetchedPlaneIsReadFromThePool(kFixtures[0], 4);
         TestAPrefetchedPlaneIsReadFromThePool(CARTA_ZARR_PIXEL_FIXTURE_FINE_FLAG, 6);
+        TestAPoolDoesNotCarryOneDatasetsArraysIntoTheNext(kFixtures[0]);
         TestACoordinateDisagreeingWithItsConsolidatedCopyIsRefused(kFixtures[0]);
         TestAnImageWhoseArraysDisagreeWithTheirCopiesDoesNotOpen(kFixtures[0]);
         TestLabelsAreHeldToTheirOwnDocument(kFixtures[0]);

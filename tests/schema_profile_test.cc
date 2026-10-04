@@ -35,6 +35,7 @@
 #include <map>
 #include <set>
 #include <string>
+#include <tuple>
 #include <utility>
 #include <vector>
 
@@ -801,6 +802,13 @@ void TestFirstFaultIsTheOnlyDiagnostic() {
 // Choosing a flag is the half of it that consults the store: what a flag has to be once it is found
 // takes no store at all and is checked in tests/flag_test.cc.
 //
+// The same root, declaring `data_groups` as given.
+std::string RootGroupWithDataGroups(const std::string& data_groups) {
+    auto root = RootGroup();
+    root.insert(root.find("},\"zarr_format\""), ",\"data_groups\":" + data_groups);
+    return root;
+}
+
 // A declared flag is the image's own statement that its pixels need a mask, so an image naming one
 // that cannot be read is closed rather than opened unmasked. Reads apply the mask by default, and an
 // unusable mask reported as no mask would show flagged pixels as valid -- the one failure a consumer
@@ -837,11 +845,19 @@ void TestADeclaredFlagIsBinding() {
 // The listing's half of the same rule. An image whose declared flag cannot mask it is closed when it
 // is opened, so it has to be closed when it is listed too: it was listed openable and chosen as the
 // default, and a consumer offered an image it could not open.
+//
+// A flag is declared on the image's own attribute or by a data group naming the image as its sky, and
+// the listing asks both, as DetermineFlag does: it asked only the attribute, so a data group declaring
+// a missing flag left the image listed openable and refused when opened.
 void TestADeclaredFlagThatCannotMaskClosesTheImageInTheListing() {
     const std::string sky_dimensions = R"(["time","frequency","polarization","l","m"])";
-    const auto listing = [&](const std::string& flag_node) {
+    const auto listing = [&](bool by_group, const std::string& flag_node, const std::string& data_groups) {
         auto nodes = CompleteStore();
-        nodes["SKY"] = SkyArray("float32", R"({"units":"Jy/beam","flag":"MASK_0"})");
+        if (by_group) {
+            nodes[""] = RootGroupWithDataGroups(data_groups);
+        } else {
+            nodes["SKY"] = SkyArray("float32", R"({"units":"Jy/beam","flag":"MASK_0"})");
+        }
         nodes["MODEL"] = SkyArray();
         if (!flag_node.empty()) {
             nodes["MASK_0"] = flag_node;
@@ -853,27 +869,38 @@ void TestADeclaredFlagThatCannotMaskClosesTheImageInTheListing() {
         Require(static_cast<bool>(discovery), "discovery failed on the declared-flag listing store");
         return std::make_pair(discovery.value(), profile.Describe(store.value(), "SKY"));
     };
+    const std::string declares_mask = R"({"base":{"sky":"SKY","flag":"MASK_0"}})";
+    const auto usable_flag = NumericArray("[1,3,2,4,5]", sky_dimensions, "bool", R"({"type":"flag"})");
 
-    const auto usable = listing(NumericArray("[1,3,2,4,5]", sky_dimensions, "bool", R"({"type":"flag"})"));
-    Require(OpenableImageIds(usable.first.images) == std::vector<std::string>{"SKY", "MODEL"},
-            "an image whose declared flag can mask it was not listed openable");
+    for (const bool by_group : {false, true}) {
+        const std::string how = by_group ? " declared by a data group" : " declared on the image";
+        const auto usable = listing(by_group, usable_flag, declares_mask);
+        Require(OpenableImageIds(usable.first.images) == std::vector<std::string>{"SKY", "MODEL"},
+                "an image whose flag" + how + " can mask it was not listed openable");
 
-    const std::vector<std::pair<std::string, std::string>> unusable{
-        {"", "a declared flag that does not exist"},
-        {NumericArray("[1,3,2,4,4]", sky_dimensions, "bool", R"({"type":"flag"})"), "a flag of another shape"},
-        {NumericArray("[1,3,2,4,5]", sky_dimensions, "uint8", R"({"type":"flag"})"), "a flag that is not boolean"},
-    };
-    for (const auto& [flag_node, what] : unusable) {
-        const auto [discovery, sky] = listing(flag_node);
-        Require(ImageIds(discovery.images) == std::vector<std::string>{"SKY", "MODEL"},
-                "an image with " + what + " was dropped from the listing rather than listed with its reason");
-        Require(OpenableImageIds(discovery.images) == std::vector<std::string>{"MODEL"},
-                "an image with " + what + " was listed openable");
-        Require(discovery.default_image_id == "MODEL", "an image with " + what + " was chosen as the default");
-        Require(HasDiagnostic(discovery.images.front().diagnostics, carta::zarr::DiagnosticCode::invalid_metadata),
-                "an image with " + what + " was listed without saying why it will not open");
-        Require(!sky && sky.error().code == ErrorCode::invalid_metadata,
-                "describing an image with " + what + " was not refused as invalid metadata");
+        std::vector<std::tuple<std::string, std::string, std::string>> unusable{
+            {"", declares_mask, "a flag that does not exist"},
+            {NumericArray("[1,3,2,4,4]", sky_dimensions, "bool", R"({"type":"flag"})"), declares_mask,
+             "a flag of another shape"},
+            {NumericArray("[1,3,2,4,5]", sky_dimensions, "uint8", R"({"type":"flag"})"), declares_mask,
+             "a flag that is not boolean"},
+        };
+        if (by_group) {
+            unusable.emplace_back(usable_flag, R"({"base":{"sky":"SKY","flag":"MASK_0"},"robust":{"sky":"SKY","flag":"MASK_1"}})",
+                                  "two different flags");
+        }
+        for (const auto& [flag_node, data_groups, what] : unusable) {
+            const auto [discovery, sky] = listing(by_group, flag_node, data_groups);
+            const auto with = "an image with " + what + how;
+            Require(ImageIds(discovery.images) == std::vector<std::string>{"SKY", "MODEL"},
+                    with + " was dropped from the listing rather than listed with its reason");
+            Require(OpenableImageIds(discovery.images) == std::vector<std::string>{"MODEL"}, with + " was listed openable");
+            Require(discovery.default_image_id == "MODEL", with + " was chosen as the default");
+            Require(HasDiagnostic(discovery.images.front().diagnostics, carta::zarr::DiagnosticCode::invalid_metadata),
+                    with + " was listed without saying why it will not open");
+            Require(!sky && sky.error().code == ErrorCode::invalid_metadata,
+                    "describing " + with + " was not refused as invalid metadata");
+        }
     }
 }
 
@@ -899,13 +926,6 @@ void TestAnImageWithAnAxisBeyondTheFiveIsNotOpenable() {
     const auto model = profile.Describe(store.value(), "MODEL");
     Require(!model && model.error().code == ErrorCode::invalid_metadata,
             "an image with an axis this profile cannot describe was not refused as invalid metadata");
-}
-
-// The same root, declaring `data_groups` as given.
-std::string RootGroupWithDataGroups(const std::string& data_groups) {
-    auto root = RootGroup();
-    root.insert(root.find("},\"zarr_format\""), ",\"data_groups\":" + data_groups);
-    return root;
 }
 
 carta::zarr::Result<std::string> FlagOfSky(const std::map<std::string, std::string>& nodes,

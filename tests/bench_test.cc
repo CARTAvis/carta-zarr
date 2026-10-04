@@ -23,6 +23,7 @@
 #include "record.h"
 #include "mode.h"
 
+#include <algorithm>
 #include <chrono>
 #include <cmath>
 #include <cstdint>
@@ -461,12 +462,11 @@ void TestResumingSkipsOnlyWholeTrials() {
         }
         return rows;
     };
-    std::size_t written_rows = 0;
     {
         std::string error;
         auto output = CsvOutput::Open(path, error);
         Require(output.has_value(), "a new CSV did not open: " + error);
-        auto rows = whole_trial(0);
+        output->Write(base.run_key, 0, whole_trial(0));
 
         auto failed = whole_trial(1);
         auto error_row = base;
@@ -475,34 +475,50 @@ void TestResumingSkipsOnlyWholeTrials() {
         error_row.op_index = 0;
         error_row.status = "error";
         failed.at(base.ops) = FormatRow(error_row);
-        rows.insert(rows.end(), failed.begin(), failed.end());
+        output->Write(base.run_key, 1, failed);
 
         auto truncated = whole_trial(2);
         truncated.pop_back();
-        rows.insert(rows.end(), truncated.begin(), truncated.end());
+        output->Write(base.run_key, 2, truncated);
 
         // Only the first row of a trial left: what a CSV cut short after it holds.
-        rows.push_back(whole_trial(3).front());
-        output->Write(rows);
-        written_rows = rows.size();
+        output->Write(base.run_key, 3, {whole_trial(3).front()});
     }
+    const auto lines_of = [&] {
+        std::ifstream written(path);
+        std::vector<std::string> lines;
+        for (std::string line; std::getline(written, line);) {
+            lines.push_back(line);
+        }
+        return lines;
+    };
+    const std::size_t trial_rows = base.processes * base.ops;
     {
         std::string error;
-        const auto output = CsvOutput::Open(path, error);
+        auto output = CsvOutput::Open(path, error);
         Require(output.has_value(), "the CSV did not reopen: " + error);
         const auto done = output->completed().find(base.run_key);
         Require(done != output->completed().end() && done->second == std::set<unsigned>{0},
                 "resuming does not skip exactly the trials whose every operation finished without an error");
+
+        // Rerunning a trial replaces what its earlier attempt left, rather than adding to it: the
+        // sweep counts every row, and a trial of three operations with four rows is measured twice.
+        output->Write(base.run_key, 2, whole_trial(2));
     }
-    std::ifstream written(path);
-    std::string header;
-    std::getline(written, header);
-    Require(header == CsvHeader(), "the header was not written first");
-    std::size_t lines = 1;
-    for (std::string line; std::getline(written, line);) {
-        ++lines;
+    const auto lines = lines_of();
+    Require(lines.front() == CsvHeader(), "the header was not written first");
+    Require(std::count(lines.begin(), lines.end(), CsvHeader()) == 1, "reopening the CSV wrote another header");
+    Require(lines.size() == 1 + (3 * trial_rows) + 1,
+            "a rerun trial did not replace its earlier attempt's rows: the CSV holds " +
+                std::to_string(lines.size() - 1) + " rows");
+    {
+        std::string error;
+        const auto output = CsvOutput::Open(path, error);
+        Require(output.has_value(), "the CSV did not reopen after a trial was rerun: " + error);
+        const auto done = output->completed().find(base.run_key);
+        Require(done != output->completed().end() && (done->second == std::set<unsigned>{0, 2}),
+                "a trial rerun whole was not whole when the CSV was reopened");
     }
-    Require(lines == written_rows + 1, "reopening the CSV wrote another header");
 
     std::ofstream(path) << "csv_version,something_else\n";
     std::string error;

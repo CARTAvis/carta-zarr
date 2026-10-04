@@ -20,28 +20,19 @@ namespace {
 namespace zarr_metadata = ::carta::zarr::internal::zarr;
 
 // Why the flag an image declares cannot mask it, or nothing when it declares none or one that can.
-// What DetermineFlag refuses an image over, asked of the listing so that the two agree; with nothing
-// declared there is no refusal to agree with, because an image with no usable candidate opens
-// unmasked.
+// DeclaredFlag is what DetermineFlag refuses an image over, asked of the listing so that the two
+// agree; with nothing declared there is no refusal to agree with, because an image with no usable
+// candidate opens unmasked.
 std::optional<Diagnostic> UnusableDeclaredFlag(const Store& store, const zarr_metadata::ArrayMetadata& image,
                                                std::string_view node) {
-    const auto declared = AttributeString(image.attributes, "flag");
-    if (declared.empty()) {
+    const auto declared = DeclaredFlag(store, image, node);
+    if (declared) {
         return std::nullopt;
     }
-    const auto refused = [&](const Error& error) {
-        return Diagnostic{DiagnosticCode::invalid_metadata,
-                          "Declared flag '" + declared + "' cannot mask this image: " + error.message,
-                          std::string(node)};
-    };
-    const auto& flag = store.ReadArrayMetadata(declared);
-    if (!flag) {
-        return refused(flag.error());
-    }
-    if (auto usable = RequireUsableFlag(flag.value(), image, declared); !usable) {
-        return refused(usable.error());
-    }
-    return std::nullopt;
+    return Diagnostic{DiagnosticCode::invalid_metadata,
+                      "Declared flag '" + declared.error().node_path + "' cannot mask this image: " +
+                          declared.error().message,
+                      std::string(node)};
 }
 
 }  // namespace

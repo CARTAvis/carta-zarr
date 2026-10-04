@@ -189,7 +189,7 @@ int Run(const RunOptions& options) {
                 continue;
             }
             const auto outcome = RunTrial(options, mode, trial, cold.method, base);
-            output->Write(outcome.rows);
+            output->Write(base.run_key, trial, outcome.rows);
             std::fprintf(stderr, "%s trial %u/%u: %u ok, %u timeout, %u error, makespan %.3f s\n", ModeName(mode),
                          trial + 1, options.trials, outcome.ok, outcome.timeouts, outcome.errors, outcome.makespan_s);
             failed = failed || outcome.errors > 0;

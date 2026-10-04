@@ -148,7 +148,11 @@ public:
     CsvOutput& operator=(CsvOutput&&) = delete;
     ~CsvOutput();
 
-    void Write(const std::vector<std::string>& rows);
+    // Append one trial's rows. A trial the CSV already held part of, or held with an error, has
+    // those rows taken out first, so that the CSV holds one attempt at each trial: everything that
+    // reads it counts rows, and a retried trial left beside its earlier attempt is counted twice.
+    // The rest of the file is written again for that, which happens only on a retry.
+    void Write(const std::string& run_key, unsigned trial, const std::vector<std::string>& rows);
 
     // The trials a CSV already holds whole, by run key: those with a row for every operation of
     // every process and no error among them. Rows are written a trial at a time, so a trial
@@ -159,10 +163,17 @@ public:
     }
 
 private:
-    explicit CsvOutput(std::FILE* file) : _file(file) {}
+    CsvOutput(std::FILE* file, std::string path) : _file(file), _path(std::move(path)) {}
+
+    // Write the file again without the rows of one trial, and go on appending to what is left.
+    void Remove(const std::string& run_key, unsigned trial);
 
     std::FILE* _file = nullptr;
+    // Empty for stdout, which holds nothing to replace.
+    std::string _path;
     std::map<std::string, std::set<unsigned>> _completed;
+    // The trials the file holds rows of that are not whole.
+    std::set<std::pair<std::string, unsigned>> _partial;
 };
 
 // The bytes one element of an image stored as `type` takes.

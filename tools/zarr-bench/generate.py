@@ -75,7 +75,7 @@ import zarr
 MANIFEST_NAME = "bench-manifest.json"
 # Bumped whenever the same arguments would produce different bytes, so that a dataset written by an
 # older generator is not mistaken for one this one would write.
-FORMAT_VERSION = 1
+FORMAT_VERSION = 2
 
 AXES = ("time", "frequency", "polarization", "l", "m")
 STOKES = ("I", "Q", "U", "V")
@@ -408,11 +408,11 @@ class Synthetic:
         return block
 
     def flags(self, start: tuple[int, ...], stop: tuple[int, ...]) -> np.ndarray:
-        # True is a good pixel: XRADIO's flag says which pixels to keep. See src/pixel_mask.h.
-        block = np.ones([b - a for a, b in zip(start, stop)], dtype=bool)
+        # True is a flagged pixel: XRADIO's flag says which pixels to drop. See src/pixel_mask.h.
+        block = np.zeros([b - a for a, b in zip(start, stop)], dtype=bool)
         outside = self.outside(range(start[3], stop[3]), range(start[4], stop[4]))
         if outside is not None:
-            block[..., outside] = False
+            block[..., outside] = True
         return block
 
 

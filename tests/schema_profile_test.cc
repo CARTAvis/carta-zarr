@@ -901,6 +901,74 @@ void TestAnImageWithAnAxisBeyondTheFiveIsNotOpenable() {
             "an image with an axis this profile cannot describe was not refused as invalid metadata");
 }
 
+// The same root, declaring `data_groups` as given.
+std::string RootGroupWithDataGroups(const std::string& data_groups) {
+    auto root = RootGroup();
+    root.insert(root.find("},\"zarr_format\""), ",\"data_groups\":" + data_groups);
+    return root;
+}
+
+carta::zarr::Result<std::string> FlagOfSky(const std::map<std::string, std::string>& nodes,
+                              std::vector<carta::zarr::Diagnostic>& diagnostics) {
+    auto store = Open(nodes);
+    Require(static_cast<bool>(store), "the data-group store did not open");
+    const auto& image = store.value().ReadArrayMetadata("SKY");
+    Require(static_cast<bool>(image), "SKY was not readable in the data-group store");
+    return DetermineFlag(store.value(), image.value(), "SKY", diagnostics);
+}
+
+// XRADIO's writer ties a flag to its sky image in the root's data_groups and nowhere else: the
+// image names no flag. That link is a declaration, taken before any guess from dimensions, and two
+// flags fitting the image equally are then no ambiguity at all.
+void TestADataGroupDeclaresItsSkysFlag() {
+    const std::string sky_dimensions = R"(["time","frequency","polarization","l","m"])";
+    auto nodes = CompleteStore();
+    nodes["FLAG_1"] = NumericArray("[1,3,2,4,5]", sky_dimensions, "bool", R"({"type":"flag"})");
+    nodes["FLAG_2"] = NumericArray("[1,3,2,4,5]", sky_dimensions, "int8", R"({"type":"flag","dtype":"bool"})");
+
+    nodes[""] = RootGroupWithDataGroups(R"({"base":{"sky":"SKY","flag":"FLAG_2"},"other":{"sky":"OTHER","flag":"FLAG_1"}})");
+    std::vector<carta::zarr::Diagnostic> diagnostics;
+    auto declared = FlagOfSky(nodes, diagnostics);
+    Require(declared && declared.value() == "FLAG_2", "the flag data_groups names for SKY was not the one chosen");
+    Require(diagnostics.empty(), "a flag data_groups names was reported as ambiguous");
+
+    // A flag another image's group declares is that image's, so the guess leaves it out.
+    nodes[""] = RootGroupWithDataGroups(R"({"base":{"sky":"SKY"},"other":{"sky":"OTHER","flag":"FLAG_1"}})");
+    diagnostics.clear();
+    auto guessed = FlagOfSky(nodes, diagnostics);
+    Require(guessed && guessed.value() == "FLAG_2", "a flag declared for another image was a candidate for SKY");
+    Require(diagnostics.empty(), "one remaining candidate was reported as ambiguous");
+
+    // The image's own attribute is its own statement, and outranks a group's.
+    auto own = nodes;
+    own["SKY"] = SkyArray("float32", R"({"units":"Jy/beam","flag":"FLAG_1"})");
+    own[""] = RootGroupWithDataGroups(R"({"base":{"sky":"SKY","flag":"FLAG_2"}})");
+    diagnostics.clear();
+    auto attribute = FlagOfSky(own, diagnostics);
+    Require(attribute && attribute.value() == "FLAG_1", "a data group outranked the image's own flag attribute");
+
+    // Declared flags are binding: one that cannot serve closes the image rather than leaving it unmasked.
+    nodes["FLAG_3"] = NumericArray("[1,3,2,4,5]", sky_dimensions, "float32", R"({"type":"flag"})");
+    nodes[""] = RootGroupWithDataGroups(R"({"base":{"sky":"SKY","flag":"FLAG_3"}})");
+    diagnostics.clear();
+    auto unusable = FlagOfSky(nodes, diagnostics);
+    Require(!unusable && unusable.error().code == ErrorCode::unsupported_data_type,
+            "an unusable flag data_groups declares did not close the image");
+
+    // Two groups of the same sky naming different flags contradict each other.
+    nodes[""] = RootGroupWithDataGroups(R"({"base":{"sky":"SKY","flag":"FLAG_1"},"robust":{"sky":"SKY","flag":"FLAG_2"}})");
+    diagnostics.clear();
+    auto contradictory = FlagOfSky(nodes, diagnostics);
+    Require(!contradictory && contradictory.error().code == ErrorCode::invalid_metadata,
+            "two different flags declared for one image were not refused");
+
+    // The same flag named by both is one declaration.
+    nodes[""] = RootGroupWithDataGroups(R"({"base":{"sky":"SKY","flag":"FLAG_1"},"robust":{"sky":"SKY","flag":"FLAG_1"}})");
+    diagnostics.clear();
+    auto agreeing = FlagOfSky(nodes, diagnostics);
+    Require(agreeing && agreeing.value() == "FLAG_1", "two groups naming the same flag were refused");
+}
+
 // With nothing declared the store is inspected instead, and a store offering two equally good
 // candidates is refused rather than guessed at. The refusal is a diagnostic on the image: the image
 // is still readable, just unmasked.
@@ -1395,6 +1463,7 @@ int main() {
         TestADeclaredFlagThatCannotMaskClosesTheImageInTheListing();
         TestAnImageWithAnAxisBeyondTheFiveIsNotOpenable();
         TestAmbiguousFlagsSelectNone();
+        TestADataGroupDeclaresItsSkysFlag();
         TestStoreRejections();
         TestANullConsolidatedBlockIsNoConsolidation();
         TestSizeFallsBackWhenTheStoreCannotBeMeasured();

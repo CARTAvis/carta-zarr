@@ -8,23 +8,71 @@
 
 #include "attributes.h"
 
+#include <algorithm>
+#include <set>
 #include <utility>
 
 namespace carta::zarr::internal::xradio {
+
+namespace {
+
+// The flags the root's data groups declare: those of groups whose `sky` is this image, and those
+// of every other group, which belong to some other image. XRADIO's schema defines a group's `flag`
+// as its sky image's, so nothing else in a group is taken to own it.
+struct DeclaredFlags {
+    std::set<std::string> own;
+    std::set<std::string> others;
+};
+
+DeclaredFlags FlagsOfDataGroups(const nlohmann::json& root_attributes, std::string_view image_id) {
+    DeclaredFlags declared;
+    const auto* const groups = MemberObject(root_attributes, "data_groups");
+    if (groups == nullptr) {
+        return declared;
+    }
+    for (const auto& [name, group] : groups->items()) {
+        if (!group.is_object()) {
+            continue;
+        }
+        const auto flag = AttributeString(group, "flag");
+        if (flag.empty()) {
+            continue;
+        }
+        (AttributeString(group, "sky") == image_id ? declared.own : declared.others).insert(flag);
+    }
+    return declared;
+}
+
+Result<std::string> RequireDeclaredFlag(const Store& store, const zarr::ArrayMetadata& image,
+                                        const std::string& declared) {
+    const auto& flag_array = store.ReadArrayMetadata(declared);
+    if (!flag_array) {
+        return flag_array.error();
+    }
+    if (auto usable = RequireUsableFlag(flag_array.value(), image, declared); !usable) {
+        return usable.error();
+    }
+    return declared;
+}
+
+}  // namespace
 
 Result<std::string> DetermineFlag(const Store& store, const zarr::ArrayMetadata& image, std::string_view image_id,
                                   std::vector<Diagnostic>& diagnostics) {
     // A declared flag is the image's own statement that its pixels need a mask, so a flag that
     // cannot serve as one closes the image rather than opening it unmasked.
     if (auto declared = AttributeString(image.attributes, "flag"); !declared.empty()) {
-        const auto& flag_array = store.ReadArrayMetadata(declared);
-        if (!flag_array) {
-            return flag_array.error();
-        }
-        if (auto usable = RequireUsableFlag(flag_array.value(), image, declared); !usable) {
-            return usable.error();
-        }
-        return declared;
+        return RequireDeclaredFlag(store, image, declared);
+    }
+    // XRADIO's writer records a flag here and not on the image. Two groups sharing this sky image
+    // may each name its flag; naming two different ones is a contradiction, not a choice to make.
+    const auto groups = FlagsOfDataGroups(store.RootAttributes(), image_id);
+    if (groups.own.size() > 1) {
+        return Error{ErrorCode::invalid_metadata, "data_groups name more than one flag for the image",
+                     std::string(image_id)};
+    }
+    if (groups.own.size() == 1) {
+        return RequireDeclaredFlag(store, image, *groups.own.begin());
     }
 
     const auto& inventory = store.Inventory();
@@ -36,7 +84,8 @@ Result<std::string> DetermineFlag(const Store& store, const zarr::ArrayMetadata&
         // Nothing declared one, so this is a guess from the metadata alone. A node that is not an
         // array, or whose metadata will not parse, or that does not match exactly, is simply not
         // this image's mask -- which is not an error in the store, and not this module's to report.
-        if (entry.kind != NodeKind::array || !*entry.array ||
+        // A flag a data group declares for another image is that image's, however well it fits.
+        if (entry.kind != NodeKind::array || !*entry.array || groups.others.count(entry.name) != 0 ||
             !RequireUsableFlag(entry.array->value(), image, entry.name)) {
             continue;
         }

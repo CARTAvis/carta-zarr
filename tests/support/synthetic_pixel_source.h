@@ -100,7 +100,8 @@ public:
                                       "FLAG"};
         }
         return Fill(selection, destination.size, [&](const std::vector<std::uint64_t>& logical, std::size_t at) {
-            destination.data[at] = _flags && !_flags(logical) ? 0 : 1;
+            // A flag byte is true for a flagged pixel, as XRADIO writes it: the opposite of the formula.
+            destination.data[at] = _flags && !_flags(logical) ? 1 : 0;
         });
     }
 

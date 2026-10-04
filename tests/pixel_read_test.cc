@@ -56,7 +56,7 @@ float ExpectedValue(std::uint64_t l, std::uint64_t m, std::uint64_t frequency, s
 }
 
 // The generator marks a pixel bad where (l + m) is a multiple of three.
-bool ExpectedFlag(std::uint64_t l, std::uint64_t m) {
+bool ExpectedGood(std::uint64_t l, std::uint64_t m) {
     return ((l + m) % 3) != 0;
 }
 
@@ -184,7 +184,7 @@ void TestMaskFusion(const carta::zarr::Image& sky) {
                 for (std::uint64_t l = 0; l < kL; ++l) {
                     const float value = pixels.at(LogicalOffset(l, m, f, p));
                     const std::string where = "at l=" + std::to_string(l) + " m=" + std::to_string(m);
-                    if (!ExpectedFlag(l, m) || InMissingChunk(l, f, p)) {
+                    if (!ExpectedGood(l, m) || InMissingChunk(l, f, p)) {
                         Require(std::isnan(value), "a flagged or missing pixel should read as NaN " + where);
                     } else {
                         Require(value == ExpectedValue(l, m, f, p, 0), "a good pixel should survive masking " + where);

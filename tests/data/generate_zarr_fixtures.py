@@ -383,7 +383,8 @@ def generate_xradio_fixture(
     )
     create_numeric_array(
         path / "MASK_0",
-        np.ones(sky_shape, dtype=bool),
+        # Nothing flagged: XRADIO's flag is true where a pixel is bad.
+        np.zeros(sky_shape, dtype=bool),
         dimension_names=("time", "frequency", "polarization", "l", "m"),
         chunks=(1, 1, 1, 2, 5),
         attributes={"type": "flag"},
@@ -434,7 +435,7 @@ def generate_pixel_fixture(path: Path, *, l_fastest: bool = False) -> None:
     The other XRADIO fixtures carry only fill values, so they pin metadata and say nothing about a
     pixel read. Every axis here has a different length, so a read that permutes axes wrongly cannot
     still produce the right shape, and each value spells its own logical coordinates. One chunk is
-    deleted after writing and the flag marks a known pattern false, which is how the fill-value and
+    deleted after writing and the flag marks a known pattern true, which is how the fill-value and
     pixel-mask paths get a definition instead of an assumption.
     """
     time_size, frequency_size, polarization_size, l_size, m_size = 1, 2, 3, 4, 5
@@ -507,9 +508,9 @@ def generate_pixel_fixture(path: Path, *, l_fastest: bool = False) -> None:
     )
     sky[:] = values
 
-    # True means a good pixel. The pattern crosses chunk boundaries so a mask read that ignores the
-    # transpose cannot accidentally agree.
-    flags = ((l_index + m_index) % 3 != 0)
+    # True means a flagged pixel, as XRADIO writes it. The pattern crosses chunk boundaries so a mask
+    # read that ignores the transpose cannot accidentally agree.
+    flags = ((l_index + m_index) % 3 == 0)
     flag = zarr.create_array(
         store=path / "FLAG",
         shape=shape,

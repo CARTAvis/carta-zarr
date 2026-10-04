@@ -46,7 +46,7 @@ double ExpectedValue(std::uint64_t l, std::uint64_t m, std::uint64_t frequency, 
 }
 
 // The generator marks a pixel bad where (l + m) is a multiple of three.
-bool ExpectedFlag(std::uint64_t l, std::uint64_t m) {
+bool ExpectedGood(std::uint64_t l, std::uint64_t m) {
     return ((l + m) % 3) != 0;
 }
 
@@ -93,7 +93,7 @@ Totals Expected(const carta::zarr::RegionMask& region, std::uint64_t frequency, 
             }
             // A flagged pixel and a pixel in the deleted chunk are both absent, and the reduction
             // must not be able to tell them apart.
-            if (!ExpectedFlag(x, y) || InMissingChunk(x, frequency, polarization)) {
+            if (!ExpectedGood(x, y) || InMissingChunk(x, frequency, polarization)) {
                 totals.nan_count += 1.0;
                 continue;
             }
@@ -120,7 +120,7 @@ double ExpectedDeviations(const carta::zarr::RegionMask& region, std::uint64_t f
         for (std::uint64_t x = region.x_start; x < region.x_start + region.width; ++x) {
             if ((region.mask.data != nullptr &&
                  region.mask.data[((y - region.y_start) * region.width) + (x - region.x_start)] == 0) ||
-                !ExpectedFlag(x, y) || InMissingChunk(x, frequency, polarization)) {
+                !ExpectedGood(x, y) || InMissingChunk(x, frequency, polarization)) {
                 continue;
             }
             const double distance = ExpectedValue(x, y, frequency, polarization) - mean;

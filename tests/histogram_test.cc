@@ -35,7 +35,7 @@ bool InMissingChunk(std::uint64_t l, std::uint64_t frequency, std::uint64_t pola
     return frequency == 1 && polarization == 2 && l >= 2;
 }
 
-bool ExpectedFlag(std::uint64_t l, std::uint64_t m) {
+bool ExpectedGood(std::uint64_t l, std::uint64_t m) {
     return ((l + m) % 3) != 0;
 }
 
@@ -64,7 +64,7 @@ std::vector<std::uint64_t> Expected(std::uint64_t frequency, std::uint64_t polar
     const float upper = static_cast<float>(range_upper);
     for (std::uint64_t m = 0; m < kM; ++m) {
         for (std::uint64_t l = 0; l < kL; ++l) {
-            if ((apply_mask && !ExpectedFlag(l, m)) || InMissingChunk(l, frequency, polarization)) {
+            if ((apply_mask && !ExpectedGood(l, m)) || InMissingChunk(l, frequency, polarization)) {
                 continue;  // a flagged pixel and one in the deleted chunk are both absent
             }
             const float value = ExpectedValue(l, m, frequency, polarization);
@@ -341,7 +341,7 @@ void TestOnePassMatchesTheTwoPassAnswer(const carta::zarr::Image& sky) {
     for (std::uint64_t f = 0; f < kFrequency; ++f) {
         for (std::uint64_t m = 0; m < kM; ++m) {
             for (std::uint64_t l = 0; l < kL; ++l) {
-                if (!ExpectedFlag(l, m) || InMissingChunk(l, f, polarization)) {
+                if (!ExpectedGood(l, m) || InMissingChunk(l, f, polarization)) {
                     expected_nan += 1.0;
                     continue;
                 }

@@ -37,6 +37,7 @@ means the optional coordinates are never read. Two further consequences may surp
 A known variable-name list is still kept, but only to order the images for display so that `SKY`
 appears first. It never decides membership.
 
-`data_groups` is carried into `ImageDescriptor` as descriptive metadata. It is deliberately not used
-to locate an image's flag or beam variable, because those associations are written to the image
-variable's own attributes today and to `data_groups` only in the not-yet-implemented v2 schema.
+`data_groups` is carried into `ImageDescriptor` as descriptive metadata. It is not used to locate an
+image's beam variable, which XRADIO names on the image variable's own attributes. It is used to locate
+an image's flag, which XRADIO's writer names nowhere else; this paragraph used to say otherwise, from
+fixtures written by hand rather than by XRADIO. See ADR 0019.

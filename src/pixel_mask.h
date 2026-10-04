@@ -33,7 +33,8 @@ inline bool AppliesPixelMask(const ReadOptions& options, const ImageDescriptor& 
  * flag variable the bytes came from -- see DetermineFlag in schema/xradio/flag.h. The rule
  * is stated once here rather than at each place that reads pixels, so that a profile disagreeing
  * about it has one line to change instead of a search to run. XRADIO writes a flag whose true means
- * the pixel is good, so a zero byte is the pixel to drop.
+ * the pixel is flagged -- its CASA reader inverts casacore's mask, whose true is a good pixel -- so a
+ * nonzero byte is the pixel to drop. See ADR 0019.
  *
  * Folding the flag into the pixels is what lets everything downstream ignore it: a flagged pixel
  * and a NaN pixel mean the same thing to a statistic, to a histogram, and to the consumer's own
@@ -42,7 +43,7 @@ inline bool AppliesPixelMask(const ReadOptions& options, const ImageDescriptor& 
  */
 inline void ApplyPixelMask(float* pixels, const std::uint8_t* mask, std::size_t count) {
     for (std::size_t i = 0; i < count; ++i) {
-        if (mask[i] == 0) {
+        if (mask[i] != 0) {
             pixels[i] = std::numeric_limits<float>::quiet_NaN();
         }
     }

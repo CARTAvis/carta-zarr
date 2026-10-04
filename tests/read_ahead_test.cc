@@ -42,6 +42,7 @@ using carta::zarr::Range;
 using carta::zarr::ReadRequest;
 using carta::zarr::internal::CacheShare;
 using carta::zarr::internal::PlaneRunBytes;
+using carta::zarr::internal::RunRequest;
 using carta::zarr::internal::ReadingAhead;
 using carta::zarr::internal::Run;
 using carta::zarr::internal::RunOf;
@@ -415,10 +416,43 @@ void TestEachAnimatedImageHasItsNextRunDecoded() {
 
 }  // namespace
 
+// What a prefetch of a run asks for: the whole of every chunk the plane touches, clipped to the axis
+// -- the channels and Stokes beside the plane that share its chunks included.
+void TestARunIsReadAsItsChunksWhole() {
+    ImageDescriptor descriptor;
+    descriptor.stored_type = DataType::float32;
+    descriptor.axes = {Axis("l", AxisRole::spatial_x, 10), Axis("m", AxisRole::spatial_y, 5),
+                       Axis("frequency", AxisRole::spectral, 7), Axis("polarization", AxisRole::polarization, 4)};
+    ChunkGeometry geometry;
+    geometry.chunk_shape = {4, 4, 2, 0};
+    const auto spans = [](const ReadRequest& request) {
+        std::vector<std::uint64_t> out;
+        for (const auto& range : request.axes) {
+            out.insert(out.end(), {range.start, range.count, range.stride});
+        }
+        return out;
+    };
+    ReadRequest plane;
+    plane.axes = {Range{0, 10, 1}, Range{0, 5, 1}, Range{3, 1, 1}, Range{1, 1, 1}};
+    Require(spans(RunRequest(descriptor, geometry, plane)) ==
+                std::vector<std::uint64_t>{0, 10, 1, 0, 5, 1, 2, 2, 1, 0, 4, 1},
+            "a plane's run is every channel of its chunk, and every Stokes of an axis kept in one chunk");
+    plane.axes[2] = Range{6, 1, 1};
+    Require(spans(RunRequest(descriptor, geometry, plane))[7] == 1, "the last chunk of an axis is clipped to it");
+    ReadRequest inside;
+    inside.axes = {Range{5, 2, 2}, Range{1, 1, 1}, Range{0, 1, 1}, Range{0, 1, 1}};
+    Require(spans(RunRequest(descriptor, geometry, inside)) ==
+                std::vector<std::uint64_t>{4, 4, 1, 0, 4, 1, 0, 2, 1, 0, 4, 1},
+            "a read inside a chunk, strided or not, is the chunk it lies in");
+    Require(RunOf(geometry, RunRequest(descriptor, geometry, plane)) == RunOf(geometry, plane),
+            "the read of a run is in the run");
+}
+
 int main() {
     try {
         TestARunIsTheChunksAReadDecodes();
         TestARunOfAPlaneHoldsItsChunksWhole();
+        TestARunIsReadAsItsChunksWhole();
         TestNothingIsReadAheadWithoutRoomForTwoRunsOfEachImageItsCacheHolds();
         TestTheNextRunIsDecodedOnceAndNoSooner();
         TestOnlyTheFramesLookedAheadToAreLookedAt();

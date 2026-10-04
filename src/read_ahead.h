@@ -42,6 +42,12 @@ struct Run {
 // The run a read is in. An axis with no chunk shape to speak of is one chunk.
 Run RunOf(const ChunkGeometry& geometry, const ReadRequest& request);
 
+// The read that covers the run `plane` is in: along every axis, the whole of the chunks it touches,
+// clipped to the axis. What a prefetch asks for, since a decode of the plane alone decodes every
+// pixel chunk of its run but only the flag beside that one plane -- and a flag chunked shallower than
+// the pixels has the rest of the run's planes in chunks of its own.
+ReadRequest RunRequest(const ImageDescriptor& descriptor, const ChunkGeometry& geometry, const ReadRequest& plane);
+
 // What one run of a whole plane of this image holds once decoded: the plane rounded out to whole
 // chunks along its two spatial axes, a chunk deep along every other, at what a chunk decodes to --
 // and, when the read applies the pixel mask, the flag chunks that run crosses, in the flag's own

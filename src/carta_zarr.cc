@@ -270,7 +270,8 @@ public:
         options.control.cancellation_requested = [&cancelled, callers] {
             return cancelled() || (callers && callers());
         };
-        return _image.Prefetch(plane, options).has_value();
+        return _image.Prefetch(internal::RunRequest(_image.descriptor(), _image.chunk_geometry(), plane), options)
+            .has_value();
     }
 
 private:

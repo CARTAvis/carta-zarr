@@ -18,6 +18,7 @@
 #include <fstream>
 #include <functional>
 #include <set>
+#include <stdexcept>
 #include <utility>
 
 #ifndef CARTA_ZARR_BENCH_COMMIT
@@ -357,7 +358,7 @@ std::optional<RowSummary> SummariseRow(const std::string& line) {
 
 std::optional<CsvOutput> CsvOutput::Open(const std::string& path, std::string& error) {
     if (path.empty()) {
-        CsvOutput output(stdout);
+        CsvOutput output(stdout, {});
         std::fprintf(stdout, "%s\n", CsvHeader().c_str());
         std::fflush(stdout);
         return output;
@@ -401,7 +402,7 @@ std::optional<CsvOutput> CsvOutput::Open(const std::string& path, std::string& e
         error = "cannot open " + path + " for appending";
         return std::nullopt;
     }
-    CsvOutput output(file);
+    CsvOutput output(file, path);
     if (!has_header) {
         std::fprintf(file, "%s\n", CsvHeader().c_str());
         std::fflush(file);
@@ -412,6 +413,8 @@ std::optional<CsvOutput> CsvOutput::Open(const std::string& path, std::string& e
                 coverage.grid ? std::uint64_t{coverage.grid->first} * coverage.grid->second : std::uint64_t{0};
             if (!coverage.error && expected > 0 && coverage.reported.size() == expected) {
                 output._completed[key].insert(trial);
+            } else {
+                output._partial.emplace(key, trial);
             }
         }
     }
@@ -419,7 +422,10 @@ std::optional<CsvOutput> CsvOutput::Open(const std::string& path, std::string& e
 }
 
 CsvOutput::CsvOutput(CsvOutput&& other) noexcept
-    : _file(std::exchange(other._file, nullptr)), _completed(std::move(other._completed)) {}
+    : _file(std::exchange(other._file, nullptr)),
+      _path(std::move(other._path)),
+      _completed(std::move(other._completed)),
+      _partial(std::move(other._partial)) {}
 
 CsvOutput::~CsvOutput() {
     if (_file != nullptr && _file != stdout) {
@@ -427,7 +433,37 @@ CsvOutput::~CsvOutput() {
     }
 }
 
-void CsvOutput::Write(const std::vector<std::string>& rows) {
+void CsvOutput::Remove(const std::string& run_key, unsigned trial) {
+    std::fclose(_file);
+    _file = nullptr;
+    // Written beside the file and moved over it, so that a run stopped part-way leaves the old file
+    // whole rather than half of a new one.
+    const auto replacement = _path + ".partial";
+    {
+        std::ifstream existing(_path);
+        std::ofstream kept(replacement, std::ios::trunc);
+        for (std::string line; std::getline(existing, line);) {
+            const auto row = SummariseRow(line);
+            if (!row || row->run_key != run_key || row->trial != trial) {
+                kept << line << '\n';
+            }
+        }
+        kept.flush();
+        if (!kept) {
+            throw std::runtime_error("cannot write " + replacement);
+        }
+    }
+    std::filesystem::rename(replacement, _path);
+    _file = std::fopen(_path.c_str(), "a");
+    if (_file == nullptr) {
+        throw std::runtime_error("cannot reopen " + _path + " for appending");
+    }
+}
+
+void CsvOutput::Write(const std::string& run_key, unsigned trial, const std::vector<std::string>& rows) {
+    if (_partial.erase({run_key, trial}) > 0) {
+        Remove(run_key, trial);
+    }
     for (const auto& row : rows) {
         std::fprintf(_file, "%s\n", row.c_str());
     }

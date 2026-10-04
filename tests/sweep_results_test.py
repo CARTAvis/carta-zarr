@@ -18,6 +18,7 @@ the test chose."""
 
 from __future__ import annotations
 
+import json
 import math
 import re
 import sys
@@ -293,6 +294,22 @@ class ResumingASweep(unittest.TestCase):
                 with self.assertRaises(SystemExit) as refused:
                     sweep.Sweep(config(**changed), self.output).adopt_workload()
                 self.assertIn(str(self.output), str(refused.exception))
+
+
+    def test_a_state_from_before_workloads_were_recorded_is_refused(self) -> None:
+        # Whatever it measured, nothing says what, so it cannot be told apart from another workload.
+        (self.output / "sweep-state.json").write_text(json.dumps(
+            {"runs": {"a run": {"seconds": 1.0}}, "datasets": {}, "failures": {}}))
+        with self.assertRaises(SystemExit) as refused:
+            sweep.Sweep(config(measure={"seed": 999}), self.output).adopt_workload()
+        self.assertIn(str(self.output), str(refused.exception))
+
+    def test_an_empty_state_from_before_workloads_were_recorded_is_taken_up(self) -> None:
+        # Nothing was measured, so there is nothing to mix with.
+        (self.output / "sweep-state.json").write_text(json.dumps({"runs": {}, "datasets": {}, "failures": {}}))
+        resumed = sweep.Sweep(config(), self.output)
+        resumed.adopt_workload()
+        self.assertEqual(resumed.state["workload"], sweep.workload(config()))
 
 
 if __name__ == "__main__":

@@ -674,10 +674,18 @@ class Sweep:
     def adopt_workload(self) -> None:
         """Take up the state there is only when it measured this workload. Mixing two in one
         results.csv would rank layouts on measurements of different things, so another workload is
-        refused rather than resumed: it belongs in an output directory of its own."""
+        refused rather than resumed: it belongs in an output directory of its own.
+
+        A state with runs and no workload recorded was written before workloads were, and says
+        nothing of what it measured, so it is refused too: taking it up would be taking its word for a
+        workload it never stated."""
         current = workload(self.config)
         recorded = self.state.get("workload")
-        if recorded is not None and recorded != current and (self.state["runs"] or self.state["datasets"]):
+        measured = bool(self.state["runs"] or self.state["datasets"])
+        if measured and recorded is None:
+            raise SystemExit(f"{self.output} holds runs from before sweeps recorded what they measured, so they "
+                             "cannot be told from another workload's. Write this sweep to another output directory.")
+        if measured and recorded != current:
             raise SystemExit(f"{self.output} holds runs of another workload: the source or the measure settings "
                              f"({', '.join(sorted(set(self.config['measure']) - set(RESUMABLE_MEASURE)))}) "
                              "differ from those it was measured with. Write this sweep to another output directory.")

@@ -39,6 +39,16 @@ namespace carta::zarr {
 // counts every other pixel the mask selected. Their total is the number of pixels the mask
 // selected, so a caller needing the denominator of a mean asks for num_pixels rather than deriving
 // it from the mask.
+//
+// sum_sq_dev is the sum of the squared deviations of those same pixels from their own mean -- the
+// centred second moment, Σ(v − mean)² -- so that a sample variance is sum_sq_dev / (num_pixels − 1).
+// It is here because the variance cannot be had from sum and sum_sq once the pixels are far from zero
+// against their spread: sum_sq − sum²/n subtracts two numbers that agree in every digit a double
+// holds, and what is left is rounding. See ADR 0018. What to say for one pixel is the caller's, as
+// for every quantity derived from these.
+//
+// A reduction asked for sum_sq_dev accumulates num_pixels and sum as well, since putting two sets of
+// pixels' deviations together needs both their counts and their means, and a block carries them.
 enum class Statistic : std::uint32_t {
     num_pixels = 1u << 0,
     nan_count = 1u << 1,
@@ -46,6 +56,7 @@ enum class Statistic : std::uint32_t {
     sum_sq = 1u << 3,
     min = 1u << 4,
     max = 1u << 5,
+    sum_sq_dev = 1u << 6,
 };
 
 // A set of statistics, made by joining them with |: `Statistic::sum | Statistic::num_pixels`. A single
@@ -193,7 +204,7 @@ private:
 
 using HistogramSink = std::function<bool(const HistogramBlock&)>;
 
-// The six statistics a reduction counts over a set of pixels: one region at one channel of a
+// The seven statistics a reduction counts over a set of pixels: one region at one channel of a
 // SpectralBlock, or everything a cube histogram's selection covers.
 //
 // What nothing was counted into reads as zero for the counts and sums and NaN for the extrema, since
@@ -205,7 +216,7 @@ using HistogramSink = std::function<bool(const HistogramBlock&)>;
 // tell "not asked for" from "nothing there" asks the block, with Carries.
 //
 // One type for both, rather than a set of fields per result: the cube histogram used to spell the
-// same six its own way, with the extrema named minimum and maximum, and the two defaults drifted
+// same statistics its own way, with the extrema named minimum and maximum, and the two defaults drifted
 // apart until c66699d put them back.
 struct SpectralTotals {
     double num_pixels = 0.0;
@@ -214,12 +225,14 @@ struct SpectralTotals {
     double sum_sq = 0.0;
     double min = std::numeric_limits<double>::quiet_NaN();
     double max = std::numeric_limits<double>::quiet_NaN();
+    double sum_sq_dev = 0.0;
 };
 
 // Everything one pass can say about the selection.
 struct CubeHistogramResult {
     // Over every pixel the selection covers, or every one the sample kept. The extrema are exact,
-    // whatever the bin edges did, and NaN when nothing finite was read.
+    // whatever the bin edges did, and NaN when nothing finite was read. All seven statistics are
+    // there, sum_sq_dev included.
     SpectralTotals totals;
     // `bins` counts over [totals.min, totals.max].
     std::vector<std::uint64_t> counts;
@@ -345,7 +358,7 @@ class StatisticSlots;
 // only the library can fill one in.
 //
 // min and max are reported as NaN for a channel whose region contributed no finite pixel, since
-// there is no such thing as the smallest value of nothing. sum and sum_sq are zero in that case,
+// there is no such thing as the smallest value of nothing. sum, sum_sq and sum_sq_dev are zero in that case,
 // which is what they are worth, and num_pixels is zero -- so a caller deriving a mean sees the
 // division it must not perform.
 struct SpectralBlock {
@@ -407,6 +420,7 @@ struct SpectralBlock {
         at(Statistic::sum_sq, totals.sum_sq);
         at(Statistic::min, totals.min);
         at(Statistic::max, totals.max);
+        at(Statistic::sum_sq_dev, totals.sum_sq_dev);
         return totals;
     }
 

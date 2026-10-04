@@ -191,6 +191,14 @@ for a snapshot -- each is re-aggregated onto the caller's bins over the extremes
 and the counts are added. How fine it is, is what `provisional_bins` says.
 _Avoid_: partial, accumulator, tile histogram, intermediate histogram
 
+**Spread**:
+How far a set of pixels lies from its own mean, said as the sum of their squared deviations from
+it, `sum_sq_dev`; a sample variance is that over one less than the count. Kept beside the sum and
+the sum of squares rather than made from them, because from those it is a difference of two numbers
+that agree in every digit a double holds once the pixels are far from zero against how far apart
+they are. Two sets' spreads are put together from their counts and means. See ADR 0018.
+_Avoid_: variance (for the sum itself), M2, second moment (on its own)
+
 **Run**:
 The chunks one plane of an image decodes -- the plane rounded out to whole chunks, and a chunk deep
 along every other axis -- and so every plane that decodes the same ones. An animation playing through

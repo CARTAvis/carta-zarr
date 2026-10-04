@@ -108,9 +108,32 @@ Totals Expected(const carta::zarr::RegionMask& region, std::uint64_t frequency, 
     return totals;
 }
 
-constexpr std::array<carta::zarr::Statistic, 6> kEveryStatistic{
+// The sum of squared deviations of the pixels Expected counts, from their own mean, found first.
+double ExpectedDeviations(const carta::zarr::RegionMask& region, std::uint64_t frequency, std::uint64_t polarization) {
+    const auto totals = Expected(region, frequency, polarization);
+    if (totals.num_pixels == 0.0) {
+        return 0.0;
+    }
+    const double mean = totals.sum / totals.num_pixels;
+    double deviations = 0.0;
+    for (std::uint64_t y = region.y_start; y < region.y_start + region.height; ++y) {
+        for (std::uint64_t x = region.x_start; x < region.x_start + region.width; ++x) {
+            if ((region.mask.data != nullptr &&
+                 region.mask.data[((y - region.y_start) * region.width) + (x - region.x_start)] == 0) ||
+                !ExpectedFlag(x, y) || InMissingChunk(x, frequency, polarization)) {
+                continue;
+            }
+            const double distance = ExpectedValue(x, y, frequency, polarization) - mean;
+            deviations += distance * distance;
+        }
+    }
+    return deviations;
+}
+
+constexpr std::array<carta::zarr::Statistic, 7> kEveryStatistic{
     carta::zarr::Statistic::num_pixels, carta::zarr::Statistic::nan_count, carta::zarr::Statistic::sum,
-    carta::zarr::Statistic::sum_sq,     carta::zarr::Statistic::min,       carta::zarr::Statistic::max};
+    carta::zarr::Statistic::sum_sq,     carta::zarr::Statistic::min,       carta::zarr::Statistic::max,
+    carta::zarr::Statistic::sum_sq_dev};
 
 carta::zarr::StatisticSet AllStatistics() {
     return carta::zarr::Statistic::num_pixels | carta::zarr::Statistic::nan_count |
@@ -146,6 +169,8 @@ struct Collected {
                 return at.min;
             case carta::zarr::Statistic::max:
                 return at.max;
+            case carta::zarr::Statistic::sum_sq_dev:
+                return at.sum_sq_dev;
         }
         throw std::runtime_error("not a statistic");
     }
@@ -242,6 +267,34 @@ void TestRegionsSpanningChunks(const carta::zarr::Image& sky) {
     const auto collected = Collect(sky, WholeSpectrum(regions, 0));
     Require(collected.carried == AllStatistics(), "all six statistics should be reported");
     CheckAgainstOracle(collected, regions, 0, "spanning");
+}
+
+// sum_sq_dev asked for alone, through the public entry point: it comes with the count and the sum
+// its merges were made with, and is the pixels' own, the flagged and the missing left out as they
+// are from every other statistic.
+void TestTheSpreadIsThePixelsOwn(const carta::zarr::Image& sky) {
+    std::vector<std::uint8_t> holes(kL * kM);
+    for (std::size_t i = 0; i < holes.size(); ++i) {
+        holes[i] = static_cast<std::uint8_t>(i % 3 != 1);
+    }
+    const std::vector<carta::zarr::RegionMask> regions{{0, 0, kL, kM}, {1, 1, 2, 2}, {3, 4, 1, 1},
+                                                        {0, 0, kL, kM, {holes.data(), holes.size()}}};
+    for (std::uint64_t polarization = 0; polarization < kPolarization; ++polarization) {
+        auto request = WholeSpectrum(regions, polarization);
+        request.statistics = carta::zarr::Statistic::sum_sq_dev;
+        const auto collected = Collect(sky, request);
+        Require(collected.carried == (carta::zarr::Statistic::num_pixels | carta::zarr::Statistic::sum |
+                                      carta::zarr::Statistic::sum_sq_dev),
+                "sum_sq_dev should come with the count and the sum, and nothing else");
+        for (std::size_t r = 0; r < regions.size(); ++r) {
+            for (std::uint64_t f = 0; f < collected.channel_count; ++f) {
+                RequireClose(collected.At(r, carta::zarr::Statistic::sum_sq_dev, f),
+                             ExpectedDeviations(regions.at(r), f, polarization),
+                             "polarization " + std::to_string(polarization) + " region " + std::to_string(r) +
+                                 " channel " + std::to_string(f) + " sum_sq_dev");
+            }
+        }
+    }
 }
 
 // Every pixel of polarization 2, frequency 1, l >= 2 lives in the chunk the generator deleted.
@@ -572,6 +625,7 @@ int main() {
             fast_axes.push_back(sky.chunk_geometry().fastest_spatial_axis);
             TestRegionsSpanningChunks(sky);
             TestMissingChunkHasNoFinitePixels(sky);
+            TestTheSpreadIsThePixelsOwn(sky);
             TestRasterMaskAndNullMaskAgree(sky);
             TestOnlyRequestedStatisticsAreReported(sky);
             TestStrideSelectsChannels(sky);

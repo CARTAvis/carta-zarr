@@ -511,6 +511,168 @@ void TestACubeHistogramSplitAcrossWorkers() {
             "four provisional histograms re-aggregated onto one grid still hold every pixel");
 }
 
+// The spread of pixels far from zero against it, which is what sum and sum_sq cannot give: the cases
+// ADR 0018 was measured on, and one where the pixel a span takes its distances from is the odd one out.
+
+// About normal, of unit variance, and the same every time for the same pixel.
+double Noise(const std::vector<std::uint64_t>& logical) {
+    std::uint64_t state = (logical.at(0) * 0x9E3779B97F4A7C15ULL) ^ (logical.at(1) * 0xC2B2AE3D27D4EB4FULL) ^
+                          (logical.at(2) * 0x165667B19E3779F9ULL);
+    double total = 0.0;
+    for (int draw = 0; draw < 4; ++draw) {
+        state += 0x9E3779B97F4A7C15ULL;
+        std::uint64_t mixed = state;
+        mixed = (mixed ^ (mixed >> 30U)) * 0xBF58476D1CE4E5B9ULL;
+        mixed = (mixed ^ (mixed >> 27U)) * 0x94D049BB133111EBULL;
+        mixed ^= mixed >> 31U;
+        total += static_cast<double>(mixed >> 11U) / 9007199254740992.0;
+    }
+    return (total - 2.0) * std::sqrt(3.0);
+}
+
+struct Spread {
+    const char* name;
+    SyntheticPixelSource::Formula value;
+};
+
+std::vector<Spread> Spreads() {
+    return {
+        {"all 1e8", [](const std::vector<std::uint64_t>&) { return 1.0e8F; }},
+        {"1e6 + 0.5 noise", [](const std::vector<std::uint64_t>& at) { return static_cast<float>(1.0e6 + 0.5 * Noise(at)); }},
+        {"1e7 + 0.5 noise", [](const std::vector<std::uint64_t>& at) { return static_cast<float>(1.0e7 + 0.5 * Noise(at)); }},
+        {"1e8 + 20 noise", [](const std::vector<std::uint64_t>& at) { return static_cast<float>(1.0e8 + 20.0 * Noise(at)); }},
+        // The walk's rows run along m, so every pixel at the start of a chunk's row is the outlier.
+        {"1e8 + 20 noise, the first of each row far out", [](const std::vector<std::uint64_t>& at) {
+             return static_cast<float>(1.0e8 + 20.0 * Noise(at) + (at.at(1) % 65 == 0 ? 1.0e5 : 0.0));
+         }},
+    };
+}
+
+// The sum of squared deviations over the pixels `in` selects, worked out the slow way: in long
+// double, from a mean found first.
+template <typename Selected>
+double CentredReference(const SyntheticPixelSource::Formula& value, std::uint64_t channels_from, std::uint64_t channels_to,
+                        std::uint64_t x, std::uint64_t y, const Selected& in) {
+    long double count = 0.0L;
+    long double sum = 0.0L;
+    for (std::uint64_t z = channels_from; z < channels_to; ++z) {
+        for (std::uint64_t l = 0; l < x; ++l) {
+            for (std::uint64_t m = 0; m < y; ++m) {
+                if (in(l, m)) {
+                    count += 1.0L;
+                    sum += value({l, m, z, 0, 0});
+                }
+            }
+        }
+    }
+    const long double mean = sum / count;
+    long double deviations = 0.0L;
+    for (std::uint64_t z = channels_from; z < channels_to; ++z) {
+        for (std::uint64_t l = 0; l < x; ++l) {
+            for (std::uint64_t m = 0; m < y; ++m) {
+                if (in(l, m)) {
+                    const long double distance = value({l, m, z, 0, 0}) - mean;
+                    deviations += distance * distance;
+                }
+            }
+        }
+    }
+    return static_cast<double>(deviations);
+}
+
+void RequireCentred(double actual, double expected, const std::string& where) {
+    Require(std::abs(actual - expected) <= 1e-10 * std::max(1.0, std::abs(expected)),
+            where + ": sum_sq_dev " + std::to_string(actual) + ", the pixels' own " + std::to_string(expected));
+}
+
+void TestASpectralSpreadIsCentredWhateverTheMagnitude() {
+    const auto image = MakeImage(kX, kY, kZ);
+    const auto geometry = MakeGeometry(64, 65, 2);
+    // A region with holes in it, so that its rows are several spans and take the masked loop.
+    constexpr std::uint64_t kHolesX = 150;
+    constexpr std::uint64_t kHolesY = 170;
+    std::vector<std::uint8_t> holes(kHolesX * kHolesY);
+    for (std::uint64_t i = 0; i < holes.size(); ++i) {
+        holes[i] = static_cast<std::uint8_t>(((i / kHolesX) % 7 != 3) && ((i % kHolesX) % 11 != 5));
+    }
+    const std::vector<carta::zarr::RegionMask> regions{
+        {0, 0, kX, kY},
+        {40, 50, 100, 120},
+        {30, 20, kHolesX, kHolesY, {holes.data(), holes.size()}},
+    };
+    const auto inside = [&](std::size_t r, std::uint64_t l, std::uint64_t m) {
+        const auto& region = regions.at(r);
+        if (l < region.x_start || l >= region.x_start + region.width || m < region.y_start ||
+            m >= region.y_start + region.height) {
+            return false;
+        }
+        return region.mask.size == 0 ||
+               region.mask.data[((m - region.y_start) * region.width) + (l - region.x_start)] != 0;
+    };
+
+    for (const auto& spread : Spreads()) {
+        SyntheticPixelSource source(image, geometry, spread.value);
+        carta::zarr::SpectralReduceRequest request;
+        request.planes.spectral = {0, kZ, 1};
+        request.regions = {regions.data(), regions.size()};
+        // Alone: the count and the sum come with it.
+        request.statistics = carta::zarr::Statistic::sum_sq_dev;
+
+        ReadOptions options;
+        options.read_budget_bytes = 4 * 64 * 65 * 2 * 4;
+        WorkPool workers(4);
+        std::vector<double> deviations(regions.size() * kZ, -1.0);
+        const auto reducible = Reducible(source, image, geometry, workers);
+        const auto outcome = carta::zarr::internal::ReduceSpectral(
+            reducible, request, [&](const carta::zarr::SpectralBlock& block) {
+                Require(block.Carries(carta::zarr::Statistic::num_pixels | carta::zarr::Statistic::sum |
+                                      carta::zarr::Statistic::sum_sq_dev),
+                        "a block asked for sum_sq_dev carries the count and the sum it was made with");
+                if (block.complete) {
+                    for (std::size_t r = 0; r < regions.size(); ++r) {
+                        for (std::uint64_t c = 0; c < block.channel_count; ++c) {
+                            deviations.at((r * kZ) + block.first_channel + c) = block.Totals(r, c).sum_sq_dev;
+                        }
+                    }
+                }
+                return true;
+            }, options);
+        Require(static_cast<bool>(outcome),
+                std::string("the reduction failed: ") + (outcome ? "" : outcome.error().message));
+
+        for (std::size_t r = 0; r < regions.size(); ++r) {
+            for (std::uint64_t z = 0; z < kZ; ++z) {
+                const auto expected = CentredReference(spread.value, z, z + 1, kX, kY,
+                                                       [&](std::uint64_t l, std::uint64_t m) { return inside(r, l, m); });
+                RequireCentred(deviations.at((r * kZ) + z), expected,
+                               std::string(spread.name) + ", region " + std::to_string(r) + ", channel " + std::to_string(z));
+            }
+        }
+    }
+}
+
+void TestACubeSpreadIsCentredWhateverTheMagnitude() {
+    const auto image = MakeImage(kSplitX, kSplitY, kSplitZ);
+    const auto geometry = MakeGeometry(64, 65, 2);
+    for (const auto& spread : Spreads()) {
+        SyntheticPixelSource source(image, geometry, spread.value);
+        carta::zarr::CubeHistogramRequest request;
+        request.planes.spectral = {0, kSplitZ, 1};
+        request.bins = 64;
+        ReadOptions options;
+        options.read_budget_bytes = 4 * 64 * 65 * 2 * 4;
+        WorkPool workers(4);
+        const auto reducible = Reducible(source, image, geometry, workers);
+        const auto outcome = carta::zarr::internal::ComputeCubeHistogram(reducible, request, options, {});
+        Require(static_cast<bool>(outcome),
+                std::string("the cube histogram failed: ") + (outcome ? "" : outcome.error().message));
+        RequireCentred(outcome.value().totals.sum_sq_dev,
+                       CentredReference(spread.value, 0, kSplitZ, kSplitX, kSplitY,
+                                        [](std::uint64_t, std::uint64_t) { return true; }),
+                       std::string(spread.name) + ", the cube");
+    }
+}
+
 // Progress is a count of chunks read against a count of chunks to read, and the two are worked out
 // in different places: the walk adds up what each read covered, the total is taken once over the
 // whole run. Every report is made before a read that is still to come, so none of them may say the
@@ -806,6 +968,8 @@ int main() {
         TestAMaskedRegionReadsOnlyTheChunksItOccupies();
         TestAPlaneHistogramSplitAcrossWorkers();
         TestACubeHistogramSplitAcrossWorkers();
+        TestASpectralSpreadIsCentredWhateverTheMagnitude();
+        TestACubeSpreadIsCentredWhateverTheMagnitude();
         TestProgressNeverClaimsTheWholeRunBeforeItsLastRead();
         TestAPlaneHistogramHandsOverAtEveryReadOfItsBlock();
         TestARegionCoveringThePlaneHandsOverAsThePlaneDoes();

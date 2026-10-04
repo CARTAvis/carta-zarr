@@ -313,6 +313,41 @@ class ResumingASweep(unittest.TestCase):
                 sweep.Sweep(config(**given), self.output).adopt_workload()
             self.assertIn(str(self.output), str(refused.exception))
 
+    def test_another_build_of_the_bench_is_another_workload(self) -> None:
+        # The same settings measured by a bench whose reader changed are other measurements, and a
+        # bench is known by what `carta-zarr-bench identity` says of itself: the bytes it runs.
+        with tempfile.TemporaryDirectory() as directory:
+            said = Path(directory) / "identity"
+            bench = Path(directory) / "carta-zarr-bench"
+            bench.write_text(f"#!/bin/sh\n[ \"$1\" = identity ] && cat {said}\n")
+            bench.chmod(0o755)
+            said.write_text("0123456789abcdef\n")
+            given = {"paths": {"bench": str(bench), "work": directory}}
+            self.start(**given)
+            sweep.Sweep(config(**given), self.output).adopt_workload()
+
+            said.write_text("fedcba9876543210\n")
+            with self.assertRaises(SystemExit) as refused:
+                sweep.Sweep(config(**given), self.output).adopt_workload()
+            self.assertIn(str(self.output), str(refused.exception))
+
+            said.write_text("0123456789abcdef\n")
+            variant = Path(directory) / "variant"
+            variant.write_text("#!/bin/sh\necho 0000000000000001\n")
+            variant.chmod(0o755)
+            warm = {**given, "warm": {"variants": [{"name": "v", "bench": str(variant)}]}}
+            self.assertNotEqual(sweep.workload(config(**warm)), sweep.workload(config(**given)),
+                                "a warm variant's build is not part of what the sweep measures")
+
+    def test_a_bench_that_cannot_say_what_it_is_is_refused(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            bench = Path(directory) / "carta-zarr-bench"
+            bench.write_text("#!/bin/sh\nexit 2\n")
+            bench.chmod(0o755)
+            with self.assertRaises(SystemExit) as refused:
+                sweep.workload(config(paths={"bench": str(bench), "work": directory}))
+            self.assertIn(str(bench), str(refused.exception))
+
     def test_a_state_from_before_workloads_were_recorded_is_refused(self) -> None:
         # Whatever it measured, nothing says what, so it cannot be told apart from another workload.
         (self.output / "sweep-state.json").write_text(json.dumps(

@@ -10,6 +10,7 @@
 // measures is what a backend linked against the same build would see. tools/zarr-bench/sweep.py runs
 // it over layouts and settings and turns its CSV into a recommendation; see tools/zarr-bench/README.md.
 
+#include "build_identity.h"
 #include "cold.h"
 #include "options.h"
 #include "record.h"
@@ -212,6 +213,10 @@ int main(int argc, char** argv) {
     }
     if (const auto* probe = std::get_if<ProbeOptions>(&command)) {
         return Probe(*probe);
+    }
+    if (std::holds_alternative<IdentityOptions>(command)) {
+        std::printf("%s\n", BuildIdentity().c_str());
+        return 0;
     }
     return Run(std::get<RunOptions>(command));
 }

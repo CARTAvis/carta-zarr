@@ -33,8 +33,10 @@ namespace zarr_metadata = ::carta::zarr::internal::zarr;
 
 constexpr std::string_view kVersion = "1.2";
 
+constexpr int kKnownImages = 6;
+
 int KnownImageRank(std::string_view image_id) {
-    static constexpr std::array<std::string_view, 6> known{
+    static constexpr std::array<std::string_view, kKnownImages> known{
         "SKY", "MODEL", "RESIDUAL", "POINT_SPREAD_FUNCTION", "PRIMARY_BEAM", "MASK_DECONVOLVE"};
     const auto* const found = std::find(known.begin(), known.end(), image_id);
     return found == known.end() ? static_cast<int>(known.size()) : static_cast<int>(found - known.begin());
@@ -152,8 +154,9 @@ std::optional<TemporalCoordinate> DescribeTemporalCoordinate(const Store& store,
     return temporal;
 }
 
-// What discovery found, and the one thing beyond the listing that deciding the match needs: whether
-// anything in this store was malformed rather than merely unopenable, and which diagnostic says so.
+// What discovery found, and the two things beyond the listing that deciding the match needs: whether
+// anything in this store was malformed rather than merely unopenable, and which diagnostic says so;
+// and whether anything in it is evidence of an image dataset at all.
 //
 // Here rather than on ImageDiscovery because it is this profile reasoning about its own store, and
 // ImageDiscovery is what every profile answers with. A second profile would decide its own match
@@ -161,6 +164,10 @@ std::optional<TemporalCoordinate> DescribeTemporalCoordinate(const Store& store,
 struct Discovered {
     ImageDiscovery discovery;
     std::optional<std::size_t> first_malformation;
+    // A malformed node says the store is broken, not what it is. An image variable this profile
+    // recognised, openable or not, or a node bearing one of XRADIO's image names, says it is an
+    // image dataset; so does a root that says so, which InspectImages asks.
+    bool image_evidence = false;
 };
 
 // Which variables of this store are images this profile will open. Only InspectImages calls it:
@@ -176,6 +183,9 @@ Result<Discovered> DiscoverImages(const Store& store) {
     ImageDiscovery& result = found.discovery;
     for (const auto& entry : inventory.value()) {
         auto qualified = QualifyNode(store, entry);
+        if (qualified.listed || KnownImageRank(entry.name) < kKnownImages) {
+            found.image_evidence = true;
+        }
         if (qualified.diagnostic) {
             if (qualified.malformed && !found.first_malformation) {
                 found.first_malformation = result.diagnostics.size();
@@ -253,7 +263,14 @@ Result<SchemaInspection> InspectImages(const Store& store) {
         // whose images disagree with their coordinates, or whose metadata will not parse, is a
         // store this profile recognised and found broken -- and reporting that as a non-match tells
         // whoever picked the file that nothing knew what it was, which is untrue and no use.
-        return finish(found.value().first_malformation ? SchemaMatchKind::invalid : SchemaMatchKind::no_match);
+        //
+        // But only a store with something of an image about it. A malformed node alone is not that:
+        // a visibility dataset with a weights array that will not parse is Zarr of something else,
+        // and calling it a broken image sent CARTA's file browser to list it as one.
+        const bool image_dataset = found.value().image_evidence ||
+                                   AttributeString(root_attributes, "type") == "image_dataset";
+        return finish(found.value().first_malformation && image_dataset ? SchemaMatchKind::invalid
+                                                                          : SchemaMatchKind::no_match);
     }
 
     // Once discovery found an openable image, validate the metadata needed by the image reader.

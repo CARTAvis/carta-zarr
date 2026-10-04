@@ -77,7 +77,7 @@ from fingerprint import source_content
 MANIFEST_NAME = "bench-manifest.json"
 # Bumped whenever the same arguments would produce different bytes, so that a dataset written by an
 # older generator is not mistaken for one this one would write.
-FORMAT_VERSION = 2
+FORMAT_VERSION = 3
 
 AXES = ("time", "frequency", "polarization", "l", "m")
 STOKES = ("I", "Q", "U", "V")
@@ -527,21 +527,48 @@ def fill(job: Job, shape: list[int], unit: tuple[int, ...], itemsize: int, args:
 # -- Dataset assembly -----------------------------------------------------------------------------
 
 
-def find_flag(root: Path, image: str, image_metadata: dict[str, Any], names: list[str]) -> str | None:
-    """The flag carta-zarr would mask this image with: the one it declares, or else the only
-    flag-typed boolean array with its dimensions and shape. The same rule as src/schema/xradio/flag.cc."""
+def holds_booleans(metadata: dict[str, Any]) -> bool:
+    """A Zarr bool, or xarray's encoding of one -- an int8 marked dtype "bool" -- which is what XRADIO
+    writes for every flag. HoldsBooleans in src/schema/xradio/flag.h."""
+    if metadata.get("data_type") == "bool":
+        return True
+    return metadata.get("data_type") == "int8" and metadata.get("attributes", {}).get("dtype") == "bool"
+
+
+def flags_of_data_groups(root_metadata: dict[str, Any], image: str) -> tuple[set[str], set[str]]:
+    """The flags the root's data groups give this image as its sky, and those they give any other."""
+    own, others = set(), set()
+    groups = root_metadata.get("attributes", {}).get("data_groups")
+    for group in (groups.values() if isinstance(groups, dict) else ()):
+        flag = group.get("flag") if isinstance(group, dict) else None
+        if isinstance(flag, str) and flag:
+            (own if group.get("sky") == image else others).add(flag)
+    return own, others
+
+
+def find_flag(root: Path, image: str, image_metadata: dict[str, Any], names: list[str],
+              root_metadata: dict[str, Any]) -> str | None:
+    """The flag carta-zarr would mask this image with, by the rule of src/schema/xradio/flag.cc: the
+    one its own `flag` attribute names, else the one data_groups give it as its sky, else the only
+    flag-typed boolean array with its dimensions and shape that no data group gives another image.
+    Two groups giving it different flags is refused, as carta-zarr refuses to open it."""
     declared = image_metadata.get("attributes", {}).get("flag")
     if isinstance(declared, str) and declared:
         return declared
+    own, others = flags_of_data_groups(root_metadata, image)
+    if len(own) > 1:
+        raise SystemExit(f"data_groups name more than one flag for {image}: {', '.join(sorted(own))}")
+    if own:
+        return next(iter(own))
     matches = []
     for name in names:
-        if name == image:
+        if name == image or name in others:
             continue
         metadata = read_metadata(root / name)
         if (
             metadata.get("node_type") == "array"
             and metadata.get("attributes", {}).get("type") == "flag"
-            and metadata.get("data_type") == "bool"
+            and holds_booleans(metadata)
             and metadata.get("dimension_names") == image_metadata.get("dimension_names")
             and metadata.get("shape") == image_metadata.get("shape")
         ):
@@ -587,7 +614,7 @@ def rewrite_source(args: argparse.Namespace, out: Path) -> dict[str, Any]:
 
     shape, _ = cropped(image_metadata)
     layout = resolve_layout(args, dims, shape)
-    flag = find_flag(source, image, image_metadata, names)
+    flag = find_flag(source, image, image_metadata, names, root_metadata)
     rewritten = {image} | ({flag} if flag else set())
 
     zarr.create_group(store=str(out), zarr_format=3, attributes=root_metadata.get("attributes", {}))

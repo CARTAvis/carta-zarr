@@ -113,8 +113,10 @@ open. `run` writes one CSV row per operation; `--help` lists its options.
 - **Deadline.** `--trial-timeout` becomes each read's `ReadControl::deadline`. An operation it stops,
   and any not yet started, is a `timeout` row; a process still running 30 s past it is killed.
 - **Resuming.** Rows are written a trial at a time, so an interrupted run loses at most the trial it
-  was in. `--resume` skips the trials the CSV already holds for the same settings -- the `run_key`
-  column -- whose rows cover every operation of every process and hold no error. A trial run again
+  was in. `--resume` skips the trials the CSV already holds for the same settings and the same
+  build -- the `run_key` column, which hashes the bench's bytes and those of the carta-zarr it loads
+  as `carta-zarr-bench identity` prints them -- whose rows cover every operation of every process and
+  hold no error. A trial run again
   replaces the rows its earlier attempt left, so the CSV holds one attempt at each trial. A last line
   cut short -- one without its newline, which the bench always writes -- is dropped before anything
   is appended; any other line that is not a row stops the run rather than being written after.
@@ -186,8 +188,9 @@ that did not survive validation. The tables behind it follow.
 - **Resuming.** `sweep-state.json` records each finished run, so a rerun skips it without writing its
   layout again; a run cut short resumes from the CSV. Runs that failed are tried again. The state
   holds only runs of one workload -- the source, what it holds (each file's path, size and
-  modification time), and the measure settings a run key does not say -- and a sweep of another is
-  refused rather than mixed in with it.
+  modification time), the build of the bench and of each warm variant (`carta-zarr-bench identity`),
+  and the measure settings a run key does not say -- and a sweep of another is refused rather than
+  mixed in with it.
 - **`--report-only`** rewrites `summary.md` from what there is, mid-sweep or after.
 
 The output directory, `zarr-bench-results` beside the config unless `--output` says otherwise, holds

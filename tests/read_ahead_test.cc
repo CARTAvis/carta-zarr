@@ -21,6 +21,7 @@
 #include <exception>
 #include <memory>
 #include <mutex>
+#include <new>
 #include <string>
 #include <thread>
 #include <utility>
@@ -82,6 +83,9 @@ public:
     bool Prefetch(const ReadRequest& plane, const std::function<bool()>& cancelled) const override {
         std::unique_lock<std::mutex> lock(_mutex);
         _prefetched.emplace_back(plane.axes.at(0).start, plane.axes.at(1).start);
+        if (_throwing) {
+            throw std::bad_alloc();
+        }
         while (_holding && !cancelled()) {
             _released.wait_for(lock, std::chrono::milliseconds(1));
         }
@@ -95,6 +99,12 @@ public:
     void Hold() {
         const std::scoped_lock lock(_mutex);
         _holding = true;
+    }
+    // Every prefetch from now on throws, as copying what a read is asked with does when the memory
+    // for it is not there.
+    void Throw() {
+        const std::scoped_lock lock(_mutex);
+        _throwing = true;
     }
     void Release() {
         {
@@ -119,6 +129,7 @@ private:
     mutable std::mutex _mutex;
     mutable std::condition_variable _released;
     bool _holding = false;
+    bool _throwing = false;
     mutable bool _saw_cancel = false;
     mutable Planes _prefetched;
 };
@@ -202,13 +213,32 @@ void TestARunOfAPlaneHoldsItsChunksWhole() {
     ChunkGeometry geometry;
     geometry.chunk_shape = {4, 4, 2, 2};
     // 3 x 2 chunks across the plane, each 4 x 4 x 2 x 2 elements of four bytes.
-    Require(PlaneRunBytes(descriptor, geometry, false) == 6ULL * 256, "a run is the plane in whole chunks");
-    Require(PlaneRunBytes(descriptor, geometry, true) == 6ULL * (256 + 64),
+    Require(PlaneRunBytes(descriptor, geometry, geometry, false) == 6ULL * 256, "a run is the plane in whole chunks");
+    Require(PlaneRunBytes(descriptor, geometry, geometry, true) == 6ULL * (256 + 64),
             "with the pixel mask applied a run holds the flag beside it, at a byte an element");
+
+    // A flag chunked otherwise holds what its own chunks hold. Coarser: the whole plane in one chunk,
+    // four channels and every Stokes deep -- one chunk of 10 x 5 x 4 x 4 bytes beside the pixels' six.
+    ChunkGeometry coarse;
+    coarse.chunk_shape = {10, 5, 4, 4};
+    Require(PlaneRunBytes(descriptor, geometry, coarse, true) == (6ULL * 256) + 800,
+            "a flag chunked coarser than the pixels was counted in the pixels' chunks");
+    Require(PlaneRunBytes(descriptor, geometry, coarse, false) == 6ULL * 256, "an unmasked read holds no flag");
+    // Finer: one element along x, so ten chunks across, each 1 x 5 x 1 x 2 -- and a run two channels
+    // deep crosses two of them.
+    ChunkGeometry fine;
+    fine.chunk_shape = {1, 5, 1, 2};
+    Require(PlaneRunBytes(descriptor, geometry, fine, true) == (6ULL * 256) + (10ULL * 2 * 10),
+            "a flag chunked finer than the pixels was counted in the pixels' chunks");
+    // Offset from the pixels' chunks, a run of channels 2 and 3 crosses two flag chunks of three.
+    ChunkGeometry offset;
+    offset.chunk_shape = {10, 5, 3, 2};
+    Require(PlaneRunBytes(descriptor, geometry, offset, true) == (6ULL * 256) + (2ULL * 10 * 5 * 3 * 2),
+            "a flag chunk boundary inside a run of channels was not counted on both sides");
 
     descriptor.axes = {Axis("frequency", AxisRole::spectral, 8)};
     geometry.chunk_shape = {2};
-    Require(PlaneRunBytes(descriptor, geometry, false) == 0, "an image with no plane has no run of one");
+    Require(PlaneRunBytes(descriptor, geometry, geometry, false) == 0, "an image with no plane has no run of one");
 }
 
 void TestNothingIsReadAheadWithoutRoomForTwoRunsOfEachImageItsCacheHolds() {
@@ -353,6 +383,20 @@ void TestLettingGoStopsWhatIsUnderWayAndWaitsForIt() {
     Require(image->SawCancel(), "a prefetch outlived the reading ahead that started it");
 }
 
+// A prefetch that throws -- the memory to copy what it reads with was not there -- stops reading
+// ahead rather than ending the process. It runs on a thread of its own, where an exception nothing
+// catches is std::terminate.
+void TestAPrefetchThatThrowsStopsReadingAhead() {
+    const auto image = std::make_shared<FakeImage>();
+    auto reading = Over({image});
+    image->Throw();
+    reading->Served(Clock::now(), false, {Plane(0, 0)}, Upcoming(1, 8));
+    WaitUntilIdle(*reading);
+    Require(reading->Stats().stopped, "a prefetch that threw did not stop reading ahead");
+    reading->Served(Clock::now(), false, {Plane(0, 4)}, Upcoming(5, 8));
+    Require(image->Prefetched().size() == 1, "reading ahead went on after a prefetch threw");
+}
+
 void TestEachAnimatedImageHasItsNextRunDecoded() {
     const auto active = std::make_shared<FakeImage>(4);
     const auto matched = std::make_shared<FakeImage>(2);
@@ -385,6 +429,7 @@ int main() {
         TestCancellingStopsWhatIsUnderWay();
         TestLettingGoStopsWhatIsUnderWayAndWaitsForIt();
         TestEachAnimatedImageHasItsNextRunDecoded();
+        TestAPrefetchThatThrowsStopsReadingAhead();
     } catch (const std::exception& error) {
         std::fprintf(stderr, "read ahead test failed: %s\n", error.what());
         return 1;

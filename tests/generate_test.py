@@ -27,6 +27,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from typing import Any
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "tools" / "zarr-bench"))
 
@@ -127,6 +128,72 @@ class ClaimTest(unittest.TestCase):
                                               "--output", "out", "--chunk", "l=1"])
         self.assertEqual(generate.inputs_read(synthetic), [("--template", template)])
 
+
+
+class FindFlagTest(unittest.TestCase):
+    """The flag a rewrite rewrites beside its image is the one carta-zarr masks the image with, by the
+    rule of src/schema/xradio/flag.cc: the image's own `flag` attribute, else the one the root's
+    data_groups give the image as its sky, else the only flag-typed boolean array of its shape. A
+    boolean is a Zarr bool or xarray's int8 marked dtype "bool", which is what XRADIO writes. A flag
+    left behind keeps the source's layout, and the layouts compared would each be a mix."""
+
+    def setUp(self) -> None:
+        self._directory = tempfile.TemporaryDirectory()
+        self.root = Path(self._directory.name)
+
+    def tearDown(self) -> None:
+        self._directory.cleanup()
+
+    def array(self, name: str, data_type: str = "float32", **attributes: Any) -> dict[str, Any]:
+        metadata = {"zarr_format": 3, "node_type": "array", "shape": [1, 2, 3, 4, 5], "data_type": data_type,
+                    "dimension_names": ["time", "frequency", "polarization", "l", "m"], "attributes": attributes}
+        (self.root / name).mkdir()
+        (self.root / name / "zarr.json").write_text(json.dumps(metadata))
+        return metadata
+
+    def find(self, image: dict[str, Any], groups: dict[str, Any] | None = None) -> str | None:
+        root = {"attributes": {"data_groups": groups}} if groups is not None else {"attributes": {}}
+        return generate.find_flag(self.root, "SKY", image, generate.member_names(self.root), root)
+
+    def test_xarrays_encoding_of_a_bool_is_a_flag(self) -> None:
+        image = self.array("SKY")
+        self.array("FLAG_SKY", "int8", type="flag", dtype="bool")
+        self.assertEqual(self.find(image), "FLAG_SKY")
+
+    def test_an_int8_that_is_not_marked_bool_is_not(self) -> None:
+        image = self.array("SKY")
+        self.array("FLAG_SKY", "int8", type="flag")
+        self.assertIsNone(self.find(image))
+
+    def test_a_data_group_declares_its_skys_flag(self) -> None:
+        image = self.array("SKY")
+        self.array("FLAG_SKY", "int8", type="flag", dtype="bool")
+        self.array("OTHER_FLAG", "bool", type="flag")
+        self.assertEqual(self.find(image, {"base": {"sky": "SKY", "flag": "FLAG_SKY"}}), "FLAG_SKY")
+
+    def test_the_images_own_attribute_outranks_a_data_group(self) -> None:
+        image = self.array("SKY", flag="MINE")
+        self.array("MINE", "bool", type="flag")
+        self.array("FLAG_SKY", "bool", type="flag")
+        self.assertEqual(self.find(image, {"base": {"sky": "SKY", "flag": "FLAG_SKY"}}), "MINE")
+
+    def test_two_groups_naming_different_flags_is_refused(self) -> None:
+        image = self.array("SKY")
+        self.array("A", "bool", type="flag")
+        self.array("B", "bool", type="flag")
+        with self.assertRaises(SystemExit):
+            self.find(image, {"one": {"sky": "SKY", "flag": "A"}, "two": {"sky": "SKY", "flag": "B"}})
+
+    def test_another_images_flag_is_not_guessed_to_be_this_ones(self) -> None:
+        image = self.array("SKY")
+        self.array("FLAG_MODEL", "bool", type="flag")
+        self.assertIsNone(self.find(image, {"model": {"sky": "MODEL", "flag": "FLAG_MODEL"}}))
+
+    def test_the_committed_conversion_names_its_flag(self) -> None:
+        fixture = Path(__file__).resolve().parent / "data" / "images" / "zarr" / "xradio" / "conformance_flagged"
+        root = generate.read_metadata(fixture)
+        image = generate.read_metadata(fixture / "SKY")
+        self.assertEqual(generate.find_flag(fixture, "SKY", image, generate.member_names(fixture), root), "FLAG_SKY")
 
 
 class IdentityTest(unittest.TestCase):

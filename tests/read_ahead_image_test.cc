@@ -156,12 +156,36 @@ void TestACacheWithoutRoomForTwoRunsIsDeclinedAndSaysWhy() {
     Require(!ReadAhead::For({}), "reading ahead of nothing was made");
 }
 
+// A flag chunked otherwise than the pixels is held in its own chunks, and the room asked for counts
+// them. Here the whole flag is one chunk of 120 bytes, so a run of a plane -- two pixel chunks of 40
+// bytes -- holds 200 with the flag beside it, not the 100 its counting in the pixels' chunks said; a
+// cache of 300 cannot keep two such runs, and a read ahead into it would be evicted before it was
+// read.
+void TestAFlagChunkedOtherwiseIsCountedInItsOwnChunks() {
+    const auto context = ContextHolding(0);
+    const auto image = OpenSky(context, CARTA_ZARR_PIXEL_FIXTURE_COARSE_FLAG);
+    Require(image.descriptor().has_pixel_mask, "the coarse-flag fixture has no flag to count");
+
+    ReadOptions pooled;
+    pooled.control.cache_pool = context.NewCachePool(300).value();
+    const auto declined = ReadAhead::For({{image, pooled}});
+    Require(!declined && declined.error().code == ErrorCode::buffer_too_small,
+            "a cache without room for two runs of a coarse flag beside the pixels was read ahead into");
+    pooled.control.cache_pool = context.NewCachePool(400).value();
+    Require(ReadAhead::For({{image, pooled}}).has_value(), "a cache with room for two runs was declined");
+    ReadOptions unmasked = pooled;
+    unmasked.apply_pixel_mask = false;
+    unmasked.control.cache_pool = context.NewCachePool(200).value();
+    Require(ReadAhead::For({{image, unmasked}}).has_value(), "an unmasked read was asked room for a flag");
+}
+
 }  // namespace
 
 int main() {
     try {
         TestTheNextRunIsDecodedIntoTheCacheTheFramesReadThrough();
         TestACacheWithoutRoomForTwoRunsIsDeclinedAndSaysWhy();
+        TestAFlagChunkedOtherwiseIsCountedInItsOwnChunks();
     } catch (const std::exception& error) {
         std::fprintf(stderr, "read ahead image test failed: %s\n", error.what());
         return 1;

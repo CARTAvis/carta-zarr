@@ -24,6 +24,7 @@ if(GIT_FOUND)
 endif()
 
 add_library(carta_zarr_bench_core STATIC
+    build_identity.cc
     cold.cc
     mode.cc
     modes/animation.cc
@@ -39,7 +40,7 @@ target_compile_features(carta_zarr_bench_core PUBLIC cxx_std_17)
 target_include_directories(carta_zarr_bench_core PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 target_link_libraries(carta_zarr_bench_core
     PUBLIC CARTA::zarr
-    PRIVATE nlohmann_json::nlohmann_json)
+    PRIVATE nlohmann_json::nlohmann_json ${CMAKE_DL_LIBS})
 target_compile_definitions(carta_zarr_bench_core PUBLIC
     CARTA_ZARR_BENCH_COMMIT="${CARTA_ZARR_BENCH_COMMIT}"
     CARTA_ZARR_BENCH_BUILD_TYPE="$<IF:$<STREQUAL:$<CONFIG>,>,none,$<CONFIG>>"

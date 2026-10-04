@@ -429,7 +429,9 @@ def generate_xradio_fixture(
         add_consolidated_metadata(path)
 
 
-def generate_pixel_fixture(path: Path, *, l_fastest: bool = False, fine_flag: bool = False) -> None:
+def generate_pixel_fixture(
+    path: Path, *, l_fastest: bool = False, fine_flag: bool = False, coarse_flag: bool = False
+) -> None:
     """An XRADIO image whose pixels are readable and self-describing.
 
     The other XRADIO fixtures carry only fill values, so they pin metadata and say nothing about a
@@ -440,6 +442,9 @@ def generate_pixel_fixture(path: Path, *, l_fastest: bool = False, fine_flag: bo
 
     `fine_flag` chunks the flag half as long along l as the pixels, which a flag is allowed to be: a
     prefetch that samples the flag where it samples the pixels decodes only half its chunks.
+
+    `coarse_flag` keeps the whole flag in one chunk, which a flag is allowed to be too: what a run
+    of chunks holds counted in the pixels' chunks then misses most of the flag beside them.
     """
     time_size, frequency_size, polarization_size, l_size, m_size = 1, 2, 3, 4, 5
     # XRADIO writes m last, so m is the axis a plane is contiguous along. A store that writes l last
@@ -519,6 +524,8 @@ def generate_pixel_fixture(path: Path, *, l_fastest: bool = False, fine_flag: bo
         if l_fastest:
             raise ValueError("fine_flag is defined for the m-last layout only")
         flag_chunks = (1, 1, 1, 1, 5)
+    if coarse_flag:
+        flag_chunks = shape
     flag = zarr.create_array(
         store=path / "FLAG",
         shape=shape,
@@ -693,6 +700,7 @@ def main() -> None:
         "xradio/pixels",
         "xradio/pixels_l_fastest",
         "xradio/pixels_fine_flag",
+        "xradio/pixels_coarse_flag",
         "xradio/pixels_wide",
         "xradio/time_axis",
     ):
@@ -707,6 +715,7 @@ def main() -> None:
     generate_pixel_fixture(OUTPUT_DIR / "xradio" / "pixels")
     generate_pixel_fixture(OUTPUT_DIR / "xradio" / "pixels_l_fastest", l_fastest=True)
     generate_pixel_fixture(OUTPUT_DIR / "xradio" / "pixels_fine_flag", fine_flag=True)
+    generate_pixel_fixture(OUTPUT_DIR / "xradio" / "pixels_coarse_flag", coarse_flag=True)
     generate_wide_pixel_fixture(OUTPUT_DIR / "xradio" / "pixels_wide")
     generate_xradio_fixture(OUTPUT_DIR / "xradio" / "time_axis", typed=True, consolidated=True, times=2)
 

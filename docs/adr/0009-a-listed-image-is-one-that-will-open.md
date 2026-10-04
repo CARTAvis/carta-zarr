@@ -106,6 +106,13 @@ built-in profile recognised a store that a profile recognised perfectly well and
 store whose only image will not parse now answers the same way, which is a change: it used to be a
 non-match with its reason dropped.
 
+Malformed is not enough on its own, though: a malformed node says a store is broken, not that it
+is an image dataset. A visibility dataset whose weights array will not parse was answered `invalid`
+and listed by CARTA as a broken image. So `invalid` also needs evidence of an image dataset -- an
+image variable this profile recognised, openable or not; a node bearing one of XRADIO's image names,
+such as `SKY`; or a root whose `type` is `image_dataset` -- and a store with none is `no_match`,
+whatever in it would not parse.
+
 **A refusal reports the code its own reason implies.** `RequireOpenable` wrote
 `unsupported_data_type` for every refusal; a coordinate disagreement reports `invalid_metadata` and
 a complex variable reports `unsupported_data_type`, because the thing that knows the reason is the

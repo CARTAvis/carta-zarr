@@ -180,7 +180,8 @@ if(CARTA_ZARR_BUILD_TESTS AND BUILD_TESTING)
     set(CARTA_ZARR_PIXEL_FIXTURES
         CARTA_ZARR_PIXEL_FIXTURE="${CARTA_ZARR_FIXTURE_DIR}/xradio/pixels"
         CARTA_ZARR_PIXEL_FIXTURE_L_FASTEST="${CARTA_ZARR_FIXTURE_DIR}/xradio/pixels_l_fastest"
-        CARTA_ZARR_PIXEL_FIXTURE_FINE_FLAG="${CARTA_ZARR_FIXTURE_DIR}/xradio/pixels_fine_flag")
+        CARTA_ZARR_PIXEL_FIXTURE_FINE_FLAG="${CARTA_ZARR_FIXTURE_DIR}/xradio/pixels_fine_flag"
+        CARTA_ZARR_PIXEL_FIXTURE_COARSE_FLAG="${CARTA_ZARR_FIXTURE_DIR}/xradio/pixels_coarse_flag")
     set(CARTA_ZARR_WIDE_FIXTURE
         CARTA_ZARR_PIXEL_FIXTURE_WIDE="${CARTA_ZARR_FIXTURE_DIR}/xradio/pixels_wide")
 
@@ -535,7 +536,7 @@ if(CARTA_ZARR_BUILD_TESTS AND BUILD_TESTING)
         TEST_NAME carta-zarr-read-ahead-image
         SOURCES tests/read_ahead_image_test.cc
         LIBRARIES Threads::Threads
-        DEFINITIONS ${CARTA_ZARR_WIDE_FIXTURE})
+        DEFINITIONS ${CARTA_ZARR_WIDE_FIXTURE} ${CARTA_ZARR_PIXEL_FIXTURES})
 
     # Which chunks a set of regions occupies. LIBRARIES is empty and meant to stay empty: the
     # question is regions and a chunk shape in, an index out, so a target that starts needing a

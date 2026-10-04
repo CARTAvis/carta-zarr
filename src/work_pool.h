@@ -10,6 +10,7 @@
 #include <condition_variable>
 #include <cstddef>
 #include <cstdint>
+#include <exception>
 #include <functional>
 #include <mutex>
 #include <thread>
@@ -34,8 +35,11 @@ namespace carta::zarr::internal {
  *   before it reuses the buffer for the next one.
  * - The body is handed a worker index as well as a task index, so a caller that needs private
  *   accumulation can address one slot per worker without a map or a lock.
- * - Exceptions are not propagated. Every body this pool runs is arithmetic over a buffer the caller
- *   already owns; if one of them throws, the process is already past saving.
+ * - An exception a body throws reaches the caller of `Run`, rethrown there once every worker has
+ *   stopped. A body is mostly arithmetic over a buffer the caller owns, but not only: a histogram
+ *   growing its bins allocates, and an allocation can fail. Thrown on a pool thread and left there,
+ *   it ended the process, since nothing above a std::thread's function catches; on the caller's
+ *   thread it reaches the public entry point, which reports it as an error like any other.
  */
 class WorkPool {
 public:
@@ -65,6 +69,10 @@ public:
      *
      * Safe to call from more than one thread: calls are serialised, and one of them waits. That is
      * not a detail a caller can ignore on a pool it does not own -- see `_run` below.
+     *
+     * If a body throws, no task not yet claimed is started, the ones already running finish, and
+     * the first exception is rethrown here. Which tasks ran is then unspecified, so a caller
+     * treats whatever they were writing as lost -- which a caller unwinding does anyway.
      */
     void Run(std::size_t tasks, const std::function<void(std::size_t task, std::size_t worker)>& body);
 
@@ -104,6 +112,8 @@ private:
     std::size_t _running = 0;
     std::size_t _generation = 0;
     bool _stopping = false;
+    // The first exception a body of the current Run threw, for Run to rethrow.
+    std::exception_ptr _failure;
 };
 
 /**

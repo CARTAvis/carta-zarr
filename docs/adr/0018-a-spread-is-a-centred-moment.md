@@ -77,10 +77,11 @@ answer over two fixtures and a 1024² × 32 synthetic cube, at one thread and fo
 The variance is the consumer's to derive, and so is what one pixel's is: the library reports the
 sum, as it reports `sum` and not a mean.
 
-Statistics a consumer did not have the library count -- a file's own precomputed ones, which hold
-only the sum and the sum of squares -- cannot be helped from here. A consumer falls back to the
-difference of sums for those, and should say it cannot tell rather than give a number, when that
-difference is within its own rounding.
+Statistics a consumer did not have the library count -- its own over pixels it read some other way,
+or a file's precomputed ones, which hold only the sum and the sum of squares -- cannot be helped from
+here. CARTA's backend makes sigma from the spread for a Zarr image and leaves every other format's
+made from the sums as it always was, so the same pixels stored two ways can report two sigmas when
+they are far from zero against their spread.
 
 ## Consequences
 

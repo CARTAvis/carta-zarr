@@ -10,7 +10,6 @@
 
 #include <algorithm>
 #include <map>
-#include <system_error>
 #include <utility>
 
 namespace carta::zarr::internal {
@@ -24,6 +23,23 @@ std::string Size(std::uint64_t bytes) {
 // Chunks along one axis of `length` elements: one for an axis with no chunk shape to speak of.
 std::uint64_t ChunksAlong(std::uint64_t length, std::uint64_t chunk) {
     return chunk == 0 ? 1 : std::max<std::uint64_t>(1, (length + chunk - 1) / chunk);
+}
+
+// The most flag chunks one pixel chunk along an axis crosses: one when the two are chunked alike, more
+// when the flag's are shorter or their boundaries fall inside a pixel chunk. Asked of every pixel
+// chunk rather than bounded, since a bound that assumes the worst alignment doubles the count of two
+// chunk shapes that line up; an axis is at most a few thousand chunks long.
+std::uint64_t FlagChunksAcrossARun(std::uint64_t length, std::uint64_t pixel_chunk, std::uint64_t flag_chunk) {
+    if (flag_chunk == 0 || length == 0) {
+        return 1;
+    }
+    const std::uint64_t step = pixel_chunk == 0 ? length : pixel_chunk;
+    std::uint64_t most = 1;
+    for (std::uint64_t first = 0; first < length; first += step) {
+        const std::uint64_t last = std::min(first + step, length) - 1;
+        most = std::max(most, (last / flag_chunk) - (first / flag_chunk) + 1);
+    }
+    return most;
 }
 
 }  // namespace
@@ -43,18 +59,34 @@ Run RunOf(const ChunkGeometry& geometry, const ReadRequest& request) {
     return run;
 }
 
-std::uint64_t PlaneRunBytes(const ImageDescriptor& descriptor, const ChunkGeometry& geometry, bool apply_mask) {
+std::uint64_t PlaneRunBytes(const ImageDescriptor& descriptor, const ChunkGeometry& geometry,
+                            const ChunkGeometry& flag_geometry, bool apply_mask) {
     const auto x = AxisIndex(descriptor.axes, AxisRole::spatial_x);
     const auto y = AxisIndex(descriptor.axes, AxisRole::spatial_y);
     if (!x || !y) {
         return 0;
     }
-    const auto chunk = [&](std::size_t axis) {
-        return axis < geometry.chunk_shape.size() ? geometry.chunk_shape[axis] : 0;
+    const auto chunk = [](const ChunkGeometry& of, std::size_t axis) {
+        return axis < of.chunk_shape.size() ? of.chunk_shape[axis] : 0;
     };
-    const std::uint64_t chunks = ChunksAlong(descriptor.axes[*x].length, chunk(*x)) *
-                                 ChunksAlong(descriptor.axes[*y].length, chunk(*y));
-    return chunks * DecodedChunkBytes(descriptor, geometry, apply_mask);
+    const std::uint64_t chunks = ChunksAlong(descriptor.axes[*x].length, chunk(geometry, *x)) *
+                                 ChunksAlong(descriptor.axes[*y].length, chunk(geometry, *y));
+    const std::uint64_t pixels = chunks * DecodedChunkBytes(descriptor, geometry);
+    if (!apply_mask) {
+        return pixels;
+    }
+    const auto& flag = flag_geometry.chunk_shape.empty() ? geometry : flag_geometry;
+    std::uint64_t flag_chunks = 1;
+    for (std::size_t axis = 0; axis < descriptor.axes.size(); ++axis) {
+        const auto length = descriptor.axes[axis].length;
+        const auto flag_chunk = chunk(flag, axis);
+        if (axis == *x || axis == *y) {
+            flag_chunks *= ChunksAlong(length, flag_chunk);
+        } else {
+            flag_chunks *= FlagChunksAcrossARun(length, chunk(geometry, axis), flag_chunk);
+        }
+    }
+    return pixels + (flag_chunks * ChunkElements(flag));
 }
 
 Result<std::unique_ptr<ReadingAhead>> ReadingAhead::For(std::vector<std::shared_ptr<const RunSource>> sources) {
@@ -172,18 +204,31 @@ void ReadingAhead::Served(Clock::time_point began, bool late, const std::vector<
     try {
         _worker = std::thread([this, work = std::move(work)] {
             const auto cancelled = [this] { return _cancelled.load(); };
-            for (const auto& [source, plane] : work) {
-                if (_cancelled) {
-                    break;
+            bool failed = false;
+            // Nothing above this thread can catch what escapes it -- an exception leaving a thread's
+            // function is std::terminate, which takes the consumer with it -- and a prefetch can throw
+            // before the image's own guard is reached: copying the options it reads with allocates.
+            // Reading ahead is for memory to spare, so a prefetch that ran out stops it.
+            try {
+                for (const auto& [source, plane] : work) {
+                    if (_cancelled) {
+                        break;
+                    }
+                    (void)source->Prefetch(plane, cancelled);
                 }
-                (void)source->Prefetch(plane, cancelled);
+            } catch (...) {
+                failed = true;
             }
             const std::scoped_lock lock(_mutex);
             _under_way = false;
             _finished = Clock::now();
+            if (failed) {
+                _stats.stopped = true;
+            }
         });
-    } catch (const std::system_error&) {
-        // A machine with no thread to spare has no time to spare either.
+    } catch (...) {
+        // A machine with no thread to spare has no time to spare either, and one without the memory
+        // to start a thread none to decode ahead into.
         const std::scoped_lock lock(_mutex);
         _under_way = false;
         _finished = Clock::now();

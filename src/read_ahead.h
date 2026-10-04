@@ -44,9 +44,12 @@ Run RunOf(const ChunkGeometry& geometry, const ReadRequest& request);
 
 // What one run of a whole plane of this image holds once decoded: the plane rounded out to whole
 // chunks along its two spatial axes, a chunk deep along every other, at what a chunk decodes to --
-// counting the flag beside it when the read applies the pixel mask. Zero for an image with no two
-// spatial axes, which has no plane to animate.
-std::uint64_t PlaneRunBytes(const ImageDescriptor& descriptor, const ChunkGeometry& geometry, bool apply_mask);
+// and, when the read applies the pixel mask, the flag chunks that run crosses, in the flag's own
+// chunks at a byte an element. A flag may be chunked otherwise than its image, and one kept whole in
+// a single chunk is all of it beside every run. `flag_geometry` without a chunk shape is taken to be
+// the pixels'. Zero for an image with no two spatial axes, which has no plane to animate.
+std::uint64_t PlaneRunBytes(const ImageDescriptor& descriptor, const ChunkGeometry& geometry,
+                            const ChunkGeometry& flag_geometry, bool apply_mask);
 
 // The cache an image's reads keep their chunks in, and how much it holds. Images reading through the
 // same one share what it holds, which is what it has to be enough for.

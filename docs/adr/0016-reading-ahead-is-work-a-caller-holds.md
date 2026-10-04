@@ -45,7 +45,14 @@ waits for the decode under way rather than starting its own, which is what ADR 0
 
 And only when each cache the animated images read through holds two runs of every image reading
 through it: the one playing and the one decoded ahead. Otherwise the run decoded ahead evicts the one
-being played. A run of 512 x 512 x 4 chunks of that cube is 589 MB; of 512 x 512 x 16, 2.4 GB.
+being played. A run of 512 x 512 x 4 chunks of that cube is 589 MB; of 512 x 512 x 16, 2.4 GB. A
+flag is counted in its own chunks, which need not be the pixels': one kept whole in a single chunk
+is the whole flag beside every run, and counting it in the pixels' chunks once asked, of the
+coarse-flag test fixture, half the room two of its runs take.
+
+A prefetch that throws -- the memory to copy what it reads with was not there -- stops reading ahead,
+as a late frame does. Nothing above its thread could catch it, and an exception leaving a thread
+ends the process.
 
 How far ahead to look -- 64 frames, which at CARTA's 5 frames a second is 13 s before the next run is
 needed -- is a constant of the library's, as ADR 0014 has it, and published so that a caller builds

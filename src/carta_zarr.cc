@@ -230,15 +230,18 @@ namespace {
 // its frames are read with -- so into the cache they will look in.
 class ImageRuns final : public internal::RunSource {
 public:
-    ImageRuns(Image image, ReadOptions options, internal::CacheShare cache)
-        : _image(std::move(image)), _options(std::move(options)), _cache(cache) {}
+    ImageRuns(Image image, ChunkGeometry flag_geometry, ReadOptions options, internal::CacheShare cache)
+        : _image(std::move(image)),
+          _flag_geometry(std::move(flag_geometry)),
+          _options(std::move(options)),
+          _cache(cache) {}
 
     internal::Run RunOf(const ReadRequest& plane) const override {
         return internal::RunOf(_image.chunk_geometry(), plane);
     }
     std::uint64_t PlaneRunBytes() const override {
         const auto& descriptor = _image.descriptor();
-        return internal::PlaneRunBytes(descriptor, _image.chunk_geometry(),
+        return internal::PlaneRunBytes(descriptor, _image.chunk_geometry(), _flag_geometry,
                                        internal::AppliesPixelMask(_options, descriptor));
     }
     internal::CacheShare Cache() const override {
@@ -259,6 +262,9 @@ public:
 
 private:
     Image _image;
+    // Not on Image's public face: a consumer asks how the pixels are chunked, and what the flag
+    // costs beside them is this class's question.
+    ChunkGeometry _flag_geometry;
     ReadOptions _options;
     internal::CacheShare _cache;
 };
@@ -290,7 +296,7 @@ Result<ReadAhead> ReadAhead::For(const std::vector<std::pair<Image, ReadOptions>
                 cache.identity = image._impl->context.get();
                 cache.bytes = image._impl->context->options.cache_bytes.value_or(0);
             }
-            sources.push_back(std::make_shared<ImageRuns>(image, options, cache));
+            sources.push_back(std::make_shared<ImageRuns>(image, image._impl->flag_geometry, options, cache));
         }
         auto reading = internal::ReadingAhead::For(std::move(sources));
         if (!reading) {

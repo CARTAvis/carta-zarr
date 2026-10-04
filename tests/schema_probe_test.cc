@@ -229,6 +229,53 @@ void TestNonMatchAndInvalid(const std::filesystem::path& root) {
             "metadata-incomplete XRADIO-like store was not reported as an invalid match");
 }
 
+// A malformed node is evidence that a store is broken, not that it is an image dataset. Zarr of
+// something else -- here a visibility dataset, whose one-dimensional weights will not parse -- is a
+// store this profile does not match, and calling it a malformed image sent CARTA's file browser to
+// list it as one. Only a store with something of an image about it is a broken image store: an
+// image variable this profile recognised, a node bearing an image's name, or a root that says it
+// is an image dataset.
+void TestAMalformedStoreIsAnImageOnlyOnEvidence(const std::filesystem::path& root) {
+    // An array with no chunk grid, which no Zarr reader can read.
+    const std::string unreadable =
+        R"({"zarr_format":3,"node_type":"array","shape":[4],"data_type":"float32","dimension_names":["row"]})";
+    const auto probe = [](const std::filesystem::path& store) {
+        const auto probed = carta::zarr::ProbeSchema(store.string(), carta::zarr::kXradioImageSchema);
+        Require(static_cast<bool>(probed), "probing failed outright: " + store.string());
+        return probed.value().kind;
+    };
+
+    const auto visibilities = root / "visibilities";
+    Write(visibilities / "zarr.json",
+          R"({"zarr_format":3,"node_type":"group","attributes":{"type":"visibility"}})");
+    Write(visibilities / "WEIGHT" / "zarr.json", unreadable);
+    Require(probe(visibilities) == SchemaMatchKind::no_match,
+            "a visibility dataset with a malformed weights array was matched as a malformed image store");
+    const auto context = carta::zarr::Context::Create();
+    const auto opened = carta::zarr::Dataset::Open(context.value(), visibilities.string());
+    Require(!opened && opened.error().code == ErrorCode::unsupported_schema,
+            "a visibility dataset with a malformed array was refused as invalid metadata, not as another schema");
+
+    const auto untyped = root / "untyped";
+    Write(untyped / "zarr.json", RootMetadata());
+    Write(untyped / "WEIGHT" / "zarr.json", unreadable);
+    Require(probe(untyped) == SchemaMatchKind::no_match,
+            "a store whose one malformed node is nothing of an image was matched as a malformed image store");
+
+    const auto typed = root / "typed";
+    Write(typed / "zarr.json",
+          R"({"zarr_format":3,"node_type":"group","attributes":{"type":"image_dataset"}})");
+    Write(typed / "WEIGHT" / "zarr.json", unreadable);
+    Require(probe(typed) == SchemaMatchKind::invalid,
+            "a store saying it is an image dataset, with a malformed node and no image, was not invalid");
+
+    const auto named = root / "named";
+    Write(named / "zarr.json", RootMetadata());
+    Write(named / "SKY" / "zarr.json", unreadable);
+    Require(probe(named) == SchemaMatchKind::invalid,
+            "a store whose malformed node is named as an XRADIO image is was not invalid");
+}
+
 // A store Dataset::Open refuses must say why it refused. The probe has already worked the reason
 // out -- often down to the attribute -- and the consumer puts this message in front of whoever
 // picked the file, so answering "not a supported dataset" spends a probe and reports nothing.
@@ -1003,6 +1050,7 @@ int main() {
         TestAHandleMovedFromStillWorks();
         TestTimeGreaterThanOne(root / "time-two");
         TestNonMatchAndInvalid(root / "classification");
+        TestAMalformedStoreIsAnImageOnlyOnEvidence(root / "evidence");
         TestMissingAndUnsupported(root);
         TestOpenSaysWhyItRefused(root / "refusal");
         TestCoordinateCompletion(root / "coordinates");

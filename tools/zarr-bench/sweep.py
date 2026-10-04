@@ -56,6 +56,8 @@ import tomllib
 from pathlib import Path
 from typing import Any
 
+from fingerprint import source_content
+
 HERE = Path(__file__).resolve().parent
 MODES = ("plane", "animation", "spectrum", "region", "cube-histogram", "open")
 # The modes ranked on first touches alone: the operations that read no chunk another operation of the
@@ -624,9 +626,16 @@ RESUMABLE_MEASURE = ("modes", "trials", "histogram_reference", "generator_worker
 def workload(config: dict[str, Any]) -> str:
     """What every run of a sweep measures beside what its key says: the source, and how the bench is
     told to read it. A run is done only for the workload it measured, and its key alone would let a
-    sweep asked for seed 999 skip every run it made with seed 1."""
+    sweep asked for seed 999 skip every run it made with seed 1.
+
+    The source is what it holds as well as how it is named: a cube edited in place keeps its path and
+    its settings, and the layouts written after the edit would measure other data than those written
+    before it. Its content is fingerprinted as the generator fingerprints it, from each file's path,
+    size and modification time."""
     measure = {name: value for name, value in config["measure"].items() if name not in RESUMABLE_MEASURE}
-    said = json.dumps({"source": config["source"], "measure": measure}, sort_keys=True)
+    path = config["source"]["path"]
+    content = source_content(Path(path)) if path else ""
+    said = json.dumps({"source": config["source"], "content": content, "measure": measure}, sort_keys=True)
     return hashlib.sha256(said.encode()).hexdigest()[:16]
 
 
@@ -686,7 +695,7 @@ class Sweep:
             raise SystemExit(f"{self.output} holds runs from before sweeps recorded what they measured, so they "
                              "cannot be told from another workload's. Write this sweep to another output directory.")
         if measured and recorded != current:
-            raise SystemExit(f"{self.output} holds runs of another workload: the source or the measure settings "
+            raise SystemExit(f"{self.output} holds runs of another workload: the source, what it holds, or the measure settings "
                              f"({', '.join(sorted(set(self.config['measure']) - set(RESUMABLE_MEASURE)))}) "
                              "differ from those it was measured with. Write this sweep to another output directory.")
         self.state["workload"] = current

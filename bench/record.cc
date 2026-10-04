@@ -14,11 +14,14 @@
 
 #include <array>
 #include <cinttypes>
+#include <cstdio>
 #include <filesystem>
 #include <fstream>
 #include <functional>
+#include <iterator>
 #include <set>
 #include <stdexcept>
+#include <system_error>
 #include <utility>
 
 #ifndef CARTA_ZARR_BENCH_COMMIT
@@ -356,6 +359,40 @@ std::optional<RowSummary> SummariseRow(const std::string& line) {
     return summary;
 }
 
+namespace {
+
+// Cut a file back to its last newline. The bench ends every line it writes with one, so a last line
+// without it is a write that stopped part-way -- a row, or the header, of which only some bytes
+// reached the disk. It is no row at all, and a row appended after it would join it into one line
+// that is neither. False, with `error` set, only when the file cannot be read or cut.
+bool DropLineCutShort(const std::string& path, std::string& error) {
+    std::error_code failed;
+    if (!std::filesystem::exists(path, failed)) {
+        return true;
+    }
+    std::ifstream file(path, std::ios::binary);
+    if (!file) {
+        error = "cannot read " + path;
+        return false;
+    }
+    const std::string text{std::istreambuf_iterator<char>(file), std::istreambuf_iterator<char>()};
+    if (text.empty() || text.back() == '\n') {
+        return true;
+    }
+    const auto last_newline = text.find_last_of('\n');
+    const auto keep = last_newline == std::string::npos ? std::uintmax_t{0} : std::uintmax_t{last_newline + 1};
+    std::filesystem::resize_file(path, keep, failed);
+    if (failed) {
+        error = "cannot drop the line " + path + " was cut short in: " + failed.message();
+        return false;
+    }
+    std::fprintf(stderr, "note: dropped the last line of %s, which a write stopped part-way through\n",
+                 path.c_str());
+    return true;
+}
+
+}  // namespace
+
 std::optional<CsvOutput> CsvOutput::Open(const std::string& path, std::string& error) {
     if (path.empty()) {
         CsvOutput output(stdout, {});
@@ -373,6 +410,9 @@ std::optional<CsvOutput> CsvOutput::Open(const std::string& path, std::string& e
     };
     std::map<std::string, std::map<unsigned, Coverage>> trials;
     bool has_header = false;
+    if (!DropLineCutShort(path, error)) {
+        return std::nullopt;
+    }
     if (std::ifstream existing(path); existing) {
         std::string line;
         if (std::getline(existing, line) && !line.empty()) {
@@ -382,17 +422,23 @@ std::optional<CsvOutput> CsvOutput::Open(const std::string& path, std::string& e
             }
             has_header = true;
         }
-        while (std::getline(existing, line)) {
-            if (const auto row = SummariseRow(line)) {
-                auto& coverage = trials[row->run_key][row->trial];
-                const std::pair<unsigned, unsigned> grid{row->processes, row->ops};
-                // Rows of one trial disagreeing about its size cannot all be its rows.
-                coverage.error = coverage.error || row->status == "error" || !row->op_index ||
-                                 (coverage.grid && *coverage.grid != grid);
-                coverage.grid = grid;
-                if (row->op_index && row->process_index < row->processes && *row->op_index < row->ops) {
-                    coverage.reported.emplace(row->process_index, *row->op_index);
-                }
+        for (std::size_t number = 2; std::getline(existing, line); ++number) {
+            const auto row = SummariseRow(line);
+            // Every line left ends in a newline, so none was cut short by a write stopping; one that
+            // is still not a row is something else, and appending to the file would bury it.
+            if (!row) {
+                error = "line " + std::to_string(number) + " of " + path +
+                        " is not a row carta-zarr-bench writes; repair the file or move it aside";
+                return std::nullopt;
+            }
+            auto& coverage = trials[row->run_key][row->trial];
+            const std::pair<unsigned, unsigned> grid{row->processes, row->ops};
+            // Rows of one trial disagreeing about its size cannot all be its rows.
+            coverage.error = coverage.error || row->status == "error" || !row->op_index ||
+                             (coverage.grid && *coverage.grid != grid);
+            coverage.grid = grid;
+            if (row->op_index && row->process_index < row->processes && *row->op_index < row->ops) {
+                coverage.reported.emplace(row->process_index, *row->op_index);
             }
         }
     }

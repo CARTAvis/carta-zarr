@@ -623,19 +623,42 @@ def cold_method(config: dict[str, Any]) -> str:
 RESUMABLE_MEASURE = ("modes", "trials", "histogram_reference", "generator_workers")
 
 
+def bench_identity(bench: str) -> str:
+    """Which build a bench is, as it says of itself: a hash of its bytes and of the carta-zarr it
+    loads. A bench too old to say is refused rather than taken as any build."""
+    if not bench:
+        return ""
+    try:
+        said = subprocess.run([bench, "identity"], capture_output=True, text=True, timeout=60)
+    except OSError as error:
+        raise SystemExit(f"{bench} could not be run to ask which build it is: {error}") from error
+    identity = said.stdout.strip()
+    if said.returncode != 0 or not identity:
+        raise SystemExit(f"{bench} did not say which build it is (carta-zarr-bench identity); is it built from "
+                         "the same commit as this script?")
+    return identity
+
+
 def workload(config: dict[str, Any]) -> str:
-    """What every run of a sweep measures beside what its key says: the source, and how the bench is
-    told to read it. A run is done only for the workload it measured, and its key alone would let a
-    sweep asked for seed 999 skip every run it made with seed 1.
+    """What every run of a sweep measures beside what its key says: the source, how the bench is told
+    to read it, and the builds that read it. A run is done only for the workload it measured, and its
+    key alone would let a sweep asked for seed 999 skip every run it made with seed 1.
 
     The source is what it holds as well as how it is named: a cube edited in place keeps its path and
     its settings, and the layouts written after the edit would measure other data than those written
     before it. Its content is fingerprinted as the generator fingerprints it, from each file's path,
-    size and modification time."""
+    size and modification time.
+
+    A bench is the build it is, not the path it is at: rebuilt with a reader changed, the same path
+    measures something else, and the runs it measured before would be skipped as done. So is each
+    warm variant."""
     measure = {name: value for name, value in config["measure"].items() if name not in RESUMABLE_MEASURE}
     path = config["source"]["path"]
     content = source_content(Path(path)) if path else ""
-    said = json.dumps({"source": config["source"], "content": content, "measure": measure}, sort_keys=True)
+    builds = {"bench": bench_identity(config["paths"]["bench"]),
+              "warm": {variant["name"]: bench_identity(variant["bench"]) for variant in config["warm"]["variants"]}}
+    said = json.dumps({"source": config["source"], "content": content, "measure": measure, "builds": builds},
+                      sort_keys=True)
     return hashlib.sha256(said.encode()).hexdigest()[:16]
 
 
@@ -695,7 +718,7 @@ class Sweep:
             raise SystemExit(f"{self.output} holds runs from before sweeps recorded what they measured, so they "
                              "cannot be told from another workload's. Write this sweep to another output directory.")
         if measured and recorded != current:
-            raise SystemExit(f"{self.output} holds runs of another workload: the source, what it holds, or the measure settings "
+            raise SystemExit(f"{self.output} holds runs of another workload: the source, what it holds, the builds of the bench, or the measure settings "
                              f"({', '.join(sorted(set(self.config['measure']) - set(RESUMABLE_MEASURE)))}) "
                              "differ from those it was measured with. Write this sweep to another output directory.")
         self.state["workload"] = current

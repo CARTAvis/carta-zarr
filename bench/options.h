@@ -143,13 +143,16 @@ struct ProbeOptions {
     std::string image_id;
 };
 
+// Asked which build this is: prints BuildIdentity, which a sweep resumes only for.
+struct IdentityOptions {};
+
 // Asked for help, or asked wrongly. `error` says which: help goes to stdout and exits 0.
 struct Usage {
     std::string message;
     bool error = false;
 };
 
-using Command = std::variant<RunOptions, ProbeOptions, Usage>;
+using Command = std::variant<RunOptions, ProbeOptions, IdentityOptions, Usage>;
 
 Command ParseCommandLine(int argc, const char* const* argv);
 

@@ -46,9 +46,13 @@ constexpr std::array<std::string_view, 19> kRunOptions{
 constexpr std::string_view kUsage = R"(usage:
   carta-zarr-bench run <dataset> [options]
   carta-zarr-bench probe <dataset> [--image ID]
+  carta-zarr-bench identity
 
 probe opens the dataset as carta-backend would and prints what the library sees, as one line of JSON.
 It exits non-zero when the dataset does not open.
+
+identity prints which build this is: a hash of the executable's bytes and those of the carta-zarr it
+loaded. It is in every run key, so --resume skips only what this build measured.
 
 run measures reads of the dataset and writes one CSV row per operation. plane and spectrum read
 each operation through a cache of its own, so that each is a first touch; animation plays frames at a
@@ -501,6 +505,12 @@ Command ParseCommandLine(int argc, const char* const* argv) {
     }
     if (command == "probe") {
         return ParseProbe(arguments);
+    }
+    if (command == "identity") {
+        if (!arguments.Done()) {
+            return Wrong("identity takes nothing: " + std::string(arguments.words[arguments.next]));
+        }
+        return IdentityOptions{};
     }
     return Wrong("unknown command: " + std::string(command));
 }

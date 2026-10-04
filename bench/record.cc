@@ -231,7 +231,7 @@ DatasetFacts ReadManifest(const std::string& dataset) {
 }
 
 Row RowTemplate(const RunOptions& options, Mode mode, ColdMethod cold, const DatasetFacts& facts,
-                const std::string& run_id) {
+                const std::string& run_id, const std::string& build) {
     Row row;
     row.run_id = run_id;
     row.label = options.label;
@@ -259,14 +259,15 @@ Row RowTemplate(const RunOptions& options, Mode mode, ColdMethod cold, const Dat
 
     // Everything that decides what a trial measures, and nothing that does not: a dataset is known by
     // what the generator says decides its bytes when there is a manifest, since the same layout
-    // written again elsewhere is the same measurement, and by its path when there is not.
+    // written again elsewhere is the same measurement, and by its path when there is not; and the
+    // build measuring it by the bytes it runs, since a reader changed since is another measurement.
     std::error_code ignored;
     const auto identity = facts.identity_hash.empty()
                               ? std::filesystem::absolute(options.dataset, ignored).lexically_normal().string()
                               : facts.identity_hash;
     std::string key = std::to_string(kCsvVersion);
     for (const auto& part :
-         {identity, row.tuning, options.image_id, row.mode, std::to_string(row.processes), std::to_string(row.io_threads),
+         {identity, build, row.tuning, options.image_id, row.mode, std::to_string(row.processes), std::to_string(row.io_threads),
           std::to_string(row.decode_threads), row.cache_bytes, std::to_string(row.read_budget_bytes),
           std::to_string(row.seed), std::to_string(row.ops), row.region_fraction, row.histogram_method, row.animation_frames, row.animation_fps, row.animation_prefetch,
           std::to_string(row.trial_timeout_s), row.cold_method, row.label}) {

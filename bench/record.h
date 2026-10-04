@@ -13,6 +13,7 @@
 // drift. Changing what a column means, or which columns there are, bumps kCsvVersion; a run refuses
 // to append to a CSV whose header is not its own.
 
+#include "build_identity.h"
 #include "options.h"
 
 #include <carta-zarr/carta_zarr.h>
@@ -112,9 +113,9 @@ struct Row {
 };
 
 // The settings columns of a row, from the options and the dataset: everything a row says before
-// anything has been read.
+// anything has been read. Its run key is of `build` as well, which is this one's but for a test.
 Row RowTemplate(const RunOptions& options, Mode mode, ColdMethod cold, const DatasetFacts& facts,
-                const std::string& run_id);
+                const std::string& run_id, const std::string& build = BuildIdentity());
 
 std::string CsvHeader();
 std::string FormatRow(const Row& row);

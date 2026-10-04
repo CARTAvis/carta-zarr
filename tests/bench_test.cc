@@ -224,6 +224,8 @@ void TestTheCommandLine() {
     Require(!Get<Usage>(Parse({"run", "--help"})).error, "asking for help is not an error");
     Require(Get<ProbeOptions>(Parse({"probe", "cube.zarr", "--image", "SKY"})).image_id == "SKY",
             "probe lost its --image");
+    (void)Get<IdentityOptions>(Parse({"identity"}));
+    Require(Get<Usage>(Parse({"identity", "cube.zarr"})).error, "identity took a dataset it does not read");
 }
 
 // Process 0 reads the same positions however many processes there are, so a measurement at one
@@ -415,6 +417,22 @@ void TestTheRunKeyIsTheSettings() {
     Require(key != RowTemplate(options, Mode::plane, ColdMethod::fadvise, DatasetFacts{"def456", "", "", ""}, "run-a")
                        .run_key,
             "two datasets share a run key");
+
+    // Another build of the bench or of the library it reads with is another measurement: a reader
+    // changed since a trial ran would otherwise be skipped as done.
+    Require(key == RowTemplate(options, Mode::plane, ColdMethod::fadvise, facts, "run-a", BuildIdentity()).run_key,
+            "the run key is not of the build that is running");
+    Require(key != RowTemplate(options, Mode::plane, ColdMethod::fadvise, facts, "run-a", "another build").run_key,
+            "two builds share a run key");
+}
+
+// What a build is known by: the bytes of the executable and of the carta-zarr it loaded. The same
+// bytes are the same build wherever they are and whenever they were linked.
+void TestABuildIsKnownByWhatItRuns() {
+    const auto identity = BuildIdentity();
+    Require(identity.size() == 16 && identity.find_first_not_of("0123456789abcdef") == std::string::npos,
+            "a build identity is not a hash: " + identity);
+    Require(identity == BuildIdentity(), "a build identity changed within one run");
 }
 
 void TestARowIsOneLine() {
@@ -980,6 +998,7 @@ int main(int argc, char** argv) {
         TestAModeWritesOnlyItsOwnSettings();
         TestAFingerprintHasOneNaN();
         TestTheRunKeyIsTheSettings();
+        TestABuildIsKnownByWhatItRuns();
         TestARowIsOneLine();
         TestResumingSkipsOnlyWholeTrials();
         TestResumingDropsARowCutShort();

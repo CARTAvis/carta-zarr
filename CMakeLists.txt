@@ -253,7 +253,8 @@ if(CARTA_ZARR_BUILD_TESTS AND BUILD_TESTING)
 
     carta_zarr_add_test(carta_zarr_allocation_failure_tests PUBLIC
         TEST_NAME carta-zarr-allocation-failure
-        SOURCES tests/allocation_failure_test.cc)
+        SOURCES tests/allocation_failure_test.cc
+        DEFINITIONS CARTA_ZARR_REFERENCE_FIXTURE="${CARTA_ZARR_FIXTURE_DIR}/xradio/minimal")
 
     # The string decoder is an internal component with hidden visibility, so this test compiles it
     # directly instead of linking the shared library.

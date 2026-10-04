@@ -14,6 +14,7 @@
 #include <cstddef>
 #include <cstdlib>
 #include <exception>
+#include <functional>
 #include <iostream>
 #include <new>
 #include <string>
@@ -110,12 +111,44 @@ void TestNewCachePool(const carta::zarr::Context& context) {
     }
 }
 
+// The entry points that name what they are about before doing anything else: the location or the
+// image id becomes the report's node, and that string was built before the guard was entered, so the
+// first allocation escaped as a std::bad_alloc.
+//
+// Only the first. The last is not a fixed place here -- TensorStore keeps state from one open to the
+// next, so two calls do not make the same number of allocations, and failing what was the last of
+// one can fail nothing in the other. Nor every one between, though that was tried: nlohmann::json's
+// destructor allocates -- it flattens a nested value onto a vector of its own rather than recursing
+// -- and a destructor is noexcept, so one failing there ends the process before any guard sees it.
+// Nothing this library does changes that.
+void TestFirstAllocationOf(const std::string& name, const std::function<bool()>& call) {
+    const auto outcome = WithFailure(1, call);
+    Require(outcome == "an error", name + " with its first allocation failing gave " + outcome);
+}
+
+void TestOpeningAndProbing(const carta::zarr::Context& context) {
+    const std::string location = CARTA_ZARR_REFERENCE_FIXTURE;
+    TestFirstAllocationOf("Dataset::Open",
+                          [&]() { return static_cast<bool>(carta::zarr::Dataset::Open(context, location)); });
+    TestFirstAllocationOf("ProbeSchema", [&]() {
+        return static_cast<bool>(carta::zarr::ProbeSchema(location, carta::zarr::kXradioImageSchema));
+    });
+    auto dataset = carta::zarr::Dataset::Open(context, location);
+    Require(static_cast<bool>(dataset), "Dataset::Open failed");
+    // Before the image is described and after: the second finds it in the dataset's own map.
+    const auto open_image = [&]() { return static_cast<bool>(dataset->OpenImage("SKY")); };
+    TestFirstAllocationOf("Dataset::OpenImage", open_image);
+    Require(open_image(), "Dataset::OpenImage failed");
+    TestFirstAllocationOf("Dataset::OpenImage, described", open_image);
+}
+
 }  // namespace
 
 int main() {
     auto context = carta::zarr::Context::Create({});
     Require(static_cast<bool>(context), "Context::Create failed");
     TestNewCachePool(*context);
+    TestOpeningAndProbing(*context);
     std::cout << "allocation failure tests passed\n";
     return 0;
 }

@@ -430,7 +430,12 @@ def generate_xradio_fixture(
 
 
 def generate_pixel_fixture(
-    path: Path, *, l_fastest: bool = False, fine_flag: bool = False, coarse_flag: bool = False
+    path: Path,
+    *,
+    l_fastest: bool = False,
+    fine_flag: bool = False,
+    coarse_flag: bool = False,
+    deep_pixels: bool = False,
 ) -> None:
     """An XRADIO image whose pixels are readable and self-describing.
 
@@ -445,6 +450,10 @@ def generate_pixel_fixture(
 
     `coarse_flag` keeps the whole flag in one chunk, which a flag is allowed to be too: what a run
     of chunks holds counted in the pixels' chunks then misses most of the flag beside them.
+
+    `deep_pixels` chunks the pixels two polarizations deep and leaves the flag one deep, so one run
+    of pixel chunks holds two planes and the flag beside them is two chunks: a prefetch of the run
+    that asks for one of its planes decodes the flag of that plane only.
     """
     time_size, frequency_size, polarization_size, l_size, m_size = 1, 2, 3, 4, 5
     # XRADIO writes m last, so m is the axis a plane is contiguous along. A store that writes l last
@@ -460,6 +469,13 @@ def generate_pixel_fixture(
         shape = (time_size, frequency_size, polarization_size, l_size, m_size)
         chunks = (1, 1, 1, 2, 5)
         missing_chunk_key = ("0", "1", "2", "1", "0")
+    flag_chunks = chunks
+    if deep_pixels:
+        if l_fastest:
+            raise ValueError("deep_pixels is defined for the m-last layout only")
+        chunks = (1, 1, 2, 2, 5)
+        # Polarization 2 is alone in the second chunk along it.
+        missing_chunk_key = ("0", "1", "1", "1", "0")
 
     root = zarr.open_group(store=path, mode="w", zarr_format=3)
     root.attrs.update(
@@ -519,7 +535,6 @@ def generate_pixel_fixture(
     # True means a flagged pixel, as XRADIO writes it. The pattern crosses chunk boundaries so a mask
     # read that ignores the transpose cannot accidentally agree.
     flags = ((l_index + m_index) % 3 == 0)
-    flag_chunks = chunks
     if fine_flag:
         if l_fastest:
             raise ValueError("fine_flag is defined for the m-last layout only")
@@ -701,6 +716,7 @@ def main() -> None:
         "xradio/pixels_l_fastest",
         "xradio/pixels_fine_flag",
         "xradio/pixels_coarse_flag",
+        "xradio/pixels_deep",
         "xradio/pixels_wide",
         "xradio/time_axis",
     ):
@@ -716,6 +732,7 @@ def main() -> None:
     generate_pixel_fixture(OUTPUT_DIR / "xradio" / "pixels_l_fastest", l_fastest=True)
     generate_pixel_fixture(OUTPUT_DIR / "xradio" / "pixels_fine_flag", fine_flag=True)
     generate_pixel_fixture(OUTPUT_DIR / "xradio" / "pixels_coarse_flag", coarse_flag=True)
+    generate_pixel_fixture(OUTPUT_DIR / "xradio" / "pixels_deep", deep_pixels=True)
     generate_wide_pixel_fixture(OUTPUT_DIR / "xradio" / "pixels_wide")
     generate_xradio_fixture(OUTPUT_DIR / "xradio" / "time_axis", typed=True, consolidated=True, times=2)
 

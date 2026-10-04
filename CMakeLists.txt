@@ -181,7 +181,8 @@ if(CARTA_ZARR_BUILD_TESTS AND BUILD_TESTING)
         CARTA_ZARR_PIXEL_FIXTURE="${CARTA_ZARR_FIXTURE_DIR}/xradio/pixels"
         CARTA_ZARR_PIXEL_FIXTURE_L_FASTEST="${CARTA_ZARR_FIXTURE_DIR}/xradio/pixels_l_fastest"
         CARTA_ZARR_PIXEL_FIXTURE_FINE_FLAG="${CARTA_ZARR_FIXTURE_DIR}/xradio/pixels_fine_flag"
-        CARTA_ZARR_PIXEL_FIXTURE_COARSE_FLAG="${CARTA_ZARR_FIXTURE_DIR}/xradio/pixels_coarse_flag")
+        CARTA_ZARR_PIXEL_FIXTURE_COARSE_FLAG="${CARTA_ZARR_FIXTURE_DIR}/xradio/pixels_coarse_flag"
+        CARTA_ZARR_PIXEL_FIXTURE_DEEP="${CARTA_ZARR_FIXTURE_DIR}/xradio/pixels_deep")
     set(CARTA_ZARR_WIDE_FIXTURE
         CARTA_ZARR_PIXEL_FIXTURE_WIDE="${CARTA_ZARR_FIXTURE_DIR}/xradio/pixels_wide")
 
@@ -253,7 +254,8 @@ if(CARTA_ZARR_BUILD_TESTS AND BUILD_TESTING)
 
     carta_zarr_add_test(carta_zarr_allocation_failure_tests PUBLIC
         TEST_NAME carta-zarr-allocation-failure
-        SOURCES tests/allocation_failure_test.cc)
+        SOURCES tests/allocation_failure_test.cc
+        DEFINITIONS CARTA_ZARR_REFERENCE_FIXTURE="${CARTA_ZARR_FIXTURE_DIR}/xradio/minimal")
 
     # The string decoder is an internal component with hidden visibility, so this test compiles it
     # directly instead of linking the shared library.

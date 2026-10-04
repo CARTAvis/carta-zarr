@@ -59,6 +59,19 @@ Run RunOf(const ChunkGeometry& geometry, const ReadRequest& request) {
     return run;
 }
 
+ReadRequest RunRequest(const ImageDescriptor& descriptor, const ChunkGeometry& geometry, const ReadRequest& plane) {
+    const Run run = RunOf(geometry, plane);
+    ReadRequest request = plane;
+    for (std::size_t axis = 0; axis < request.axes.size() && axis < descriptor.axes.size(); ++axis) {
+        const std::uint64_t length = descriptor.axes[axis].length;
+        const auto chunk = axis < geometry.chunk_shape.size() ? geometry.chunk_shape[axis] : 0;
+        const std::uint64_t first = chunk == 0 ? 0 : std::min(length, run.first[axis] * chunk);
+        const std::uint64_t end = chunk == 0 ? length : std::min(length, (run.last[axis] + 1) * chunk);
+        request.axes[axis] = Range{first, end - first, 1};
+    }
+    return request;
+}
+
 std::uint64_t PlaneRunBytes(const ImageDescriptor& descriptor, const ChunkGeometry& geometry,
                             const ChunkGeometry& flag_geometry, bool apply_mask) {
     const auto x = AxisIndex(descriptor.axes, AxisRole::spatial_x);

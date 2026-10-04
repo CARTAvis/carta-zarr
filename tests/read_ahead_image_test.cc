@@ -12,7 +12,9 @@
 #include <carta-zarr/carta_zarr.h>
 #include <carta-zarr/read_ahead.h>
 
+#include <algorithm>
 #include <chrono>
+#include <cmath>
 #include <cstdint>
 #include <cstdio>
 #include <exception>
@@ -179,6 +181,69 @@ void TestAFlagChunkedOtherwiseIsCountedInItsOwnChunks() {
     Require(ReadAhead::For({{image, unmasked}}).has_value(), "an unmasked read was asked room for a flag");
 }
 
+// A run is every plane in the pixel chunks one plane is in, and the flag beside all of them is read
+// ahead with it -- not the flag of the one plane the run was asked by. Here the pixels are chunked two
+// polarizations deep and the flag one deep, so the run of polarizations 0 and 1 is one pixel chunk
+// and two flag chunks. Played backwards from polarization 2, it is asked for by polarization 1; once
+// every chunk of a copy is truncated, polarization 0 still reads masked, from the cache.
+void TestAFlagShallowerThanARunIsReadAheadForEveryPlaneOfIt() {
+    const char* const fixture = CARTA_ZARR_PIXEL_FIXTURE_DEEP;
+    const auto at = [](const Image& image, std::uint64_t polarization) {
+        auto plane = PlaneAt(image, 0);
+        plane.axes[AxisIndex(image.descriptor().axes, AxisRole::polarization).value()] = Range{polarization, 1, 1};
+        return plane;
+    };
+    const auto read = [&](const Image& image, std::uint64_t polarization, std::vector<float>& pixels) {
+        pixels.assign(PlaneElements(image), 0.0F);
+        return image.Read(at(image, polarization), {pixels.data(), pixels.size()}).has_value();
+    };
+    std::vector<float> expected;
+    const auto reference = OpenSky(ContextHolding(0), fixture);
+    Require(reference.descriptor().has_pixel_mask, "the deep fixture has no flag to read ahead");
+    Require(read(reference, 0, expected), "the deep fixture's first polarization did not read");
+
+    const auto copy =
+        std::filesystem::temp_directory_path() / ("carta-zarr-read-ahead-deep-" + std::to_string(getpid()));
+    std::filesystem::remove_all(copy);
+    std::filesystem::copy(fixture, copy, std::filesystem::copy_options::recursive);
+    const auto image = OpenSky(ContextHolding(std::size_t{64} << 20), copy.string());
+
+    auto made = ReadAhead::For({{image, ReadOptions{}}});
+    Require(made.has_value(), "reading ahead was declined: " + (made ? std::string{} : made.error().message));
+    auto reading = std::move(made).value();
+    reading.Served(ReadAhead::Clock::now(), false, {AnimatedPlane{0, at(image, 2)}},
+                   {{AnimatedPlane{0, at(image, 1)}}, {AnimatedPlane{0, at(image, 0)}}});
+    const auto deadline = ReadAhead::Clock::now() + std::chrono::seconds(10);
+    while (reading.stats().under_way && ReadAhead::Clock::now() < deadline) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+    const auto stats = reading.stats();
+
+    for (const auto* array : {"SKY", "FLAG"}) {
+        for (const auto& entry : std::filesystem::recursive_directory_iterator(copy / array / "c")) {
+            if (entry.is_regular_file()) {
+                std::filesystem::resize_file(entry.path(), 0);
+            }
+        }
+    }
+    std::vector<float> asked;
+    std::vector<float> beside;
+    std::vector<float> behind;
+    const bool asked_read = read(image, 1, asked);
+    const bool beside_read = read(image, 0, beside);
+    const bool behind_read = read(image, 2, behind);
+    std::filesystem::remove_all(copy);
+
+    Require(!stats.under_way && stats.prefetches == 1, "the next run was not read ahead, once");
+    Require(asked_read, "the plane the run was asked by was not read ahead");
+    Require(beside_read, "the other plane of the run did not read from the cache: its flag was not read ahead");
+    // Masked pixels are NaN, which equals nothing, so the planes are compared NaN for NaN.
+    const auto same = [](float a, float b) { return a == b || (std::isnan(a) && std::isnan(b)); };
+    Require(std::equal(beside.begin(), beside.end(), expected.begin(), expected.end(), same),
+            "the other plane of the run read back differently");
+    Require(!behind_read, "a run nothing decoded still read, so this test shows nothing about the cache");
+}
+
 }  // namespace
 
 int main() {
@@ -186,6 +251,7 @@ int main() {
         TestTheNextRunIsDecodedIntoTheCacheTheFramesReadThrough();
         TestACacheWithoutRoomForTwoRunsIsDeclinedAndSaysWhy();
         TestAFlagChunkedOtherwiseIsCountedInItsOwnChunks();
+        TestAFlagShallowerThanARunIsReadAheadForEveryPlaneOfIt();
     } catch (const std::exception& error) {
         std::fprintf(stderr, "read ahead image test failed: %s\n", error.what());
         return 1;

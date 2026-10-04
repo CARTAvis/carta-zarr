@@ -254,6 +254,26 @@ class Recommending(unittest.TestCase):
 
 
 
+class WhichImageIsMeasured(unittest.TestCase):
+    """A sweep of a source's MODEL writes MODEL into every layout -- generate.py takes source.image --
+    and the bench reads a dataset's default image unless told otherwise, which there is SKY. So every
+    command that reads a written dataset names the image its manifest says was written."""
+
+    def test_every_command_that_reads_a_dataset_names_its_image(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            dataset = Path(directory) / "layout"
+            dataset.mkdir()
+            (dataset / "bench-manifest.json").write_text(json.dumps({"image": {"variable": "MODEL"}}))
+            measuring = sweep.Sweep(config(paths={"bench": "carta-zarr-bench", "work": directory}),
+                                    Path(directory) / "out")
+            run = sweep.Run("stage1", sweep.Setting(2, CORES, 1024, 0), 1, ("plane",), 1)
+            for command in (measuring.probe_command(dataset),
+                            measuring.bench_command(dataset, run, Path(directory) / "results.csv")):
+                with self.subTest(command=command[1]):
+                    self.assertIn("--image", command)
+                    self.assertEqual(command[command.index("--image") + 1], "MODEL")
+
+
 class ResumingASweep(unittest.TestCase):
     """A sweep resumes by skipping the runs its state says are done, and a run is done only for the
     workload it measured: another seed, other operation counts or another source is another
@@ -338,6 +358,34 @@ class ResumingASweep(unittest.TestCase):
             warm = {**given, "warm": {"variants": [{"name": "v", "bench": str(variant)}]}}
             self.assertNotEqual(sweep.workload(config(**warm)), sweep.workload(config(**given)),
                                 "a warm variant's build is not part of what the sweep measures")
+
+    def test_another_generator_is_another_workload(self) -> None:
+        # The bench reads what the generator writes: a generator rewritten to write other pixels keeps
+        # every setting, and the layouts it writes after the change measure other data. So does one
+        # whose helper beside it changed, since that is part of what runs.
+        with tempfile.TemporaryDirectory() as directory:
+            generator = Path(directory) / "generate.py"
+            helper = Path(directory) / "helper.py"
+            unrelated = Path(directory) / "unrelated.py"
+            generator.write_text("import json\nfrom helper import pixels\n")
+            helper.write_text("def pixels(): return 1\n")
+            unrelated.write_text("x = 1\n")
+            given = {"paths": {"generator": str(generator)}}
+            self.start(**given)
+            sweep.Sweep(config(**given), self.output).adopt_workload()
+
+            unrelated.write_text("x = 2\n")
+            sweep.Sweep(config(**given), self.output).adopt_workload()
+
+            for changed, text in ((generator, "import json\nfrom helper import pixels  # other\n"),
+                                  (helper, "def pixels(): return 2\n")):
+                with self.subTest(changed=changed.name):
+                    original = changed.read_text()
+                    changed.write_text(text)
+                    with self.assertRaises(SystemExit) as refused:
+                        sweep.Sweep(config(**given), self.output).adopt_workload()
+                    self.assertIn(str(self.output), str(refused.exception))
+                    changed.write_text(original)
 
     def test_a_bench_that_cannot_say_what_it_is_is_refused(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

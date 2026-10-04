@@ -48,7 +48,10 @@ through it: the one playing and the one decoded ahead. Otherwise the run decoded
 being played. A run of 512 x 512 x 4 chunks of that cube is 589 MB; of 512 x 512 x 16, 2.4 GB. A
 flag is counted in its own chunks, which need not be the pixels': one kept whole in a single chunk
 is the whole flag beside every run, and counting it in the pixels' chunks once asked, of the
-coarse-flag test fixture, half the room two of its runs take.
+coarse-flag test fixture, half the room two of its runs take. And it is read ahead as the run it is
+counted as: the prefetch asks for the whole of the pixel chunks the plane lies in, not the plane. The
+plane alone decodes every pixel chunk of its run but only the flag beside that plane, so a flag one
+channel deep beside pixels two deep was read from storage at every other frame.
 
 A prefetch that throws -- the memory to copy what it reads with was not there -- stops reading ahead,
 as a late frame does. Nothing above its thread could catch it, and an exception leaving a thread

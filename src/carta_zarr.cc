@@ -26,7 +26,10 @@
 #include <cstdint>
 #include <functional>
 #include <mutex>
+#include <new>
 #include <optional>
+#include <string>
+#include <string_view>
 #include <vector>
 #include <unordered_map>
 #include <utility>
@@ -42,12 +45,22 @@ namespace {
 // It is the only try in this file. Three entry points used to write their own beside the twelve
 // that went through here, with fallback codes of their own, so whether one caught was a question you
 // answered by reading to the end of it.
+//
+// The node is a view, and it becomes a string only in the handler. Taken as a string, it was built
+// at the call -- the location or the image id, copied before the try it was meant to be reported
+// from -- so an allocation that failed there escaped every entry point that named its node first.
+// The report is a string too, and under the same shortage it may not be possible to make one: then
+// the code is what reaches the caller, with nothing to say, which is still a Result.
 template <typename Function>
-auto Guarded(ErrorCode code, std::string node, Function&& function) -> decltype(function()) {
+auto Guarded(ErrorCode code, std::string_view node, Function&& function) -> decltype(function()) {
     try {
         return function();
     } catch (const std::exception& error) {
-        return Error{code, error.what(), std::move(node)};
+        try {
+            return Error{code, error.what(), std::string(node)};
+        } catch (const std::bad_alloc&) {
+            return Error{code, {}, {}};
+        }
     }
 }
 
@@ -257,7 +270,8 @@ public:
         options.control.cancellation_requested = [&cancelled, callers] {
             return cancelled() || (callers && callers());
         };
-        return _image.Prefetch(plane, options).has_value();
+        return _image.Prefetch(internal::RunRequest(_image.descriptor(), _image.chunk_geometry(), plane), options)
+            .has_value();
     }
 
 private:
@@ -350,7 +364,7 @@ Dataset::Dataset(std::shared_ptr<Impl> impl) : _impl(std::move(impl)) {}
 Dataset::~Dataset() = default;
 
 Result<Dataset> Dataset::Open(const Context& context, std::string_view location) {
-    return Guarded(ErrorCode::invalid_metadata, std::string(location), [&]() -> Result<Dataset> {
+    return Guarded(ErrorCode::invalid_metadata, location, [&]() -> Result<Dataset> {
         // TensorStore resources are shared by Context, while array handles are scoped to this
         // Dataset and the Images that retain its Store.
         auto store_context = context._impl->store_context->CloneForStore();
@@ -393,8 +407,7 @@ Result<DatasetSize> Dataset::Size(std::chrono::milliseconds stored_size_timeout)
 }
 
 Result<Image> Dataset::OpenImage(std::string_view image_id) const {
-    const std::string node(image_id);
-    return Guarded(ErrorCode::invalid_metadata, node, [&]() -> Result<Image> {
+    return Guarded(ErrorCode::invalid_metadata, image_id, [&]() -> Result<Image> {
         std::scoped_lock const lock(_impl->mutex);
         const std::string image_name(image_id);
         const auto make_image = [&](const internal::DescribedImage& described) {
@@ -419,7 +432,7 @@ Result<Image> Dataset::OpenImage(std::string_view image_id) const {
 }
 
 Result<SchemaProbeResult> ProbeSchema(std::string_view location, std::string_view schema_id) {
-    return Guarded(ErrorCode::invalid_metadata, std::string(location), [&]() -> Result<SchemaProbeResult> {
+    return Guarded(ErrorCode::invalid_metadata, location, [&]() -> Result<SchemaProbeResult> {
         // Resolve the profile before touching the store, so an unknown schema reports itself rather
         // than whatever happens to be wrong with the path.
         auto profile = internal::SchemaProfile::For(schema_id);

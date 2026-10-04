@@ -189,7 +189,7 @@ that did not survive validation. The tables behind it follow.
   layout again; a run cut short resumes from the CSV. Runs that failed are tried again. The state
   holds only runs of one workload -- the source, what it holds (each file's path, size and
   modification time), the build of the bench and of each warm variant (`carta-zarr-bench identity`),
-  and the measure settings a run key does not say -- and a sweep of another is refused rather than
+  the generator (its bytes and those of the modules beside it that it imports), and the measure settings a run key does not say -- and a sweep of another is refused rather than
   mixed in with it.
 - **`--report-only`** rewrites `summary.md` from what there is, mid-sweep or after.
 

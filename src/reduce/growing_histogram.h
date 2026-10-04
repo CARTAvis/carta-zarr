@@ -67,10 +67,13 @@ public:
             //
             // A first pixel of exactly zero seeds at the least denormal, which is as narrow as it
             // gets: about a hundred and fifty merges to reach a spread of one. A range of zero width
-            // would never grow at all.
+            // would never grow at all. At the largest float the next one up is infinity, and a bin of
+            // infinite width holds everything in its first; the spacing below is the same there.
             const auto at = static_cast<float>(std::abs(v));
-            const double spacing =
-                static_cast<double>(std::nextafter(at, std::numeric_limits<float>::infinity())) - static_cast<double>(at);
+            const float above = std::nextafter(at, std::numeric_limits<float>::infinity());
+            const double spacing = std::isinf(above)
+                                       ? static_cast<double>(at) - static_cast<double>(std::nextafter(at, 0.0F))
+                                       : static_cast<double>(above) - static_cast<double>(at);
             _width = spacing;
             _lower = v - (spacing * static_cast<double>(_counts.size() / 2));
             _seeded = true;

@@ -16,9 +16,11 @@
 
 #include "reduce/growing_histogram.h"
 
+#include <cmath>
 #include <cstdint>
 #include <cstdio>
 #include <exception>
+#include <limits>
 #include <string>
 #include <vector>
 
@@ -85,6 +87,34 @@ void TestANarrowDistributionFarFromZeroKeepsItsResolution() {
                   "a narrow distribution around a nonzero baseline");
 }
 
+// At the largest float there is no float above it to take the spacing from -- the next one up is
+// infinity, and an infinitely wide bin puts every pixel in the first one, by a conversion of
+// infinity to an index that is undefined. The spacing below is the same there, and is the one taken.
+void TestTheLargestFloatsKeepTheirResolution() {
+    constexpr float kLargest = std::numeric_limits<float>::max();
+    const float below = std::nextafter(kLargest, 0.0F);
+    GrowingHistogram histogram(64);
+    for (int i = 0; i < 39; ++i) {
+        histogram.Add(kLargest);
+    }
+    histogram.Add(below);
+    RequireCounts(histogram.Aggregate(4, below, kLargest), {1, 0, 0, 39}, "pixels at the largest float");
+
+    // The most negative float seeds from the same spacing. Its pixels a float apart share one
+    // provisional bin as wide as the whole target range, so they are spread as any bin is; what is
+    // asked of them is that the range is finite and none is lost.
+    GrowingHistogram negative(64);
+    for (int i = 0; i < 39; ++i) {
+        negative.Add(-kLargest);
+    }
+    negative.Add(-below);
+    std::uint64_t total = 0;
+    for (const auto count : negative.Aggregate(4, -static_cast<double>(kLargest), -static_cast<double>(below))) {
+        total += count;
+    }
+    Require(total == 40, "pixels at the most negative float were lost");
+}
+
 // A first pixel of exactly zero has no magnitude to seed a range from, and a range of zero width
 // never grows: the loop that widens it to fit the next pixel would not terminate. The spacing of the
 // floats at zero is the least denormal, which costs about a hundred and fifty merges once.
@@ -135,6 +165,7 @@ int main() {
     try {
         TestTheRangeSeedsAndGrowsBothWays();
         TestANarrowDistributionFarFromZeroKeepsItsResolution();
+        TestTheLargestFloatsKeepTheirResolution();
         TestAFirstPixelOfZeroStillGrows();
         TestAStraddlingBinIsSplitAndTheRemainderPlaced();
         TestAnEmptyTargetRangePutsEverythingInTheFirstBin();

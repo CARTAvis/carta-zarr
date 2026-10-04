@@ -12,7 +12,9 @@
 
 #include <nlohmann/json.hpp>
 
+#include <atomic>
 #include <cstddef>
+#include <cstdint>
 #include <memory>
 #include <utility>
 
@@ -52,13 +54,19 @@ nlohmann::json CachePoolSpec(std::size_t bytes) {
 
 }  // namespace
 
+StoreContext::StoreContext(tensorstore::Context context) : context(std::move(context)) {
+    static std::atomic<std::uint64_t> made{0};
+    _id = ++made;
+}
+
 StoreContextPtr StoreContext::CloneForStore() const {
     return std::make_shared<const StoreContext>(context);
 }
 
 Result<tensorstore::TensorStore<>> StoreContext::OpenArray(const std::filesystem::path& array_path,
-                                                           std::string_view node) const {
-    const std::string key = array_path.string();
+                                                           std::string_view node, const StoreContext* through) const {
+    const StoreContext& pool = through == nullptr ? *this : *through;
+    const auto key = std::make_pair(pool._id, array_path.string());
     {
         const std::scoped_lock lock(_arrays_mutex);
         if (const auto found = _arrays.find(key); found != _arrays.end()) {
@@ -67,7 +75,7 @@ Result<tensorstore::TensorStore<>> StoreContext::OpenArray(const std::filesystem
     }
 
     // Opened outside the lock so that a slow open of one array does not stall reads of another.
-    auto opened = OpenZarr3File(key, context, node);
+    auto opened = OpenZarr3File(key.second, pool.context, node);
     if (!opened) {
         return opened.error();
     }

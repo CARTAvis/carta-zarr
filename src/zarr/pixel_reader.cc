@@ -60,9 +60,10 @@ Result<void> ReadInto(const std::filesystem::path& array_path, const StoreContex
         // A read with a pool of its own runs against that pool's context rather than the session's.
         // Chosen here rather than by the caller because this is where the array handle is taken,
         // and a handle carries the pool it was opened against.
-        const StoreContextPtr& pool =
-            control.cache_pool ? CachePoolAccess::StoreContextOf(*control.cache_pool) : context;
-        auto opened = pool->OpenArray(array_path, node);
+        // Kept by the store either way, so that a pool outliving it keeps nothing of it.
+        const StoreContext* pool =
+            control.cache_pool ? CachePoolAccess::StoreContextOf(*control.cache_pool).get() : nullptr;
+        auto opened = context->OpenArray(array_path, node, pool);
         if (!opened) {
             return opened.error();
         }

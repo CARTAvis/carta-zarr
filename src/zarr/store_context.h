@@ -12,12 +12,14 @@
 #include <tensorstore/context.h>
 #include <tensorstore/tensorstore.h>
 
+#include <cstdint>
 #include <filesystem>
 #include <map>
 #include <memory>
 #include <mutex>
 #include <string>
 #include <string_view>
+#include <utility>
 
 namespace carta::zarr::internal {
 
@@ -27,7 +29,7 @@ namespace carta::zarr::internal {
 // type so that the schema layer never sees TensorStore.
 class StoreContext {
 public:
-    explicit StoreContext(tensorstore::Context context) : context(std::move(context)) {}
+    explicit StoreContext(tensorstore::Context context);
 
     // Make a context for one Dataset/Store. The TensorStore resource handles remain shared, while
     // the array-handle table has the same lifetime as that store rather than the public Context.
@@ -43,9 +45,17 @@ public:
      *
      * The handle is cheap to copy and safe to use from several threads, so callers get a copy and
      * the table is only locked around the lookup.
+     *
+     * `through` is the pool a read has of its own, when it has one: a handle carries the pool it was
+     * opened against, so the array is opened against that pool's context and kept here under that
+     * pool. Here, and not in the pool's own context, because a pool outlives the datasets read
+     * through it: it used to keep the handles by path, and a dataset closed, rewritten and opened
+     * again through the same pool was read through the handle opened for the one before -- the
+     * chunks it had decoded, and the data type it had then. Kept by the pool's id rather than its
+     * address, which a pool made after this one is let go of may be given.
      */
-    Result<tensorstore::TensorStore<>> OpenArray(const std::filesystem::path& array_path,
-                                                 std::string_view node) const;
+    Result<tensorstore::TensorStore<>> OpenArray(const std::filesystem::path& array_path, std::string_view node,
+                                                 const StoreContext* through = nullptr) const;
 
     /**
      * The same resources with a cache pool of `bytes` of its own. See carta::zarr::CachePool.
@@ -53,8 +63,9 @@ public:
      * A child context, so the thread pools are the shared ones -- a walk that ran on its own
      * threads would compete with the session rather than take its turn.
      *
-     * It keeps its own array table because a handle carries the pool it was opened against, so a
-     * read through this pool cannot reuse one opened with the shared pool. A new one each call,
+     * Its arrays are kept by the store that reads through it -- see OpenArray -- because a handle
+     * carries the pool it was opened against, so a read through this pool cannot reuse one opened
+     * with the shared pool, and a pool outlives any one store. A new one each call,
      * and kept by nothing here: whoever asked holds the only reference, so what the pool decoded is
      * freed when they let go. The zero-byte pool used to be built once and kept for as long as the
      * store, which cost nothing at that size and would keep gigabytes at the size a moment asks for.
@@ -64,8 +75,10 @@ public:
     tensorstore::Context context;
 
 private:
+    // Never reused, unlike an address: which pool a handle was opened against.
+    std::uint64_t _id;
     mutable std::mutex _arrays_mutex;
-    mutable std::map<std::string, tensorstore::TensorStore<>> _arrays;
+    mutable std::map<std::pair<std::uint64_t, std::string>, tensorstore::TensorStore<>> _arrays;
 };
 
 // How CachePool's implementation reaches the context it reads through, which is internal and has no

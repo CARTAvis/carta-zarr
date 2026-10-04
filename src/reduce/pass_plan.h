@@ -73,8 +73,9 @@ using BlockChannel = ChannelIndex<struct BlockChannelTag>;
  */
 class PassPlan;
 
-PassPlan PlanPass(const ImageDescriptor& descriptor, const ChunkGeometry& geometry, const AxisMap& map,
-                  const CheckedPlanes& planes, std::uint64_t sample, const ReadOptions& options);
+PassPlan PlanPass(const ImageDescriptor& descriptor, const ChunkGeometry& geometry,
+                  const ChunkGeometry& flag_geometry, const AxisMap& map, const CheckedPlanes& planes,
+                  std::uint64_t sample, const ReadOptions& options);
 
 class PassPlan {
 public:
@@ -87,8 +88,9 @@ public:
     std::uint64_t v_length = 0;
     std::uint64_t chunk_u = 1;
     std::uint64_t chunk_v = 1;
-    // What one chunk costs to decode, counting the flag beside it when this read applies the mask,
-    // and how much of that a single read may hold. Both are answers rather than steps towards one:
+    // What one chunk costs to decode, counting the flag chunks beside it when this read applies the
+    // mask -- in the flag's own chunks, see DecodedFlagBytes -- and how much of that a single read may
+    // hold. Both are answers rather than steps towards one:
     // ADR 0005 turns on the first, and the second is the caller's own ceiling when it stated one.
     std::uint64_t chunk_bytes = 1;
     std::size_t slab_budget_bytes = 0;
@@ -182,8 +184,9 @@ public:
     std::uint64_t EmitChannels(std::uint64_t layer_chunks, std::size_t bytes_per_channel, std::uint32_t hint) const;
 
 private:
-    friend PassPlan PlanPass(const ImageDescriptor& descriptor, const ChunkGeometry& geometry, const AxisMap& map,
-                             const CheckedPlanes& planes, std::uint64_t sample, const ReadOptions& options);
+    friend PassPlan PlanPass(const ImageDescriptor& descriptor, const ChunkGeometry& geometry,
+                             const ChunkGeometry& flag_geometry, const AxisMap& map, const CheckedPlanes& planes,
+                             std::uint64_t sample, const ReadOptions& options);
 
     // Steps towards the answers above rather than answers themselves, and the two a caller used to
     // divide by itself: the chunk-count rule was written out in six places and the slab-sizing rule

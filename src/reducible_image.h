@@ -46,7 +46,7 @@ namespace carta::zarr::internal {
  * other.
  *
  * Holds references and an AxisMap by value, so it is cheap to build per call and owns nothing. It
- * must not outlive the source, the descriptor, the geometry or the pool it was built from.
+ * must not outlive the source, the descriptor, the geometries or the pool it was built from.
  */
 class ReducibleImage {
 public:
@@ -54,12 +54,13 @@ public:
     // that is not degenerate, or a missing spatial or spectral axis. Built per call, so that
     // failure reaches the caller of the reduction that needed it and no other.
     static Result<ReducibleImage> Of(const PixelSource& source, const ImageDescriptor& descriptor,
-                                    const ChunkGeometry& geometry, WorkPool& workers) {
+                                    const ChunkGeometry& geometry, const ChunkGeometry& flag_geometry,
+                                    WorkPool& workers) {
         auto map = MapAxes(descriptor);
         if (!map) {
             return map.error();
         }
-        return ReducibleImage(source, descriptor, geometry, workers, map.value());
+        return ReducibleImage(source, descriptor, geometry, flag_geometry, workers, map.value());
     }
 
     const PixelSource& source() const noexcept {
@@ -86,7 +87,7 @@ public:
         if (!checked) {
             return checked.error();
         }
-        return PlanPass(*_descriptor, *_geometry, _map, checked.value(), sample, options);
+        return PlanPass(*_descriptor, *_geometry, *_flag_geometry, _map, checked.value(), sample, options);
     }
 
     // How a reduction whose tasks each hold an accumulator of `accumulator_bytes` divides a read
@@ -98,12 +99,19 @@ public:
 
 private:
     ReducibleImage(const PixelSource& source, const ImageDescriptor& descriptor, const ChunkGeometry& geometry,
-                  WorkPool& workers, const AxisMap& map)
-        : _source(&source), _descriptor(&descriptor), _geometry(&geometry), _workers(&workers), _map(map) {}
+                  const ChunkGeometry& flag_geometry, WorkPool& workers, const AxisMap& map)
+        : _source(&source),
+          _descriptor(&descriptor),
+          _geometry(&geometry),
+          _flag_geometry(&flag_geometry),
+          _workers(&workers),
+          _map(map) {}
 
     const PixelSource* _source;
     const ImageDescriptor* _descriptor;
     const ChunkGeometry* _geometry;
+    // The flag's, which a masked pass's reads are sized by beside the pixels'. See DescribedImage.
+    const ChunkGeometry* _flag_geometry;
     WorkPool* _workers;
     AxisMap _map;
 };

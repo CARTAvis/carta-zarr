@@ -84,13 +84,19 @@ ChunkGeometry MakeGeometry(std::uint64_t chunk_x, std::uint64_t chunk_y, std::ui
     return geometry;
 }
 
-PassPlan Plan(const ImageDescriptor& descriptor, const ChunkGeometry& geometry, const Range& spectral,
-              const ReadOptions& options, std::uint64_t sample = 1) {
+PassPlan Plan(const ImageDescriptor& descriptor, const ChunkGeometry& geometry, const ChunkGeometry& flag_geometry,
+              const Range& spectral, const ReadOptions& options, std::uint64_t sample = 1) {
     const auto map = MapAxes(descriptor);
     Require(static_cast<bool>(map), "MapAxes failed on a well-formed image");
     const auto planes = CheckedPlanes::Of(descriptor, map.value(), {spectral, 0, 0});
     Require(static_cast<bool>(planes), "the spectral range does not fit this image");
-    return PlanPass(descriptor, geometry, map.value(), planes.value(), sample, options);
+    return PlanPass(descriptor, geometry, flag_geometry, map.value(), planes.value(), sample, options);
+}
+
+// A flag chunked as its pixels are, which is every image here but one.
+PassPlan Plan(const ImageDescriptor& descriptor, const ChunkGeometry& geometry, const Range& spectral,
+              const ReadOptions& options, std::uint64_t sample = 1) {
+    return Plan(descriptor, geometry, geometry, spectral, options, sample);
 }
 
 constexpr const char* kCancelled = "The test's pass was cancelled";
@@ -146,6 +152,32 @@ void TestAMaskCostsWhatTheFlagCosts() {
     const auto not_applied = Plan(MakeImage(512, 520, 32, true), geometry, spectral, declined);
     Require(!not_applied.apply_mask && not_applied.chunk_bytes == plain.chunk_bytes,
             "an image with a flag the caller declined costs what an unmasked one costs");
+}
+
+// The flag's chunks are its own, and a pixel chunk decodes every flag chunk it lies across. Kept
+// whole, the flag is all of it beside each pixel chunk, and a pass that counted a byte an element
+// would read four pixel chunks a time where the budget affords one.
+void TestAFlagIsCountedInItsOwnChunks() {
+    const Range spectral{0, 32, 1};
+    const auto image = MakeImage(512, 520, 32, true);
+    const auto geometry = MakeGeometry(256, 260, 2, AxisRole::spatial_y);
+    const std::uint64_t pixel_bytes = 256ULL * 260ULL * 2ULL * 4ULL;
+    ReadOptions options;
+    options.read_budget_bytes = 4 * (pixel_bytes + (256ULL * 260ULL * 2ULL));
+
+    ChunkGeometry whole;
+    whole.chunk_shape = {512, 520, 32, 1, 1};
+    const auto coarse = Plan(image, geometry, whole, spectral, options);
+    Require(coarse.chunk_bytes == pixel_bytes + (512ULL * 520ULL * 32ULL),
+            "a flag kept in one chunk is all of it beside every pixel chunk");
+    Require(coarse.ChunksPerRead() == 0, "a budget of four chunks counted alike affords less than one beside it");
+
+    ChunkGeometry finer;
+    finer.chunk_shape = {128, 260, 1, 1, 1};
+    const auto lined_up = Plan(image, geometry, finer, spectral, options);
+    Require(lined_up.chunk_bytes == pixel_bytes + (256ULL * 260ULL * 2ULL),
+            "a finer flag lined up with the pixels costs a byte an element, in more chunks");
+    Require(lined_up.ChunksPerRead() == 4, "the budget was not what it said");
 }
 
 // The caller's ceiling is taken as given; without one the pass asks chunk_blocks for the policy.
@@ -812,6 +844,7 @@ int main() {
     try {
         TestTheInnerAxisFollowsTheStore();
         TestAMaskCostsWhatTheFlagCosts();
+        TestAFlagIsCountedInItsOwnChunks();
         TestTheCallersCeilingWins();
         TestASlabIsCountedInChunksOfTheSpectralAxis();
         TestALayerIsCountedInWholeChunks();

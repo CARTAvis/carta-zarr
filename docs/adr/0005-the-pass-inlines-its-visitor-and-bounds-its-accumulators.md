@@ -72,8 +72,8 @@ unavailable mask cannot leave a piece of the caller's destination updated, where
 pixels first; and it reports progress in elements rather than in chunks. Fitting it would take a
 second entry point or a handful of parameters that do nothing for anybody else.
 
-What it shares it already shared: `DecodedChunkBytes`, `DefaultReadBytes`, `ChunksSpanned` and
-`AlignedBlockEnd` in `chunk_blocks.h`. `ElementsPerPiece` does not duplicate that policy -- it
+What it shares it already shared: `ReadCost`, `DefaultReadBytes`, `ChunksTouched` and
+`AlignedBlockEnd` in `chunk_blocks.h`. `UnitsPerPiece` does not duplicate that policy -- it
 converts the byte budget the policy returns into a count of elements along one axis, which is a
 thing the pass never needs.
 
@@ -81,9 +81,17 @@ They do now agree on what a masked read costs, which they did not when the pass 
 pass doubled its budget when it would also read a flag and `Image::Read` ignored the flag entirely,
 so one overstated the cost and the other understated it. Neither figure was right: `RequireUsableFlag`
 holds a flag to `bool` over the image's own shape, so beside a float32 chunk it is a quarter of one.
-`DecodedChunkBytes` takes an `apply_mask` argument and both sides call it -- in `Image::Read`'s case
-in both halves of its sizing, the budget and the per-row cost that budget is divided by, because
-counting it in one and not the other sizes pieces against a cost the read does not have.
+`ReadCost::Of` answers it and both sides call it -- in `Image::Read`'s case in both halves of its
+sizing, the budget and the per-row cost that budget is divided by, because counting it in one and
+not the other sizes pieces against a cost the read does not have.
+
+A quarter of a chunk was still an equal-chunk answer: it took the flag to be chunked as its pixels
+were, and ADR 0016 records that it need not be. Both walks are handed the flag's own geometry now,
+and `DecodedFlagBytes` charges each pixel chunk the flag chunks it lies across, whole. Chunked alike
+or finer, that is the same byte an element; coarser, it is more, and for a flag kept in one chunk it
+is all of it. A read of several pixel chunks sharing one flag chunk decodes that chunk once, so this
+over-counts such a read -- deliberately: both walks count in pixel chunks, an over-count costs a read
+some parallelism, and an under-count spends memory the caller's budget said not to.
 
 ## Consequences
 

@@ -62,7 +62,6 @@ inline std::uint64_t DefaultReadBytes(std::uint64_t chunk_bytes) {
                                    std::max<std::uint64_t>(kDecodedBytesPerRead, wanted));
 }
 
-// Elements in one chunk of this image.
 // How many units of `chunks_per_unit` chunks a read that may decode `chunks_per_read` chunks affords.
 // Never zero: a budget smaller than a single unit still reads one, because a chunk is the smallest
 // thing that can be decoded and refusing to read is the worse answer.
@@ -74,6 +73,7 @@ inline std::uint64_t UnitsAffordable(std::uint64_t chunks_per_read, std::uint64_
     return std::max<std::uint64_t>(1, chunks_per_read / std::max<std::uint64_t>(1, chunks_per_unit));
 }
 
+// Elements in one chunk of this image.
 inline std::uint64_t ChunkElements(const ChunkGeometry& geometry) {
     std::uint64_t elements = 1;
     for (const auto length : geometry.chunk_shape) {
@@ -94,18 +94,55 @@ inline std::uint64_t DecodedChunkBytes(const ImageDescriptor& descriptor, const 
     return std::max<std::uint64_t>(1, elements * element_bytes);
 }
 
-// The same, counting the flag chunk a read decodes beside the pixels when it will apply the image's
-// pixel mask.
+// The most flag chunks one pixel chunk along an axis of `length` elements lies across: one when the
+// two are chunked alike, more when the flag's are shorter or their boundaries fall inside a pixel
+// chunk. Asked of every pixel chunk rather than bounded, since a bound that assumes the worst
+// alignment doubles the count of two chunk shapes that line up; an axis is at most a few thousand
+// chunks long. An axis with no chunk shape to speak of is one chunk, of either.
+inline std::uint64_t FlagChunksAcross(std::uint64_t length, std::uint64_t pixel_chunk, std::uint64_t flag_chunk) {
+    // Chunked alike needs no walk, and every read asks this of every axis.
+    if (flag_chunk == 0 || length == 0 || flag_chunk == pixel_chunk) {
+        return 1;
+    }
+    const std::uint64_t step = pixel_chunk == 0 ? length : pixel_chunk;
+    std::uint64_t most = 1;
+    for (std::uint64_t first = 0; first < length; first += step) {
+        const std::uint64_t last = std::min(first + step, length) - 1;
+        most = std::max(most, (last / flag_chunk) - (first / flag_chunk) + 1);
+    }
+    return most;
+}
+
+// Bytes of flag that decoding one pixel chunk of this image decodes beside it: every flag chunk the
+// pixel chunk lies across, whole, at a byte an element. `flag_geometry` without a chunk shape is
+// taken to be the pixels'.
 //
 // One byte an element rather than another copy of the pixels: a flag is boolean over the image's own
 // shape by construction -- RequireUsableFlag holds it to both -- so beside a float32 chunk it is a
-// quarter of one, not a second one. Whichever way this is wrong it is wrong in the units the budget
-// is spent in, and a read sized too small is the mistake this header exists to prevent: on a 1 MiB
-// chunk image a whole-plane profile took 97.8 ms at 64 chunks per request and 462.2 at one.
-inline std::uint64_t DecodedChunkBytes(const ImageDescriptor& descriptor, const ChunkGeometry& geometry,
-                                       bool apply_mask) {
-    const std::uint64_t pixels = DecodedChunkBytes(descriptor, geometry);
-    return apply_mask ? pixels + ChunkElements(geometry) : pixels;
+// quarter of one, not a second one. But a flag need share nothing else with its image, and its chunks
+// are what is decoded. Chunked alike, or finer and lined up, that comes to the pixel chunk's own
+// elements. Coarser, it is more: a flag kept whole in one chunk is all of it beside every pixel
+// chunk, and counting it in the pixels' chunks said a read of the coarse-flag fixture's two-chunk row
+// decoded 100 bytes where it decoded 200.
+//
+// This is the most one pixel chunk can bring, and a read of several that share a flag chunk decodes
+// that chunk once, so a flag coarser than its pixels is over-counted in any read of more than one.
+// That is the side to be wrong on. Every walk here counts what it may decode in pixel chunks, and an
+// over-count costs a read some of the chunks it could have decoded in parallel, where an under-count
+// spends memory the caller's budget said not to.
+inline std::uint64_t DecodedFlagBytes(const ImageDescriptor& descriptor, const ChunkGeometry& geometry,
+                                      const ChunkGeometry& flag_geometry) {
+    const auto& flag = flag_geometry.chunk_shape.empty() ? geometry : flag_geometry;
+    const auto chunk = [](const ChunkGeometry& of, std::size_t axis) -> std::uint64_t {
+        return axis < of.chunk_shape.size() ? of.chunk_shape[axis] : 0;
+    };
+    std::uint64_t bytes = 1;
+    for (std::size_t axis = 0; axis < descriptor.axes.size(); ++axis) {
+        const auto flag_chunk = chunk(flag, axis);
+        bytes *= FlagChunksAcross(descriptor.axes[axis].length, chunk(geometry, axis), flag_chunk) *
+                 std::max<std::uint64_t>(1, flag_chunk);
+    }
+    return bytes;
 }
 
 // What one read of this image costs, and how much of that it may spend at once: the three answers
@@ -114,17 +151,22 @@ inline std::uint64_t DecodedChunkBytes(const ImageDescriptor& descriptor, const 
 // They were written out twice, word for word -- whether the flag is folded in, what a chunk
 // decodes to counting it, and the caller's budget or the library's own -- and the two copies have
 // to agree, because a read and a reduction that sized themselves against different costs would
-// split the same image differently for no reason either could give.
+// split the same image differently for no reason either could give. The flag's own layout is part
+// of the second, so both are handed it: sized against the pixels' layout alone, each took the flag to
+// be chunked as its pixels were, which reading ahead already knew it need not be.
+//
+// A chunk here is a pixel chunk, and what it costs counts the flag it brings; see DecodedFlagBytes.
 struct ReadCost {
     bool apply_mask = false;
     std::uint64_t chunk_bytes = 1;
     std::size_t budget_bytes = 0;
 
     static ReadCost Of(const ImageDescriptor& descriptor, const ChunkGeometry& geometry,
-                       const ReadOptions& options) {
+                       const ChunkGeometry& flag_geometry, const ReadOptions& options) {
         ReadCost cost;
         cost.apply_mask = AppliesPixelMask(options, descriptor);
-        cost.chunk_bytes = DecodedChunkBytes(descriptor, geometry, cost.apply_mask);
+        cost.chunk_bytes = DecodedChunkBytes(descriptor, geometry) +
+                           (cost.apply_mask ? DecodedFlagBytes(descriptor, geometry, flag_geometry) : 0);
         cost.budget_bytes = options.read_budget_bytes != 0 ? options.read_budget_bytes
                                                                       : DefaultReadBytes(cost.chunk_bytes);
         return cost;

@@ -51,7 +51,7 @@ using carta::zarr::testing::Require;
 
 ReducibleImage Reducible(const SyntheticPixelSource& source, const ImageDescriptor& image,
                        const ChunkGeometry& geometry, WorkPool& workers) {
-    auto reducible = ReducibleImage::Of(source, image, geometry, workers);
+    auto reducible = ReducibleImage::Of(source, image, geometry, geometry, workers);
     Require(static_cast<bool>(reducible), "the synthetic image's axes could not be mapped");
     return reducible.value();
 }

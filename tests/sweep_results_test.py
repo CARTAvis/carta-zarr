@@ -254,6 +254,26 @@ class Recommending(unittest.TestCase):
 
 
 
+class WhichImageIsMeasured(unittest.TestCase):
+    """A sweep of a source's MODEL writes MODEL into every layout -- generate.py takes source.image --
+    and the bench reads a dataset's default image unless told otherwise, which there is SKY. So every
+    command that reads a written dataset names the image its manifest says was written."""
+
+    def test_every_command_that_reads_a_dataset_names_its_image(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            dataset = Path(directory) / "layout"
+            dataset.mkdir()
+            (dataset / "bench-manifest.json").write_text(json.dumps({"image": {"variable": "MODEL"}}))
+            measuring = sweep.Sweep(config(paths={"bench": "carta-zarr-bench", "work": directory}),
+                                    Path(directory) / "out")
+            run = sweep.Run("stage1", sweep.Setting(2, CORES, 1024, 0), 1, ("plane",), 1)
+            for command in (measuring.probe_command(dataset),
+                            measuring.bench_command(dataset, run, Path(directory) / "results.csv")):
+                with self.subTest(command=command[1]):
+                    self.assertIn("--image", command)
+                    self.assertEqual(command[command.index("--image") + 1], "MODEL")
+
+
 class ResumingASweep(unittest.TestCase):
     """A sweep resumes by skipping the runs its state says are done, and a run is done only for the
     workload it measured: another seed, other operation counts or another source is another

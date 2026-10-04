@@ -623,6 +623,14 @@ def cold_method(config: dict[str, Any]) -> str:
 RESUMABLE_MEASURE = ("modes", "trials", "histogram_reference", "generator_workers")
 
 
+def image_of(dataset: Path) -> str:
+    """The image a written dataset holds, as its manifest says: the one generate.py wrote, which is
+    source.image when one was asked for. Named to the bench rather than left to it, since the bench
+    otherwise reads the dataset's default image -- which for a source with a MODEL beside its SKY is
+    SKY, whatever was written."""
+    return json.loads((dataset / "bench-manifest.json").read_text())["image"]["variable"]
+
+
 def bench_identity(bench: str) -> str:
     """Which build a bench is, as it says of itself: a hash of its bytes and of the carta-zarr it
     loads. A bench too old to say is refused rather than taken as any build."""
@@ -774,7 +782,7 @@ class Sweep:
             return None
         path = Path(completed.stdout.strip().splitlines()[-1])
         manifest = json.loads((path / "bench-manifest.json").read_text())
-        probe = subprocess.run([self.bench, "probe", str(path)], capture_output=True, text=True)
+        probe = subprocess.run(self.probe_command(path), capture_output=True, text=True)
         if probe.returncode != 0:
             self.fail(dataset, f"carta-zarr-bench probe refused it: {probe.stdout.strip() or probe.stderr.strip()}")
             # What generate.py printed, which it claimed before writing: never the source or around it.
@@ -797,6 +805,9 @@ class Sweep:
         self.save()
         return path
 
+    def probe_command(self, path: Path) -> list[str]:
+        return [self.bench, "probe", str(path), "--image", image_of(path)]
+
     def bench_command(self, path: Path, run: Run, csv_path: Path) -> list[str]:
         measure = self.config["measure"]
         cold = run.cold or measure["cold"]
@@ -808,7 +819,7 @@ class Sweep:
                    "--animation-frames", str(measure["animation_frames"]),
                    "--animation-fps", str(measure["animation_fps"]),
                    *(["--animation-prefetch"] if measure["animation_prefetch"] else []),
-                   "--histogram-method", run.histogram, *run.setting.bench_args()]
+                   "--histogram-method", run.histogram, *run.setting.bench_args(), "--image", image_of(path)]
         if ops:
             command += ["--ops", ops]
         if measure["drop_cache_cmd"] and cold != "off":

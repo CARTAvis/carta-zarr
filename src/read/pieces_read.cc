@@ -114,25 +114,54 @@ Result<std::size_t> ReadInPieces(const PixelSource& source, const ImageDescripto
     return static_cast<std::size_t>(elements);
 }
 
+namespace {
+
+std::uint64_t Elements(const ReadRequest& request) {
+    std::uint64_t elements = 1;
+    for (const auto& range : request.axes) {
+        elements *= range.count;
+    }
+    return elements;
+}
+
+}  // namespace
+
 Result<std::uint64_t> PrefetchChunks(const PixelSource& source, const ImageDescriptor& descriptor,
-                                     const ChunkGeometry& geometry, const ReadRequest& request,
-                                     const ReadOptions& options) {
+                                     const ChunkGeometry& geometry, const ChunkGeometry& flag_geometry,
+                                     const ReadRequest& request, const ReadOptions& options) {
     // Checked as the request the caller made, so that a mistake in it is reported in its own terms
     // rather than in those of the sample made from it.
     if (auto checked = zarr::BuildSelection(descriptor, request, zarr::DestinationOrder::logical); !checked) {
         return checked.error();
     }
+    // The pixels and the flag are each sampled one element a chunk by their own layout, so the
+    // pixels are read here without the flag, which is sampled below.
     const auto sample = OneElementPerChunk(geometry, request);
-    std::uint64_t chunks = 1;
-    for (const auto& range : sample.axes) {
-        chunks *= range.count;
-    }
+    const auto chunks = Elements(sample);
+    auto pixels_only = options;
+    pixels_only.apply_pixel_mask = false;
     std::vector<float> discarded(static_cast<std::size_t>(chunks));
-    auto read = ReadInPieces(source, descriptor, geometry, sample, {discarded.data(), discarded.size()}, options, {});
+    auto read =
+        ReadInPieces(source, descriptor, geometry, sample, {discarded.data(), discarded.size()}, pixels_only, {});
     if (!read) {
         return read.error();
     }
-    return chunks;
+    if (!AppliesPixelMask(options, descriptor)) {
+        return chunks;
+    }
+
+    const auto flag_sample = OneElementPerChunk(flag_geometry, request);
+    const auto flag_chunks = Elements(flag_sample);
+    auto selection = zarr::BuildSelection(descriptor, flag_sample, zarr::DestinationOrder::logical);
+    if (!selection) {
+        return selection.error();
+    }
+    std::vector<std::uint8_t> discarded_flags(static_cast<std::size_t>(flag_chunks));
+    auto flags = source.ReadMask(selection.value(), {discarded_flags.data(), discarded_flags.size()}, options.control);
+    if (!flags) {
+        return flags.error();
+    }
+    return chunks + flag_chunks;
 }
 
 }  // namespace carta::zarr::internal

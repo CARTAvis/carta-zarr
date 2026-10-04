@@ -56,7 +56,7 @@ float ExpectedValue(std::uint64_t l, std::uint64_t m, std::uint64_t frequency, s
 }
 
 // The generator marks a pixel bad where (l + m) is a multiple of three.
-bool ExpectedFlag(std::uint64_t l, std::uint64_t m) {
+bool ExpectedGood(std::uint64_t l, std::uint64_t m) {
     return ((l + m) % 3) != 0;
 }
 
@@ -184,7 +184,7 @@ void TestMaskFusion(const carta::zarr::Image& sky) {
                 for (std::uint64_t l = 0; l < kL; ++l) {
                     const float value = pixels.at(LogicalOffset(l, m, f, p));
                     const std::string where = "at l=" + std::to_string(l) + " m=" + std::to_string(m);
-                    if (!ExpectedFlag(l, m) || InMissingChunk(l, f, p)) {
+                    if (!ExpectedGood(l, m) || InMissingChunk(l, f, p)) {
                         Require(std::isnan(value), "a flagged or missing pixel should read as NaN " + where);
                     } else {
                         Require(value == ExpectedValue(l, m, f, p, 0), "a good pixel should survive masking " + where);
@@ -511,7 +511,11 @@ void TestAnOpenImageOutlivesTheWorkingDirectory(const char* fixture) {
 // chunks are emptied on disk, and the plane it covered still reads as it did, while the next plane,
 // which it did not cover, no longer reads at all. The fixture's flag is emptied too, so the plane
 // reading back masked shows that its chunks were decoded as well.
-void TestAPrefetchedPlaneIsReadFromThePool(const char* fixture) {
+//
+// `expected_chunks` counts the pixels' chunks and the flag's, each by its own layout: a flag may be
+// chunked finer than its image, and then sampling it where the pixels are sampled leaves some of its
+// chunks to be read from storage after all.
+void TestAPrefetchedPlaneIsReadFromThePool(const char* fixture, std::uint64_t expected_chunks) {
     const auto copy = std::filesystem::temp_directory_path() / ("carta-zarr-prefetch-" + std::to_string(getpid()));
     std::filesystem::remove_all(copy);
     std::filesystem::copy(fixture, copy, std::filesystem::copy_options::recursive);
@@ -547,8 +551,9 @@ void TestAPrefetchedPlaneIsReadFromThePool(const char* fixture) {
     carta::zarr::ReadOptions options;
     options.control.cache_pool = *pool;
     const auto chunks = sky.Prefetch(plane(0), options);
-    Require(chunks && *chunks == kL / 2, "a prefetch of a plane did not say it decoded the plane's chunks" +
-                                             (chunks ? std::string{} : ": " + chunks.error().message));
+    Require(chunks && *chunks == expected_chunks,
+            "a prefetch of a plane did not say it decoded the plane's chunks and its flag's" +
+                (chunks ? ", it said " + std::to_string(*chunks) : ": " + chunks.error().message));
 
     for (const char* array : {"SKY", "FLAG"}) {
         for (const auto& entry : std::filesystem::recursive_directory_iterator(copy / array / "c")) {
@@ -786,7 +791,10 @@ int main() {
     }
     try {
         TestAnOpenImageOutlivesTheWorkingDirectory(kFixtures[0]);
-        TestAPrefetchedPlaneIsReadFromThePool(kFixtures[0]);
+        // A plane of the pixels is two chunks along l; its flag is two more, or four when it is
+        // chunked half as long.
+        TestAPrefetchedPlaneIsReadFromThePool(kFixtures[0], 4);
+        TestAPrefetchedPlaneIsReadFromThePool(CARTA_ZARR_PIXEL_FIXTURE_FINE_FLAG, 6);
         TestACoordinateDisagreeingWithItsConsolidatedCopyIsRefused(kFixtures[0]);
         TestAnImageWhoseArraysDisagreeWithTheirCopiesDoesNotOpen(kFixtures[0]);
         TestLabelsAreHeldToTheirOwnDocument(kFixtures[0]);

@@ -17,6 +17,7 @@
 #include <filesystem>
 #include <fstream>
 #include <functional>
+#include <set>
 #include <utility>
 
 #ifndef CARTA_ZARR_BENCH_COMMIT
@@ -327,6 +328,10 @@ std::optional<RowSummary> SummariseRow(const std::string& line) {
     static const auto status = ColumnIndex("status");
     static const auto seconds = ColumnIndex("seconds");
     static const auto t_end_s = ColumnIndex("t_end_s");
+    static const auto processes = ColumnIndex("processes");
+    static const auto ops = ColumnIndex("ops");
+    static const auto process_index = ColumnIndex("process_index");
+    static const auto op_index = ColumnIndex("op_index");
     const auto fields = ParseCsvLine(line);
     if (fields.size() != Columns().size()) {
         return std::nullopt;
@@ -335,6 +340,12 @@ std::optional<RowSummary> SummariseRow(const std::string& line) {
     summary.run_key = fields[run_key];
     try {
         summary.trial = static_cast<unsigned>(std::stoul(fields[trial]));
+        summary.processes = static_cast<unsigned>(std::stoul(fields[processes]));
+        summary.ops = static_cast<unsigned>(std::stoul(fields[ops]));
+        summary.process_index = static_cast<unsigned>(std::stoul(fields[process_index]));
+        if (!fields[op_index].empty()) {
+            summary.op_index = static_cast<unsigned>(std::stoul(fields[op_index]));
+        }
     } catch (...) {
         return std::nullopt;
     }
@@ -352,7 +363,14 @@ std::optional<CsvOutput> CsvOutput::Open(const std::string& path, std::string& e
         return output;
     }
 
-    std::map<std::string, std::map<unsigned, bool>> trials;
+    // What each trial's rows say about it: whether any was an error, how many operations it was
+    // meant to have, and which of them have a row.
+    struct Coverage {
+        bool error = false;
+        std::optional<std::pair<unsigned, unsigned>> grid;
+        std::set<std::pair<unsigned, unsigned>> reported;
+    };
+    std::map<std::string, std::map<unsigned, Coverage>> trials;
     bool has_header = false;
     if (std::ifstream existing(path); existing) {
         std::string line;
@@ -365,8 +383,15 @@ std::optional<CsvOutput> CsvOutput::Open(const std::string& path, std::string& e
         }
         while (std::getline(existing, line)) {
             if (const auto row = SummariseRow(line)) {
-                auto [entry, added] = trials[row->run_key].try_emplace(row->trial, true);
-                entry->second = entry->second && row->status != "error";
+                auto& coverage = trials[row->run_key][row->trial];
+                const std::pair<unsigned, unsigned> grid{row->processes, row->ops};
+                // Rows of one trial disagreeing about its size cannot all be its rows.
+                coverage.error = coverage.error || row->status == "error" || !row->op_index ||
+                                 (coverage.grid && *coverage.grid != grid);
+                coverage.grid = grid;
+                if (row->op_index && row->process_index < row->processes && *row->op_index < row->ops) {
+                    coverage.reported.emplace(row->process_index, *row->op_index);
+                }
             }
         }
     }
@@ -382,8 +407,10 @@ std::optional<CsvOutput> CsvOutput::Open(const std::string& path, std::string& e
         std::fflush(file);
     }
     for (const auto& [key, outcomes] : trials) {
-        for (const auto& [trial, whole] : outcomes) {
-            if (whole) {
+        for (const auto& [trial, coverage] : outcomes) {
+            const auto expected =
+                coverage.grid ? std::uint64_t{coverage.grid->first} * coverage.grid->second : std::uint64_t{0};
+            if (!coverage.error && expected > 0 && coverage.reported.size() == expected) {
                 output._completed[key].insert(trial);
             }
         }

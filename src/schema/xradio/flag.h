@@ -34,6 +34,18 @@ inline bool IsFlag(const zarr::ArrayMetadata& metadata) {
            metadata.attributes.at("type").get<std::string>() == "flag";
 }
 
+// Whether a variable's values are booleans: a Zarr bool, or xarray's encoding of one, which is an
+// int8 recorded as `dtype: "bool"` in its attributes. xarray encodes every bool that way, so it is
+// what XRADIO's own writer leaves on disk for each flag it converts; a reader taking only a Zarr
+// bool opened those images with no pixel mask at all.
+inline bool HoldsBooleans(const zarr::ArrayMetadata& metadata) {
+    if (metadata.data_type == "bool") {
+        return true;
+    }
+    return metadata.data_type == "int8" && metadata.attributes.contains("dtype") &&
+           metadata.attributes.at("dtype").is_string() && metadata.attributes.at("dtype").get<std::string>() == "bool";
+}
+
 /**
  * What a variable has to be before it can mask this image's pixels.
  *
@@ -49,7 +61,7 @@ inline Result<void> RequireUsableFlag(const zarr::ArrayMetadata& flag, const zar
     if (!IsFlag(flag)) {
         return Error{ErrorCode::invalid_metadata, "Pixel mask variable is not marked as a flag", std::string(node)};
     }
-    if (flag.data_type != "bool") {
+    if (!HoldsBooleans(flag)) {
         return Error{ErrorCode::unsupported_data_type, "Pixel mask variable is not boolean", std::string(node)};
     }
     if (flag.dimension_names != image.dimension_names || flag.shape != image.shape) {
@@ -62,11 +74,13 @@ inline Result<void> RequireUsableFlag(const zarr::ArrayMetadata& flag, const zar
 /**
  * The flag variable supplying this image's pixel mask, or an empty name when it has none.
  *
- * A declared flag is binding: an image naming one that cannot serve is closed rather than opened
- * unmasked, because reads apply the mask by default and an unusable mask reported as no mask would
- * show flagged pixels as valid -- the one failure a consumer has no way to notice. With nothing
- * declared the store is inspected instead, and more than one match is refused rather than guessed
- * at, as a diagnostic on the image.
+ * A flag is declared either by the image's own `flag` attribute or by a root `data_groups` entry
+ * whose `sky` is this image -- which is the only place XRADIO's writer records it. A declared flag
+ * is binding: an image naming one that cannot serve is closed rather than opened unmasked, because
+ * reads apply the mask by default and an unusable mask reported as no mask would show flagged pixels
+ * as valid -- the one failure a consumer has no way to notice. With nothing declared the store is
+ * inspected instead, leaving out any flag a data group declares for another image, and more than one
+ * match is refused rather than guessed at, as a diagnostic on the image. See ADR 0019.
  *
  * Takes the whole Store rather than a narrower interface: what varies underneath is the transport,
  * which already has two adapters, and a seam here would have exactly one. See ADR 0006.

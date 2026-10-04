@@ -28,6 +28,7 @@ python-casacore on macOS, so casatools is required on every platform here.
 from __future__ import annotations
 
 import shutil
+import tempfile
 from pathlib import Path
 
 import numpy as np
@@ -35,6 +36,17 @@ from astropy.io import fits
 
 OUTPUT_DIR = Path(__file__).parent / "images" / "zarr" / "xradio"
 FIXTURE_NAME = "conformance"
+FLAGGED_FIXTURE_NAME = "conformance_flagged"
+
+# The pixels each CASA image's mask marks bad, as (x, y, stokes, frequency) -- casacore's axis order.
+# casacore's mask is true for a good pixel and XRADIO's flag is true for a bad one, so these are the
+# pixels the converted flags mark true. Every value of the FITS image is finite and unique, so a
+# reader that ignores a flag, inverts it, or applies another image's flag reports a different count
+# of valid pixels on a known plane and keeps a value it should have dropped.
+MASKED_PIXELS = {
+    "sky": [(1, 2, 0, 0), (3, 0, 1, 1)],
+    "sky_other": [(4, 3, 2, 0)],
+}
 
 AXES = [
     # (CTYPE, CRVAL, CDELT, CUNIT)
@@ -77,6 +89,42 @@ def write_fits(path: Path) -> None:
     hdu.writeto(path, overwrite=True)
 
 
+def write_masked_casa_image(path: Path, fits_path: Path, masked: list[tuple[int, int, int, int]]) -> None:
+    from casatools import image as image_tool
+
+    image = image_tool()
+    try:
+        image.fromfits(outfile=str(path), infile=str(fits_path), overwrite=True)
+        good = np.ones(image.shape(), dtype=bool)
+        for pixel in masked:
+            good[pixel] = False
+        image.putregion(pixelmask=good)
+    finally:
+        image.done()
+
+
+def write_flagged(fits_path: Path, scratch: Path) -> None:
+    """Two CASA images with internal masks, converted together.
+
+    This is the shape of what XRADIO writes from CASA images, which the FITS conversion above never
+    produces: each sky image's flag stored as int8 with `dtype: "bool"` in its attributes rather than
+    as a Zarr bool, true where the pixel is bad, and tied to its image only by the root's
+    `data_groups` -- the image itself names no flag. Two of them, of the same shape, so a reader that
+    guesses a flag from its dimensions finds two candidates for each image.
+    """
+    from xradio.image import open_image, write_image
+
+    fixture = OUTPUT_DIR / FLAGGED_FIXTURE_NAME
+    shutil.rmtree(fixture, ignore_errors=True)
+    stores = {}
+    for role, masked in MASKED_PIXELS.items():
+        casa_path = scratch / f"{role}.im"
+        write_masked_casa_image(casa_path, fits_path, masked)
+        stores[role] = str(casa_path)
+    xds = open_image(stores)
+    write_image(xds, str(fixture), out_format="zarr", overwrite=True)
+
+
 def main() -> None:
     from xradio.image import open_image, write_image
 
@@ -84,13 +132,15 @@ def main() -> None:
     fixture = OUTPUT_DIR / FIXTURE_NAME
     shutil.rmtree(fixture, ignore_errors=True)
 
-    fits_path = OUTPUT_DIR / f"{FIXTURE_NAME}.fits"
+    scratch = Path(tempfile.mkdtemp(prefix="carta-zarr-conformance-"))
+    fits_path = scratch / f"{FIXTURE_NAME}.fits"
     write_fits(fits_path)
     try:
         xds = open_image(str(fits_path))
         write_image(xds, str(fixture), out_format="zarr", overwrite=True)
+        write_flagged(fits_path, scratch)
     finally:
-        fits_path.unlink(missing_ok=True)
+        shutil.rmtree(scratch, ignore_errors=True)
 
 
 if __name__ == "__main__":

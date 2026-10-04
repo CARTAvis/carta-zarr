@@ -93,6 +93,26 @@ void TestTheFlagMustMatchTheImagesOwnDimensions() {
 }
 
 // The refusal names the variable, because a consumer shows it to whoever picked the file.
+// xarray stores a bool variable as int8 and records `dtype: "bool"` in its attributes, so that is
+// what XRADIO's own writer leaves on disk for every flag it converts. An int8 without that record
+// is a number, not a flag, and so is any other integer carrying it: xarray writes only int8.
+void TestXarraysEncodingOfABoolIsAFlag() {
+    auto encoded = Flag("int8");
+    encoded.attributes["dtype"] = "bool";
+    Require(static_cast<bool>(RequireUsableFlag(encoded, Image(), "FLAG_SKY")),
+            "an int8 flag recorded as bool, which is how XRADIO writes one, was refused");
+
+    const auto bare = RequireUsableFlag(Flag("int8"), Image(), "FLAG_SKY");
+    Require(!bare && bare.error().code == ErrorCode::unsupported_data_type,
+            "an int8 flag with no record that it holds booleans was accepted");
+
+    auto widened = Flag("uint16");
+    widened.attributes["dtype"] = "bool";
+    const auto other = RequireUsableFlag(widened, Image(), "FLAG_SKY");
+    Require(!other && other.error().code == ErrorCode::unsupported_data_type,
+            "an integer other than int8 was taken as xarray's encoding of a bool");
+}
+
 void TestTheRefusalNamesTheVariable() {
     const auto numeric = RequireUsableFlag(Flag("float32"), Image(), "MASK_7");
     Require(!numeric && numeric.error().node_path == "MASK_7", "the refusal did not name the flag variable");
@@ -106,6 +126,7 @@ int main() {
         TestClassificationIsNotByName();
         TestANumericVariableIsNotAMask();
         TestTheFlagMustMatchTheImagesOwnDimensions();
+        TestXarraysEncodingOfABoolIsAFlag();
         TestTheRefusalNamesTheVariable();
         std::cout << "carta-zarr flag tests passed\n";
         return 0;

@@ -7,6 +7,7 @@
 #include "work_pool.h"
 
 #include <algorithm>
+#include <utility>
 
 namespace carta::zarr::internal {
 
@@ -66,7 +67,18 @@ void WorkPool::DrainTasks(const std::function<void(std::size_t, std::size_t)>& b
         }
         // Outside the lock: a body is the arithmetic a reduction came for, and holding the counter
         // across it would serialise the very thing the pool exists to spread.
-        body(task, worker);
+        try {
+            body(task, worker);
+        } catch (...) {
+            // Kept for Run to rethrow on the caller's thread, and every task not yet claimed given
+            // up: the call has failed, and the sooner the workers stop, the sooner it says so.
+            std::lock_guard<std::mutex> lock(_mutex);
+            if (!_failure) {
+                _failure = std::current_exception();
+            }
+            _next = _tasks;
+            return;
+        }
     }
 }
 
@@ -112,6 +124,7 @@ void WorkPool::Run(std::size_t tasks, const std::function<void(std::size_t, std:
     // Everything below writes the pool's one set of fields and then waits for workers reading
     // them, so only one call may be inside it at a time. See _run.
     std::lock_guard<std::mutex> serialised(_run);
+    std::exception_ptr failure;
 
     {
         std::lock_guard<std::mutex> lock(_mutex);
@@ -134,6 +147,10 @@ void WorkPool::Run(std::size_t tasks, const std::function<void(std::size_t, std:
         _done.wait(lock, [&] { return _running == 0; });
         _body = nullptr;
         _tasks = 0;
+        failure = std::exchange(_failure, nullptr);
+    }
+    if (failure) {
+        std::rethrow_exception(failure);
     }
 }
 

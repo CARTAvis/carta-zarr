@@ -436,26 +436,55 @@ void TestARowIsOneLine() {
             "a row does not read back as what was written");
 }
 
+// A trial is whole when its rows cover every operation of every process and none of them is an
+// error. A trial's rows are written together, but a CSV can still lose its tail -- a full disk, a
+// copy cut short -- and a trial left with one row of three looked as finished as one with all three.
 void TestResumingSkipsOnlyWholeTrials() {
     const auto path =
         (std::filesystem::temp_directory_path() / ("carta-zarr-bench-test-" + std::to_string(getpid()) + ".csv"))
             .string();
     std::filesystem::remove(path);
     const auto base = RowTemplate(SomeOptions(), Mode::plane, ColdMethod::off, {}, "run");
+    Require(base.processes * base.ops >= 2, "the test needs a trial of more than one operation");
+    const auto whole_trial = [&](unsigned trial) {
+        std::vector<std::string> rows;
+        for (unsigned process = 0; process < base.processes; ++process) {
+            for (unsigned op = 0; op < base.ops; ++op) {
+                auto row = base;
+                row.trial = trial;
+                row.process_index = process;
+                row.op_index = op;
+                // A timeout is a measurement, not a failure, and a trial holding one is whole.
+                row.status = process == 0 && op == 0 ? "timeout" : "ok";
+                rows.push_back(FormatRow(row));
+            }
+        }
+        return rows;
+    };
+    std::size_t written_rows = 0;
     {
         std::string error;
         auto output = CsvOutput::Open(path, error);
         Require(output.has_value(), "a new CSV did not open: " + error);
-        auto ok = base;
-        ok.trial = 0;
-        ok.status = "ok";
-        auto timeout = base;
-        timeout.trial = 0;
-        timeout.status = "timeout";
-        auto failed = base;
-        failed.trial = 1;
-        failed.status = "error";
-        output->Write({FormatRow(ok), FormatRow(timeout), FormatRow(failed)});
+        auto rows = whole_trial(0);
+
+        auto failed = whole_trial(1);
+        auto error_row = base;
+        error_row.trial = 1;
+        error_row.process_index = 1;
+        error_row.op_index = 0;
+        error_row.status = "error";
+        failed.at(base.ops) = FormatRow(error_row);
+        rows.insert(rows.end(), failed.begin(), failed.end());
+
+        auto truncated = whole_trial(2);
+        truncated.pop_back();
+        rows.insert(rows.end(), truncated.begin(), truncated.end());
+
+        // Only the first row of a trial left: what a CSV cut short after it holds.
+        rows.push_back(whole_trial(3).front());
+        output->Write(rows);
+        written_rows = rows.size();
     }
     {
         std::string error;
@@ -463,7 +492,7 @@ void TestResumingSkipsOnlyWholeTrials() {
         Require(output.has_value(), "the CSV did not reopen: " + error);
         const auto done = output->completed().find(base.run_key);
         Require(done != output->completed().end() && done->second == std::set<unsigned>{0},
-                "resuming does not skip exactly the trials that finished without an error");
+                "resuming does not skip exactly the trials whose every operation finished without an error");
     }
     std::ifstream written(path);
     std::string header;
@@ -473,7 +502,7 @@ void TestResumingSkipsOnlyWholeTrials() {
     for (std::string line; std::getline(written, line);) {
         ++lines;
     }
-    Require(lines == 4, "reopening the CSV wrote another header");
+    Require(lines == written_rows + 1, "reopening the CSV wrote another header");
 
     std::ofstream(path) << "csv_version,something_else\n";
     std::string error;

@@ -72,10 +72,12 @@ from typing import Any, Iterator
 import numpy as np
 import zarr
 
+from fingerprint import source_content
+
 MANIFEST_NAME = "bench-manifest.json"
 # Bumped whenever the same arguments would produce different bytes, so that a dataset written by an
 # older generator is not mistaken for one this one would write.
-FORMAT_VERSION = 1
+FORMAT_VERSION = 2
 
 AXES = ("time", "frequency", "polarization", "l", "m")
 STOKES = ("I", "Q", "U", "V")
@@ -408,11 +410,11 @@ class Synthetic:
         return block
 
     def flags(self, start: tuple[int, ...], stop: tuple[int, ...]) -> np.ndarray:
-        # True is a good pixel: XRADIO's flag says which pixels to keep. See src/pixel_mask.h.
-        block = np.ones([b - a for a, b in zip(start, stop)], dtype=bool)
+        # True is a flagged pixel: XRADIO's flag says which pixels to drop. See src/pixel_mask.h.
+        block = np.zeros([b - a for a, b in zip(start, stop)], dtype=bool)
         outside = self.outside(range(start[3], stop[3]), range(start[4], stop[4]))
         if outside is not None:
-            block[..., outside] = False
+            block[..., outside] = True
         return block
 
 
@@ -887,22 +889,6 @@ def take_layout_from_source(args: argparse.Namespace) -> None:
 
 
 # -- Identity and reuse ---------------------------------------------------------------------------
-
-
-def source_content(source: Path) -> str:
-    """What every file of a source dataset is, as far as the filesystem says without reading it: its
-    path, size and modification time. A rewrite reads pixels, flags and coordinates as well as
-    metadata, and a source edited in place keeps its path and, as often as not, its metadata, so
-    without this the rewrite of what it used to hold is reused.
-
-    Stated rather than read because a source can be terabytes: walking it costs a stat per file, and
-    hashing it would cost reading all of it. A file copied without its times looks changed, which
-    costs a rewrite and never a wrong measurement."""
-    digest = hashlib.sha256()
-    for path in sorted(entry for entry in source.rglob("*") if entry.is_file()):
-        stat = path.stat()
-        digest.update(f"{path.relative_to(source).as_posix()}\0{stat.st_size}\0{stat.st_mtime_ns}\n".encode())
-    return digest.hexdigest()
 
 
 def identity(args: argparse.Namespace) -> dict[str, Any]:

@@ -30,10 +30,12 @@ refuse to open. This library's own time > 1 case is a store its tests write.
 
 `images/zarr/xradio/pixels` is a small image whose every value spells its own logical coordinates,
 and whose axes all differ in length, so a read that permutes the axes wrongly gets either the wrong
-shape or the wrong values. One chunk is deleted and the flag marks a known pattern false, so the
+shape or the wrong values. One chunk is deleted and the flag marks a known pattern true (flagged), so the
 fill-value and pixel-mask paths have a definition to be checked against.
 `images/zarr/xradio/pixels_l_fastest` is the same image stored with `l` rather than `m` last, for a
 reader that decides anything from where an axis sits rather than from its name.
+`images/zarr/xradio/pixels_fine_flag` is `pixels` with its flag chunked half as long along `l`, for
+a prefetch that must decode the flag's chunks by the flag's own layout.
 `images/zarr/xradio/pixels_wide`, 512 x 520 x 4 x 2, is large enough for the reductions to divide a
 plane or a chunk between workers, which the small ones never are; it has no absent chunk and no
 flag, since the small ones cover those.
@@ -49,6 +51,14 @@ XRADIO itself rather than zarr-python: it writes a FITS image with astropy and c
 `xradio.image.open_image()` / `write_image()`. It is the record of what XRADIO actually writes, and
 `tests/conformance_test.cc` asserts this library's assumptions against it, so bumping the pinned
 XRADIO version reports which assumption the new version broke.
+
+`images/zarr/xradio/conformance_flagged` is the same FITS image made into two CASA images with
+casatools, each given an internal mask over a few known pixels, and converted together as `sky` and
+`sky_other`. It is what XRADIO writes from CASA and the FITS conversion never does: each flag an
+`int8` with `dtype: "bool"`, true where casacore's mask was false, and tied to its image only by the
+root's `data_groups`. Two flags of the same shape mean a reader guessing from dimensions finds two
+candidates for each image. Importing casatools downloads CASA's runtime data (about 340 MB, into
+`~/.casa/data`) the first time.
 
 ```sh
 ./generate_conformance_fixtures.py

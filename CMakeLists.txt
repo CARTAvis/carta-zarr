@@ -179,7 +179,8 @@ if(CARTA_ZARR_BUILD_TESTS AND BUILD_TESTING)
     # in one place rather than in whichever targets happened to reference it.
     set(CARTA_ZARR_PIXEL_FIXTURES
         CARTA_ZARR_PIXEL_FIXTURE="${CARTA_ZARR_FIXTURE_DIR}/xradio/pixels"
-        CARTA_ZARR_PIXEL_FIXTURE_L_FASTEST="${CARTA_ZARR_FIXTURE_DIR}/xradio/pixels_l_fastest")
+        CARTA_ZARR_PIXEL_FIXTURE_L_FASTEST="${CARTA_ZARR_FIXTURE_DIR}/xradio/pixels_l_fastest"
+        CARTA_ZARR_PIXEL_FIXTURE_FINE_FLAG="${CARTA_ZARR_FIXTURE_DIR}/xradio/pixels_fine_flag")
     set(CARTA_ZARR_WIDE_FIXTURE
         CARTA_ZARR_PIXEL_FIXTURE_WIDE="${CARTA_ZARR_FIXTURE_DIR}/xradio/pixels_wide")
 
@@ -557,7 +558,8 @@ if(CARTA_ZARR_BUILD_TESTS AND BUILD_TESTING)
     carta_zarr_add_test(carta_zarr_conformance_tests PUBLIC
         TEST_NAME carta-zarr-xradio-conformance
         SOURCES tests/conformance_test.cc
-        DEFINITIONS CARTA_ZARR_CONFORMANCE_FIXTURE="${CARTA_ZARR_FIXTURE_DIR}/xradio/conformance")
+        DEFINITIONS CARTA_ZARR_CONFORMANCE_FIXTURE="${CARTA_ZARR_FIXTURE_DIR}/xradio/conformance"
+                    CARTA_ZARR_CONFORMANCE_FLAGGED_FIXTURE="${CARTA_ZARR_FIXTURE_DIR}/xradio/conformance_flagged")
 
     # Pixel reads run against a fixture whose values encode their own logical coordinates, so the
     # axis permutation, the stride, the fill value of a deleted chunk and the pixel mask each have a

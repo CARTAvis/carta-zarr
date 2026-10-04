@@ -124,6 +124,12 @@ std::vector<std::string> ParseCsvLine(const std::string& line);
 struct RowSummary {
     std::string run_key;
     unsigned trial = 0;
+    // How many processes and operations each the trial ran, and which of them this row is about. A
+    // row for a process that never got as far as an operation has no op_index.
+    unsigned processes = 0;
+    unsigned ops = 0;
+    unsigned process_index = 0;
+    std::optional<unsigned> op_index;
     std::string status;
     std::optional<double> seconds;
     std::optional<double> t_end_s;
@@ -144,8 +150,10 @@ public:
 
     void Write(const std::vector<std::string>& rows);
 
-    // The trials a CSV already holds whole, by run key: those with rows and no error among them.
-    // A trial interrupted part-way never wrote any, since rows are written a trial at a time.
+    // The trials a CSV already holds whole, by run key: those with a row for every operation of
+    // every process and no error among them. Rows are written a trial at a time, so a trial
+    // interrupted part-way wrote none; but a CSV can still lose its tail, and a trial left with some
+    // of its rows is not whole.
     const std::map<std::string, std::set<unsigned>>& completed() const noexcept {
         return _completed;
     }

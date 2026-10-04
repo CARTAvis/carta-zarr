@@ -296,6 +296,23 @@ class ResumingASweep(unittest.TestCase):
                 self.assertIn(str(self.output), str(refused.exception))
 
 
+    def test_a_source_edited_in_place_is_another_workload(self) -> None:
+        # The same path and the same settings, other pixels: every layout written after the edit
+        # would measure different data from the ones written before it.
+        with tempfile.TemporaryDirectory() as directory:
+            source = Path(directory)
+            chunk = source / "SKY" / "c" / "0"
+            chunk.parent.mkdir(parents=True)
+            chunk.write_bytes(b"pixels")
+            given = {"source": {"path": str(source)}}
+            self.start(**given)
+            sweep.Sweep(config(**given), self.output).adopt_workload()
+
+            chunk.write_bytes(b"other pixels")
+            with self.assertRaises(SystemExit) as refused:
+                sweep.Sweep(config(**given), self.output).adopt_workload()
+            self.assertIn(str(self.output), str(refused.exception))
+
     def test_a_state_from_before_workloads_were_recorded_is_refused(self) -> None:
         # Whatever it measured, nothing says what, so it cannot be told apart from another workload.
         (self.output / "sweep-state.json").write_text(json.dumps(

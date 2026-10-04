@@ -383,7 +383,8 @@ def generate_xradio_fixture(
     )
     create_numeric_array(
         path / "MASK_0",
-        np.ones(sky_shape, dtype=bool),
+        # Nothing flagged: XRADIO's flag is true where a pixel is bad.
+        np.zeros(sky_shape, dtype=bool),
         dimension_names=("time", "frequency", "polarization", "l", "m"),
         chunks=(1, 1, 1, 2, 5),
         attributes={"type": "flag"},
@@ -428,14 +429,17 @@ def generate_xradio_fixture(
         add_consolidated_metadata(path)
 
 
-def generate_pixel_fixture(path: Path, *, l_fastest: bool = False) -> None:
+def generate_pixel_fixture(path: Path, *, l_fastest: bool = False, fine_flag: bool = False) -> None:
     """An XRADIO image whose pixels are readable and self-describing.
 
     The other XRADIO fixtures carry only fill values, so they pin metadata and say nothing about a
     pixel read. Every axis here has a different length, so a read that permutes axes wrongly cannot
     still produce the right shape, and each value spells its own logical coordinates. One chunk is
-    deleted after writing and the flag marks a known pattern false, which is how the fill-value and
+    deleted after writing and the flag marks a known pattern true, which is how the fill-value and
     pixel-mask paths get a definition instead of an assumption.
+
+    `fine_flag` chunks the flag half as long along l as the pixels, which a flag is allowed to be: a
+    prefetch that samples the flag where it samples the pixels decodes only half its chunks.
     """
     time_size, frequency_size, polarization_size, l_size, m_size = 1, 2, 3, 4, 5
     # XRADIO writes m last, so m is the axis a plane is contiguous along. A store that writes l last
@@ -507,13 +511,18 @@ def generate_pixel_fixture(path: Path, *, l_fastest: bool = False) -> None:
     )
     sky[:] = values
 
-    # True means a good pixel. The pattern crosses chunk boundaries so a mask read that ignores the
-    # transpose cannot accidentally agree.
-    flags = ((l_index + m_index) % 3 != 0)
+    # True means a flagged pixel, as XRADIO writes it. The pattern crosses chunk boundaries so a mask
+    # read that ignores the transpose cannot accidentally agree.
+    flags = ((l_index + m_index) % 3 == 0)
+    flag_chunks = chunks
+    if fine_flag:
+        if l_fastest:
+            raise ValueError("fine_flag is defined for the m-last layout only")
+        flag_chunks = (1, 1, 1, 1, 5)
     flag = zarr.create_array(
         store=path / "FLAG",
         shape=shape,
-        chunks=chunks,
+        chunks=flag_chunks,
         dtype=np.bool_,
         zarr_format=3,
         dimension_names=names,
@@ -672,9 +681,10 @@ def generate_wide_pixel_fixture(path: Path) -> None:
 
 
 def main() -> None:
-    # Remove only what this script owns. xradio/conformance lives under the same directory but is
+    # Remove only what this script owns. xradio/conformance and xradio/conformance_flagged live under
+    # the same directory but are
     # written by generate_conformance_fixtures.py against a pinned XRADIO, and wiping the whole tree
-    # here would delete a fixture this script cannot rebuild.
+    # here would delete fixtures this script cannot rebuild.
     for owned in (
         "string",
         "xradio/minimal",
@@ -682,6 +692,7 @@ def main() -> None:
         "xradio/legacy",
         "xradio/pixels",
         "xradio/pixels_l_fastest",
+        "xradio/pixels_fine_flag",
         "xradio/pixels_wide",
         "xradio/time_axis",
     ):
@@ -695,6 +706,7 @@ def main() -> None:
     )
     generate_pixel_fixture(OUTPUT_DIR / "xradio" / "pixels")
     generate_pixel_fixture(OUTPUT_DIR / "xradio" / "pixels_l_fastest", l_fastest=True)
+    generate_pixel_fixture(OUTPUT_DIR / "xradio" / "pixels_fine_flag", fine_flag=True)
     generate_wide_pixel_fixture(OUTPUT_DIR / "xradio" / "pixels_wide")
     generate_xradio_fixture(OUTPUT_DIR / "xradio" / "time_axis", typed=True, consolidated=True, times=2)
 

@@ -23,6 +23,9 @@ namespace carta::zarr::internal {
 struct DescribedImage {
     ImageDescriptor descriptor;
     ChunkGeometry geometry;
+    // The flag's, by its own layout, which need not be the pixels': a flag has to share the image's
+    // dimensions and nothing more. Empty when the image has no pixel mask.
+    ChunkGeometry flag_geometry;
 };
 
 // What every built-in profile made of one store, as ProbeStore reports it: whether one of them

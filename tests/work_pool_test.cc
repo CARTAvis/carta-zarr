@@ -19,6 +19,7 @@
 #include <cstdint>
 #include <cstdlib>
 #include <iostream>
+#include <new>
 #include <stdexcept>
 #include <string>
 #include <thread>
@@ -217,6 +218,48 @@ void RowRangesCoverEveryRowOnce() {
     Require(TaskRows(4, 5, 3).first == TaskRows(4, 5, 3).last, "a task past the last row is empty");
 }
 
+// A body that throws -- a histogram growing its bins is an allocation, and an allocation can fail --
+// reaches the thread that called Run, after every worker has stopped touching the caller's buffers.
+// Thrown on a pool thread, it used to end the process: nothing above a std::thread's function
+// catches.
+void AThrowingBodyReachesTheCaller() {
+    WorkPool pool(4);
+    const auto caller = std::this_thread::get_id();
+    for (const bool on_caller : {false, true}) {
+        std::atomic<int> running{0};
+        std::atomic<int> after_failure{0};
+        std::atomic<bool> failed{false};
+        bool caught = false;
+        try {
+            pool.Run(1000, [&](std::size_t, std::size_t) {
+                ++running;
+                if (failed.load()) {
+                    ++after_failure;
+                }
+                const bool here = (std::this_thread::get_id() == caller) == on_caller;
+                if (here && !failed.exchange(true)) {
+                    --running;
+                    throw std::bad_alloc();
+                }
+                std::this_thread::sleep_for(std::chrono::microseconds(20));
+                --running;
+            });
+        } catch (const std::bad_alloc&) {
+            caught = true;
+        }
+        const std::string where = on_caller ? "the calling thread" : "a pool thread";
+        Require(caught, "an exception thrown on " + where + " did not reach the caller of Run");
+        Require(running.load() == 0, "Run returned while a body thrown alongside was still running");
+        // Bodies already claimed may finish, but the failure stops the rest being handed out.
+        Require(after_failure.load() < 100, "tasks kept being started after one failed on " + where);
+
+        // The pool is as it was: the next Run runs every task.
+        std::atomic<std::size_t> ran{0};
+        pool.Run(1000, [&](std::size_t, std::size_t) { ++ran; });
+        Require(ran.load() == 1000, "a pool whose body threw did not run every task of the next Run");
+    }
+}
+
 }  // namespace
 
 int main() {
@@ -228,6 +271,7 @@ int main() {
         ConcurrentRunsDoNotShareState();
         TheSplitRuleIsConservative();
         RowRangesCoverEveryRowOnce();
+        AThrowingBodyReachesTheCaller();
     } catch (const std::exception& error) {
         std::cerr << "work pool test failed: " << error.what() << "\n";
         return 1;

@@ -185,7 +185,7 @@ public:
     // One function rather than two, because reading an image's pixels and reading its flag differed
     // only in the element type: both hold the array to its own document, ask the transport where its
     // bytes are, and hand that to the reader. `float` is pixels, converted from whatever the array holds;
-    // `std::uint8_t` is a flag, one byte an element, true meaning a good pixel. Instantiated for
+    // `std::uint8_t` is a flag, one byte an element, true meaning a flagged pixel. Instantiated for
     // those two in store.cc and for nothing else.
     template <typename T>
     Result<void> ReadPixelsInto(std::string_view node, const zarr::PixelSelection& selection,

@@ -348,14 +348,17 @@ Result<DescribedImage> DescribeImageFrom(const Store& store, std::string_view im
     descriptor.has_pixel_mask = !descriptor.pixel_mask_id.empty();
     // The flag is read only by a masked read, so an image whose flag disagreed with the root's copy
     // opened, read unmasked, and failed every masked read.
+    ChunkGeometry flag_geometry;
     if (descriptor.has_pixel_mask) {
-        if (const auto& verified = store.VerifyArray(descriptor.pixel_mask_id); !verified) {
+        const auto& verified = store.VerifyArray(descriptor.pixel_mask_id);
+        if (!verified) {
             return verified.error();
         }
+        flag_geometry = BuildChunkGeometry(descriptor, zarr_metadata::ParseStorageLayout(verified.value()));
     }
 
     auto geometry = BuildChunkGeometry(descriptor, layout);
-    return DescribedImage{std::move(descriptor), std::move(geometry)};
+    return DescribedImage{std::move(descriptor), std::move(geometry), std::move(flag_geometry)};
 }
 
 Result<std::vector<Beam>> ReadBeams(const Store& store, std::string_view image_id) {

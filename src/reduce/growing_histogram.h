@@ -12,9 +12,9 @@
 // It was already a deep module -- two methods over a range that seeds itself, doubles, merges and
 // re-aggregates -- but the seam was file-local inside plane_histogram.cc, so the only way to reach
 // it was ComputeCubeHistogram over a fixture on disk, compared against a two-pass oracle to a
-// tolerance. It is the most numerically subtle code in this library and it has had two fixes --
-// 9c21397 on how a straddling bin is split, 6ba0ce2 on where the range seeds itself -- and each
-// would have been a five-line exact-count test from here.
+// tolerance. It is the most numerically subtle code in this library and it has had three fixes --
+// 9c21397 on how a straddling bin is split, 6ba0ce2 and then a narrower seed on where the range
+// seeds itself -- and each was a five-line exact-count test from here.
 //
 // Nothing about the arithmetic changed in the move, and ComputeCubeHistogram uses the class exactly
 // as before. One thing about its codegen did, and it is recorded here rather than left to be
@@ -53,22 +53,26 @@ public:
     void Add(float value) {
         const double v = value;
         if (!_seeded) {
-            // A first range around the first pixel seen, and a narrow one. The range only ever
-            // grows, so a guess that is too wide is permanent while one that is too narrow costs a
-            // few merges and then fits.
+            // A first range around the first pixel seen, as narrow as a range can usefully be: one
+            // bin per float, at the spacing of the floats there. The range only ever grows, so a
+            // guess that is too wide is permanent while one that is too narrow costs a few merges and
+            // then fits -- each merge doubles it, so reaching any spread the pixels have is a few
+            // dozen, once, against a cube of billions of pixels.
             //
-            // Anchoring it at one instead of at the pixel's own magnitude is what this used to do,
-            // and on a radio image it spent almost all of the resolution on the empty space between
-            // a Jansky and the hundredths of one the pixels actually are: a two-wide range over
-            // 65,536 bins left about three of them inside each of a thousand target bins rather
-            // than the sixty-five the default is chosen for.
+            // It was seeded twice too wide before this. Anchored at one, it spent almost all of the
+            // resolution on the empty space between a Jansky and the hundredths of one the pixels
+            // actually are. Anchored at the pixel's own magnitude, it was 2000 wide around a first
+            // pixel of 1000, and pixels a sixteenth apart there shared one provisional bin and came
+            // out spread evenly over every target bin between them.
             //
-            // The floor is there because a first pixel of exactly zero would give a range of zero
-            // width, which never grows. Starting that far down costs a couple of hundred merges
-            // before the range fits -- once, against a cube of billions of pixels.
-            const double magnitude = std::max<double>(std::abs(v), std::numeric_limits<float>::min());
-            _lower = v - magnitude;
-            _width = (2.0 * magnitude) / static_cast<double>(_counts.size());
+            // A first pixel of exactly zero seeds at the least denormal, which is as narrow as it
+            // gets: about a hundred and fifty merges to reach a spread of one. A range of zero width
+            // would never grow at all.
+            const auto at = static_cast<float>(std::abs(v));
+            const double spacing =
+                static_cast<double>(std::nextafter(at, std::numeric_limits<float>::infinity())) - static_cast<double>(at);
+            _width = spacing;
+            _lower = v - (spacing * static_cast<double>(_counts.size() / 2));
             _seeded = true;
         }
         while (v < _lower) {

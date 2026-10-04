@@ -72,6 +72,17 @@ inline Result<void> RequireUsableFlag(const zarr::ArrayMetadata& flag, const zar
 }
 
 /**
+ * The flag this image declares, checked as able to mask it, or an empty name when it declares none.
+ *
+ * Declared either by the image's own `flag` attribute or by a root `data_groups` entry whose `sky` is
+ * this image; the attribute outranks a group. A declaration that cannot serve -- a flag that is
+ * missing or unusable, or two groups naming different ones -- is an error. One function for both
+ * DetermineFlag and the listing's qualification, so that an image is never listed openable over a
+ * declaration that would refuse it when opened.
+ */
+Result<std::string> DeclaredFlag(const Store& store, const zarr::ArrayMetadata& image, std::string_view image_id);
+
+/**
  * The flag variable supplying this image's pixel mask, or an empty name when it has none.
  *
  * A flag is declared either by the image's own `flag` attribute or by a root `data_groups` entry

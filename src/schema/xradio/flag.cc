@@ -57,10 +57,7 @@ Result<std::string> RequireDeclaredFlag(const Store& store, const zarr::ArrayMet
 
 }  // namespace
 
-Result<std::string> DetermineFlag(const Store& store, const zarr::ArrayMetadata& image, std::string_view image_id,
-                                  std::vector<Diagnostic>& diagnostics) {
-    // A declared flag is the image's own statement that its pixels need a mask, so a flag that
-    // cannot serve as one closes the image rather than opening it unmasked.
+Result<std::string> DeclaredFlag(const Store& store, const zarr::ArrayMetadata& image, std::string_view image_id) {
     if (auto declared = AttributeString(image.attributes, "flag"); !declared.empty()) {
         return RequireDeclaredFlag(store, image, declared);
     }
@@ -74,6 +71,18 @@ Result<std::string> DetermineFlag(const Store& store, const zarr::ArrayMetadata&
     if (groups.own.size() == 1) {
         return RequireDeclaredFlag(store, image, *groups.own.begin());
     }
+    return std::string{};
+}
+
+Result<std::string> DetermineFlag(const Store& store, const zarr::ArrayMetadata& image, std::string_view image_id,
+                                  std::vector<Diagnostic>& diagnostics) {
+    // A declared flag is the image's own statement that its pixels need a mask, so a flag that
+    // cannot serve as one closes the image rather than opening it unmasked.
+    auto declared = DeclaredFlag(store, image, image_id);
+    if (!declared || !declared.value().empty()) {
+        return declared;
+    }
+    const auto groups = FlagsOfDataGroups(store.RootAttributes(), image_id);
 
     const auto& inventory = store.Inventory();
     if (!inventory) {

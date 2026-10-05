@@ -14,6 +14,7 @@
 #include "zarr/transport.h"
 
 #include <algorithm>
+#include <chrono>
 #include <cstdio>
 #include <exception>
 #include <filesystem>
@@ -126,6 +127,41 @@ void TestALinkedArrayIsNamedWhereItSits(const std::filesystem::path& root) {
     RequireListing(root / "alias", {"GROUP", "SKY"}, "the same store reached through a link");
 }
 
+// What is under a linked group is in the store as much as the group is: listed, the group's children
+// were not, so an unconsolidated store lost every node below a link and the same dataset consolidated
+// had them. A link back up the tree is listed once and not followed round again, whichever directory
+// it climbs to -- the group it is in, or the store's own root.
+void TestALinkedGroupIsWalkedIntoOnce(const std::filesystem::path& root) {
+    const auto store = root / "store";
+    WriteNode(store, "group");
+    WriteNode(root / "elsewhere" / "GROUP", "group");
+    WriteNode(root / "elsewhere" / "GROUP" / "INNER", "array");
+    WriteNode(root / "elsewhere" / "GROUP" / "DEEPER" / "SKY", "array");
+    std::filesystem::create_directory_symlink(root / "elsewhere" / "GROUP", store / "GROUP");
+    std::filesystem::create_directory_symlink(root / "elsewhere" / "GROUP", root / "elsewhere" / "GROUP" / "SELF");
+    std::filesystem::create_directory_symlink(store, store / "ROOT");
+    RequireListing(store, {"GROUP", "GROUP/DEEPER/SKY", "GROUP/INNER"},
+                   "a store whose group is a link, with links back up inside it");
+}
+
+// What a store holds is what its links point at as well: measured without following them, a store
+// whose pixels are a link was the size of its metadata. A link back up the tree is not followed round
+// again, so the walk ends.
+void TestALinkedArrayIsCountedInTheStoresSize(const std::filesystem::path& root) {
+    const auto store = root / "store";
+    WriteNode(store, "group");
+    WriteNode(root / "elsewhere" / "SKY", "array");
+    WriteFile(root / "elsewhere" / "SKY" / "c" / "0", std::string(100000, 'x'));
+    std::filesystem::create_directory_symlink(root / "elsewhere" / "SKY", store / "SKY");
+    std::filesystem::create_directory_symlink(store, store / "ROOT");
+    auto transport = OpenFilesystemTransport(store.string());
+    Require(static_cast<bool>(transport), "the linked store did not open as a transport");
+    const auto size = transport.value()->StoredSizeBytes(std::chrono::steady_clock::now() + std::chrono::seconds(30));
+    Require(static_cast<bool>(size), "the linked store could not be sized");
+    Require(size.value() >= 100000 && size.value() < 200000,
+            "the linked store's size was " + std::to_string(size.value()) + ", not its linked chunk counted once");
+}
+
 }  // namespace
 
 int main() {
@@ -137,6 +173,8 @@ int main() {
         TestChunksAreNotWalked(root / "chunks");
         TestADirectoryWithoutMetadataIsNotANode(root / "plain-directory");
         TestALinkedArrayIsNamedWhereItSits(root / "linked");
+        TestALinkedGroupIsWalkedIntoOnce(root / "linked-group");
+        TestALinkedArrayIsCountedInTheStoresSize(root / "linked-size");
         std::filesystem::remove_all(root);
     } catch (const std::exception& error) {
         std::fprintf(stderr, "transport test failed: %s\n", error.what());

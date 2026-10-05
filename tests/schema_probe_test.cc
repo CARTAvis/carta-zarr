@@ -175,6 +175,15 @@ void TestValidAndTimeAxis(const std::filesystem::path& root) {
                 measured_size.value().basis == carta::zarr::SizeBasis::measured,
             "the measured Zarr size calculation was not used");
 
+    // A timeout too long to add to the clock is no timeout. It used to wrap -- milliseconds converted
+    // to the clock's nanoseconds overflow past about 292 years -- into a deadline already past, and the
+    // longest wait anyone could ask for answered as though they would not wait at all.
+    for (const auto forever : {std::chrono::milliseconds::max(), std::chrono::milliseconds(std::chrono::hours(24 * 365 * 1000))}) {
+        const auto patient = dataset.value().Size(forever);
+        Require(patient && patient.value().basis == carta::zarr::SizeBasis::measured,
+                "a timeout of " + std::to_string(forever.count()) + " ms was taken for none");
+    }
+
     // The two are different questions, and the declared one does not bound the other: this store's
     // arrays declare 592 bytes while the store holds several times that in zarr.json documents
     // alone. Asserted on the store the rest of this case already built, because the point is that

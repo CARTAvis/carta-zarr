@@ -60,6 +60,11 @@ struct ReadAheadStats {
 //
 // A handle like Image: copies share it, and the last of them to go cancels the prefetch under way and
 // waits for it. Nothing it starts outlives it.
+//
+// Threads: Served is called from one thread at a time -- the one that serves the frames -- and not from
+// two at once, even through two copies. Cancel and stats may be called from any thread, alongside it.
+// A prefetch runs on a thread of its own, and asks the cancellation_requested of the options each image
+// was given from there, so that callable must be safe to call from another thread.
 class CARTA_ZARR_EXPORT ReadAhead final {
 public:
     using Clock = std::chrono::steady_clock;

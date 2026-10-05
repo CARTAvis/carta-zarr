@@ -107,7 +107,8 @@ Result<void> CollectConsolidatedMetadata(nlohmann::json& metadata, const std::st
 // What the store takes from the root's copy of an array's document rather than from the array's own,
 // and so what the two must agree about: an image is qualified and described from the copy -- its
 // extent, its dimensions and their order, its data type -- and its reads are planned from the chunks
-// and shards the copy says it has. See Store::VerifyArray for what is left out and why.
+// and shards the copy says it has, and what its values mean is read from its attributes. See
+// Store::VerifyArray for what is left out and why.
 Result<void> RequireSameArray(const zarr_metadata::ArrayMetadata& copy, const zarr_metadata::ArrayMetadata& own,
                               const std::string& node) {
     const auto differs = [&node](const std::string& what) {
@@ -131,6 +132,15 @@ Result<void> RequireSameArray(const zarr_metadata::ArrayMetadata& copy, const za
     // An unsharded layout has no shard shape, so comparing it also says whether both are sharded.
     if (copy_layout.chunk_shape != own_layout.chunk_shape || copy_layout.shard_shape != own_layout.shard_shape) {
         return differs("chunk layout");
+    }
+    // What the values mean -- a coordinate's unit and frame, its reference and rest frequencies, an
+    // image's unit and the flag it declares -- is read from the attributes, and those are taken from
+    // the copy while the values are decoded with the own document. A copy left behind by a rewrite
+    // of the attributes alone described the values in the old terms: a frequency axis in Hz reported
+    // as GHz opened and read. Compared whole, because which attributes a profile reads is the
+    // profile's business and the store's rule is that what it takes from the copy agrees.
+    if (copy.attributes != own.attributes) {
+        return differs("attributes");
     }
     return {};
 }
@@ -444,8 +454,8 @@ const Result<zarr::NumericArray>& Store::ReadNumericArray(std::string_view node)
 }
 
 Result<zarr::NumericArray> Store::ReadNumericArrayUncached(std::string_view node) const {
-    // Bound to the array's own document, which is what TensorStore decodes the values with: the
-    // root's copy agrees with it on every field that addresses them, but not on its attributes.
+    // Bound to the array's own document, which is what TensorStore decodes the values with, and which
+    // VerifyArray holds the root's copy to.
     const auto& own = VerifyArray(node);
     if (!own) {
         return own.error();

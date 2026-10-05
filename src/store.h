@@ -147,10 +147,11 @@ public:
      * array from there, and so does the label decoder. A copy left stale by a rewrite, or written by
      * hand, describes an array that is not the one on disk, and every value read from it would be
      * answered for an array nobody described. So the two are held to each other on what the store
-     * takes from the copy: the extent, the names and order of the dimensions, the data type, and the
-     * chunks and shards. How the chunks are encoded -- codecs, chunk keys, the fill value -- is not
-     * compared, because the copy is never used to decode one; what comes back here is the own
-     * document's, and that is what a reader decodes with.
+     * takes from the copy: the extent, the names and order of the dimensions, the data type, the
+     * chunks and shards, and the attributes, which say what the values mean. How the chunks are
+     * encoded -- codecs, chunk keys, the fill value -- is not compared, because the copy is never
+     * used to decode one; what comes back here is the own document's, and that is what a reader
+     * decodes with.
      *
      * Reports invalid_metadata, naming the node, when the two disagree, when the copy names an array
      * whose own document is missing (ADR 0004: such a store is malformed), and when the own document

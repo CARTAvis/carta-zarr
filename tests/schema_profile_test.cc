@@ -1213,10 +1213,10 @@ void RequireRefusedAs(const carta::zarr::Error& error, ErrorCode code, const std
 // The store decides what an image is from the root's copy of each array's document, and every value
 // is decoded from the array's own: TensorStore opens an array from its own document, and so does
 // the label decoder. Where a rewrite left the two disagreeing about what the library derives from
-// the copy -- extent, dimension names and order, data type, how it is chunked -- the array is not
-// the one the store described, and every read of it says so before it asks where the array lives.
-// Here that is before the in-memory transport says it holds no array data, which is the only other
-// answer a read gets from it.
+// the copy -- extent, dimension names and order, data type, how it is chunked, what its attributes
+// say its values mean -- the array is not the one the store described, and every read of it says so
+// before it asks where the array lives. Here that is before the in-memory transport says it holds no
+// array data, which is the only other answer a read gets from it.
 void TestAnArrayDisagreeingWithTheRootsCopyIsRefused() {
     const std::vector<std::pair<std::string, std::string>> rewritten{
         {"another extent", ArrayDocument("[6]", "[4]", R"(["l"])")},
@@ -1233,6 +1233,11 @@ void TestAnArrayDisagreeingWithTheRootsCopyIsRefused() {
                                                         R"([{"name":"sharding_indexed","configuration":{"chunk_shape":[4],
                                                              "codecs":[{"name":"bytes","configuration":{"endian":"little"}}],
                                                              "index_codecs":[{"name":"bytes","configuration":{"endian":"little"}}]}}])")},
+        // What the values mean: a unit the copy does not give them.
+        {"other attributes", [] {
+             auto document = ArrayDocument("[4]", "[4]", R"(["l"])");
+             return document.replace(document.find("\"attributes\":{}"), 15, R"("attributes":{"units":"deg"})");
+         }()},
         {"a document that will not parse", "{"},
         {"a group", R"({"zarr_format":3,"node_type":"group"})"},
     };

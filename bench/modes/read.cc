@@ -10,11 +10,14 @@
 
 #include "cube.h"
 
-#include <algorithm>
 #include <optional>
 #include <vector>
 
 namespace carta::zarr::bench {
+
+std::size_t PixelsRead(const CubeAxes& axes, bool plane) {
+    return plane ? axes.width * axes.height : axes.channels;
+}
 
 Result<std::size_t> ReadPixels(const Image& image, const CubeAxes& axes, const Operation& operation, bool plane,
                                float* pixels, const ReadOptions& options) {
@@ -26,8 +29,7 @@ Result<std::size_t> ReadPixels(const Image& image, const CubeAxes& axes, const O
     if (axes.polarization) {
         request.axes[*axes.polarization] = Range{operation.polarization, 1, 1};
     }
-    const std::size_t elements = plane ? axes.width * axes.height : axes.channels;
-    return image.Read(request, {pixels, elements}, options);
+    return image.Read(request, {pixels, PixelsRead(axes, plane)}, options);
 }
 
 std::string DescribeChannels(const Operation& operation) {
@@ -46,7 +48,7 @@ public:
     FirstTouchRunner(const Context& context, Image image, CubeAxes axes, bool plane, std::size_t first_touch_bytes)
         : CubeRunner(std::move(image), axes), _context(context), _plane(plane), _first_touch_bytes(first_touch_bytes) {
         // Sized here so that no operation pays for growing it.
-        _pixels.resize(std::max(axes.width * axes.height, axes.channels));
+        _pixels.resize(PixelsRead(axes, plane));
     }
 
     Result<void> Prepare(const Operation& operation) override {

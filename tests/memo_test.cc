@@ -72,6 +72,37 @@ void TestFailuresAreRemembered() {
     Require(calls == 1, "the failing computation ran more than once");
 }
 
+// A read that could not be made is not an answer about the store: an I/O error may not happen the
+// next time, and remembering it kept an image unopenable until the whole dataset was opened again.
+// It is asked again instead -- and the answer a caller was handed before is still the one it holds.
+void TestAReadThatCouldNotBeMadeIsAskedAgain() {
+    for (const auto code : {carta::zarr::ErrorCode::io_error, carta::zarr::ErrorCode::cancelled}) {
+        Memo<std::string, carta::zarr::Result<int>> memo;
+        int calls = 0;
+        const auto& first = memo.GetOrCompute("node", [&calls, code]() -> carta::zarr::Result<int> {
+            ++calls;
+            return carta::zarr::Error{code, "the disk hiccuped", "node"};
+        });
+        Require(!first && first.error().code == code, "the failure was not returned");
+
+        const auto& second = memo.GetOrCompute("node", [&calls]() -> carta::zarr::Result<int> {
+            ++calls;
+            return 7;
+        });
+        Require(second && second.value() == 7, "a read that could not be made was not asked again");
+        Require(calls == 2, "the read was not made a second time");
+        Require(!first && first.error().code == code, "the answer handed out first changed under its holder");
+        Require(memo.GetOrCompute("node", []() -> carta::zarr::Result<int> { return 8; }).value() == 7,
+                "an answer was asked again once there was one");
+
+        Lazy<carta::zarr::Result<int>> lazy;
+        Require(!lazy.GetOrCompute([code]() -> carta::zarr::Result<int> { return carta::zarr::Error{code, "", ""}; }),
+                "Lazy did not return the failure");
+        Require(lazy.GetOrCompute([]() -> carta::zarr::Result<int> { return 3; }).value() == 3,
+                "Lazy did not ask again after a read that could not be made");
+    }
+}
+
 void TestLazyComputesOnce() {
     Lazy<int> lazy;
     int calls = 0;
@@ -129,6 +160,7 @@ int main() {
         TestComputesOncePerKey();
         TestKeysAreIndependent();
         TestFailuresAreRemembered();
+        TestAReadThatCouldNotBeMadeIsAskedAgain();
         TestLazyComputesOnce();
         TestConcurrentReadersComputeOnce();
         std::cout << "carta-zarr memo tests passed\n";

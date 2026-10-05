@@ -162,6 +162,38 @@ void TestALinkedArrayIsCountedInTheStoresSize(const std::filesystem::path& root)
             "the linked store's size was " + std::to_string(size.value()) + ", not its linked chunk counted once");
 }
 
+// A store with a directory that cannot be read has not been measured, and a size that leaves the
+// directory out is not the store's. The walk skipped it as though it were empty, so the size came back
+// short and still counted as measured, and the declared size that Dataset::Size falls back to when a
+// directory refuses to be read was never reached. The listing goes on past it: a node there would be
+// unreadable anyway, and a later read says so.
+void TestAnUnreadableDirectoryLeavesTheStoreUnmeasured(const std::filesystem::path& root) {
+    WriteNode(root, "group");
+    WriteNode(root / "SKY", "array");
+    WriteFile(root / "SKY" / "c" / "0", std::string(1000, 'x'));
+    WriteNode(root / "FLAG", "array");
+    const auto locked = root / "SKY" / "c";
+    std::filesystem::permissions(locked, std::filesystem::perms::none);
+    std::error_code readable;
+    std::filesystem::directory_iterator probe(locked, readable);
+    if (!readable) {
+        // Whoever runs this can read a directory with no permissions at all -- root can -- so there is
+        // nothing unreadable to test against.
+        std::filesystem::permissions(locked, std::filesystem::perms::owner_all);
+        return;
+    }
+    auto transport = OpenFilesystemTransport(root.string());
+    Require(static_cast<bool>(transport), "the store did not open as a transport");
+    const auto size = transport.value()->StoredSizeBytes(std::chrono::steady_clock::now() + std::chrono::seconds(30));
+    const auto nodes = transport.value()->ListNodes();
+    std::filesystem::permissions(locked, std::filesystem::perms::owner_all);
+    Require(!size, "a store with an unreadable directory was measured at " +
+                       (size ? std::to_string(size.value()) : std::string()) + " bytes");
+    Require(size.error().code == carta::zarr::ErrorCode::io_error,
+            "an unreadable directory should be a read that could not be made");
+    Require(static_cast<bool>(nodes), "the listing should go on past an unreadable directory");
+}
+
 }  // namespace
 
 int main() {
@@ -175,6 +207,7 @@ int main() {
         TestALinkedArrayIsNamedWhereItSits(root / "linked");
         TestALinkedGroupIsWalkedIntoOnce(root / "linked-group");
         TestALinkedArrayIsCountedInTheStoresSize(root / "linked-size");
+        TestAnUnreadableDirectoryLeavesTheStoreUnmeasured(root / "unreadable");
         std::filesystem::remove_all(root);
     } catch (const std::exception& error) {
         std::fprintf(stderr, "transport test failed: %s\n", error.what());

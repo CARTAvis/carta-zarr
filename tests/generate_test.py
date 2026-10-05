@@ -256,5 +256,51 @@ class IdentityTest(unittest.TestCase):
         self.assertEqual(here, elsewhere)
 
 
+class SyntheticCoordinatesTest(unittest.TestCase):
+    """A synthetic cube's right ascension and declination are each as large as a plane -- 8 GiB apiece
+    at 32768 square -- so they are written in blocks through fill(), as the pixels are, and not built
+    whole in memory whatever --block-mib said."""
+
+    def test_the_sky_direction_is_written_in_blocks_and_is_the_projection_inverted(self) -> None:
+        import numpy as np
+        import zarr
+
+        with tempfile.TemporaryDirectory() as directory:
+            out = Path(directory) / "synthetic.zarr"
+            args = generate.parse_arguments(
+                ["--synthetic", "--shape", "frequency=1,polarization=1,l=1024,m=1024", "--output", str(out),
+                 "--chunk", "l=128,m=128", "--block-mib", "1", "--workers", "1"])
+            filled: dict[str, int] = {}
+            real_fill = generate.fill
+
+            def fill(job: Any, shape: list[int], unit: tuple[int, ...], itemsize: int, given: Any) -> None:
+                filled[Path(job.target).name] = len(generate.plan_blocks(shape, unit, itemsize, given.block_mib << 20))
+                real_fill(job, shape, unit, itemsize, given)
+
+            generate.fill = fill
+            try:
+                generate.synthesize(args, out)
+            finally:
+                generate.fill = real_fill
+
+            for name in ("right_ascension", "declination"):
+                self.assertIn(name, filled, f"{name} was built whole rather than written through fill()")
+                # 1024 x 1024 float64 is 8 MiB, so 1 MiB blocks take eight.
+                self.assertGreater(filled[name], 1, f"{name} was written in one block")
+
+            root = json.loads((Path(generate.DEFAULT_TEMPLATE) / "zarr.json").read_text())
+            ra0, dec0 = root["attributes"]["coordinate_system_info"]["reference_direction"]["data"]
+            l_axis = np.asarray(zarr.open_array(str(out / "l"), mode="r")[...])[:, None]
+            m_axis = np.asarray(zarr.open_array(str(out / "m"), mode="r")[...])[None, :]
+            n = np.sqrt(np.maximum(0.0, 1.0 - l_axis * l_axis - m_axis * m_axis))
+            expected = {
+                "declination": np.arcsin(m_axis * np.cos(dec0) + n * np.sin(dec0)),
+                "right_ascension": ra0 + np.arctan2(l_axis, n * np.cos(dec0) - m_axis * np.sin(dec0)),
+            }
+            for name, values in expected.items():
+                written = np.asarray(zarr.open_array(str(out / name), mode="r")[...])
+                self.assertEqual(written.shape, (1024, 1024))
+                np.testing.assert_allclose(written, values, rtol=0, atol=1e-15, err_msg=name)
+
 if __name__ == "__main__":
     unittest.main()

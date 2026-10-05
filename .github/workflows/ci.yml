@@ -1,0 +1,102 @@
+# Builds the library and runs its tests on the platforms the README says it is built and tested on.
+#
+# The first configure downloads TensorStore and the libraries it declares, and building them is most
+# of the time a job takes. The downloaded archives are cached by what pins them -- the TensorStore
+# version in CMakeLists.txt -- and the compiler's output by ccache, so a later run downloads nothing
+# and recompiles only what changed.
+name: CI
+
+on:
+  push:
+    branches: [main, dev]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: ${{ matrix.name }}
+    runs-on: ${{ matrix.runner }}
+    container: ${{ matrix.container }}
+    timeout-minutes: 180
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: macOS (Apple silicon)
+            runner: macos-15
+            container: ""
+          - name: Ubuntu 24.04
+            runner: ubuntu-24.04
+            container: ""
+          # Its own GCC 8 and Python 3.6 are too old; conda-forge's GCC 13 is what the README names.
+          - name: AlmaLinux 8
+            runner: ubuntu-24.04
+            container: almalinux:8
+    defaults:
+      run:
+        shell: bash -el {0}
+    steps:
+      - name: Install system packages (AlmaLinux)
+        if: matrix.container == 'almalinux:8'
+        shell: bash
+        run: dnf install -y git tar gzip bzip2 xz patch findutils which diffutils
+
+      - uses: actions/checkout@v4
+
+      - name: Install tools (macOS)
+        if: runner.os == 'macOS'
+        run: brew install nasm ninja ccache
+
+      - name: Install tools (Ubuntu)
+        if: runner.os == 'Linux' && matrix.container == ''
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential cmake python3 nasm patch ninja-build ccache
+
+      - name: Install tools (AlmaLinux)
+        if: matrix.container == 'almalinux:8'
+        uses: mamba-org/setup-micromamba@v2
+        with:
+          environment-name: build
+          create-args: >-
+            -c conda-forge
+            gcc_linux-64=13 gxx_linux-64=13 cmake=3.29 python=3.12 nasm make ninja ccache
+          init-shell: bash
+
+      - name: Cache downloaded archives
+        uses: actions/cache@v4
+        with:
+          path: build/_deps/*-subbuild/*-populate-prefix/src/*.*
+          key: deps-${{ matrix.runner }}-${{ matrix.container }}-${{ hashFiles('CMakeLists.txt') }}
+          restore-keys: deps-${{ matrix.runner }}-${{ matrix.container }}-
+
+      - name: Cache compiler output
+        uses: actions/cache@v4
+        with:
+          path: .ccache
+          key: ccache-${{ matrix.runner }}-${{ matrix.container }}-${{ github.sha }}
+          restore-keys: ccache-${{ matrix.runner }}-${{ matrix.container }}-
+
+      - name: Configure
+        env:
+          CCACHE_DIR: ${{ github.workspace }}/.ccache
+        run: >-
+          cmake -S . -B build -G Ninja
+          -DCMAKE_BUILD_TYPE=Release
+          -DCMAKE_C_COMPILER_LAUNCHER=ccache
+          -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
+
+      - name: Build
+        env:
+          CCACHE_DIR: ${{ github.workspace }}/.ccache
+        run: cmake --build build
+
+      - name: Test
+        run: ctest --test-dir build --output-on-failure

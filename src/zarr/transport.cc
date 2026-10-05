@@ -8,13 +8,59 @@
 
 #include <nlohmann/json.hpp>
 
+#include <algorithm>
+#include <filesystem>
 #include <fstream>
 #include <limits>
 #include <string>
 #include <utility>
+#include <vector>
 
 namespace carta::zarr::internal {
 namespace {
+
+// A walk of the store that follows directory links, and where it must not. What a link points at is
+// in the store as much as what sits there -- a dataset's arrays are as often as not links to where
+// their bytes are, and its consolidated copy names what is under a linked group -- so a walk that
+// stopped at links lost those nodes and that size. A link to a directory the walk is already inside
+// is a cycle: it is neither listed, which would name that directory again, nor followed.
+//
+// Holds the real path of each directory the walk is inside, the root first. An ordinary directory's
+// is its parent's and its name; only a link's is asked of the filesystem.
+class LinkedWalk {
+public:
+    // `root` is resolved already: the transport's root always is.
+    explicit LinkedWalk(const std::filesystem::path& root)
+        : iterator(root,
+                   std::filesystem::directory_options::skip_permission_denied |
+                       std::filesystem::directory_options::follow_directory_symlink,
+                   error),
+          _ancestors{root} {}
+
+    // Whether the directory the walk is at is one to take: false, with recursion into it turned off,
+    // for a link back to a directory the walk is inside or one that cannot be resolved.
+    bool Enter() {
+        const auto& path = iterator->path();
+        _ancestors.resize(static_cast<std::size_t>(iterator.depth()) + 1);
+        std::filesystem::path real = _ancestors.back() / path.filename();
+        std::error_code entry_error;
+        if (iterator->is_symlink(entry_error)) {
+            real = std::filesystem::canonical(path, entry_error);
+            if (entry_error || std::find(_ancestors.begin(), _ancestors.end(), real) != _ancestors.end()) {
+                iterator.disable_recursion_pending();
+                return false;
+            }
+        }
+        _ancestors.push_back(std::move(real));
+        return true;
+    }
+
+    std::error_code error;
+    std::filesystem::recursive_directory_iterator iterator;
+
+private:
+    std::vector<std::filesystem::path> _ancestors;
+};
 
 Result<std::filesystem::path> NormalizeLocation(std::string_view location) {
     if (location.empty()) {
@@ -94,9 +140,9 @@ public:
 
     Result<std::vector<std::string>> ListNodes() const override {
         std::vector<std::string> nodes;
-        std::error_code error;
-        std::filesystem::recursive_directory_iterator iterator(
-            _root, std::filesystem::directory_options::skip_permission_denied, error);
+        LinkedWalk walk(_root);
+        auto& iterator = walk.iterator;
+        std::error_code& error = walk.error;
         const std::filesystem::recursive_directory_iterator end;
         for (; iterator != end; iterator.increment(error)) {
             if (error) {
@@ -114,7 +160,11 @@ public:
                 continue;
             }
 
+            if (!walk.Enter()) {
+                continue;
+            }
             const auto path = iterator->path();
+
             const auto metadata_path = path / "zarr.json";
             // A directory carrying no readable zarr.json is not a node. Whether the answer was no
             // or the question could not be asked makes no difference here: neither is a node, and
@@ -158,9 +208,9 @@ public:
 
     Result<std::uint64_t> StoredSizeBytes(std::chrono::steady_clock::time_point deadline) const override {
         std::uint64_t total = 0;
-        std::error_code error;
-        std::filesystem::recursive_directory_iterator iterator(
-            _root, std::filesystem::directory_options::skip_permission_denied, error);
+        LinkedWalk walk(_root);
+        auto& iterator = walk.iterator;
+        std::error_code& error = walk.error;
         if (error) {
             return Error{ErrorCode::io_error, "Unable to enumerate the Zarr store: " + error.message(),
                          _root.string()};
@@ -176,7 +226,9 @@ public:
             }
 
             std::error_code entry_error;
-            if (iterator->is_regular_file(entry_error)) {
+            if (iterator->is_directory(entry_error) && !entry_error) {
+                walk.Enter();
+            } else if (iterator->is_regular_file(entry_error)) {
                 const auto file_size = iterator->file_size(entry_error);
                 if (entry_error) {
                     return Error{ErrorCode::io_error, "Unable to size a Zarr store file: " + entry_error.message(),

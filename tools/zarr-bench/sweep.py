@@ -1170,8 +1170,11 @@ class Results:
             if row["status"] == "ok" and row["checksum"] and not dataset.startswith("validate|"):
                 where = (row["mode"], method, row["processes"], row["trial"], row["process_index"], row["op_index"],
                          row["position"], row["shape"])
-                # Tuning variants read one dataset, and must read it alike too.
-                source = f"{dataset} {row['label']}" if row["label"].startswith("warm-") else dataset
+                # Each stage and setting reading a dataset is an observation of its own: keyed by the
+                # dataset alone, the last of them was all that was left to compare. Tuning variants
+                # are stages, and must read alike too.
+                io, decode, cache, budget = setting
+                source = f"{dataset} {row['label']} io={io} decode={decode} cache={cache} budget={budget}"
                 checksums.setdefault(where, {})[source] = row["checksum"]
         for (key, _), end in trial_ends.items():
             self.groups[key].makespans.append(end)

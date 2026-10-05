@@ -168,6 +168,20 @@ class ReadingAlike(unittest.TestCase):
         rows = [row(first, "plane", 0.1, checksum="aa"), row(second, "plane", 0.1, checksum="bb")]
         self.assertEqual(len(sweep.Results(rows, datasets(first, second)).mismatches), 1)
 
+    def test_two_settings_reading_one_position_differently_are_a_mismatch(self) -> None:
+        # One layout read under two settings is two observations, not one written over the other.
+        one = layout("one")
+        other = ("4", str(CORES), str(1024 << 20), "0")
+        rows = [row(one, "plane", 0.1, checksum="aa"), row(one, "plane", 0.1, checksum="bb", setting=other)]
+        mismatches = sweep.Results(rows, datasets(one)).mismatches
+        self.assertEqual(len(mismatches), 1, "a setting that read other bytes went unnoticed")
+        self.assertIn("io=4", mismatches[0], "and the mismatch should say which settings disagree")
+
+    def test_two_stages_reading_one_position_differently_are_a_mismatch(self) -> None:
+        one = layout("one")
+        rows = [row(one, "plane", 0.1, checksum="aa"), row(one, "plane", 0.1, checksum="bb", stage="stage2")]
+        self.assertEqual(len(sweep.Results(rows, datasets(one)).mismatches), 1)
+
     def test_reading_alike_is_no_mismatch(self) -> None:
         first, second = layout("first"), layout("second")
         rows = [row(first, "plane", 0.1, checksum="aa"), row(second, "plane", 0.1, checksum="aa")]

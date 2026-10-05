@@ -11,9 +11,8 @@
 // spectrum, and histograms of a plane or of a whole cube.
 //
 // Separate from read.h because a consumer that only opens images and reads them needs none of it,
-// and because this vocabulary is where the library has been changing: it arrived whole in the
-// fourteen commits before this split, and every one of them edited the header that describes what
-// an image dataset is.
+// and so that this vocabulary can grow without editing the header that describes what an image
+// dataset is.
 
 #include "carta-zarr/read.h"
 
@@ -62,10 +61,10 @@ enum class Statistic : std::uint32_t {
 // A set of statistics, made by joining them with |: `Statistic::sum | Statistic::num_pixels`. A single
 // statistic is the set of just it.
 //
-// A type of its own rather than the integer it was, because an integer could name a statistic that
-// does not exist -- `statistics = 0x40` compiled, and a bit past the last one was simply never
-// accumulated -- and because `set & statistic` read as a question and was a number. Nothing makes one
-// from bits, so every set holds only statistics there are.
+// A type of its own rather than an integer, because an integer could name a statistic that does not
+// exist -- a bit past the last one would compile and simply never be accumulated -- and because
+// `set & statistic` would read as a question and be a number. Nothing makes one from bits, so every
+// set holds only statistics there are.
 class StatisticSet {
 public:
     constexpr StatisticSet() noexcept = default;
@@ -147,8 +146,7 @@ struct RegionMask {
     // loop an unmasked region uses. A raster too fragmented to be worth runs is read as a raster.
     //
     // width * height elements when there is one, and nothing when there is not; a reduction refuses
-    // any other size. It was a bare pointer, whose length a reduction could only assume, so a raster
-    // cut for another box was read past its end.
+    // any other size, so a raster cut for another box is an error rather than a read past its end.
     BufferView<const std::uint8_t> mask;
 };
 
@@ -178,8 +176,8 @@ class HistogramBlocks;
 // Bin counts for a run of planes, valid only inside the sink call.
 //
 // Read through Counts, as a SpectralBlock is read through Series: how the channels are laid out is
-// the library's alone, which is why only the library can fill one in. It was a bare pointer with the
-// layout written in a comment, the one block in the library a caller indexed by hand.
+// the library's alone, which is why only the library can fill one in, and why a caller never indexes
+// one by hand.
 struct HistogramBlock {
     // Index into the request's spectral selection, as SpectralBlock::first_channel is.
     std::uint64_t first_channel = 0;
@@ -215,9 +213,8 @@ using HistogramSink = std::function<bool(const HistogramBlock&)>;
 // In a SpectralBlock, a statistic the block does not carry reads the same way. A caller that has to
 // tell "not asked for" from "nothing there" asks the block, with Carries.
 //
-// One type for both, rather than a set of fields per result: the cube histogram used to spell the
-// same statistics its own way, with the extrema named minimum and maximum, and the two defaults drifted
-// apart until c66699d put them back.
+// One type for both, rather than a set of fields per result, so that the same statistic is spelt and
+// defaulted the same way wherever it is reported.
 struct SpectralTotals {
     double num_pixels = 0.0;
     double nan_count = 0.0;

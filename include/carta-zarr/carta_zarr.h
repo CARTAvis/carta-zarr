@@ -208,9 +208,9 @@ private:
 // not match, or matched something malformed -- and an Error only when the store could not be read
 // at all.
 //
-// There used to be an IsXradioImage(location) beside this returning Result<bool>. It folded a third
-// answer into an error and put two bools in one Result, so `if (IsXradioImage(p))` compiled and
-// meant "did not fail" rather than "yes". Its body was this call and a comparison.
+// Three answers rather than a yes or no: a store that matched something malformed is neither, and a
+// Result<bool> would also make `if (ProbeSchema(...))` compile and mean "did not fail" rather than
+// "yes".
 CARTA_ZARR_EXPORT Result<SchemaProbeResult> ProbeSchema(std::string_view location, std::string_view schema_id);
 
 }  // namespace carta::zarr

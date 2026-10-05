@@ -139,7 +139,7 @@ struct AxisDescriptor {
 // Axes are reached by role because their logical order is a schema profile's choice rather than
 // this library's promise. The XRADIO profile happens to report l, m, frequency, polarization, time,
 // whatever order the store holds them in; a consumer that indexes by position is assuming that
-// profile, and this used to be exported as a constant for doing exactly that. See ADR 0012.
+// profile, which is why no such position is exported. See ADR 0012.
 //
 // Every role but `other` is played by at most one axis of an image this library describes. For
 // `other` this finds the first.

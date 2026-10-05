@@ -7,6 +7,7 @@
 #include "carta-zarr/carta_zarr.h"
 #include "carta-zarr/read_ahead.h"
 
+#include "chunk_blocks.h"
 #include "pixel_mask.h"
 #include "read/pieces.h"
 #include "read_ahead.h"
@@ -201,6 +202,11 @@ Result<std::size_t> Image::Read(const ReadRequest& request, BufferView<float> de
         return internal::ReadInPieces(_impl->source, _impl->descriptor, _impl->geometry, _impl->flag_geometry,
                                       request, destination, options, progress);
     });
+}
+
+std::uint64_t Image::DecodedChunkBytes(const ReadOptions& options) const {
+    // What every read and reduction sizes itself against, so that a caller's cache agrees with them.
+    return internal::ReadCost::Of(_impl->descriptor, _impl->geometry, _impl->flag_geometry, options).chunk_bytes;
 }
 
 Result<std::uint64_t> Image::Prefetch(const ReadRequest& request, const ReadOptions& options) const {

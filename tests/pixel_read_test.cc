@@ -641,6 +641,44 @@ std::string Replaced(std::string text, const std::string& after, const std::stri
     return text.replace(at, from.size(), to);
 }
 
+// What a chunk keeps in a cache once decoded: its elements at the type they are stored as, and with
+// the mask applied the flag chunks it brings at a byte an element -- not the float a read hands back.
+// A consumer sizing a cache for the chunks a walk comes back to is sizing it in these; counted in
+// floats, a float64 image's cache held half the chunks, and a flagged one's less again.
+void TestAChunkSaysWhatItDecodesTo(const char* fixture) {
+    const auto bytes = [](const std::string& location, bool masked) {
+        const auto context = carta::zarr::Context::Create();
+        Require(static_cast<bool>(context), "Context::Create failed");
+        const auto dataset = carta::zarr::Dataset::Open(context.value(), location);
+        Require(static_cast<bool>(dataset), "Dataset::Open failed on " + location);
+        const auto sky = dataset->OpenImage("SKY");
+        Require(static_cast<bool>(sky), "SKY could not be opened in " + location);
+        carta::zarr::ReadOptions options;
+        options.apply_pixel_mask = masked;
+        return sky->DecodedChunkBytes(options);
+    };
+    // Chunks of 1 x 1 x 1 x 2 x 5 float32, and a flag chunked alike.
+    Require(bytes(fixture, false) == 10 * 4, "an unmasked float32 chunk of ten is not 40 bytes");
+    Require(bytes(fixture, true) == (10 * 4) + 10, "a masked one is not 40 bytes and its flag's 10");
+    // The whole flag in one chunk of 120, beside every pixel chunk.
+    Require(bytes(CARTA_ZARR_PIXEL_FIXTURE_COARSE_FLAG, true) == (10 * 4) + 120,
+            "a chunk did not count the coarse flag chunk it brings");
+
+    const auto copy = std::filesystem::temp_directory_path() / ("carta-zarr-float64-" + std::to_string(getpid()));
+    std::filesystem::remove_all(copy);
+    std::filesystem::copy(fixture, copy, std::filesystem::copy_options::recursive);
+    struct Remove {
+        std::filesystem::path path;
+        ~Remove() {
+            std::error_code ignored;
+            std::filesystem::remove_all(path, ignored);
+        }
+    } const remove{copy};
+    const auto sky = copy / "SKY" / "zarr.json";
+    WriteText(sky, Replaced(ReadText(sky), "\"data_type\"", "float32", "float64"));
+    Require(bytes(copy.string(), true) == (10 * 8) + 10, "a float64 chunk was not counted at eight bytes an element");
+}
+
 using Rewrite = std::function<std::string(std::string)>;
 
 // A copy of a fixture with the root's consolidated metadata written in, as zarr-python writes it --
@@ -844,6 +882,7 @@ int main() {
         TestAPrefetchedPlaneIsReadFromThePool(kFixtures[0], 4);
         TestAPrefetchedPlaneIsReadFromThePool(CARTA_ZARR_PIXEL_FIXTURE_FINE_FLAG, 6);
         TestAPoolDoesNotCarryOneDatasetsArraysIntoTheNext(kFixtures[0]);
+        TestAChunkSaysWhatItDecodesTo(kFixtures[0]);
         TestACoordinateDisagreeingWithItsConsolidatedCopyIsRefused(kFixtures[0]);
         TestAnImageWhoseArraysDisagreeWithTheirCopiesDoesNotOpen(kFixtures[0]);
         TestLabelsAreHeldToTheirOwnDocument(kFixtures[0]);

@@ -58,7 +58,7 @@ is faster.
 
 | variant | users | exact histogram | | binned histogram | | region | |
 |---|---|---|---|---|---|---|---|
-| | | the workstation | the server | the workstation | the server | the workstation | the server |
+| | | workstation | server | workstation | server | workstation | server |
 | default | 1 | 5.50 s | 6.24 s | 1.49 s | 1.55 s | 0.84 s | 1.06 s |
 | `LEAST_PIXELS_PER_TASK=4096` | 1 | +15% | +23% | – | -3% | -1% | +1% |
 | `LEAST_PIXELS_PER_TASK=16384` | 1 | +12% | +21% | +0% | -4% | -0% | +1% |
@@ -69,8 +69,8 @@ is faster.
 | `CUBE_ACCUMULATOR_CACHE_BYTES=33554432` | 1 | +0% | +1% | +1% | -8% | +5% | -0% |
 | every variant | 8 | within ±5% | within ±6% | within ±1% | within ±2% | within ±1% | within ±2% |
 
-the workstation is a desktop: an Intel i7-14700F, 28 logical cores, 28 MiB of L2 and 33 MiB of L3, with the cube
-on local NVMe. the server is a server: two Xeon Gold 6134 sockets, 32 logical cores, 1 MiB of L2 a core
+The workstation is a desktop: an Intel i7-14700F, 28 logical cores, 28 MiB of L2 and 33 MiB of L3, with the cube
+on local NVMe. The server has two Xeon Gold 6134 sockets, 32 logical cores, 1 MiB of L2 a core
 and 25 MiB of L3, with the cube on Lustre. Every position every build read fingerprinted the same on
 both, 81 positions each.
 

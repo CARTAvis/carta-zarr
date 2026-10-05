@@ -37,7 +37,7 @@ read them reads the same values again, and a handle opened afresh cannot read th
 
 ## What it was measured to gain
 
-On the server's Lustre 2.15 -- one client, an idle metadata server -- with every data cache emptied before
+On a server's Lustre 2.15 -- one client, an idle metadata server -- with every data cache emptied before
 each run by `tools/zarr-bench/drop-lustre-cache.py`, one user, on a 2048-channel crop of the ASKAP cube
 in three layouts. Medians of the run before the change and after it, six runs each, alternating which
 ran first and each preceded by an untimed run of its own:
@@ -61,7 +61,7 @@ settings on Lustre, which is why the sweep now runs the bench once, untimed, on 
 Nothing measured here argues against it either, and what the check is for does not apply to what
 CARTA reads. The check guards against a file that changed under an open array; a viewer's datasets do
 not change while it views them, and the metadata a changed file would also need is not checked again
-anyway. What the check costs depends on where the chunks are, and on the server they were where it costs
+anyway. What the check costs depends on where the chunks are, and on that server they were where it costs
 least: one client holding the locks of every file it read, from a metadata server with nothing else
 to do. Many clients on one busy metadata server would pay more.
 

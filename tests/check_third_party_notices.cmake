@@ -6,7 +6,8 @@
 # names out of the build tree and fails on any whose notice the generated file does not hold, so that
 # a dependency TensorStore adds is not shipped without one.
 #
-# Takes BINARY_DIR, the build tree, and NOTICES, the generated file.
+# Takes BINARY_DIR, the build tree; DEPS_DIR, where the fetched libraries were built, which is the
+# build tree's _deps unless FETCHCONTENT_BASE_DIR moved it; and NOTICES, the generated file.
 cmake_minimum_required(VERSION 3.24)
 
 if(NOT EXISTS "${NOTICES}")
@@ -38,6 +39,9 @@ if(link STREQUAL "")
     message(FATAL_ERROR "Could not find how libcarta-zarr is linked in ${BINARY_DIR}")
 endif()
 
+# A library built in the tree is named relative to it, as _deps/<name>-build/; one built where
+# FETCHCONTENT_BASE_DIR put it, as an offline build does, by its absolute path. Both are read alike.
+string(REPLACE "${DEPS_DIR}/" "_deps/" link "${link}")
 string(REGEX MATCHALL "_deps/[A-Za-z0-9_.+-]+-build/" built "${link}")
 list(REMOVE_DUPLICATES built)
 if(NOT built)

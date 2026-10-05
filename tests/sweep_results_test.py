@@ -289,6 +289,18 @@ class Recommending(unittest.TestCase):
         self.assertEqual((now.layout.name, after.layout.name), ("current", "better"))
 
 
+    def test_nothing_is_recommended_while_checksums_disagree(self) -> None:
+        """Two layouts reading one position differently means one of them read wrongly, and which is not
+        known: the faster of the two used to be recommended under a warning that it might be the wrong
+        one. Until the bytes agree there is no recommendation, and nothing confirmed or validated for one."""
+        first, second = layout("first"), layout("second")
+        rows = [row(first, "plane", 2.0, stage="stage2", checksum="aa"),
+                row(second, "plane", 1.0, stage="stage2", checksum="bb")]
+        analysis = self.analysis([first, second], rows, stage2={"layouts": ["first", "second"]})
+        self.assertEqual(len(analysis.results.mismatches), 1)
+        self.assertEqual(analysis.recommendations(), (None, None))
+        self.assertEqual(analysis.confirm_plan(), [])
+
     def test_a_choice_whose_operations_failed_is_never_chosen(self) -> None:
         # Nine of ten operations failed and the one that finished was fast: ranked on what finished,
         # it was the best layout and the recommendation.

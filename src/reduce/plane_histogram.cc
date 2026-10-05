@@ -17,6 +17,7 @@
 #include <cmath>
 #include <cstdint>
 #include <string>
+#include <type_traits>
 #include <vector>
 
 namespace carta::zarr::internal {
@@ -137,36 +138,50 @@ Result<void> ComputeHistogram(const ReducibleImage& image, const HistogramReques
             const float* plane = slab.pixels + (offset * stride_z);
             std::uint64_t* into = counts.data() + (static_cast<std::size_t>((slab.first_channel + offset).index) * bins);
 
-            const auto bin_rows = [&](std::uint64_t v_first, std::uint64_t v_last, std::uint64_t* destination) {
-                // Two loops rather than one with the choice inside it, so that the common one is the
-                // loop it always was. The caller's own rule in both: a pixel outside the range is not
-                // counted, and NaN fails both comparisons.
-                if (finite_offsets) {
-                    for (std::uint64_t v = v_first; v < v_last; ++v) {
-                        const float* row = plane + (v * stride_v);
-                        for (std::uint64_t u = 0; u < u_count; ++u) {
-                            const float value = row[u * stride_u];
-                            if (lower <= value && value <= upper) {
-                                auto bin = static_cast<std::size_t>((value - lower) / width);
-                                if (bin >= bins) {
-                                    bin = bins - 1;
+            // One loop per way of binning, each its own instantiation, so that the common one is the
+            // loop it always was. The caller's own rule in both: a pixel outside the range is not
+            // counted, and NaN fails both comparisons.
+            const auto bin_rows_as = [&](auto finite, std::uint64_t v_first, std::uint64_t v_last,
+                                         std::uint64_t* destination) {
+                // Copied into locals whose addresses never escape. Reached through the captures, each
+                // was loaded again for every pixel -- the store into a bin may, as far as the compiler
+                // knows, have changed it -- and through two lambdas' captures, twice over.
+                const float* const pixels = plane;
+                const std::uint64_t row_stride = stride_v;
+                const std::uint64_t column_stride = stride_u;
+                const std::uint64_t columns = u_count;
+                const float low = lower;
+                const float high = upper;
+                const float step = width;
+                const std::size_t count = bins;
+                const double wide_low = wide_lower;
+                const double wide_step = wide_width;
+                const double last = wide_last;
+                for (std::uint64_t v = v_first; v < v_last; ++v) {
+                    const float* row = pixels + (v * row_stride);
+                    for (std::uint64_t u = 0; u < columns; ++u) {
+                        const float value = row[u * column_stride];
+                        if (low <= value && value <= high) {
+                            if constexpr (decltype(finite)::value) {
+                                auto bin = static_cast<std::size_t>((value - low) / step);
+                                if (bin >= count) {
+                                    bin = count - 1;
                                 }
                                 ++destination[bin];
+                            } else {
+                                const double offset =
+                                    wide_step > 0.0 ? (static_cast<double>(value) - wide_low) / wide_step : 0.0;
+                                ++destination[static_cast<std::size_t>(std::min(offset, last))];
                             }
                         }
                     }
-                    return;
                 }
-                for (std::uint64_t v = v_first; v < v_last; ++v) {
-                    const float* row = plane + (v * stride_v);
-                    for (std::uint64_t u = 0; u < u_count; ++u) {
-                        const float value = row[u * stride_u];
-                        if (lower <= value && value <= upper) {
-                            const double offset =
-                                wide_width > 0.0 ? (static_cast<double>(value) - wide_lower) / wide_width : 0.0;
-                            ++destination[static_cast<std::size_t>(std::min(offset, wide_last))];
-                        }
-                    }
+            };
+            const auto bin_rows = [&](std::uint64_t v_first, std::uint64_t v_last, std::uint64_t* destination) {
+                if (finite_offsets) {
+                    bin_rows_as(std::true_type{}, v_first, v_last, destination);
+                } else {
+                    bin_rows_as(std::false_type{}, v_first, v_last, destination);
                 }
             };
 

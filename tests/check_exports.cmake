@@ -1,13 +1,13 @@
 # Every symbol libcarta-zarr exports is its own.
 #
 # The library links TensorStore and the libraries it brings in statically, and the linker is told to
-# export carta::zarr and nothing else (cmake/carta_zarr.map and carta_zarr.exp). Without that it
+# export carta::zarr and nothing else (cmake/carta_zarr.map.in and carta_zarr.exp). Without that it
 # exported over eleven thousand symbols of Abseil, riegeli, zstd, zlib and blosc beside its own 42,
 # and a program linking its own zstd or zlib had two of each. This reads the built library's dynamic
 # symbol table and fails on any defined symbol outside carta::zarr, and on a library that exports
 # none of the API -- which an export list with a typo would produce.
 #
-# Takes LIBRARY, the built library, and NM.
+# Takes LIBRARY, the built library; NM; and ABI_NODE, the version node the map declares.
 cmake_minimum_required(VERSION 3.24)
 
 if(APPLE)
@@ -22,7 +22,7 @@ if(failed)
 endif()
 
 # What the ELF toolchain defines in every shared object, and the version node the map declares.
-set(always _init _fini __bss_start _edata _end CARTA_ZARR_0)
+set(always _init _fini __bss_start _edata _end ${ABI_NODE})
 
 string(REPLACE "\n" ";" lines "${table}")
 set(own 0)

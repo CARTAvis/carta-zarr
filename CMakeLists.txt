@@ -115,22 +115,35 @@ target_link_libraries(carta_zarr PRIVATE
     tensorstore::index_space_dim_expression
     tensorstore::driver_cast)
 
+# Which releases can stand in for one another. Before 1.0 a minor release may break the ABI, so the
+# soname and the package version file both name the minor; from 1.0 on they name the major alone.
+# See docs/adr/0020-before-1-0-the-minor-version-is-the-abi.md.
+if(PROJECT_VERSION_MAJOR EQUAL 0)
+    set(CARTA_ZARR_ABI_VERSION "${PROJECT_VERSION_MAJOR}.${PROJECT_VERSION_MINOR}")
+    set(CARTA_ZARR_VERSION_COMPATIBILITY SameMinorVersion)
+else()
+    set(CARTA_ZARR_ABI_VERSION "${PROJECT_VERSION_MAJOR}")
+    set(CARTA_ZARR_VERSION_COMPATIBILITY SameMajorVersion)
+endif()
+string(REPLACE "." "_" CARTA_ZARR_ABI_NODE "CARTA_ZARR_${CARTA_ZARR_ABI_VERSION}")
+
 set_target_properties(carta_zarr PROPERTIES
     OUTPUT_NAME carta-zarr
     EXPORT_NAME zarr
     CXX_VISIBILITY_PRESET hidden
     VISIBILITY_INLINES_HIDDEN YES
     VERSION ${PROJECT_VERSION}
-    SOVERSION ${PROJECT_VERSION_MAJOR})
+    SOVERSION ${CARTA_ZARR_ABI_VERSION})
 
 # Hidden visibility covers what this library compiles, not the static libraries TensorStore brings,
 # which are linked in whole and would otherwise all be exported. The linker is told outright what to
-# export: carta::zarr and nothing else. See cmake/carta_zarr.map.
+# export: carta::zarr and nothing else. See cmake/carta_zarr.map.in.
 if(APPLE)
     set(CARTA_ZARR_EXPORTS "${CMAKE_CURRENT_SOURCE_DIR}/cmake/carta_zarr.exp")
     target_link_options(carta_zarr PRIVATE "LINKER:-exported_symbols_list,${CARTA_ZARR_EXPORTS}")
 elseif(CMAKE_SYSTEM_NAME MATCHES "Linux|BSD")
-    set(CARTA_ZARR_EXPORTS "${CMAKE_CURRENT_SOURCE_DIR}/cmake/carta_zarr.map")
+    set(CARTA_ZARR_EXPORTS "${CMAKE_CURRENT_BINARY_DIR}/carta_zarr.map")
+    configure_file(cmake/carta_zarr.map.in "${CARTA_ZARR_EXPORTS}" @ONLY)
     target_link_options(carta_zarr PRIVATE "LINKER:--version-script=${CARTA_ZARR_EXPORTS}" "LINKER:--exclude-libs,ALL")
 endif()
 if(CARTA_ZARR_EXPORTS)
@@ -151,7 +164,7 @@ install(FILES LICENSE README.md "${CMAKE_CURRENT_BINARY_DIR}/THIRD_PARTY_NOTICES
 write_basic_package_version_file(
     "${CMAKE_CURRENT_BINARY_DIR}/CartaZarrConfigVersion.cmake"
     VERSION ${PROJECT_VERSION}
-    COMPATIBILITY SameMajorVersion)
+    COMPATIBILITY ${CARTA_ZARR_VERSION_COMPATIBILITY})
 
 configure_package_config_file(
     "${CMAKE_CURRENT_SOURCE_DIR}/cmake/CartaZarrConfig.cmake.in"
@@ -688,14 +701,23 @@ if(CARTA_ZARR_BUILD_TESTS AND BUILD_TESTING)
         endif()
     endif()
 
-    # The library exports its own API and none of what it links in statically. See cmake/carta_zarr.map.
+    # The library exports its own API and none of what it links in statically. See cmake/carta_zarr.map.in.
     if(CMAKE_NM AND (APPLE OR CMAKE_SYSTEM_NAME MATCHES "Linux|BSD"))
         add_test(NAME carta-zarr-exports
             COMMAND ${CMAKE_COMMAND}
                 "-DLIBRARY=$<TARGET_FILE:carta_zarr>"
                 "-DNM=${CMAKE_NM}"
+                "-DABI_NODE=${CARTA_ZARR_ABI_NODE}"
                 -P "${CMAKE_CURRENT_SOURCE_DIR}/tests/check_exports.cmake")
     endif()
+
+    # The version file and the soname agree on which releases can stand in for this one.
+    add_test(NAME carta-zarr-version-compatibility
+        COMMAND ${CMAKE_COMMAND}
+            "-DCONFIG_VERSION=${CMAKE_CURRENT_BINARY_DIR}/CartaZarrConfigVersion.cmake"
+            "-DVERSION=${PROJECT_VERSION}"
+            "-DSONAME=$<TARGET_SONAME_FILE_NAME:carta_zarr>"
+            -P "${CMAKE_CURRENT_SOURCE_DIR}/tests/check_version_compatibility.cmake")
 
     # What the library carries, it carries the notices of. See cmake/ThirdPartyNotices.cmake.
     add_test(NAME carta-zarr-third-party-notices

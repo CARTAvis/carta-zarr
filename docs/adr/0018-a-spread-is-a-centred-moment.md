@@ -87,4 +87,4 @@ they are far from zero against their spread.
 
 `SpectralTotals` gained a field, which changes the library's ABI. The version stays 0.1.0: nothing
 has been released, and the one consumer is built against each change as it lands. What a version
-promises before the first release, and when its soname changes, is decided separately.
+promises before the first release, and when its soname changes, is decided separately, in ADR 0020.

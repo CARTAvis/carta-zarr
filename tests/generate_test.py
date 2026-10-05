@@ -231,6 +231,24 @@ class IdentityTest(unittest.TestCase):
                 os.utime(changed, ns=(stat.st_atime_ns, stat.st_mtime_ns + 1_000_000_000))
                 self.assertNotEqual(self.identity(), was, f"{changed.name} changed and the identity did not")
 
+    def test_a_template_whose_arrays_change_is_another_synthetic_dataset(self) -> None:
+        # A synthetic cube takes its coordinates and their metadata from the template's arrays, not
+        # only from its root document: a template rechunked along frequency writes another dataset.
+        frequency = self.source / "frequency" / "zarr.json"
+        frequency.parent.mkdir()
+        frequency.write_text(json.dumps({"chunk_grid": {"configuration": {"chunk_shape": [4]}}}))
+
+        def synthetic() -> dict:
+            return generate.identity(generate.parse_arguments(
+                ["--synthetic", "--shape", "time=1,frequency=4,polarization=1,l=8,m=8", "--template", str(self.source), "--output", "out", "--chunk", "l=1"]))
+
+        was = synthetic()
+        self.assertEqual(synthetic(), was, "the same template came to two identities")
+        stat = frequency.stat()
+        frequency.write_text(json.dumps({"chunk_grid": {"configuration": {"chunk_shape": [2]}}}))
+        os.utime(frequency, ns=(stat.st_atime_ns, stat.st_mtime_ns + 1_000_000_000))
+        self.assertNotEqual(synthetic(), was, "a template array changed and the identity did not")
+
     def test_where_it_is_written_and_how_fast_are_not_its_identity(self) -> None:
         here = self.identity()
         elsewhere = generate.identity(generate.parse_arguments(

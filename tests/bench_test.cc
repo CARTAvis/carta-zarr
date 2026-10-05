@@ -27,6 +27,7 @@
 #include <chrono>
 #include <cmath>
 #include <cstdint>
+#include <cstdlib>
 #include <cstring>
 #include <filesystem>
 #include <fstream>
@@ -752,7 +753,20 @@ void TestAModeWritesOnlyItsOwnSettings() {
     const Columns none{"", "", "", "", ""};
     Require(written(Mode::plane) == none && written(Mode::spectrum) == none && written(Mode::open) == none,
             "a mode no setting shapes wrote a setting");
-    Require(written(Mode::region) == Columns{"0.2000", "", "", "", ""}, "region wrote other than its fraction");
+    Require(written(Mode::region) == Columns{"0.2", "", "", "", ""}, "region wrote other than its fraction");
+    // The fraction is part of the run key, so two that read different boxes are two spellings of it.
+    // At four decimals 0.000001 and 0.000049 were both 0.0000 -- boxes of 4 and 36 elements on a
+    // 1024-square plane -- and a resume skipped the second as done.
+    const auto fraction = [](double value) {
+        Row row;
+        Workload::For(Mode::region, Settings(value))->WriteSettings(row);
+        return row.region_fraction;
+    };
+    Require(fraction(0.000001) != fraction(0.000049), "two fractions that read different boxes were spelled alike");
+    for (const double value : {0.000001, 0.000049, 0.05, 1.0 / 3.0, 0.1 + 0.2}) {
+        Require(std::strtod(fraction(value).c_str(), nullptr) == value,
+                "the fraction " + fraction(value) + " does not read back as what it was written from");
+    }
     Require(written(Mode::cube_histogram) == Columns{"", "sampled:4", "", "", ""},
             "cube-histogram wrote other than its method");
     Require(written(Mode::animation) == Columns{"", "", "8", "0", "true"},

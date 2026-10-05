@@ -12,6 +12,7 @@
 #include <array>
 #include <cmath>
 #include <cstdio>
+#include <cstdlib>
 #include <limits>
 #include <vector>
 
@@ -78,9 +79,18 @@ class Region final : public Workload {
 public:
     Region(const RunOptions& options, RegionSettings settings) : Workload(Mode::region, options), _settings(settings) {}
 
+    // The shortest spelling that reads back as the fraction it was written from. It is part of the
+    // run key, and at four decimals 0.000001 and 0.000049 were both 0.0000 -- boxes of 4 and 36
+    // elements on a 1024-square plane, and a resume skipped the second as done. max_digits10 always
+    // reads back; the shortest that does keeps 0.05 from being written 0.050000000000000003.
     void WriteSettings(Row& row) const override {
         std::array<char, 32> fraction{};
-        std::snprintf(fraction.data(), fraction.size(), "%.4f", _settings.fraction);
+        for (int digits = 1; digits <= std::numeric_limits<double>::max_digits10; ++digits) {
+            std::snprintf(fraction.data(), fraction.size(), "%.*g", digits, _settings.fraction);
+            if (std::strtod(fraction.data(), nullptr) == _settings.fraction) {
+                break;
+            }
+        }
         row.region_fraction = fraction.data();
     }
 

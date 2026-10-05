@@ -281,8 +281,6 @@ struct ChunkGeometry {
     // Number of inner chunks along each axis.
     std::vector<std::uint64_t> grid_shape;
     bool sharded = false;
-    // True when the logical order differs from the stored order, so every read carries a transpose.
-    bool transpose_required = false;
     std::string compressor;
 };
 

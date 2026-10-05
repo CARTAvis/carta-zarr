@@ -7,9 +7,10 @@
  * call to whichever it found first, including the calls made from inside this library.
  *
  * Kept in step with carta_zarr.exp, which says the same to Apple's linker, and checked by the
- * carta-zarr-exports test. The version node is the library's ABI: it changes when the major does.
+ * carta-zarr-exports test. The version node is the library's ABI, CMakeLists.txt's
+ * CARTA_ZARR_ABI_VERSION: it changes when the soname does.
  */
-CARTA_ZARR_0 {
+@CARTA_ZARR_ABI_NODE@ {
     global:
         extern "C++" {
             carta::zarr::*;

@@ -16,6 +16,13 @@ namespace carta::zarr::internal::xradio {
 
 namespace {
 
+// A node a document names, as the store files it, so that it can be compared with the names the
+// store lists: "./FLAG" is FLAG. A name that is no node is kept as written, and reading it reports so.
+std::string Canonical(std::string_view node) {
+    auto normalized = NormalizeNodeName(node);
+    return normalized ? std::move(normalized).value() : std::string(node);
+}
+
 // The flags the root's data groups declare: those of groups whose `sky` is this image, and those
 // of every other group, which belong to some other image. XRADIO's schema defines a group's `flag`
 // as its sky image's, so nothing else in a group is taken to own it.
@@ -38,13 +45,17 @@ DeclaredFlags FlagsOfDataGroups(const nlohmann::json& root_attributes, std::stri
         if (flag.empty()) {
             continue;
         }
-        (AttributeString(group, "sky") == image_id ? declared.own : declared.others).insert(flag);
+        // Canonical on both sides: compared as written, another group's "./FLAG" was not the FLAG the
+        // inventory lists, and the guess below took a flag another image owns.
+        (Canonical(AttributeString(group, "sky")) == image_id ? declared.own : declared.others)
+            .insert(Canonical(flag));
     }
     return declared;
 }
 
 Result<std::string> RequireDeclaredFlag(const Store& store, const zarr::ArrayMetadata& image,
-                                        const std::string& declared) {
+                                        const std::string& spelt) {
+    const std::string declared = Canonical(spelt);
     const auto& flag_array = store.ReadArrayMetadata(declared);
     if (!flag_array) {
         return flag_array.error();

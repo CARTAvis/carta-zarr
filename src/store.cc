@@ -40,35 +40,6 @@ Result<nlohmann::json> ParseNodeMetadata(const std::string& bytes, std::string_v
     }
 }
 
-// A node name is a relative path carrying no ".." component. Validating it here rather than in a
-// Transport holds every Transport to the same rule, and yields the key the caches are stored under.
-//
-// A "." component is dropped rather than refused, because "./SKY" names the node "SKY" and a store
-// is entitled to spell it that way. This used to be the one place the two rules disagreed: a
-// metadata read went through here and was served, and the pixel read that followed went through
-// Transport::ArrayDirectory, which refused the same name -- so an image declaring `flag: "./MASK_0"`
-// described perfectly, reported a pixel mask, and then failed every masked read.
-Result<std::string> NormalizeNodeName(std::string_view node) {
-    const std::filesystem::path relative(node);
-    if (relative.empty() || relative.is_absolute() || relative.has_root_path()) {
-        return Error{ErrorCode::invalid_argument, "Invalid Zarr node path", std::string(node)};
-    }
-    std::filesystem::path normalized;
-    for (const auto& part : relative) {
-        if (part == "..") {
-            return Error{ErrorCode::invalid_argument, "Invalid Zarr node path", std::string(node)};
-        }
-        if (part == "." || part.empty()) {
-            continue;
-        }
-        normalized /= part;
-    }
-    if (normalized.empty()) {
-        return Error{ErrorCode::invalid_argument, "Invalid Zarr node path", std::string(node)};
-    }
-    return normalized.generic_string();
-}
-
 std::string NormalizeMetadataKey(std::string key) {
     while (!key.empty() && key.front() == '/') {
         key.erase(key.begin());
@@ -165,6 +136,35 @@ Result<void> RequireSameArray(const zarr_metadata::ArrayMetadata& copy, const za
 }
 
 }  // namespace
+
+// A node name is a relative path carrying no ".." component. Validating it here rather than in a
+// Transport holds every Transport to the same rule, and yields the key the caches are stored under.
+//
+// A "." component is dropped rather than refused, because "./SKY" names the node "SKY" and a store
+// is entitled to spell it that way. This used to be the one place the two rules disagreed: a
+// metadata read went through here and was served, and the pixel read that followed went through
+// Transport::ArrayDirectory, which refused the same name -- so an image declaring `flag: "./MASK_0"`
+// described perfectly, reported a pixel mask, and then failed every masked read.
+Result<std::string> NormalizeNodeName(std::string_view node) {
+    const std::filesystem::path relative(node);
+    if (relative.empty() || relative.is_absolute() || relative.has_root_path()) {
+        return Error{ErrorCode::invalid_argument, "Invalid Zarr node path", std::string(node)};
+    }
+    std::filesystem::path normalized;
+    for (const auto& part : relative) {
+        if (part == "..") {
+            return Error{ErrorCode::invalid_argument, "Invalid Zarr node path", std::string(node)};
+        }
+        if (part == "." || part.empty()) {
+            continue;
+        }
+        normalized /= part;
+    }
+    if (normalized.empty()) {
+        return Error{ErrorCode::invalid_argument, "Invalid Zarr node path", std::string(node)};
+    }
+    return normalized.generic_string();
+}
 
 Store::Store(TransportPtr transport, nlohmann::json root_attributes,
              std::map<std::string, nlohmann::json> consolidated_metadata, bool has_consolidated_metadata,

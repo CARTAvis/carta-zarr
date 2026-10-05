@@ -987,6 +987,30 @@ void TestADataGroupDeclaresItsSkysFlag() {
     diagnostics.clear();
     auto agreeing = FlagOfSky(nodes, diagnostics);
     Require(agreeing && agreeing.value() == "FLAG_1", "two groups naming the same flag were refused");
+
+    // "./FLAG_1" names the node FLAG_1, and every rule above holds of it however it is spelt. Compared
+    // as written, another group's "./FLAG_1" was not FLAG_1 the listing had, so the guess took a flag
+    // another image owns -- and masked this image's valid pixels with it.
+    const auto spelt = [&](const std::string& data_groups) {
+        nodes[""] = RootGroupWithDataGroups(data_groups);
+        diagnostics.clear();
+        return FlagOfSky(nodes, diagnostics);
+    };
+    auto others = spelt(R"({"base":{"sky":"SKY"},"other":{"sky":"OTHER","flag":"./FLAG_1"}})");
+    Require(others && others.value() == "FLAG_2", "a flag another image's group spells ./FLAG_1 was a candidate for SKY");
+    auto dotted = spelt(R"({"base":{"sky":"SKY","flag":"./FLAG_2"}})");
+    Require(dotted && dotted.value() == "FLAG_2", "a declared ./FLAG_2 was not chosen as the node FLAG_2");
+    auto aliases = spelt(R"({"base":{"sky":"SKY","flag":"FLAG_1"},"robust":{"sky":"SKY","flag":"./FLAG_1"}})");
+    Require(aliases && aliases.value() == "FLAG_1", "two spellings of one flag were taken for two flags");
+    auto dotted_sky = spelt(R"({"base":{"sky":"./SKY","flag":"FLAG_2"}})");
+    Require(dotted_sky && dotted_sky.value() == "FLAG_2", "a group whose sky is spelt ./SKY was not SKY's");
+    auto own_dotted = nodes;
+    own_dotted["SKY"] = SkyArray("float32", R"({"units":"Jy/beam","flag":"./FLAG_1"})");
+    own_dotted[""] = RootGroup();
+    diagnostics.clear();
+    auto attribute_dotted = FlagOfSky(own_dotted, diagnostics);
+    Require(attribute_dotted && attribute_dotted.value() == "FLAG_1",
+            "an image's own ./FLAG_1 was not named as the node it is");
 }
 
 // With nothing declared the store is inspected instead, and a store offering two equally good

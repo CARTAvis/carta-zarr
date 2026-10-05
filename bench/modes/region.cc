@@ -41,8 +41,11 @@ public:
         request.planes.spectral = Range{0, axes().channels, 1};
         request.planes.polarization = operation.polarization;
         request.regions = {&region, 1};
+        // What carta-backend asks of a region's spectral profile, sum_sq_dev included: sigma is made
+        // from it, and it is one more accumulator per channel and one more pass of arithmetic per
+        // pixel, so a run without it timed a lighter reduction than the one being stood in for.
         request.statistics = Statistic::num_pixels | Statistic::nan_count | Statistic::sum | Statistic::sum_sq |
-                             Statistic::min | Statistic::max;
+                             Statistic::min | Statistic::max | Statistic::sum_sq_dev;
 
         _exact.assign(axes().channels * 4, std::numeric_limits<double>::quiet_NaN());
         const auto sink = [this](const SpectralBlock& block) {

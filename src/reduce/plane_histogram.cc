@@ -17,6 +17,7 @@
 #include <cmath>
 #include <cstdint>
 #include <string>
+#include <type_traits>
 #include <vector>
 
 namespace carta::zarr::internal {
@@ -56,17 +57,12 @@ Result<void> ValidateRange(const std::string& node, const HistogramRequest& requ
                      "A histogram needs a finite range with a lower bound below its upper bound", node};
     }
     // Pixels are float, so the range is narrowed once and every pixel is binned against the
-    // narrowed copy. A range that is finite and non-empty in double need not still be either: two
-    // distinct doubles can narrow to one float, a bin width can underflow to zero or overflow to
-    // infinity, and (value - lower) / 0 is a NaN whose conversion to a bin index is undefined.
-    // Checking the narrowed values is therefore checking the ones the loop will actually use.
-    if (const float lower = static_cast<float>(request.lower), upper = static_cast<float>(request.upper),
-        width = static_cast<float>((request.upper - request.lower) / request.bins);
-        !std::isfinite(lower) || !std::isfinite(upper) || !(lower < upper) || !std::isfinite(width) ||
-        !(width > 0.0F)) {
-        return Error{ErrorCode::invalid_argument,
-                     "A histogram needs a range that stays finite and non-empty, and bins that stay wider "
-                     "than nothing, in the precision its pixels are counted in",
+    // narrowed copy. Bounds that do not fit a float leave nothing to bin against; the caller's own
+    // bounds are its pixels' extremes, which always fit. Everything else that narrowing does to a
+    // range -- two bounds narrowed to one float, a width underflowing to zero or overflowing to
+    // infinity -- the caller bins all the same, and ComputeHistogram bins as it does.
+    if (!std::isfinite(static_cast<float>(request.lower)) || !std::isfinite(static_cast<float>(request.upper))) {
+        return Error{ErrorCode::invalid_argument, "A histogram needs bounds that fit in a float, as its pixels do",
                      node};
     }
     return {};
@@ -101,6 +97,18 @@ Result<void> ComputeHistogram(const ReducibleImage& image, const HistogramReques
     const float width = static_cast<float>((request.upper - request.lower) / request.bins);
     const float lower = static_cast<float>(request.lower);
     const float upper = static_cast<float>(request.upper);
+    // Over a range whose span and width are positive and finite in float, every offset is finite and
+    // at least zero, and the float sequence above is the whole of it. Over any other, an offset found
+    // in float can be NaN or infinite, and converting one to an index is undefined; there the caller
+    // bins every pixel in double, against a width found from the narrowed bounds, and a range of no
+    // width puts every pixel it admits in the first bin. Decided once for the range, as the caller
+    // decides it: deciding per pixel binned the lower half of a range wider than a float one way and
+    // the upper half the other, which is neither of the caller's answers.
+    const float span = upper - lower;
+    const bool finite_offsets = span > 0.0F && std::isfinite(span) && width > 0.0F && std::isfinite(width);
+    const double wide_lower = lower;
+    const double wide_width = (static_cast<double>(upper) - wide_lower) / request.bins;
+    const double wide_last = static_cast<double>(request.bins - 1);
     const auto bins = static_cast<std::size_t>(request.bins);
     std::vector<std::uint64_t> counts;
 
@@ -130,31 +138,50 @@ Result<void> ComputeHistogram(const ReducibleImage& image, const HistogramReques
             const float* plane = slab.pixels + (offset * stride_z);
             std::uint64_t* into = counts.data() + (static_cast<std::size_t>((slab.first_channel + offset).index) * bins);
 
-            const auto bin_rows = [&](std::uint64_t v_first, std::uint64_t v_last, std::uint64_t* destination) {
+            // One loop per way of binning, each its own instantiation, so that the common one is the
+            // loop it always was. The caller's own rule in both: a pixel outside the range is not
+            // counted, and NaN fails both comparisons.
+            const auto bin_rows_as = [&](auto finite, std::uint64_t v_first, std::uint64_t v_last,
+                                         std::uint64_t* destination) {
+                // Copied into locals whose addresses never escape. Reached through the captures, each
+                // was loaded again for every pixel -- the store into a bin may, as far as the compiler
+                // knows, have changed it -- and through two lambdas' captures, twice over.
+                const float* const pixels = plane;
+                const std::uint64_t row_stride = stride_v;
+                const std::uint64_t column_stride = stride_u;
+                const std::uint64_t columns = u_count;
+                const float low = lower;
+                const float high = upper;
+                const float step = width;
+                const std::size_t count = bins;
+                const double wide_low = wide_lower;
+                const double wide_step = wide_width;
+                const double last = wide_last;
                 for (std::uint64_t v = v_first; v < v_last; ++v) {
-                    const float* row = plane + (v * stride_v);
-                    for (std::uint64_t u = 0; u < u_count; ++u) {
-                        const float value = row[u * stride_u];
-                        // The caller's own rule: a pixel outside the range is not counted, and
-                        // NaN fails both comparisons.
-                        if (lower <= value && value <= upper) {
-                            // A range wider than FLT_MAX passes ValidateRange -- its bounds and its
-                            // width each fit -- but the offset of a pixel in its upper part does not,
-                            // and infinity converted to an index is undefined. Only then is the offset
-                            // taken in double, where it fits; everywhere else the float sequence
-                            // above is left alone, because it is the caller's.
-                            const float offset = value - lower;
-                            auto bin = std::isfinite(offset)
-                                           ? static_cast<std::size_t>(offset / width)
-                                           : static_cast<std::size_t>(
-                                                 (static_cast<double>(value) - static_cast<double>(lower)) /
-                                                 static_cast<double>(width));
-                            if (bin >= bins) {
-                                bin = bins - 1;
+                    const float* row = pixels + (v * row_stride);
+                    for (std::uint64_t u = 0; u < columns; ++u) {
+                        const float value = row[u * column_stride];
+                        if (low <= value && value <= high) {
+                            if constexpr (decltype(finite)::value) {
+                                auto bin = static_cast<std::size_t>((value - low) / step);
+                                if (bin >= count) {
+                                    bin = count - 1;
+                                }
+                                ++destination[bin];
+                            } else {
+                                const double offset =
+                                    wide_step > 0.0 ? (static_cast<double>(value) - wide_low) / wide_step : 0.0;
+                                ++destination[static_cast<std::size_t>(std::min(offset, last))];
                             }
-                            ++destination[bin];
                         }
                     }
+                }
+            };
+            const auto bin_rows = [&](std::uint64_t v_first, std::uint64_t v_last, std::uint64_t* destination) {
+                if (finite_offsets) {
+                    bin_rows_as(std::true_type{}, v_first, v_last, destination);
+                } else {
+                    bin_rows_as(std::false_type{}, v_first, v_last, destination);
                 }
             };
 

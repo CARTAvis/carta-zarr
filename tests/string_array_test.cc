@@ -8,14 +8,60 @@
 
 #include "zarr/array_metadata.h"
 
+#include <cstddef>
+#include <cstdlib>
 #include <exception>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
+#include <new>
 #include <string>
 #include <vector>
 
 #include "support/check.h"
+
+// One allocation on the calling thread can be made to fail once, so that a decode can be run with
+// each of its allocations failing in turn.
+namespace {
+
+thread_local bool counting = false;
+thread_local std::size_t allocations = 0;
+thread_local std::size_t failing = 0;
+
+void* Allocate(std::size_t size) {
+    if (counting) {
+        ++allocations;
+        if (allocations == failing) {
+            failing = 0;
+            throw std::bad_alloc();
+        }
+    }
+    if (void* memory = std::malloc(size == 0 ? 1 : size)) {
+        return memory;
+    }
+    throw std::bad_alloc();
+}
+
+}  // namespace
+
+void* operator new(std::size_t size) {
+    return Allocate(size);
+}
+void* operator new[](std::size_t size) {
+    return Allocate(size);
+}
+void operator delete(void* memory) noexcept {
+    std::free(memory);
+}
+void operator delete[](void* memory) noexcept {
+    std::free(memory);
+}
+void operator delete(void* memory, std::size_t) noexcept {
+    std::free(memory);
+}
+void operator delete[](void* memory, std::size_t) noexcept {
+    std::free(memory);
+}
 
 namespace {
 
@@ -26,15 +72,18 @@ const std::filesystem::path kFixtureDir{CARTA_ZARR_STRING_FIXTURE_DIR};
 
 using carta::zarr::testing::Require;
 
-carta::zarr::Result<std::vector<std::string>> ReadFixture(const std::string& name) {
-    const std::filesystem::path array_dir = kFixtureDir / name;
-    std::ifstream metadata_file(array_dir / "zarr.json");
-    Require(metadata_file.is_open(), "Missing fixture " + array_dir.string());
+zarr_metadata::ArrayMetadata FixtureMetadata(const std::string& name) {
+    std::ifstream metadata_file(kFixtureDir / name / "zarr.json");
+    Require(metadata_file.is_open(), "Missing fixture " + (kFixtureDir / name).string());
     const nlohmann::json metadata = nlohmann::json::parse(metadata_file);
 
     auto array_metadata = zarr_metadata::ParseArrayMetadata(metadata, name);
     Require(static_cast<bool>(array_metadata), "Fixture " + name + " has unreadable array metadata");
-    return zarr_metadata::ReadFixedLengthUtf32StringArray(array_dir, array_metadata.value(), name);
+    return array_metadata.value();
+}
+
+carta::zarr::Result<std::vector<std::string>> ReadFixture(const std::string& name) {
+    return zarr_metadata::ReadFixedLengthUtf32StringArray(kFixtureDir / name, FixtureMetadata(name), name);
 }
 
 void ExpectValues(const std::string& name, const std::vector<std::string>& expected) {
@@ -100,6 +149,44 @@ void TestCorruptChunks() {
     ExpectError("invalid_unicode", ErrorCode::decode_error);
 }
 
+// An allocation that fails is not corrupt data. The store remembers what a read of labels came to
+// for as long as it lives, and asks again only after a read that could not be made; a decode_error
+// is an answer about the array, so a shortage of memory reported as one kept good labels unreadable
+// until the store was closed. With each of the decode's allocations failing in turn, what comes out
+// is the std::bad_alloc itself -- which the store reports as a read it could not make -- or, where the
+// failure was survived, the values.
+void TestAnAllocationThatFailsIsNotCorruptData() {
+    for (const auto* name : {"zstd_overhang", "gzip", "blosc", "multi_chunk"}) {
+        const auto metadata = FixtureMetadata(name);
+        const auto decode = [&]() {
+            return zarr_metadata::ReadFixedLengthUtf32StringArray(kFixtureDir / name, metadata, name);
+        };
+        allocations = 0;
+        counting = true;
+        Require(static_cast<bool>(decode()), std::string("Fixture ") + name + " failed to decode");
+        counting = false;
+        const auto total = allocations;
+        Require(total > 0, std::string("Decoding ") + name + " allocated nothing to fail");
+        for (std::size_t which = 1; which <= total; ++which) {
+            allocations = 0;
+            failing = which;
+            counting = true;
+            std::string outcome;
+            try {
+                const auto result = decode();
+                outcome = result ? "values" : std::string("a ") + zarr_metadata::ErrorCodeName(result.error().code);
+            } catch (const std::bad_alloc&) {
+                outcome = "a std::bad_alloc";
+            }
+            counting = false;
+            failing = 0;
+            Require(outcome == "values" || outcome == "a std::bad_alloc", std::string("Decoding ") + name + " with allocation " +
+                                             std::to_string(which) + " of " + std::to_string(total) +
+                                             " failing gave " + outcome);
+        }
+    }
+}
+
 }  // namespace
 
 int main() {
@@ -111,6 +198,7 @@ int main() {
         TestMultipleChunks();
         TestDeclaredFillValue();
         TestCorruptChunks();
+        TestAnAllocationThatFailsIsNotCorruptData();
         std::cout << "carta-zarr string array tests passed\n";
         return 0;
     } catch (const std::exception& error) {

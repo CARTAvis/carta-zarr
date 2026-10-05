@@ -27,13 +27,21 @@ namespace {
 //
 // Holds the real path of each directory the walk is inside, the root first. An ordinary directory's
 // is its parent's and its name; only a link's is asked of the filesystem.
+//
+// A directory that refuses to be read is either passed over or the walk's error, as the walk says. A
+// listing passes over it: no node there could be read, and a later read says why. A size cannot: one
+// that leaves a directory out is not the store's size, however it is labelled.
+enum class Unreadable { skipped, failed };
+
 class LinkedWalk {
 public:
     // `root` is resolved already: the transport's root always is.
-    explicit LinkedWalk(const std::filesystem::path& root)
+    LinkedWalk(const std::filesystem::path& root, Unreadable unreadable)
         : iterator(root,
-                   std::filesystem::directory_options::skip_permission_denied |
-                       std::filesystem::directory_options::follow_directory_symlink,
+                   unreadable == Unreadable::skipped
+                       ? std::filesystem::directory_options::skip_permission_denied |
+                             std::filesystem::directory_options::follow_directory_symlink
+                       : std::filesystem::directory_options::follow_directory_symlink,
                    error),
           _ancestors{root} {}
 
@@ -140,7 +148,7 @@ public:
 
     Result<std::vector<std::string>> ListNodes() const override {
         std::vector<std::string> nodes;
-        LinkedWalk walk(_root);
+        LinkedWalk walk(_root, Unreadable::skipped);
         auto& iterator = walk.iterator;
         std::error_code& error = walk.error;
         const std::filesystem::recursive_directory_iterator end;
@@ -208,7 +216,7 @@ public:
 
     Result<std::uint64_t> StoredSizeBytes(std::chrono::steady_clock::time_point deadline) const override {
         std::uint64_t total = 0;
-        LinkedWalk walk(_root);
+        LinkedWalk walk(_root, Unreadable::failed);
         auto& iterator = walk.iterator;
         std::error_code& error = walk.error;
         if (error) {

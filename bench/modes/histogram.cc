@@ -80,8 +80,9 @@ private:
         range.planes.spectral = Range{operation.channel, operation.channel_count, 1};
         range.planes.polarization = operation.polarization;
         range.regions = {&plane, 1};
-        range.statistics =
-            Statistic::num_pixels | Statistic::sum | Statistic::sum_sq | Statistic::min | Statistic::max;
+        // The statistics carta-backend asks of that reduction, sum_sq_dev included; see RegionRunner.
+        range.statistics = Statistic::num_pixels | Statistic::sum | Statistic::sum_sq | Statistic::min |
+                           Statistic::max | Statistic::sum_sq_dev;
 
         double pixels = 0.0;
         double lowest = std::numeric_limits<double>::quiet_NaN();

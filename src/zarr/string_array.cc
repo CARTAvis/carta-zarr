@@ -13,6 +13,7 @@
 #include <iterator>
 #include <limits>
 #include <mutex>
+#include <new>
 #include <optional>
 #include <stdexcept>
 #include <string>
@@ -425,6 +426,8 @@ Result<void> CheckFixedLengthUtf32StringArray(const ArrayMetadata& array_metadat
         return {};
     } catch (const DecodeFailure& failure) {
         return Error{failure.code, failure.what(), std::string(node)};
+    } catch (const std::bad_alloc&) {
+        throw;  // nothing about the metadata, as in ReadFixedLengthUtf32StringArray
     } catch (const std::exception& error) {
         return Error{ErrorCode::invalid_metadata, error.what(), std::string(node)};
     }
@@ -464,6 +467,11 @@ Result<std::vector<std::string>> ReadFixedLengthUtf32StringArray(const std::file
         return values;
     } catch (const DecodeFailure& failure) {
         return Error{failure.code, failure.what(), std::string(node)};
+    } catch (const std::bad_alloc&) {
+        // A shortage of memory says nothing about the chunks. Store::ReadStringArray1D reports it as a
+        // read it could not make, which it asks again; as a decode_error it was an answer about the
+        // array, remembered for the store's life.
+        throw;
     } catch (const std::exception& error) {
         return Error{ErrorCode::decode_error, error.what(), std::string(node)};
     }

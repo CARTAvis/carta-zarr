@@ -126,15 +126,9 @@ Result<Occupancy> Occupancy::Of(BufferView<const RegionMask> regions, PlaneExten
 
     occupancy._chunk_cu0 = occupancy._u0 / chunk_u;
     occupancy._chunk_cv0 = occupancy._v0 / chunk_v;
+    // Every region lies on the plane, so the grid over their box has no more cells than the plane
+    // has pixels, and a cell's number cannot overflow.
     occupancy._columns = ((occupancy._u1 - 1) / chunk_u) - occupancy._chunk_cu0 + 1;
-    occupancy._rows = ((occupancy._v1 - 1) / chunk_v) - occupancy._chunk_cv0 + 1;
-
-    const auto cells = static_cast<std::size_t>(occupancy._columns * occupancy._rows);
-    if (cells > std::numeric_limits<std::uint32_t>::max()) {
-        return Error{ErrorCode::invalid_argument,
-                     "The regions span more chunks than one reduction can index", node};
-    }
-    occupancy._offsets.assign(cells + 1, 0);
 
     // The chunk span of one region's bounding box.
     const auto span = [&](const PlacedRegion& region, std::uint64_t& cx0, std::uint64_t& cx1, std::uint64_t& cy0,
@@ -153,6 +147,9 @@ Result<Occupancy> Occupancy::Of(BufferView<const RegionMask> regions, PlaneExten
     //
     // A region that is its whole box has nothing to narrow, and costs one row of each chunk row.
     std::vector<std::uint8_t> occupied;
+    // Set once the incidences pass what one reduction indexes, which ends every scan still going: a
+    // region whose box is the image would otherwise go on visiting cells nothing will keep.
+    bool too_many = false;
 
     // Walk one region's chunk rows, marking the columns each row occupies and handing the marked
     // cells over. How a row is marked is `mark_row`, which is the only part for_each_cell supplies.
@@ -170,7 +167,7 @@ Result<Occupancy> Occupancy::Of(BufferView<const RegionMask> regions, PlaneExten
 
         const std::uint64_t columns = cx1 - cx0 + 1;
         occupied.assign(static_cast<std::size_t>(columns), 0);
-        for (auto cy = cy0; cy <= cy1; ++cy) {
+        for (auto cy = cy0; cy <= cy1 && !too_many; ++cy) {
             std::fill(occupied.begin(), occupied.end(), std::uint8_t{0});
             std::uint64_t found = 0;
             const auto mark = [&](std::uint64_t column) {
@@ -241,21 +238,40 @@ Result<Occupancy> Occupancy::Of(BufferView<const RegionMask> regions, PlaneExten
     // Counting sort needs the counts before it can place anything, but the mask is the most
     // expensive thing here to look at twice -- a region whose box is the image is tens of megabytes
     // of it. So the incidences are recorded once, in region order, and the two passes read that.
-    std::vector<std::uint32_t> incidence_cells;
+    std::vector<std::uint64_t> incidence_cells;
     std::vector<std::uint64_t> region_first(region_count + 1, 0);
-    for (std::size_t i = 0; i < region_count; ++i) {
+    for (std::size_t i = 0; i < region_count && !too_many; ++i) {
         for_each_cell(placed[i], [&](std::uint64_t cx, std::uint64_t cy) {
-            incidence_cells.push_back(static_cast<std::uint32_t>(occupancy.Cell(cx, cy)));
+            if (incidence_cells.size() == kMaxChunkIncidences) {
+                too_many = true;
+                return;
+            }
+            incidence_cells.push_back(occupancy.Cell(cx, cy));
         });
-        if (incidence_cells.size() > kMaxChunkIncidences) {
-            return Error{ErrorCode::invalid_argument,
-                         "The regions together touch more chunks than one reduction can index", node};
-        }
         region_first.at(i + 1) = incidence_cells.size();
     }
+    if (too_many) {
+        return Error{ErrorCode::invalid_argument,
+                     "The regions together touch more chunks than one reduction can index", node};
+    }
 
-    for (const auto cell : incidence_cells) {
-        ++occupancy._offsets.at(static_cast<std::size_t>(cell) + 1);
+    // The occupied cells, and each incidence's place among them, found once.
+    occupancy._cells = incidence_cells;
+    std::sort(occupancy._cells.begin(), occupancy._cells.end());
+    occupancy._cells.erase(std::unique(occupancy._cells.begin(), occupancy._cells.end()), occupancy._cells.end());
+    std::vector<std::uint32_t> slots(incidence_cells.size());
+    for (std::size_t k = 0; k < incidence_cells.size(); ++k) {
+        slots[k] = static_cast<std::uint32_t>(
+            std::lower_bound(occupancy._cells.begin(), occupancy._cells.end(), incidence_cells[k]) -
+            occupancy._cells.begin());
+    }
+    static_assert(kMaxChunkIncidences <= std::numeric_limits<std::uint32_t>::max(),
+                  "an occupied cell is numbered in 32 bits");
+
+    const std::size_t cells = occupancy._cells.size();
+    occupancy._offsets.assign(cells + 1, 0);
+    for (const auto slot : slots) {
+        ++occupancy._offsets.at(static_cast<std::size_t>(slot) + 1);
     }
     for (std::size_t cell = 0; cell < cells; ++cell) {
         occupancy._offsets.at(cell + 1) += occupancy._offsets.at(cell);
@@ -265,8 +281,8 @@ Result<Occupancy> Occupancy::Of(BufferView<const RegionMask> regions, PlaneExten
     std::vector<std::uint64_t> cursor(occupancy._offsets.begin(), occupancy._offsets.end() - 1);
     for (std::size_t i = 0; i < region_count; ++i) {
         for (auto k = region_first.at(i); k < region_first.at(i + 1); ++k) {
-            const auto cell = static_cast<std::size_t>(incidence_cells.at(static_cast<std::size_t>(k)));
-            occupancy._entries.at(static_cast<std::size_t>(cursor.at(cell)++)) = static_cast<std::uint32_t>(i);
+            const auto slot = static_cast<std::size_t>(slots.at(static_cast<std::size_t>(k)));
+            occupancy._entries.at(static_cast<std::size_t>(cursor.at(slot)++)) = static_cast<std::uint32_t>(i);
         }
     }
 
@@ -276,41 +292,33 @@ Result<Occupancy> Occupancy::Of(BufferView<const RegionMask> regions, PlaneExten
 // image, while the cut touches one chunk per row. On a 4096^2 image that is 256 chunks decoded to
 // use 16. The runs are what the walk reads instead, so the cost follows the regions rather than the
 // rectangle that happens to contain them.
-    occupancy._runs_per_row.resize(static_cast<std::size_t>(occupancy._rows));
-    for (std::uint64_t row = 0; row < occupancy._rows; ++row) {
-        auto& runs = occupancy._runs_per_row.at(static_cast<std::size_t>(row));
-        for (std::uint64_t column = 0; column < occupancy._columns; ++column) {
-            const auto cell = static_cast<std::size_t>((row * occupancy._columns) + column);
-            if (occupancy._offsets.at(cell + 1) == occupancy._offsets.at(cell)) {
-                continue;
-            }
-            if (!runs.empty() && runs.back().last + 1 == column) {
-                runs.back().last = column;
-            } else {
-                runs.push_back(ColumnRun{column, column});
-            }
+    // Read off the occupied cells, which are in row order already.
+    for (const auto cell : occupancy._cells) {
+        const std::uint64_t row = cell / occupancy._columns;
+        const std::uint64_t column = cell % occupancy._columns;
+        if (occupancy._occupied_rows.empty() || occupancy._occupied_rows.back().row != row) {
+            occupancy._occupied_rows.push_back(OccupiedRow{row, {}});
+        }
+        auto& runs = occupancy._occupied_rows.back().runs;
+        if (!runs.empty() && runs.back().last + 1 == column) {
+            runs.back().last = column;
+        } else {
+            runs.push_back(ColumnRun{column, column});
         }
     }
 
     // The chunks one spectral layer of the whole region set occupies. Not the plan's layer, which
     // is the whole plane: a reduction spends its emit budget against the region set it was given.
-    for (const auto& row_runs : occupancy._runs_per_row) {
-        for (const auto& run : row_runs) {
-            occupancy._layer_chunks += run.last - run.first + 1;
-        }
-    }
+    occupancy._layer_chunks = cells;
 
     return occupancy;
 }
 
 std::vector<OccupiedFootprint> Occupancy::Footprints(std::uint64_t chunks_per_read) const {
     std::vector<OccupiedFootprint> footprints;
-    for (std::uint64_t row = 0; row < _rows;) {
-        const auto& runs = _runs_per_row.at(static_cast<std::size_t>(row));
-        if (runs.empty()) {
-            ++row;
-            continue;
-        }
+    for (std::size_t at = 0; at < _occupied_rows.size();) {
+        const std::uint64_t row = _occupied_rows[at].row;
+        const auto& runs = _occupied_rows[at].runs;
 
         // Rows below that repeat this row's runs exactly are read with it, so that a solid rectangle
         // becomes a few large requests while a diagonal stays one chunk per row -- as many rows as a
@@ -320,12 +328,14 @@ std::vector<OccupiedFootprint> Occupancy::Footprints(std::uint64_t chunks_per_re
             widest = std::max(widest, run.last - run.first + 1);
         }
         const std::uint64_t band_limit = UnitsAffordable(chunks_per_read, widest);
-        std::uint64_t band_end = row + 1;
-        while (band_end < _rows && (band_end - row) < band_limit &&
-               _runs_per_row.at(static_cast<std::size_t>(band_end)) == runs) {
-            ++band_end;
+        // Only the next row along can join the band, and only if it is occupied exactly alike.
+        std::size_t next = at + 1;
+        while (next < _occupied_rows.size() && _occupied_rows[next].row == row + (next - at) &&
+               (next - at) < band_limit && _occupied_rows[next].runs == runs) {
+            ++next;
         }
-        const std::uint64_t band_rows = band_end - row;
+        const std::uint64_t band_rows = next - at;
+        const std::uint64_t band_end = row + band_rows;
 
         const std::uint64_t chunk_cv_begin = _chunk_cv0 + row;
         const std::uint64_t chunk_cv_end = _chunk_cv0 + band_end;
@@ -359,7 +369,7 @@ std::vector<OccupiedFootprint> Occupancy::Footprints(std::uint64_t chunks_per_re
                 first += width;
             }
         }
-        row = band_end;
+        at = next;
     }
     return footprints;
 }

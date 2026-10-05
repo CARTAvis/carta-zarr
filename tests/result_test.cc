@@ -11,6 +11,7 @@
 #include <memory>
 #include <set>
 #include <string>
+#include <type_traits>
 #include <utility>
 #include <variant>
 
@@ -39,6 +40,14 @@ void TestAValue() {
 
     *result = "changed";
     Require(result.value() == "changed", "* did not reach the value itself");
+}
+
+// An Error declared and filled in later has a code before it is given one, and is still built by
+// naming its fields in order, as the library builds every one.
+static_assert(std::is_aggregate_v<carta::zarr::Error>);
+void TestADeclaredErrorHasACode() {
+    carta::zarr::Error error;
+    Require(error.code == ErrorCode::not_found && error.message.empty(), "a declared Error had no code");
 }
 
 void TestAnError() {
@@ -107,6 +116,7 @@ void TestErrorCodeNames() {
 int main() {
     try {
         TestAValue();
+        TestADeclaredErrorHasACode();
         TestAnError();
         TestTheRvalueOverloadsMove();
         TestVoid();

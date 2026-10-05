@@ -252,6 +252,11 @@ if(CARTA_ZARR_BUILD_TESTS AND BUILD_TESTING)
         TEST_NAME carta-zarr-result
         SOURCES tests/result_test.cc)
 
+    carta_zarr_add_test(carta_zarr_pool_release_tests PUBLIC
+        TEST_NAME carta-zarr-pool-release
+        SOURCES tests/pool_release_test.cc
+        DEFINITIONS ${CARTA_ZARR_WIDE_FIXTURE})
+
     carta_zarr_add_test(carta_zarr_allocation_failure_tests PUBLIC
         TEST_NAME carta-zarr-allocation-failure
         SOURCES tests/allocation_failure_test.cc

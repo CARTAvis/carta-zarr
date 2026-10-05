@@ -144,7 +144,9 @@ install(TARGETS carta_zarr
     RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
     INCLUDES DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})
 install(DIRECTORY include/ DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})
-install(FILES LICENSE README.md DESTINATION ${CMAKE_INSTALL_DOCDIR})
+include(cmake/ThirdPartyNotices.cmake)
+carta_zarr_write_third_party_notices("${FETCHCONTENT_BASE_DIR}" "${CMAKE_CURRENT_BINARY_DIR}/THIRD_PARTY_NOTICES")
+install(FILES LICENSE README.md "${CMAKE_CURRENT_BINARY_DIR}/THIRD_PARTY_NOTICES" DESTINATION ${CMAKE_INSTALL_DOCDIR})
 
 write_basic_package_version_file(
     "${CMAKE_CURRENT_BINARY_DIR}/CartaZarrConfigVersion.cmake"
@@ -694,6 +696,13 @@ if(CARTA_ZARR_BUILD_TESTS AND BUILD_TESTING)
                 "-DNM=${CMAKE_NM}"
                 -P "${CMAKE_CURRENT_SOURCE_DIR}/tests/check_exports.cmake")
     endif()
+
+    # What the library carries, it carries the notices of. See cmake/ThirdPartyNotices.cmake.
+    add_test(NAME carta-zarr-third-party-notices
+        COMMAND ${CMAKE_COMMAND}
+            "-DBINARY_DIR=${CMAKE_CURRENT_BINARY_DIR}"
+            "-DNOTICES=${CMAKE_CURRENT_BINARY_DIR}/THIRD_PARTY_NOTICES"
+            -P "${CMAKE_CURRENT_SOURCE_DIR}/tests/check_third_party_notices.cmake")
 
     if(CARTA_ZARR_BUILD_PACKAGE_TEST)
         add_test(

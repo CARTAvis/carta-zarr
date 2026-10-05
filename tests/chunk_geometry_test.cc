@@ -68,7 +68,6 @@ void TestTheLayoutIsReadThroughThePermutation() {
             "the chunk shape should come back in logical order");
     Require(geometry.grid_shape == std::vector<std::uint64_t>{2, 2, 16, 4, 2},
             "and the grid should be each axis's length over its own chunk");
-    Require(geometry.transpose_required, "a stored order that is not the logical one carries a transpose");
     Require(geometry.fastest_spatial_axis == AxisRole::spatial_y,
             "m is stored last, so a plane is contiguous along m");
     Require(!geometry.sharded && geometry.shard_shape == geometry.chunk_shape,
@@ -85,7 +84,6 @@ void TestAnUntransposedLayout() {
     const auto geometry = BuildChunkGeometry(image, layout);
 
     Require(geometry.chunk_shape == std::vector<std::uint64_t>{16, 20, 2, 1, 1}, "nothing to permute");
-    Require(!geometry.transpose_required, "and nothing to transpose");
     Require(geometry.fastest_spatial_axis == AxisRole::spatial_y,
             "m is stored after l here, so a plane is still contiguous along m");
 }

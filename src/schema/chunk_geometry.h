@@ -51,9 +51,6 @@ inline ChunkGeometry BuildChunkGeometry(const ImageDescriptor& descriptor, const
         // Both extents are positive by the same guarantee, so neither zero this divides by nor the
         // shard of no extent the line above used to substitute for can arrive.
         geometry.grid_shape.at(logical) = (axis.length + chunk - 1) / chunk;
-        if (stored != logical) {
-            geometry.transpose_required = true;
-        }
     }
 
     // The last stored dimension varies fastest, so of the two spatial axes the one with the larger

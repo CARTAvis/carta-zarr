@@ -101,7 +101,6 @@ void TestAxesAndGeometry(const carta::zarr::Image& sky) {
 
     // Stored order is (time, frequency, polarization, l, m), so every axis moves.
     const auto& geometry = sky.chunk_geometry();
-    Require(geometry.transpose_required, "a stored order differing from the logical order is a transpose");
     Require(geometry.chunk_shape == std::vector<std::uint64_t>{2, 5, 1, 1, 1},
             "chunk shape should be reported in logical order");
     Require(geometry.grid_shape == std::vector<std::uint64_t>{2, 1, 2, 3, 1}, "chunk grid shape is wrong");

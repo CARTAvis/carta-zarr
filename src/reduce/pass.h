@@ -95,8 +95,8 @@ protected:
             }
             ++reads_done;
 
-            if (auto control = zarr::CheckReadControl(_options.control, _plan.descriptor->id); !control) {
-                return control.error();
+            if (auto allowed = Allowed(); !allowed) {
+                return allowed.error();
             }
 
             SlabRequest slab_request;
@@ -171,6 +171,9 @@ protected:
         return {};
     }
 
+    // Whether the caller's control still lets the walk go on: not cancelled and not past its deadline.
+    Result<void> Allowed() const { return zarr::CheckReadControl(_options.control, _plan.descriptor->id); }
+
 private:
     // What a slab is asked for and read into, and the read itself: the walk's own, and nothing a
     // caller of it names. They were declared beside it for anyone to use, and only it ever did.
@@ -208,6 +211,7 @@ private:
      * The returned Slab points into this walk's buffers, so it is valid until the next read.
      */
     Result<Slab> ReadSlab(const SlabRequest& request);
+
 
     const PixelSource& _source;
     const PassPlan& _plan;
@@ -367,6 +371,12 @@ private:
     template <typename Report, typename Visit>
     Result<void> Walk(SelectionChannel begin, SelectionChannel end, std::uint64_t& reads_done,
                       std::uint64_t& chunks_done, Report&& report, Visit& visit) {
+        // Asked here as well as before every read, because a region set occupying nothing makes no
+        // read: already cancelled, or past its deadline, it was handed a complete block and reported
+        // success without the control ever being asked.
+        if (auto allowed = Allowed(); !allowed) {
+            return allowed.error();
+        }
         if constexpr (std::is_same_v<Shape, PlaneBands>) {
             return OverBands(begin, end, reads_done, chunks_done, report, visit);
         } else {

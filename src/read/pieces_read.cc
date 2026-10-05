@@ -14,6 +14,8 @@
 #include "pixel_mask.h"
 #include "zarr/pixel_selection.h"
 
+#include <algorithm>
+#include <cstddef>
 #include <cstdint>
 #include <string>
 #include <utility>
@@ -124,6 +126,69 @@ std::uint64_t Elements(const ReadRequest& request) {
     return elements;
 }
 
+// The most elements of a sample read at once when the caller sets no budget: 64 Ki, a quarter of a
+// MiB of pixels. A sample is one element a chunk and usually a few thousand at most, but an image of
+// small chunks can have millions to a plane.
+constexpr std::uint64_t kSampleElements = std::uint64_t{1} << 16;
+
+// The most elements of `element_bytes` each that one piece of a sample may hold.
+std::uint64_t SampleElements(const ReadOptions& options, std::size_t element_bytes) {
+    return options.read_budget_bytes == 0 ? kSampleElements
+                                          : std::max<std::uint64_t>(1, options.read_budget_bytes / element_bytes);
+}
+
+// Calls `read` with `request` cut into pieces of at most `most` elements, in turn, until one fails.
+// The axes after some axis k are kept whole, k is cut into runs, and every axis before it is taken
+// an element at a time: k is the first axis whose followers fit together, and when not even the last
+// one alone does, it is that one that is cut.
+template <typename Read>
+Result<void> ForEachPiece(const ReadRequest& request, std::uint64_t most, Read&& read) {
+    const std::size_t rank = request.axes.size();
+    std::size_t cut = 0;
+    std::uint64_t inner = Elements(request);
+    while (cut < rank) {
+        inner /= std::max<std::uint64_t>(1, request.axes[cut].count);
+        if (inner <= most) {
+            break;
+        }
+        ++cut;
+    }
+    if (cut == rank) {
+        return read(request);
+    }
+    const std::uint64_t run = std::max<std::uint64_t>(1, most / std::max<std::uint64_t>(1, inner));
+    ReadRequest piece = request;
+    std::vector<std::uint64_t> at(cut, 0);
+    while (true) {
+        for (std::size_t axis = 0; axis < cut; ++axis) {
+            const auto& range = request.axes[axis];
+            piece.axes[axis] = Range{range.start + (at[axis] * range.stride), 1, range.stride};
+        }
+        const auto& along = request.axes[cut];
+        for (std::uint64_t first = 0; first < along.count; first += run) {
+            piece.axes[cut] = Range{along.start + (first * along.stride), std::min(run, along.count - first), along.stride};
+            if (auto done = read(piece); !done) {
+                return done;
+            }
+        }
+        // The next element of the axes before the cut, the last of them fastest.
+        std::size_t axis = cut;
+        while (axis > 0) {
+            --axis;
+            if (++at[axis] < request.axes[axis].count) {
+                break;
+            }
+            at[axis] = 0;
+            if (axis == 0) {
+                return {};
+            }
+        }
+        if (cut == 0) {
+            return {};
+        }
+    }
+}
+
 }  // namespace
 
 Result<std::uint64_t> PrefetchChunks(const PixelSource& source, const ImageDescriptor& descriptor,
@@ -134,16 +199,28 @@ Result<std::uint64_t> PrefetchChunks(const PixelSource& source, const ImageDescr
     if (auto checked = zarr::BuildSelection(descriptor, request, zarr::DestinationOrder::logical); !checked) {
         return checked.error();
     }
+    // Before anything is allocated, as a read checks: a cancelled prefetch holds no memory for it.
+    if (auto allowed = zarr::CheckReadControl(options.control, descriptor.id); !allowed) {
+        return allowed.error();
+    }
     // The pixels and the flag are each sampled one element a chunk by their own layout, so the
     // pixels are read here without the flag, which is sampled below.
+    //
+    // Each in pieces, through one buffer the budget holds. A sample is one element a chunk, and an
+    // image of small chunks has a great many: read whole, a 1 KiB budget allocated 4 MiB for it.
     const auto sample = OneElementPerChunk(geometry, request);
     const auto chunks = Elements(sample);
     auto pixels_only = options;
     pixels_only.apply_pixel_mask = false;
-    std::vector<float> discarded(static_cast<std::size_t>(chunks));
-    auto read =
-        ReadInPieces(source, descriptor, geometry, flag_geometry, sample, {discarded.data(), discarded.size()},
-                     pixels_only, {});
+    std::vector<float> discarded(static_cast<std::size_t>(std::min(chunks, SampleElements(options, sizeof(float)))));
+    auto read = ForEachPiece(sample, discarded.size(), [&](const ReadRequest& piece) -> Result<void> {
+        auto piece_read = ReadInPieces(source, descriptor, geometry, flag_geometry, piece,
+                                       {discarded.data(), discarded.size()}, pixels_only, {});
+        if (!piece_read) {
+            return piece_read.error();
+        }
+        return {};
+    });
     if (!read) {
         return read.error();
     }
@@ -153,12 +230,15 @@ Result<std::uint64_t> PrefetchChunks(const PixelSource& source, const ImageDescr
 
     const auto flag_sample = OneElementPerChunk(flag_geometry, request);
     const auto flag_chunks = Elements(flag_sample);
-    auto selection = zarr::BuildSelection(descriptor, flag_sample, zarr::DestinationOrder::logical);
-    if (!selection) {
-        return selection.error();
-    }
-    std::vector<std::uint8_t> discarded_flags(static_cast<std::size_t>(flag_chunks));
-    auto flags = source.ReadMask(selection.value(), {discarded_flags.data(), discarded_flags.size()}, options.control);
+    std::vector<std::uint8_t> discarded_flags(
+        static_cast<std::size_t>(std::min(flag_chunks, SampleElements(options, sizeof(std::uint8_t)))));
+    auto flags = ForEachPiece(flag_sample, discarded_flags.size(), [&](const ReadRequest& piece) -> Result<void> {
+        auto selection = zarr::BuildSelection(descriptor, piece, zarr::DestinationOrder::logical);
+        if (!selection) {
+            return selection.error();
+        }
+        return source.ReadMask(selection.value(), {discarded_flags.data(), discarded_flags.size()}, options.control);
+    });
     if (!flags) {
         return flags.error();
     }

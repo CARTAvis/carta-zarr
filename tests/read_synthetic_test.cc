@@ -391,6 +391,34 @@ void TestAPrefetchIsMaskedAndCheckedAsAReadIs() {
     Require(refused.pixel_reads() == 0 && refused.mask_reads() == 0, "a refused prefetch read something");
 }
 
+// The sample is one element a chunk, and an image of small chunks has a great many: the buffers it is
+// read into are the ones the library allocates for a read's own sake, which the budget bounds. Here
+// every chunk is one pixel, so the sample is the whole cube, 15360 elements -- 60 KiB of pixels and 15
+// KiB of flag, against a budget of 1 KiB. Each is read in pieces through a buffer the budget holds,
+// and every chunk is still decoded, once.
+void TestAPrefetchHoldsItsSampleToTheBudget() {
+    const auto image = MakeImage(true);
+    ChunkGeometry geometry = MakeGeometry();
+    geometry.chunk_shape = {1, 1, 1, 1, 1};
+    SyntheticPixelSource source(image, geometry, Value);
+    ReadOptions options;
+    options.read_budget_bytes = 1024;
+    const auto chunks = PrefetchChunks(source, image, geometry, geometry, WholeCube(), options);
+    Require(chunks && *chunks == 2 * kElements,
+            "a prefetch in pieces did not count every chunk of the pixels and the flag" +
+                (chunks ? std::string{} : ": " + chunks.error().message));
+    for (const auto size : source.pixel_destinations()) {
+        Require(size * sizeof(float) <= options.read_budget_bytes,
+                "a prefetch read its sample into " + std::to_string(size) + " floats against a budget of 1 KiB");
+    }
+    for (const auto size : source.mask_destinations()) {
+        Require(size <= options.read_budget_bytes,
+                "a prefetch read the flag's sample into " + std::to_string(size) + " bytes against a budget of 1 KiB");
+    }
+    Require(source.chunks_touched() == kElements && source.most_hits_on_one_chunk() == 1,
+            "a prefetch in pieces did not decode every chunk exactly once");
+}
+
 int main() {
     try {
         TestAFailedFlagLeavesTheDestinationAlone();
@@ -404,6 +432,7 @@ int main() {
         TestASampleTakesOneElementOfEachChunk();
         TestAPrefetchDecodesWhatAReadWould();
         TestAPrefetchIsMaskedAndCheckedAsAReadIs();
+        TestAPrefetchHoldsItsSampleToTheBudget();
         std::cout << "carta-zarr read synthetic tests passed\n";
         return 0;
     } catch (const std::exception& error) {

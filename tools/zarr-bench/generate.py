@@ -422,15 +422,43 @@ class Synthetic:
 
 
 @dataclasses.dataclass(frozen=True)
+class SkyDirection:
+    """A synthetic cube's right ascension and declination: the SIN projection inverted, as XRADIO's
+    are, over the cube's l and m. Each is as large as a plane -- 8 GiB apiece at 32768 square -- so
+    it is computed a block at a time, as the pixels are, rather than whole."""
+
+    reference: tuple[float, float]  # right ascension and declination of the projection centre
+    lengths: tuple[int, int]  # of l and m
+    increments: tuple[float, float]  # of l and m
+
+    def axis(self, which: int, start: int, stop: int) -> np.ndarray:
+        """l or m from `start` to `stop`, exactly as the cube's l and m arrays hold them."""
+        return (np.arange(start, stop) - self.lengths[which] // 2) * self.increments[which]
+
+    def block(self, kind: str, start: tuple[int, ...], stop: tuple[int, ...]) -> np.ndarray:
+        ra0, dec0 = self.reference
+        l, m = self.axis(0, start[0], stop[0])[:, None], self.axis(1, start[1], stop[1])[None, :]
+        n = np.sqrt(np.maximum(0.0, 1.0 - l * l - m * m))
+        if kind == "declination":
+            return np.arcsin(m * math.cos(dec0) + n * math.sin(dec0))
+        return ra0 + np.arctan2(l, n * math.cos(dec0) - m * math.sin(dec0))
+
+
+# The coordinates as large as a plane, written block by block through fill().
+SKY_DIRECTION = ("right_ascension", "declination")
+
+
+@dataclasses.dataclass(frozen=True)
 class Job:
     """One array to fill, block by block: everything a worker process needs to do its share."""
 
     target: str  # path of the array being written
-    kind: str  # "copy", "pixels" or "flags"
+    kind: str  # "copy", "pixels", "flags", or one of SKY_DIRECTION
     source: str | None = None  # array read from, for a copy
     offset: tuple[int, ...] = ()  # where the target's origin sits in the source, for a crop
     synthetic: Synthetic | None = None
     keep_bits: int | None = None
+    direction: SkyDirection | None = None
 
 
 _OPEN: dict[str, Any] = {}
@@ -465,6 +493,8 @@ def fill_block(job: Job, start: tuple[int, ...], stop: tuple[int, ...]) -> int:
         values = job.synthetic.pixels(start, stop)
     elif job.kind == "flags":
         values = job.synthetic.flags(start, stop)
+    elif job.kind in SKY_DIRECTION:
+        values = job.direction.block(job.kind, start, stop)
     else:
         shifted = tuple(slice(a + o, b + o) for a, b, o in zip(start, stop, job.offset))
         values = np.asarray(_open(job.source, "r")[shifted])
@@ -691,17 +721,10 @@ def synthesize(args: argparse.Namespace, out: Path) -> dict[str, Any]:
     rest = frequency_attributes.get("rest_frequency", {}).get("data", frequencies[0])
     reference = root_metadata["attributes"]["coordinate_system_info"]["reference_direction"]["data"]
 
-    def sky_direction() -> tuple[np.ndarray, np.ndarray]:
-        # The SIN projection inverted, as XRADIO's right_ascension and declination are.
-        ra0, dec0 = reference
-        l, m = l_axis[:, None], m_axis[None, :]
-        n = np.sqrt(np.maximum(0.0, 1.0 - l * l - m * m))
-        dec = np.arcsin(m * math.cos(dec0) + n * math.sin(dec0))
-        ra = ra0 + np.arctan2(l, n * math.cos(dec0) - m * math.sin(dec0))
-        return ra, dec
+    direction = SkyDirection((float(reference[0]), float(reference[1])), (length_l, length_m),
+                             (float(l_values[1] - l_values[0]), float(m_values[1] - m_values[0])))
 
     beam = values("BEAM_FIT_PARAMS_SKY") if "BEAM_FIT_PARAMS_SKY" in names else None
-    ra, dec = sky_direction()
     coordinates: dict[str, np.ndarray] = {
         "time": values("time"),
         "frequency": frequencies,
@@ -709,13 +732,11 @@ def synthesize(args: argparse.Namespace, out: Path) -> dict[str, Any]:
         "polarization": np.asarray(STOKES[:length_p], dtype="<U1"),
         "l": l_axis,
         "m": m_axis,
-        "right_ascension": ra,
-        "declination": dec,
         "beam_params_label": values("beam_params_label") if "beam_params_label" in names else None,
     }
     if beam is not None:
         coordinates["BEAM_FIT_PARAMS_SKY"] = np.broadcast_to(beam[:, :1, :1, :], (1, length_f, length_p, beam.shape[3])).copy()
-    unknown = [name for name in names if name != image and name not in coordinates]
+    unknown = [name for name in names if name != image and name not in coordinates and name not in SKY_DIRECTION]
     if unknown:
         raise SystemExit(f"the template has arrays this generator does not know how to stretch: {', '.join(unknown)}")
 
@@ -738,18 +759,28 @@ def synthesize(args: argparse.Namespace, out: Path) -> dict[str, Any]:
     for name in names:
         if name == image:
             continue
-        data = coordinates[name]
         metadata = read_metadata(template / name)
-        metadata["shape"] = list(data.shape)
         array_dims = metadata.get("dimension_names") or []
+        if name in SKY_DIRECTION:
+            if array_dims != ["l", "m"]:
+                raise SystemExit(f"the template's {name} is stored as {array_dims}; synthesis expects ['l', 'm']")
+            data_shape = [length_l, length_m]
+        else:
+            data_shape = list(coordinates[name].shape)
+        metadata["shape"] = data_shape
         # Coordinates over l and m are as large as a plane, so they are chunked like the image's
         # planes; the rest are small enough to be one chunk, which is what XRADIO writes.
-        chunk = [layout.chunk[AXES.index(d)] if d in ("l", "m") else n for d, n in zip(array_dims, data.shape)]
-        metadata["chunk_grid"] = {"name": "regular", "configuration": {"chunk_shape": chunk or list(data.shape)}}
+        chunk = [layout.chunk[AXES.index(d)] if d in ("l", "m") else n for d, n in zip(array_dims, data_shape)]
+        metadata["chunk_grid"] = {"name": "regular", "configuration": {"chunk_shape": chunk or data_shape}}
         write_array_metadata(out / name, metadata)
+        if name in SKY_DIRECTION:
+            log(f"synthesizing {name}")
+            fill(Job(str(out / name), name, direction=direction), data_shape, tuple(chunk),
+                 np.dtype(metadata["data_type"]).itemsize, args)
+            continue
         with warnings.catch_warnings():
             warnings.simplefilter("ignore")
-            zarr.open_array(str(out / name), mode="r+")[...] = data
+            zarr.open_array(str(out / name), mode="r+")[...] = coordinates[name]
 
     sky = with_layout(image_metadata, shape, layout, 4)
     sky["attributes"]["object_name"] = "carta-zarr-bench synthetic"

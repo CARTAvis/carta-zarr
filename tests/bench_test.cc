@@ -22,6 +22,7 @@
 #include "options.h"
 #include "record.h"
 #include "mode.h"
+#include "modes/cube.h"
 
 #include <algorithm>
 #include <chrono>
@@ -737,6 +738,14 @@ void TestSharedChunksAreMarked() {
     }
 }
 
+// A plane's buffer is a plane and a spectrum's is a spectrum. Both were sized for the larger, so a
+// spectrum of a 32768-square image held 4 GiB a process for the few kilobytes it wrote.
+void TestARunnerHoldsWhatItsModeReads() {
+    const auto axes = Cube(32768, 32768, 4, 1);
+    Require(carta::zarr::bench::PixelsRead(axes, true) == std::size_t{32768} * 32768, "a plane is not a plane's pixels");
+    Require(carta::zarr::bench::PixelsRead(axes, false) == 4, "a spectrum is not a spectrum's pixels");
+}
+
 // A mode writes the settings that shape it, and no other mode's: the run key is made from these
 // columns, so a column another mode wrote would move a key on a setting that does not shape it.
 void TestAModeWritesOnlyItsOwnSettings() {
@@ -1010,6 +1019,7 @@ int main(int argc, char** argv) {
         TestAnAnimationPlaysConsecutiveChannels();
         TestSharedChunksAreMarked();
         TestAModeWritesOnlyItsOwnSettings();
+        TestARunnerHoldsWhatItsModeReads();
         TestAFingerprintHasOneNaN();
         TestTheRunKeyIsTheSettings();
         TestABuildIsKnownByWhatItRuns();

@@ -95,6 +95,7 @@ public:
                                        carta::zarr::BufferView<std::uint8_t> destination,
                                        const carta::zarr::ReadControl&) const override {
         ++_mask_reads;
+        _mask_destinations.push_back(destination.size);
         if (_mask_fail_at != 0 && _mask_reads == _mask_fail_at) {
             return carta::zarr::Error{_mask_fail_code, "The synthetic source was told to fail this flag read",
                                       "FLAG"};
@@ -118,6 +119,9 @@ public:
     // restated the selection's size -- the one mistake a check at the seam cannot see from inside.
     const std::vector<std::size_t>& pixel_destinations() const {
         return _pixel_destinations;
+    }
+    const std::vector<std::size_t>& mask_destinations() const {
+        return _mask_destinations;
     }
     std::uint64_t elements_read() const {
         return _elements;
@@ -258,6 +262,7 @@ private:
     mutable std::uint64_t _mask_reads = 0;
     mutable std::uint64_t _elements = 0;
     mutable std::vector<std::size_t> _pixel_destinations;
+    mutable std::vector<std::size_t> _mask_destinations;
     mutable std::map<std::vector<std::uint64_t>, std::uint64_t> _chunk_hits;
 };
 

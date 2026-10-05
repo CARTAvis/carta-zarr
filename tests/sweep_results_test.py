@@ -253,6 +253,24 @@ class Recommending(unittest.TestCase):
         self.assertEqual((now.layout.name, after.layout.name), ("current", "better"))
 
 
+    def test_a_choice_whose_operations_failed_is_never_chosen(self) -> None:
+        # Nine of ten operations failed and the one that finished was fast: ranked on what finished,
+        # it was the best layout and the recommendation.
+        failing, current = layout("failing"), layout("current", current=True)
+        for stage in ("stage1", "stage2"):
+            with self.subTest(stage=stage):
+                rows = [row(failing, "plane", 0.5, stage=stage, op_index="0")]
+                rows += [row(failing, "plane", 0.0, stage=stage, op_index=str(i), status="error")
+                         for i in range(1, 10)]
+                rows += [row(current, "plane", 2.0, stage=stage, op_index=str(i)) for i in range(10)]
+                analysis = self.analysis([failing, current], rows, stage2={"layouts": ["failing"]})
+                if stage == "stage1":
+                    ranking = analysis.stage1_ranking(1)
+                    self.assertEqual(ranking[0][0].name, "current", "a layout that failed ranked first")
+                else:
+                    _, after = analysis.recommendations()
+                    self.assertEqual(after.layout.name, "current", "a layout that failed was recommended")
+
 
 class WhichImageIsMeasured(unittest.TestCase):
     """A sweep of a source's MODEL writes MODEL into every layout -- generate.py takes source.image --

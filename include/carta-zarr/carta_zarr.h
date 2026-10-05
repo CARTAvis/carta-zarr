@@ -107,6 +107,17 @@ public:
     // applied its chunks are decoded too. Safe to call concurrently with Read on one handle.
     Result<std::uint64_t> Prefetch(const ReadRequest& request, const ReadOptions& options = {}) const;
 
+    // The bytes one chunk of this image keeps in a cache once decoded: its elements at the type they
+    // are stored as -- not the float a Read hands back -- and, when `options` apply the pixel mask,
+    // the flag chunks decoding it brings, whole, at a byte an element. What a caller sizing a cache
+    // for chunks it will come back to counts in: counted in floats, a float64 image's cache holds half
+    // the chunks it was meant to, and a flagged one's fewer again.
+    //
+    // The most one chunk can bring. A flag chunked coarser than its image is shared by several pixel
+    // chunks and counted beside each, which is the side to be wrong on when what is being sized is
+    // room to keep things.
+    std::uint64_t DecodedChunkBytes(const ReadOptions& options = {}) const;
+
     // Reduces every region over the same channels in one pass over the pixels, handing results to
     // the sink block by block.
     //

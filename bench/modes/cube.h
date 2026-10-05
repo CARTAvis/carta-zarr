@@ -42,8 +42,13 @@ private:
     std::size_t _item_size;
 };
 
+// How many pixels ReadPixels writes: a plane's, or a spectrum's. What a buffer for it is sized by --
+// sized for the larger of the two in either mode, a spectrum of a 32768-square image held a 4 GiB
+// buffer per process for the few kilobytes it wrote.
+std::size_t PixelsRead(const CubeAxes& axes, bool plane);
+
 // A whole plane at `operation`'s channel, or when `plane` is false every channel at its pixel, read
-// into `pixels`, which has room for either: how many pixels were written.
+// into `pixels`, which has room for PixelsRead(axes, plane): how many pixels were written.
 Result<std::size_t> ReadPixels(const Image& image, const CubeAxes& axes, const Operation& operation, bool plane,
                                float* pixels, const ReadOptions& options);
 

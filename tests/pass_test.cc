@@ -838,6 +838,47 @@ void TestFootprintsOccupyingNothing() {
     Require(reads == 0, "having read nothing");
 }
 
+// Cancellation is checked at every storage operation, and a region set occupying nothing has none:
+// a request already cancelled, or past its deadline, was handed a complete block of zeroes and
+// reported success, with the control never asked. It is asked before the walk as well.
+void TestAPassThatReadsNothingIsStillCancelled() {
+    const auto image = MakeImage(64, 64, 8);
+    const auto geometry = MakeGeometry(64, 64, 1, AxisRole::spatial_y);
+    for (const bool by_deadline : {false, true}) {
+        ReadOptions options;
+        int asked = 0;
+        if (by_deadline) {
+            options.control.deadline = std::chrono::steady_clock::now() - std::chrono::seconds(1);
+        } else {
+            options.control.cancellation_requested = [&]() {
+                ++asked;
+                return true;
+            };
+        }
+        const auto plan = Plan(image, geometry, Range{0, 8, 1}, options);
+        SyntheticPixelSource source(image, geometry, Encoded);
+        const std::vector<Footprint> nothing;
+        auto pass = PassOverFootprints(source, plan, options, nothing, kCancelled);
+        int handed = 0;
+        const auto blocks = pass.InBlocks(
+            sizeof(double), 0, [](std::uint64_t) {}, [](const Footprint&, const Slab&) {},
+            [&](SelectionChannel, std::uint64_t, bool, double) {
+                ++handed;
+                return true;
+            });
+        const std::string how = by_deadline ? "past its deadline" : "cancelled";
+        Require(!blocks && blocks.error().code == carta::zarr::ErrorCode::cancelled,
+                "a pass over nothing " + how + " reported success");
+        Require(handed == 0, "a pass over nothing " + how + " handed a block over");
+        Require(by_deadline || asked > 0, "a pass over nothing never asked whether it was cancelled");
+
+        auto whole = PassOverFootprints(source, plan, options, nothing, kCancelled);
+        const auto walked = whole.Whole([](double) { return true; }, [](const Footprint&, const Slab&) {});
+        Require(!walked && walked.error().code == carta::zarr::ErrorCode::cancelled,
+                "a whole walk over nothing " + how + " reported success");
+    }
+}
+
 }  // namespace
 
 int main() {
@@ -857,6 +898,7 @@ int main() {
         TestAFlaggedPixelArrivesAsNaN();
         TestCancellationStopsThePass();
         TestAnExpiredDeadlineStopsThePass();
+        TestAPassThatReadsNothingIsStillCancelled();
         TestAReadFailureStopsThePass();
         TestALargePlaneSplitsIntoBands();
         TestAChunkRowWiderThanTheBudgetIsSplitAlongIt();

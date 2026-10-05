@@ -158,6 +158,12 @@ struct RegionMask {
 // against the narrowed bounds. An integer count is the one thing here that can match exactly rather
 // than to a tolerance, so the sequence of roundings is copied rather than approximated.
 //
+// Copied for the ranges a float does not span as well. Where the narrowed width underflows to zero
+// or overflows to infinity, or the narrowed bounds span more than a float holds or meet in one
+// float, every pixel of the range is binned in double against a width found from the narrowed
+// bounds, and a range of no width puts every pixel it admits in the first bin. The bounds must be
+// finite with lower below upper, and must each fit in a float.
+//
 // A pixel outside [lower, upper] is not counted, and neither is one that is not finite, which is
 // the same rule: NaN fails both comparisons.
 struct HistogramRequest {

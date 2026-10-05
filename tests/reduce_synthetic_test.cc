@@ -223,6 +223,97 @@ void TestARangeWiderThanAFloatStillBinsItsPixels() {
     }
 }
 
+// carta-backend's Histogram::Fill, which is the answer the library's histogram stands in for. Over a
+// range whose float offsets are all finite -- positive span and bin width, neither overflowing -- a
+// pixel is binned in float, against the narrowed bounds and width. Over any other range, every
+// pixel is binned in double, against a width found from the narrowed bounds, and a range of no width
+// puts every pixel it admits in the first bin. The choice is made once for the range, not per pixel.
+std::vector<std::uint64_t> CallerCounts(const std::vector<float>& values, double range_lower, double range_upper,
+                                        std::size_t bins) {
+    const float lower = static_cast<float>(range_lower);
+    const float upper = static_cast<float>(range_upper);
+    const float width = static_cast<float>((range_upper - range_lower) / static_cast<double>(bins));
+    const float span = upper - lower;
+    const bool finite_offsets = span > 0 && std::isfinite(span) && width > 0 && std::isfinite(width);
+    const double wide_width = (static_cast<double>(upper) - static_cast<double>(lower)) / static_cast<double>(bins);
+    std::vector<std::uint64_t> counts(bins, 0);
+    for (const float value : values) {
+        if (!(lower <= value && value <= upper)) {
+            continue;
+        }
+        std::size_t bin = 0;
+        if (finite_offsets) {
+            bin = std::min(static_cast<std::size_t>((value - lower) / width), bins - 1);
+        } else {
+            const double offset =
+                wide_width > 0 ? (static_cast<double>(value) - static_cast<double>(lower)) / wide_width : 0.0;
+            bin = static_cast<std::size_t>(std::min(offset, static_cast<double>(bins - 1)));
+        }
+        ++counts.at(bin);
+    }
+    return counts;
+}
+
+// Every range the caller bins, binned as the caller bins it. The library refused the two whose float
+// width does not survive narrowing -- one underflows to zero, one overflows to infinity -- although
+// the caller counts both; and over a range wider than a float holds, it switched to double only for
+// the pixels whose float offset overflowed, so pixels below the middle were binned one way and those
+// above it another, and the counts differed from the caller's.
+void TestEveryRangeIsBinnedAsTheCallerBinsIt() {
+    struct Case {
+        const char* what;
+        std::vector<float> values;
+        double lower;
+        double upper;
+        std::uint32_t bins;
+    };
+    const float tiny = std::numeric_limits<float>::denorm_min();
+    const std::vector<Case> cases{
+        {"a bin width that underflows a float", {0.0F, tiny, 2 * tiny, 7 * tiny}, 0.0, 1e-44, 100},
+        {"a bin width that overflows a float", {-3e38F, 0.0F, 3e38F}, -3e38, 3e38, 1},
+        {"a range wider than a float, in three bins",
+         {-3e38F, -2.5e38F, -1e38F, -1e30F, 0.0F, 1e38F, 1.0000001e38F, 2e38F, 2.9e38F, 3e38F},
+         -3e38,
+         3e38,
+         3},
+        {"a range wider than a float, in ten bins", {-3e38F, -1.2e38F, 6e37F, 1e38F, 3e38F}, -3e38, 3e38, 10},
+        {"a range narrower than a float", {1.0F, 2.0F}, 1.0, 1.0 + 1e-9, 8},
+        {"an ordinary range", {0.0F, 0.1F, 0.3F, 0.7F, 0.99999994F, 1.0F, 1.5F}, 0.0, 1.0, 10},
+    };
+    for (const auto& c : cases) {
+        const auto columns = static_cast<std::uint64_t>(c.values.size());
+        const auto image = MakeImage(columns, 1, 1);
+        const auto geometry = MakeGeometry(columns, 1, 1);
+        SyntheticPixelSource source(image, geometry, [&](const std::vector<std::uint64_t>& logical) {
+            return c.values.at(static_cast<std::size_t>(logical.at(0)));
+        });
+        carta::zarr::HistogramRequest request;
+        request.planes.spectral = {0, 1, 1};
+        request.bins = c.bins;
+        request.lower = c.lower;
+        request.upper = c.upper;
+
+        WorkPool workers(1);
+        std::vector<std::uint64_t> counts;
+        const auto reducible = Reducible(source, image, geometry, workers);
+        const auto outcome = carta::zarr::internal::ComputeHistogram(
+            reducible, request, [&](const carta::zarr::HistogramBlock& block) {
+                if (block.complete) {
+                    counts.assign(block.Counts(0), block.Counts(0) + block.bin_count);
+                }
+                return true;
+            }, ReadOptions{});
+        Require(static_cast<bool>(outcome), std::string(c.what) + ": the histogram failed: " +
+                                                (outcome ? "" : outcome.error().message));
+        const auto expected = CallerCounts(c.values, c.lower, c.upper, c.bins);
+        for (std::size_t bin = 0; bin < expected.size(); ++bin) {
+            Require(counts.at(bin) == expected.at(bin),
+                    std::string(c.what) + ", bin " + std::to_string(bin) + ": the caller counts " +
+                        std::to_string(expected.at(bin)) + ", the library " + std::to_string(counts.at(bin)));
+        }
+    }
+}
+
 void TestASpectralReductionAgreesWithTheFormula() {
     const auto image = MakeImage(kX, kY, kZ);
     const auto geometry = MakeGeometry(64, 65, 2);
@@ -964,6 +1055,7 @@ int main() {
     try {
         TestAHistogramCountsEveryPixel();
         TestARangeWiderThanAFloatStillBinsItsPixels();
+        TestEveryRangeIsBinnedAsTheCallerBinsIt();
         TestASpectralReductionAgreesWithTheFormula();
         TestAMaskedRegionReadsOnlyTheChunksItOccupies();
         TestAPlaneHistogramSplitAcrossWorkers();

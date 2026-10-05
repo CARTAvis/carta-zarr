@@ -1,8 +1,8 @@
 # carta-zarr
 
-A standalone C++ reader library for XRADIO Zarr images, extracted from `carta-backend` so that
-CARTA and other C++ consumers can read these datasets without depending on TensorStore, casacore,
-or CARTA protobuf.
+A standalone C++ reader library for XRADIO Zarr images, written as the Zarr reader of
+`carta-backend` and kept apart from it so that CARTA and other C++ consumers can read these datasets
+without depending on TensorStore. It depends on neither casacore nor CARTA's protobuf.
 
 ## Language
 
@@ -79,8 +79,8 @@ store against. The only built-in profile is the XRADIO image profile.
 _Avoid_: schema, format, flavor
 
 **Probe**:
-A cheap, read-only inspection that decides whether a path is a supported image dataset and lists the
-images in it, without opening any of them.
+A cheap, read-only inspection that decides whether a path is a supported image dataset, without
+opening any image in it. Listing the images is what opening the dataset does.
 _Avoid_: detect, sniff, validate
 
 **Qualification**:

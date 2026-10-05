@@ -13,7 +13,8 @@ Two things, by two different people at two different times:
   chunks are grouped into shards, the compressor, and on Lustre the striping of the directory it is
   written to. Changing it means rewriting the cube.
 - **carta-backend's reader settings**, chosen when the server is configured, as flags or in
-  `settings.json`:
+  `settings.json`. They belong to carta-backend's Zarr support, which is not yet in any of its
+  releases:
 
   | flag | default | what it sets |
   |---|---|---|
@@ -117,10 +118,10 @@ CARTA's 5 frames a second, a 7763 x 4742 cube in 512 x 512 x 4 chunks stalled fo
 fourth frame for one user, and in 512 x 512 x 16 chunks for up to 400 ms every sixteenth; 512-square
 cubes barely stalled at all.
 
-carta-backend does not read ahead yet. carta-zarr's `Image::Prefetch` decodes the chunks a read would
-into the cache without reading the pixels out -- one element of each chunk, which decodes all of it --
-and the bench's `--animation-prefetch` uses it as a backend would: after the first frame of each run
-it prefetches the next, one at a time, and stops for the rest of the animation once a frame is late
+carta-zarr's `ReadAhead` is what carta-backend's Zarr support reads ahead with, and the bench's
+`--animation-prefetch` uses the same one. It decodes through `Image::Prefetch`, which puts the chunks
+a read would decode into the cache without reading the pixels out -- one element of each chunk,
+which decodes all of it. After the first frame of each run it prefetches the next, one at a time, and stops for the rest of the animation once a frame is late
 while a prefetch is under way. A frame that catches a prefetch waits for the decode already under way
 rather than starting another, since a cached chunk is not checked again (ADR 0015).
 

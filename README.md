@@ -1,8 +1,13 @@
 # carta-zarr
 
-A read-only C++17 library for XRADIO images stored as Zarr v3, extracted from
-[carta-backend](https://github.com/CARTAvis/carta-backend) so that CARTA and other C++ consumers can
-read these datasets without depending on TensorStore, casacore, or CARTA protobuf.
+A read-only C++17 library for XRADIO images stored as Zarr v3. It is written as the Zarr reader of
+[carta-backend](https://github.com/CARTAvis/carta-backend), CARTA's image server, and kept apart
+from it so that CARTA and other C++ consumers can read these datasets without depending on
+TensorStore. It depends on neither casacore nor CARTA's protobuf either.
+
+**Status:** not yet released. carta-backend's Zarr support, the consumer this library is shaped by,
+is under development and not yet in carta-backend's main branch or any of its releases; the
+carta-backend this README describes is that work.
 
 TensorStore is a private implementation detail: it is linked into this library and never appears in
 its public headers, which need only the C++ standard library.
@@ -20,7 +25,9 @@ its public headers, which need only the C++ standard library.
   they cannot be opened.
 - **Local filesystem stores.** Every node carries its own metadata document; a root
   `consolidated_metadata` copy, which is what zarr-python writes for a consolidated dataset, is used
-  to answer for them without reading each one.
+  to answer for them without reading each one. An array's own document is still read, and held to
+  the copy, before any value is read from it
+  ([ADR 0017](docs/adr/0017-an-array-is-held-to-its-own-document-once.md)).
 
 Writing is out of scope, and so is anything but the `xradio.image` profile.
 
@@ -164,10 +171,10 @@ among them without opening any.
   each one lives on disk.
 - **Pixels come back as `float32`**, converted during the read rather than materialised in their
   stored type first. Reductions accumulate and report in `double`.
-- **Pixel masks are applied by default.** An image with a flag variable reads a masked pixel as NaN,
-  so a consumer that wants the mask reads it as finiteness; `ReadOptions::apply_pixel_mask` turns
-  that off. A declared mask must be boolean and carry the image's own dimensions in order, or the
-  image does not open.
+- **Pixel masks are applied by default.** An image with a flag reads a flagged pixel as NaN, so a
+  consumer that wants the mask reads it as finiteness; `ReadOptions::apply_pixel_mask` turns that
+  off. A declared flag must be boolean -- a Zarr `bool`, or the `int8` xarray writes for one -- and
+  carry the image's own dimensions in order, or the image does not open.
 - **Reads are cancellable.** `ReadOptions::control` carries a cancellation callback, a deadline and
   the cache pool the read keeps what it decodes in -- the context's shared one unless it brings its
   own from `Context::NewCachePool` -- which every read and reduction honours; `ReadOptions` adds a

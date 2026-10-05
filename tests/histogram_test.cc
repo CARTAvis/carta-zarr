@@ -423,6 +423,27 @@ void TestSamplingTakesFewerPixels(const carta::zarr::Image& sky) {
     Require(sampled.value().totals.min >= every.value().totals.min &&
                 sampled.value().totals.max <= every.value().totals.max,
             "a sample cannot find an extreme that is not there");
+
+    // A stride past the plane keeps its origin, however far past: (end + stride - 1) / stride wrapped
+    // for the largest, which then selected nothing and refused the axis.
+    const auto origin_only = [&](std::uint64_t stride, const std::string& what) {
+        request.spatial_sample = stride;
+        const auto result = sky.ComputeCubeHistogram(request);
+        Require(static_cast<bool>(result), what + " was refused" + (result ? std::string{} : ": " + result.error().message));
+        Require(result.value().totals.num_pixels + result.value().totals.nan_count == kFrequency,
+                what + " did not keep the one pixel at each plane's origin");
+    };
+    origin_only(std::uint64_t{1} << 20, "a sample past the plane");
+    origin_only(std::numeric_limits<std::uint64_t>::max(), "the largest sample there is");
+
+    // As along the spectrum: one channel, taken at a stride nothing else is reached by.
+    request.spatial_sample = 1;
+    request.planes.spectral = {0, 1, std::numeric_limits<std::uint64_t>::max()};
+    const auto one_channel = sky.ComputeCubeHistogram(request);
+    Require(static_cast<bool>(one_channel), "one channel at the largest stride was refused" +
+                                                (one_channel ? std::string{} : ": " + one_channel.error().message));
+    Require(one_channel.value().totals.num_pixels + one_channel.value().totals.nan_count == kL * kM,
+            "one channel at the largest stride did not read one plane");
 }
 
 void TestOnePassRejectsAndCancels(const carta::zarr::Image& sky) {

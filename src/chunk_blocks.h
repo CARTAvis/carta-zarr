@@ -194,7 +194,9 @@ inline std::uint64_t AlignedBlockEnd(std::uint64_t begin, std::uint64_t desired,
         if (absolute <= axis_start) {
             return 0;
         }
-        return ((absolute - axis_start) + stride - 1) / stride;
+        // Rounded up without adding stride - 1, which wraps for a stride near the top of the range.
+        const std::uint64_t offset = absolute - axis_start;
+        return (offset / stride) + static_cast<std::uint64_t>(offset % stride != 0);
     };
 
     const auto chunk_index = chunk_of(target);

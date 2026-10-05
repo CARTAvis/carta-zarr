@@ -30,10 +30,15 @@
 namespace carta::zarr::internal {
 
 // Samples of `stride` that fall in [begin, end), as a start and a count.
+//
+// Rounded up without adding stride - 1 first, which wraps for a stride near the top of the range: the
+// largest one there is selected nothing, where it should keep the origin as any stride past the plane
+// does.
 inline void SampledRange(std::uint64_t begin, std::uint64_t end, std::uint64_t stride, std::uint64_t& start,
                          std::uint64_t& count) {
-    const std::uint64_t first = (begin + stride - 1) / stride;
-    const std::uint64_t last = (end + stride - 1) / stride;
+    const auto rounded_up = [stride](std::uint64_t value) { return (value / stride) + (value % stride != 0); };
+    const std::uint64_t first = rounded_up(begin);
+    const std::uint64_t last = rounded_up(end);
     start = first * stride;
     count = last > first ? last - first : 0;
 }

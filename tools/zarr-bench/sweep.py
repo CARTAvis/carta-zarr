@@ -1040,6 +1040,13 @@ class Stats:
         return statistics.median(self.seconds) if self.seconds else math.inf
 
     @property
+    def ranked(self) -> float:
+        """The median as a choice is ranked on: infinitely slow when any of the group's operations
+        failed. Ranked on what finished, a layout that failed nine operations of ten and was fast at
+        the tenth was the best and the recommendation. The median itself is still what a table shows."""
+        return math.inf if self.errors else self.median
+
+    @property
     def p90(self) -> float:
         if not self.seconds:
             return math.inf
@@ -1185,7 +1192,7 @@ class Results:
         result = {}
         for mode in modes:
             stats = self.get(stage, dataset, setting, users, mode)
-            result[mode] = stats.median if stats else math.inf
+            result[mode] = stats.ranked if stats else math.inf
         return result
 
 
@@ -1601,8 +1608,8 @@ def write_report(sweep: Sweep, layouts: list[Layout], invalid: list[tuple[Layout
                 library = [results.get("stage2", dataset, s, target, mode) for s in analysis.grid if s.read_budget == 0]
                 budgeted = [(results.get("stage2", dataset, s, target, mode), s) for s in analysis.grid
                             if s.read_budget != 0]
-                plain = min((stats.median for stats in library if stats), default=math.inf)
-                best = min(((stats.median, s) for stats, s in budgeted if stats), default=(math.inf, None),
+                plain = min((stats.ranked for stats in library if stats), default=math.inf)
+                best = min(((stats.ranked, s) for stats, s in budgeted if stats), default=(math.inf, None),
                            key=lambda entry: entry[0])
                 if math.isfinite(plain) and best[1] and best[0] <= plain * (1 - READ_BUDGET_GAIN):
                     warnings.append(f"**A read budget helps {mode}** on {layout.name}: {best[1].read_budget >> 20} MiB "
@@ -1619,7 +1626,7 @@ def write_report(sweep: Sweep, layouts: list[Layout], invalid: list[tuple[Layout
         for mode in modes:
             entries = [(results.get("stage1", dataset_key(layout, False), sweep.baseline, target, mode), layout)
                        for layout, _, _ in ranking]
-            entries = sorted(((stats.median, layout) for stats, layout in entries if stats), key=lambda e: e[0])
+            entries = sorted(((stats.ranked, layout) for stats, layout in entries if stats), key=lambda e: e[0])
             if not entries:
                 continue
             best_median, best_layout = entries[0]
@@ -1855,7 +1862,7 @@ def tradeoff_section(sweep: Sweep, analysis: Analysis, ranking: list[tuple[Layou
     for layout, _, _ in sorted(ranking, key=lambda entry: entry[0].name):
         dataset = dataset_key(layout, False)
         chunk = axis_lengths(results.chunk_shapes.get(dataset, ""))
-        medians[layout.name] = {mode: stats.median if (stats := results.get("stage1", dataset, sweep.baseline,
+        medians[layout.name] = {mode: stats.ranked if (stats := results.get("stage1", dataset, sweep.baseline,
                                                                              target, mode)) else math.inf
                                 for mode in modes}
         rows.append((layout, chunk))

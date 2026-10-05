@@ -21,6 +21,7 @@
 #include <fstream>
 #include <functional>
 #include <iostream>
+#include <limits>
 #include <iterator>
 #include <string>
 #include <thread>
@@ -163,6 +164,22 @@ void TestSubsetAndStride(const carta::zarr::Image& sky) {
     for (std::size_t i = 0; i < selected.size(); ++i) {
         Require(pixels.at(i) == ExpectedValue(selected.at(i).first, selected.at(i).second, 0, 1, 0),
                 "a strided read returned the wrong element at offset " + std::to_string(i));
+    }
+}
+
+// A stride says how far apart the elements an axis selects are, so on an axis selecting one it says
+// nothing, and any positive one is accepted. TensorStore takes a signed stride, and one of 2^63 or
+// more went through as a negative number: the single pixel that read at stride 1 failed at 2^63.
+void TestAStrideOverOneElementIsNoStride(const carta::zarr::Image& sky) {
+    for (const std::uint64_t stride : {std::uint64_t{1} << 63U, std::numeric_limits<std::uint64_t>::max()}) {
+        carta::zarr::ReadRequest request;
+        request.axes = {{1, 1, stride}, {3, 1, stride}, {0, 1, stride}, {1, 1, stride}, {0, 1, stride}};
+        float pixel = 0.0F;
+        const auto read = sky.Read(request, {&pixel, 1}, Unmasked());
+        Require(static_cast<bool>(read), "one pixel at a stride of " + std::to_string(stride) +
+                                             " was not read: " + (read ? std::string{} : read.error().message));
+        Require(pixel == ExpectedValue(1, 3, 0, 1, 0),
+                "one pixel at a stride of " + std::to_string(stride) + " read the wrong value");
     }
 }
 
@@ -929,6 +946,7 @@ int main() {
             TestAxesAndGeometry(sky);
             TestWholeImage(sky);
             TestSubsetAndStride(sky);
+            TestAStrideOverOneElementIsNoStride(sky);
             TestMaskFusion(sky);
             TestRejectedRequests(sky);
             TestReadControls(sky);

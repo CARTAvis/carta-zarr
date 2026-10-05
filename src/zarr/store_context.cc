@@ -15,6 +15,7 @@
 #include <atomic>
 #include <cstddef>
 #include <cstdint>
+#include <iterator>
 #include <memory>
 #include <utility>
 
@@ -65,25 +66,34 @@ StoreContextPtr StoreContext::CloneForStore() const {
 
 Result<tensorstore::TensorStore<>> StoreContext::OpenArray(const std::filesystem::path& array_path,
                                                            std::string_view node, const StoreContext* through) const {
-    const StoreContext& pool = through == nullptr ? *this : *through;
-    const auto key = std::make_pair(pool._id, array_path.string());
+    return (through == nullptr ? *this : *through).OpenArrayOf(*this, array_path, node);
+}
+
+Result<tensorstore::TensorStore<>> StoreContext::OpenArrayOf(const StoreContext& store,
+                                                             const std::filesystem::path& array_path,
+                                                             std::string_view node) const {
+    const auto key = std::make_pair(store._id, array_path.string());
     {
         const std::scoped_lock lock(_arrays_mutex);
         if (const auto found = _arrays.find(key); found != _arrays.end()) {
-            return found->second;
+            return found->second.array;
         }
     }
 
     // Opened outside the lock so that a slow open of one array does not stall reads of another.
-    auto opened = OpenZarr3File(key.second, pool.context, node);
+    auto opened = OpenZarr3File(key.second, context, node);
     if (!opened) {
         return opened.error();
     }
 
     const std::scoped_lock lock(_arrays_mutex);
+    // What stores that have closed left here: nothing will ask for it again.
+    for (auto entry = _arrays.begin(); entry != _arrays.end();) {
+        entry = entry->second.store.expired() ? _arrays.erase(entry) : std::next(entry);
+    }
     // Another thread may have opened the same array first; either handle is equivalent, so keep
     // whichever landed in the table.
-    return _arrays.emplace(key, std::move(opened.value())).first->second;
+    return _arrays.emplace(key, Opened{store.weak_from_this(), std::move(opened.value())}).first->second.array;
 }
 
 Result<tensorstore::TensorStore<>> OpenZarrArray(const std::filesystem::path& array_directory,

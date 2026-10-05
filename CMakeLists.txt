@@ -726,6 +726,7 @@ if(CARTA_ZARR_BUILD_TESTS AND BUILD_TESTING)
     add_test(NAME carta-zarr-third-party-notices
         COMMAND ${CMAKE_COMMAND}
             "-DBINARY_DIR=${CMAKE_CURRENT_BINARY_DIR}"
+            "-DDEPS_DIR=${FETCHCONTENT_BASE_DIR}"
             "-DNOTICES=${CMAKE_CURRENT_BINARY_DIR}/THIRD_PARTY_NOTICES"
             -P "${CMAKE_CURRENT_SOURCE_DIR}/tests/check_third_party_notices.cmake")
 

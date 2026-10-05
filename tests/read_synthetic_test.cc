@@ -419,6 +419,34 @@ void TestAPrefetchHoldsItsSampleToTheBudget() {
             "a prefetch in pieces did not decode every chunk exactly once");
 }
 
+// The buffer is not all the budget bounds: each element of a flag sample decodes a whole flag chunk,
+// so a piece is held to the chunks the budget affords as well. Here the flag is chunked 4 x 4, sixteen
+// bytes a chunk, and a budget of 64 bytes affords four of them a read -- where one read of the whole
+// sample, which its buffer held, decoded all 960.
+void TestAPrefetchHoldsTheFlagChunksItDecodesToTheBudget() {
+    const auto image = MakeImage(true);
+    const auto geometry = MakeGeometry();
+    ChunkGeometry flag = geometry;
+    flag.chunk_shape = {4, 4, 1, 1, 1};
+    SyntheticPixelSource source(image, geometry, Value);
+    ReadOptions options;
+    options.read_budget_bytes = 64;
+    const auto chunks = PrefetchChunks(source, image, geometry, flag, WholeCube(), options);
+    Require(static_cast<bool>(chunks), "a prefetch with a fine flag failed");
+    std::uint64_t flag_chunks = 0;
+    for (const auto selected : source.mask_selections()) {
+        Require(selected * 16 <= options.read_budget_bytes,
+                "one flag read decoded " + std::to_string(selected) + " chunks of 16 bytes against a budget of 64");
+        flag_chunks += selected;
+    }
+    Require(flag_chunks == 16 * 10 * 6, "the flag reads did not cover every flag chunk");
+    // A budget below one chunk still reads one a time, as a read does, rather than none.
+    options.read_budget_bytes = 1;
+    SyntheticPixelSource tight(image, geometry, Value);
+    Require(static_cast<bool>(PrefetchChunks(tight, image, geometry, flag, WholeCube(), options)),
+            "a budget below one flag chunk refused the prefetch");
+}
+
 int main() {
     try {
         TestAFailedFlagLeavesTheDestinationAlone();
@@ -433,6 +461,7 @@ int main() {
         TestAPrefetchDecodesWhatAReadWould();
         TestAPrefetchIsMaskedAndCheckedAsAReadIs();
         TestAPrefetchHoldsItsSampleToTheBudget();
+        TestAPrefetchHoldsTheFlagChunksItDecodesToTheBudget();
         std::cout << "carta-zarr read synthetic tests passed\n";
         return 0;
     } catch (const std::exception& error) {

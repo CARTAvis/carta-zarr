@@ -31,7 +31,9 @@ PassPlan PlanPass(const ImageDescriptor& descriptor, const ChunkGeometry& geomet
     plan.apply_mask = cost.apply_mask;
     plan.chunk_bytes = cost.chunk_bytes;
     plan.slab_budget_bytes = cost.budget_bytes;
-    plan._least_channels = ((plan._chunk_depth + spectral.stride - 1) / spectral.stride);
+    // Rounded up without adding stride - 1, which wraps for a stride near the top of the range.
+    plan._least_channels =
+        (plan._chunk_depth / spectral.stride) + static_cast<std::uint64_t>(plan._chunk_depth % spectral.stride != 0);
     plan.planes = planes.selection();
     plan.sample = std::max<std::uint64_t>(1, sample);
     // The chunks of a layer the sample has a pixel in, which is every chunk unless it steps over some:

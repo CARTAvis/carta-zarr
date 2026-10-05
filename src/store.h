@@ -208,6 +208,12 @@ private:
     std::shared_ptr<StoreCaches> _caches;
 };
 
+// The name a node is filed under, however a document spells it: "./FLAG" is FLAG. Reports
+// invalid_argument for a name that is no node of a store -- empty, absolute, or climbing out of it with
+// "..". What a name a document gives has to be compared with the names the store lists, which are
+// filed this way.
+Result<std::string> NormalizeNodeName(std::string_view node);
+
 // Open a store on the local filesystem.
 Result<Store> OpenStore(std::string_view location, StoreContextPtr context = {});
 

@@ -233,18 +233,23 @@ public:
      */
     std::vector<OccupiedFootprint> Footprints(std::uint64_t chunks_per_read) const;
 
-    // The regions touching one chunk. Read once per chunk cell by the accumulation, so it is inline
-    // and does nothing but two lookups.
+    // The regions touching one chunk, none for a chunk no region occupies. Read once per chunk cell
+    // by the accumulation, so it is inline: a search of the occupied cells and two lookups.
     RegionRefs RegionsTouching(std::uint64_t chunk_cu, std::uint64_t chunk_cv) const {
-        const auto cell = Cell(chunk_cu, chunk_cv);
-        const auto first = _offsets.at(cell);
-        const auto last = _offsets.at(cell + 1);
+        const auto key = Cell(chunk_cu, chunk_cv);
+        const auto found = std::lower_bound(_cells.begin(), _cells.end(), key);
+        if (found == _cells.end() || *found != key) {
+            return {};
+        }
+        const auto slot = static_cast<std::size_t>(found - _cells.begin());
+        const auto first = _offsets.at(slot);
+        const auto last = _offsets.at(slot + 1);
         return RegionRefs{_entries.data() + first, static_cast<std::size_t>(last - first)};
     }
 
-    // The compressed-row index itself. Exposed because it is what Of promises -- the incidences of
-    // one chunk are contiguous and in region order, which is what the counting sort is for -- and a
-    // test has nothing else to say that against.
+    // The compressed-row index itself, one offset per occupied cell and one past the last. Exposed
+    // because it is what Of promises -- the incidences of one chunk are contiguous and in region
+    // order, which is what the counting sort is for -- and a test has nothing else to say that against.
     const std::vector<std::uint64_t>& offsets() const noexcept {
         return _offsets;
     }
@@ -262,9 +267,17 @@ public:
 private:
     Occupancy() = default;
 
-    std::size_t Cell(std::uint64_t chunk_cu, std::uint64_t chunk_cv) const noexcept {
-        return static_cast<std::size_t>(((chunk_cv - _chunk_cv0) * _columns) + (chunk_cu - _chunk_cu0));
+    // A cell's number in the grid over the bounding box, row by row. Only a number: the cells are
+    // never laid out by it, so it costs nothing however large the box is.
+    std::uint64_t Cell(std::uint64_t chunk_cu, std::uint64_t chunk_cv) const noexcept {
+        return ((chunk_cv - _chunk_cv0) * _columns) + (chunk_cu - _chunk_cu0);
     }
+
+    // The occupied runs of one chunk row of the grid.
+    struct OccupiedRow {
+        std::uint64_t row = 0;
+        std::vector<ColumnRun> runs;
+    };
 
     std::vector<PlacedRegion> _regions;
     // The runs made from rasters, which PlacedRegion points into. Moving the vector moves each one's
@@ -282,12 +295,16 @@ private:
     std::uint64_t _chunk_cu0 = 0;
     std::uint64_t _chunk_cv0 = 0;
     std::uint64_t _columns = 0;
-    std::uint64_t _rows = 0;
+    // The cells some region occupies, by Cell number, ascending; and per cell, where its regions
+    // start in _entries. Sized by what the regions occupy and never by the box around them: two
+    // pixels at opposite corners of a plane cut in single-pixel chunks are two cells, where an index
+    // over the box was 2^30 offsets, allocated before a pixel was read.
+    std::vector<std::uint64_t> _cells;
     std::vector<std::uint64_t> _offsets;
     std::vector<std::uint32_t> _entries;
-    // The occupied runs of each chunk row, which is what footprints are cut from instead of the
-    // bounding box.
-    std::vector<std::vector<ColumnRun>> _runs_per_row;
+    // The chunk rows some region occupies, ascending, each with its occupied runs: what footprints
+    // are cut from instead of the bounding box.
+    std::vector<OccupiedRow> _occupied_rows;
     std::uint64_t _layer_chunks = 0;
 };
 

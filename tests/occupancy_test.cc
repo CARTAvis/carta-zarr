@@ -18,13 +18,39 @@
 #include <algorithm>
 #include <cstdint>
 #include <cstdio>
+#include <cstdlib>
 #include <exception>
 #include <limits>
+#include <new>
 #include <string>
 #include <utility>
 #include <vector>
 
 #include "support/check.h"
+
+namespace {
+
+// The largest allocation this binary may make while armed; larger is refused as though memory had run
+// out, so that a test of what an index costs does not first have to survive the cost.
+std::size_t g_allocation_limit = std::numeric_limits<std::size_t>::max();
+
+}  // namespace
+
+void* operator new(std::size_t size) {
+    if (size > g_allocation_limit) {
+        throw std::bad_alloc();
+    }
+    if (void* allocated = std::malloc(size == 0 ? 1 : size)) {
+        return allocated;
+    }
+    throw std::bad_alloc();
+}
+void operator delete(void* pointer) noexcept {
+    std::free(pointer);
+}
+void operator delete(void* pointer, std::size_t) noexcept {
+    std::free(pointer);
+}
 
 namespace {
 
@@ -316,8 +342,8 @@ void TestNoFootprintIsMoreThanOneRead() {
 // reduction can index"; that is recorded here rather than paid for on every ctest run.
 
 void TestAGridTooLargeToIndexIsRefused() {
-    // 65,536 chunks on a side is 2^32 cells, one more than a cell number can hold. Refused before
-    // anything is allocated for it.
+    // 65,536 chunks on a side, every one occupied, is 2^32 incidences, far past what one reduction
+    // indexes. Refused once the index reaches that, before the rest of the box is scanned.
     const std::vector<RegionMask> regions{Box(0, 0, 65536, 65536)};
     const auto refused =
         Occupancy::Of({regions.data(), regions.size()}, Covering(regions), 1, 1, AxisRole::spatial_x, "TEST");
@@ -459,6 +485,31 @@ void TestADiagonalIsOneRunALineEitherWay() {
     }
 }
 
+// What the index costs follows the chunks the regions occupy, not the rectangle around them. Two
+// one-pixel regions at opposite corners of a 32768-square plane cut in single-pixel chunks occupy two
+// cells; the index over the rectangle between them was 2^30 offsets, an 8 GiB allocation made before
+// a pixel was read. On a plane larger still the rectangle was refused as too many chunks to index,
+// though there are still two.
+void TestDistantSmallRegionsCostWhatTheyOccupy() {
+    for (const std::uint64_t side : {std::uint64_t{32768}, std::uint64_t{1} << 20}) {
+        const std::vector<RegionMask> regions{Box(0, 0, 1, 1), Box(side - 1, side - 1, 1, 1)};
+        g_allocation_limit = std::size_t{1} << 20;
+        auto built = Occupancy::Of({regions.data(), regions.size()}, PlaneExtent{side, side}, 1, 1,
+                                   AxisRole::spatial_x, "TEST");
+        g_allocation_limit = std::numeric_limits<std::size_t>::max();
+        Require(static_cast<bool>(built), "two distant pixels were refused: " +
+                                              (built ? std::string{} : built.error().message));
+        const auto& occupancy = built.value();
+        Require(occupancy.LayerChunks() == 2, "two pixels occupy two chunks");
+        Require(occupancy.entries().size() == 2, "and are two incidences");
+        Require(Occupied(occupancy) == "0,0 " + std::to_string(side - 1) + "," + std::to_string(side - 1),
+                "the chunks occupied were not the two corners: " + Occupied(occupancy));
+        const auto corner = occupancy.RegionsTouching(side - 1, side - 1);
+        Require(corner.size == 1 && corner.data[0] == 1, "the far corner was not region 1's");
+        Require(occupancy.RegionsTouching(1, 0).size == 0, "a cell between them was touched");
+    }
+}
+
 }  // namespace
 
 int main() {
@@ -473,6 +524,7 @@ int main() {
         TestAlikeRowsAreReadTogether();
         TestNoFootprintIsMoreThanOneRead();
         TestAGridTooLargeToIndexIsRefused();
+        TestDistantSmallRegionsCostWhatTheyOccupy();
         TestRegionsThatCannotBePlacedAreRefused();
         TestABoxIsOneSpanARowClippedToTheCell();
         TestRunsAreClippedToTheCell();

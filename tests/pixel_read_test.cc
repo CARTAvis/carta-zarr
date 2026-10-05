@@ -888,6 +888,26 @@ void TestAnImageWhoseArraysAreLinkedInReads(const char* fixture) {
     Require(static_cast<bool>(sky.Read(plane, {masked.data(), masked.size()})), "a masked plane of linked arrays did not read");
 }
 
+// What a caller's callback throws is the caller's business, and need not be a std::exception: an
+// int thrown from a progress callback escaped Image::Read, which promises a Result whatever happens.
+void TestACallbackThrowingAnythingIsAnError(const carta::zarr::Image& sky) {
+    const auto request = WholeImage(sky.descriptor());
+    std::vector<float> pixels(kL * kM * kFrequency * kPolarization * kTime);
+    bool escaped = false;
+    try {
+        const auto read = sky.Read(request, {pixels.data(), pixels.size()}, Unmasked(),
+                                   [](std::size_t, std::size_t) -> bool { throw 42; });
+        Require(!read, "a read whose progress callback threw succeeded");
+        auto cancelling = Unmasked();
+        cancelling.control.cancellation_requested = []() -> bool { throw 42; };
+        const auto cancelled = sky.Read(request, {pixels.data(), pixels.size()}, cancelling);
+        Require(!cancelled, "a read whose cancellation callback threw succeeded");
+    } catch (int) {
+        escaped = true;
+    }
+    Require(!escaped, "an int a callback threw escaped Image::Read");
+}
+
 int main() {
     std::vector<carta::zarr::AxisRole> fast_axes;
     for (const char* const fixture : kFixtures) {
@@ -921,6 +941,7 @@ int main() {
         TestLabelsAreHeldToTheirOwnDocument(kFixtures[0]);
         TestAVariableNamedWithABackslashSaysWhyItIsNotRead(kFixtures[0]);
         TestAnImageWhoseArraysAreLinkedInReads(kFixtures[0]);
+        TestACallbackThrowingAnythingIsAnError(OpenSky(kFixtures[0]));
         Require(fast_axes.size() == 2 && fast_axes.at(0) != fast_axes.at(1),
                 "the two fixtures should disagree about which spatial axis the store varies fastest; "
                 "if they agree, one of them was regenerated wrongly and half of this is untested");

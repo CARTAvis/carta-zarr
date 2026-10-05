@@ -28,7 +28,7 @@
 
 namespace carta::zarr::bench {
 
-inline constexpr int kCsvVersion = 7;
+inline constexpr int kCsvVersion = 8;
 
 // What a dataset's bench-manifest.json says, for the columns the library cannot answer. Empty for a
 // dataset the generator did not write, which the bench reads as well as any other.

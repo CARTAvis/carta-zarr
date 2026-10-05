@@ -102,6 +102,48 @@ void TestASharedArrayReportsTheChunksInsideTheShard() {
     Require(layout.compressor == "blosc", "the compressor inside the sharding codec was not reported");
 }
 
+// A sharding codec's chunk_shape is of the array as it reaches the codec, which is after any
+// transpose before it: transposed by [1,0], inner chunks of [4,1] are chunks of [1,4] in the array a
+// read asks of. Reported as [4,1], a prefetch of a plane decoded a quarter of what the plane is in.
+void TestAShardedArraysChunksAreUntransposed() {
+    const auto sharded = [](const std::string& transposes, const std::string& inner) {
+        return "[" + transposes + R"({"name":"sharding_indexed","configuration":{"chunk_shape":)" + inner + "}}]";
+    };
+    Require(LayoutOf(sharded(R"({"name":"transpose","configuration":{"order":[1,0]}},)", "[4,1]"), "[8,8]")
+                    .chunk_shape == std::vector<std::uint64_t>{1, 4},
+            "a transpose before the sharding codec was not undone");
+    Require(LayoutOf(sharded(R"({"name":"transpose","configuration":{"order":"F"}},)", "[4,1]"), "[8,8]")
+                    .chunk_shape == std::vector<std::uint64_t>{1, 4},
+            "the order F reverses the axes");
+    Require(LayoutOf(sharded(R"({"name":"transpose","configuration":{"order":"C"}},)", "[4,1]"), "[8,8]")
+                    .chunk_shape == std::vector<std::uint64_t>{4, 1},
+            "the order C leaves them as they are");
+
+    const auto three = [](const std::string& codecs) {
+        const std::string document =
+            R"({"shape":[8,8,8],"data_type":"float32","chunk_grid":{"name":"regular","configuration":)"
+            R"({"chunk_shape":[8,8,8]}},"attributes":{},"dimension_names":["a","b","c"],"codecs":)" +
+            codecs + R"(,"zarr_format":3,"node_type":"array"})";
+        return ParseStorageLayout(Parsed(document)).chunk_shape;
+    };
+    // Encoded axis i is decoded axis order[i]: [2,0,1] sends inner chunks [1,2,3] to [2,3,1].
+    Require(three(sharded(R"({"name":"transpose","configuration":{"order":[2,0,1]}},)", "[1,2,3]")) ==
+                std::vector<std::uint64_t>{2, 3, 1},
+            "a three-axis transpose was undone the wrong way round");
+    // Two in turn compose: [1,0,2] and then [0,2,1] is [1,2,0], which sends [1,2,3] to [3,1,2].
+    Require(three(sharded(R"({"name":"transpose","configuration":{"order":[1,0,2]}},)"
+                          R"({"name":"transpose","configuration":{"order":[0,2,1]}},)",
+                          "[1,2,3]")) == std::vector<std::uint64_t>{3, 1, 2},
+            "two transposes before the sharding codec were not undone in turn");
+
+    for (const auto* order : {"[0,0]", "[0]", "[0,2]", "\"X\"", "[0.5,1]"}) {
+        const auto refused = RefusedDocument(
+            sharded(std::string(R"({"name":"transpose","configuration":{"order":)") + order + "}},", "[4,1]"));
+        Require(refused.code == ErrorCode::invalid_metadata,
+                std::string("a transpose order of ") + order + " should be invalid metadata");
+    }
+}
+
 void TestTheOuterCompressorIsNotUsedForShardedChunks() {
     // A sharding codec whose configuration names no codecs leaves the compressor unset, and the
     // outer chain is then consulted -- which is what `layout.compressor.empty()` guards.
@@ -156,6 +198,7 @@ int main() {
         TestAnUnshardedArrayReportsItsOwnChunksAndCompressor();
         TestASharedArrayReportsTheChunksInsideTheShard();
         TestTheOuterCompressorIsNotUsedForShardedChunks();
+        TestAShardedArraysChunksAreUntransposed();
         TestAShardingCodecWithAnUnusableChunkShapeIsRefused();
         TestACodecNamedByANonStringIsRefused();
     } catch (const std::exception& error) {

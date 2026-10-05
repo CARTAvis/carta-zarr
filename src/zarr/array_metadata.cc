@@ -10,9 +10,14 @@
 
 #include <algorithm>
 #include <array>
+#include <cstddef>
+#include <cstdint>
 #include <iterator>
+#include <optional>
 #include <set>
+#include <string>
 #include <utility>
+#include <vector>
 
 namespace carta::zarr::internal::zarr {
 namespace {
@@ -51,20 +56,81 @@ std::string FindCompressor(const nlohmann::json* codecs) {
     return {};
 }
 
+// The axis order a transpose codec writes in, as the decoded axis each encoded axis is: encoded
+// axis i is decoded axis order[i]. Nothing when the order is not a permutation of `rank` axes. "C"
+// and "F" are the spellings Zarr v3 had before it took a list, and TensorStore still reads them.
+std::optional<std::vector<std::size_t>> TransposeOrder(const nlohmann::json& codec, std::size_t rank) {
+    if (!codec.contains("configuration") || !codec.at("configuration").is_object() ||
+        !codec.at("configuration").contains("order")) {
+        return std::nullopt;
+    }
+    const auto& order = codec.at("configuration").at("order");
+    std::vector<std::size_t> axes(rank);
+    if (order.is_string()) {
+        const auto spelling = order.get<std::string>();
+        if (spelling != "C" && spelling != "F") {
+            return std::nullopt;
+        }
+        for (std::size_t i = 0; i < rank; ++i) {
+            axes[i] = spelling == "C" ? i : rank - 1 - i;
+        }
+        return axes;
+    }
+    if (!order.is_array() || order.size() != rank) {
+        return std::nullopt;
+    }
+    std::vector<bool> seen(rank, false);
+    for (std::size_t i = 0; i < rank; ++i) {
+        if (!IsNonNegativeInteger(order.at(i)) || order.at(i).get<std::uint64_t>() >= rank ||
+            seen[order.at(i).get<std::size_t>()]) {
+            return std::nullopt;
+        }
+        axes[i] = order.at(i).get<std::size_t>();
+        seen[axes[i]] = true;
+    }
+    return axes;
+}
+
 // Reads the inner chunk shape and the compressor that applies to it out of a sharding codec that
 // ParseArrayMetadata has already accepted: the configuration is an object, its chunk_shape is an
 // array of positive integers, and it has the array's rank. Nothing here checks that again, because
 // the only way to reach this function is through metadata that parse turned away otherwise -- and
 // both live in this file, so there is no seam for a second caller to arrive through.
-void ApplyShardingLayout(const nlohmann::json& sharding, StorageLayout& layout) {
+//
+// The inner chunk shape is of the array as it reaches the sharding codec, which is after every
+// transpose before it in the chain, and is put back on the axes a read names. Taken as it stands, a
+// transposed array's [4,1] was reported for chunks that are [1,4], and a prefetch of a plane decoded
+// a quarter of the chunks the plane is in. Every transpose here was checked by the parse.
+void ApplyShardingLayout(const nlohmann::json& codecs, const nlohmann::json& sharding, StorageLayout& layout) {
     layout.sharded = true;
     layout.shard_shape = std::move(layout.chunk_shape);
-    layout.chunk_shape.clear();
+    const std::size_t rank = layout.shard_shape.size();
 
-    const auto& configuration = sharding.at("configuration");
-    for (const auto& dimension : configuration.at("chunk_shape")) {
-        layout.chunk_shape.push_back(dimension.get<std::uint64_t>());
+    // The decoded axis each axis of the array reaching the sharding codec is.
+    std::vector<std::size_t> decoded(rank);
+    for (std::size_t i = 0; i < rank; ++i) {
+        decoded[i] = i;
     }
+    for (const auto& codec : codecs) {
+        if (&codec == &sharding) {
+            break;
+        }
+        if (codec.is_object() && codec.contains("name") && codec.at("name") == "transpose") {
+            const auto order = *TransposeOrder(codec, rank);
+            std::vector<std::size_t> composed(rank);
+            for (std::size_t i = 0; i < rank; ++i) {
+                composed[i] = decoded[order[i]];
+            }
+            decoded = std::move(composed);
+        }
+    }
+
+    const auto& inner = sharding.at("configuration").at("chunk_shape");
+    layout.chunk_shape.assign(rank, 0);
+    for (std::size_t i = 0; i < rank; ++i) {
+        layout.chunk_shape[decoded[i]] = inner.at(i).get<std::uint64_t>();
+    }
+    const auto& configuration = sharding.at("configuration");
     // The compressor applies to the inner chunks, so look inside the sharding codec first.
     if (configuration.contains("codecs") && configuration.at("codecs").is_array()) {
         layout.compressor = FindCompressor(&configuration.at("codecs"));
@@ -154,7 +220,7 @@ StorageLayout ParseStorageLayout(const ArrayMetadata& metadata) {
     // A sharded array's chunk_grid describes the shard; the chunks that are actually decoded are
     // inside the sharding codec, and so is the compressor that applies to them.
     if (const nlohmann::json* sharding = FindCodec(codecs, "sharding_indexed"); sharding != nullptr) {
-        ApplyShardingLayout(*sharding, layout);
+        ApplyShardingLayout(*codecs, *sharding, layout);
     }
 
     if (layout.compressor.empty()) {
@@ -282,6 +348,16 @@ Result<ArrayMetadata> ParseArrayMetadata(const nlohmann::json& metadata, std::st
     // Checked and not kept: ParseStorageLayout reads it out when someone asks how the array is
     // stored. That is a second walk over a handful of integers, once per array, and the alternative
     // is a field here that one caller wants.
+    // A transpose's order says which axis is which from there on, the sharding codec's chunk shape
+    // included, so one that is not a permutation of the array's axes describes nothing either.
+    for (const auto& codec : result.codecs) {
+        if (codec.is_object() && codec.contains("name") && codec.at("name") == "transpose" &&
+            !TransposeOrder(codec, result.shape.size())) {
+            return Error{ErrorCode::invalid_metadata,
+                         "Transpose codec order must be a permutation of the array's axes", node_path};
+        }
+    }
+
     if (const nlohmann::json* const sharding = FindCodec(&result.codecs, "sharding_indexed");
         sharding != nullptr) {
         const auto* inner = sharding->contains("configuration") && sharding->at("configuration").is_object() &&

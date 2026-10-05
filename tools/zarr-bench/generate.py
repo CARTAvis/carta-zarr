@@ -937,6 +937,9 @@ def identity(args: argparse.Namespace) -> dict[str, Any]:
         origin = {
             "kind": "synthetic",
             "template": hashlib.sha256((template / "zarr.json").read_bytes()).hexdigest(),
+            # The coordinates and their metadata come from the template's arrays, not only its root
+            # document: rechunked along frequency, it writes another dataset under the same root.
+            "template_content": source_content(template),
             "shape": args.shape,
             "seed": args.seed,
             "noise": args.noise,

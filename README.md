@@ -31,6 +31,26 @@ its public headers, which need only the C++ standard library.
 
 Writing is out of scope, and so is anything but the `xradio.image` profile.
 
+## Getting an image dataset
+
+XRADIO converts FITS and CASA images itself, and what it writes is what this library reads:
+
+```python
+from xradio.image import open_image, write_image
+
+xds = open_image("cube.fits")      # a FITS or CASA image, or a dict naming several
+write_image(xds, "cube.zarr", out_format="zarr")
+```
+
+XRADIO's FITS reader is strict: every axis needs `CTYPE` and `CUNIT`, the Stokes axis included, and
+the header must carry `LONPOLE`, `LATPOLE`, the `PC` matrix and `DATE-OBS`. `open_image` imports
+the casacore layer even for FITS, and on macOS that means casatools.
+[tests/data/generate_conformance_fixtures.py](tests/data/generate_conformance_fixtures.py) does
+exactly this with XRADIO 1.2.3 pinned, and runs as it is under `uv`.
+
+To store a cube in another chunk layout, or to make one of a given size when there is none to hand,
+[tools/zarr-bench/generate.py](tools/zarr-bench/README.md) rewrites a real cube or synthesizes one.
+
 ## Where the library ends
 
 The library decides how to reach the pixels; carta-backend decides what the numbers mean.
@@ -154,6 +174,24 @@ that is malformed. `Dataset::Open` lists the images in one, and `ImageEntry::ope
 them will open; an openable entry also carries the axes it will open with, so a consumer can choose
 among them without opening any.
 
+### What an image can do
+
+| Call | What it does |
+|---|---|
+| `Image::Read` | Pixels of any range along each axis, as above. |
+| `Image::ReduceSpectral` | Per-channel statistics of many regions in one pass -- the pixel count, NaN count, sum, sum of squares, spread, minimum and maximum -- streamed to a callback block by block. What spectral profiles and region statistics are made from. |
+| `Image::ComputeHistogram` | A histogram of each selected plane, over a range and bin count the caller gives. |
+| `Image::ComputeCubeHistogram` | One histogram of the whole selection when its range is not known beforehand, with progress. |
+| `Image::ReadBeams` | The restoring beam fitted on each plane. |
+| `Image::Prefetch`, `Image::DecodedChunkBytes` | Decode a read's chunks into the cache without reading them out, and say how much cache one chunk takes. |
+| `ReadAhead::For` | Read ahead of a playing animation, so that the frame entering a new run of chunks does not stall ([ADR 0016](docs/adr/0016-reading-ahead-is-work-a-caller-holds.md)). |
+| `Dataset::Size` | The store's size on disk within a timeout, or else the size its metadata declares, and which of the two it is. |
+
+The headers under [include/carta-zarr](include/carta-zarr) are the reference: every type, field and
+call is documented where it is declared -- `carta_zarr.h` for the handles, `read.h` for a read's
+request and options, `reduce.h` for reductions and histograms, `read_ahead.h` for read-ahead, and
+`descriptor.h` for what a dataset and an image describe.
+
 ### What the API promises
 
 - **Everything is a `Result<T>`.** A failure carries an `ErrorCode`, a message and the node it came
@@ -187,6 +225,7 @@ among them without opening any.
 
 ## Documentation
 
+- [include/carta-zarr](include/carta-zarr) — the API reference, in the headers.
 - [CONTEXT.md](CONTEXT.md) — the vocabulary this codebase uses, and the words it avoids.
 - [docs/storage-tuning.md](docs/storage-tuning.md) — choosing a Zarr layout and carta-backend's reader
   settings for Lustre or BeeGFS, what measurements found, and how to measure your own.

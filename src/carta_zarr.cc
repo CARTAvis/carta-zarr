@@ -62,6 +62,14 @@ auto Guarded(ErrorCode code, std::string_view node, Function&& function) -> decl
         } catch (const std::bad_alloc&) {
             return Error{code, {}, {}};
         }
+    } catch (...) {
+        // What a caller's callback throws need not be a std::exception, and it is still not to leave
+        // an entry point that promises a Result. There is nothing in it to report but that it was thrown.
+        try {
+            return Error{code, "A callback threw something other than a std::exception", std::string(node)};
+        } catch (const std::bad_alloc&) {
+            return Error{code, {}, {}};
+        }
     }
 }
 

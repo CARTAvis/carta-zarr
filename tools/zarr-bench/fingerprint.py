@@ -9,7 +9,29 @@ it runs, and which needs no package.
 from __future__ import annotations
 
 import hashlib
+import os
+from collections.abc import Iterator
 from pathlib import Path
+
+
+def reached(root: Path) -> Iterator[Path]:
+    """Every file and directory under `root`, spelt as reached through it, with directory links
+    followed: a dataset's arrays are as often as not links to where their bytes are, and what is
+    behind them is the dataset as much as what is not. Each directory is entered once, so a link back
+    up the tree is listed and not followed round again."""
+    entered = {os.path.realpath(root)}
+    for directory, directories, files in os.walk(root, followlinks=True):
+        here = Path(directory)
+        kept = []
+        for name in sorted(directories):
+            yield here / name
+            real = os.path.realpath(here / name)
+            if real not in entered:
+                entered.add(real)
+                kept.append(name)
+        directories[:] = kept
+        for name in sorted(files):
+            yield here / name
 
 
 def source_content(source: Path) -> str:
@@ -22,7 +44,7 @@ def source_content(source: Path) -> str:
     hashing it would cost reading all of it. A file copied without its times looks changed, which
     costs a rewrite and never a wrong measurement."""
     digest = hashlib.sha256()
-    for path in sorted(entry for entry in source.rglob("*") if entry.is_file()):
+    for path in sorted(entry for entry in reached(source) if entry.is_file()):
         stat = path.stat()
         digest.update(f"{path.relative_to(source).as_posix()}\0{stat.st_size}\0{stat.st_mtime_ns}\n".encode())
     return digest.hexdigest()

@@ -11,7 +11,10 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
-option(CARTA_ZARR_BUILD_TESTS "Build carta-zarr tests" ON)
+# A project that adds this one with add_subdirectory or FetchContent is building its own tests, not
+# these, so they are on only when carta-zarr is the project being configured. Either way the option
+# says so outright.
+option(CARTA_ZARR_BUILD_TESTS "Build carta-zarr tests" ${PROJECT_IS_TOP_LEVEL})
 option(CARTA_ZARR_BUILD_PACKAGE_TEST "Build the install-tree CMake consumer test" ON)
 option(CARTA_ZARR_BUILD_BENCH "Build the storage benchmark tools and their tests" OFF)
 set(CARTA_ZARR_TUNING_OVERRIDES "" CACHE STRING

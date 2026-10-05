@@ -16,7 +16,7 @@ request is written changed except where its indices come from.
 
 The library's own walks never indexed by position. `AxisMap` is shared by every walk that reads
 planes because they "all have to find x, y and the spectrum without assuming they are the first
-three", and it finds them by role. carta-backend-2 maps a Zarr image onto CARTA's four axes in one
+three", and it finds them by role. carta-backend maps a Zarr image onto CARTA's four axes in one
 place, `CartaZarrAxes`, and does it by role too; it never named the constant. The only readers of
 `kXradioImageAxisOrder` were the profile that produced the order and a conformance test that
 pinned it.
@@ -49,7 +49,7 @@ destination, which is dense in the same logical order.
 
 ## Consequences
 
-Removing `kXradioImageAxisOrder` breaks a consumer that used it. carta-backend-2 did not.
+Removing `kXradioImageAxisOrder` breaks a consumer that used it. carta-backend did not.
 
 The README says axes are found by role, names the XRADIO order as the profile's rather than as a
 promise, and its example sets its two spatial ranges through `AxisIndex` instead of writing five

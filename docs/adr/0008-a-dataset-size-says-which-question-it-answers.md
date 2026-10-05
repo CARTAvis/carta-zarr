@@ -4,7 +4,7 @@
 returns the sum of the sizes of the files it holds. When that walk fails, it reads the metadata
 instead and returns the uncompressed size every array declares.
 
-Until now the second was labelled `is_upper_bound = true`, and carta-backend-2 passed that through
+Until now the second was labelled `is_upper_bound = true`, and carta-backend passed that through
 to `FileInfo::size_is_upper_bound`, which the file browser renders as a `≤` in front of the number.
 That label is a claim about how the two answers compare, and this library is not in a position to
 make it. It now reports `SizeBasis::declared` or `SizeBasis::measured` -- which question was

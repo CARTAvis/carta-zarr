@@ -1,7 +1,7 @@
 # A listed image is one that will open, and one module decides it
 
 `ImageEntry::openable` is the only thing a consumer has to go on when it decides which images to
-offer. carta-backend-2 reads exactly that field to build a file's HDU list, so it is the flag that
+offer. carta-backend reads exactly that field to build a file's HDU list, so it is the flag that
 puts a variable in front of a user.
 
 It was decided by one rule and contradicted by another. Discovery published a variable as readable
@@ -16,7 +16,7 @@ place saying the same thing with a different word.
 
 *Since decided:* `openable` is no longer the only thing an entry carries. An openable entry also
 reports `image_role` and the `axes` it will open with -- `ImageDescriptor::axes`, element for
-element -- because carta-backend-2 refuses more than this library does: it displays one time step,
+element -- because carta-backend refuses more than this library does: it displays one time step,
 and opening every image to learn its axes read every coordinate value to answer a question about
 shapes. Its file list now builds the HDU list from `openable` and those axes together. The promise
 here is unchanged and is what makes that safe: the axes are reported only for an entry that will
@@ -194,7 +194,7 @@ readable.
 ## Consequences
 
 `openable` is a promise. A consumer that lists only openable images -- which is what a file browser
-does -- stops offering one that will fail. carta-backend-2's `FileInfoLoader` changed with the
+does -- stops offering one that will fail. carta-backend's `FileInfoLoader` changed with the
 rename, in the same change, because the package-consumer test reinstalls the prefix it builds
 against.
 

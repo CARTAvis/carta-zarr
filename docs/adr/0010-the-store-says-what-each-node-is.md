@@ -107,7 +107,7 @@ A node whose `node_type` is present and not a string used to throw. Two of the t
 for it as a string with a default, which nlohmann refuses with `type_error.302`, so discovery threw
 and the dataset did not open. It is an unrecognised node now, like any other.
 
-carta-backend-2 sees one change: a dataset holding a stray document that will not parse is listed
+carta-backend sees one change: a dataset holding a stray document that will not parse is listed
 with its images and a diagnostic, where the file browser used to report an error. Nothing there
 matches on a diagnostic code, so `unrecognised_node` is additive.
 

@@ -17,7 +17,7 @@ namespace carta::zarr::internal::zarr {
 // ChunkGeometry, the same facts permuted into logical order; this is what that is built from.
 //
 // It used to be reported as well, as ImageDescriptor::storage, beside the geometry made from it: one
-// fact in two orders, of which a consumer had to pick one -- and carta-backend-2's own comment said
+// fact in two orders, of which a consumer had to pick one -- and carta-backend's own comment said
 // which one it picked.
 struct StorageLayout {
     std::vector<std::uint64_t> chunk_shape;

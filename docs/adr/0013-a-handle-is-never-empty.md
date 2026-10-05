@@ -24,7 +24,7 @@ three also refused a null store that `Image::Impl`'s constructor cannot produce,
 a reader was looking at took working out.
 
 A consumer that genuinely needs a handle it fills in later already has the standard answer.
-carta-backend-2 held its image in a `std::optional<carta::zarr::Image>` before this change and holds
+carta-backend held its image in a `std::optional<carta::zarr::Image>` before this change and holds
 it the same way after; the empty case is then the optional's, where the compiler and every reader
 can see it.
 
@@ -45,13 +45,13 @@ than a pointer taken, beside calls that read metadata or decompress chunks. The 
 ## Consequences
 
 Calling through a handle that has been moved from used to report `invalid_argument` and now works.
-carta-backend-2 never did it.
+carta-backend never did it.
 
 `schema_probe_test` moves each of the three handles and uses the one left behind, down to reading a
 pixel. With the defaulted moves restored the test binary crashes, since nothing checks for null any
 more; that is the regression it is there to catch.
 
-carta-backend-2's `GetZarrContext` returned a `shared_ptr<const Context>`, two layers of sharing
+carta-backend's `GetZarrContext` returned a `shared_ptr<const Context>`, two layers of sharing
 around one TensorStore context. It returns the `Context` by value now, and keeps the process-wide
 one in a `std::optional` that is empty only before the first call.
 

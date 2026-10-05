@@ -11,6 +11,7 @@
 
 #include "read/pieces.h"
 
+#include "chunk_blocks.h"
 #include "pixel_mask.h"
 #include "zarr/pixel_selection.h"
 
@@ -232,7 +233,19 @@ Result<std::uint64_t> PrefetchChunks(const PixelSource& source, const ImageDescr
     const auto flag_chunks = Elements(flag_sample);
     std::vector<std::uint8_t> discarded_flags(
         static_cast<std::size_t>(std::min(flag_chunks, SampleElements(options, sizeof(std::uint8_t)))));
-    auto flags = ForEachPiece(flag_sample, discarded_flags.size(), [&](const ReadRequest& piece) -> Result<void> {
+    // Each element of the sample decodes a whole flag chunk, so a piece is held to the chunks the
+    // budget affords too, and not only to its buffer: a byte an element bounded the buffer and let one
+    // read of 1024 x 1024 flags chunked 32 x 32 decode a MiB against a budget of 8 KiB. One chunk at
+    // the least, as a read holds one however small the budget. The pixels' pieces go through
+    // ReadInPieces, which cuts them by what their chunks decode to as it cuts any read -- down to a row
+    // of chunks along the axis it splits, which is as far as Image::Read goes either.
+    const std::uint64_t flag_chunk_bytes =
+        ChunkElements(flag_geometry.chunk_shape.empty() ? geometry : flag_geometry);
+    const std::uint64_t flag_budget =
+        options.read_budget_bytes != 0 ? options.read_budget_bytes : DefaultReadBytes(flag_chunk_bytes);
+    const std::uint64_t flag_piece =
+        std::min<std::uint64_t>(discarded_flags.size(), std::max<std::uint64_t>(1, flag_budget / flag_chunk_bytes));
+    auto flags = ForEachPiece(flag_sample, flag_piece, [&](const ReadRequest& piece) -> Result<void> {
         auto selection = zarr::BuildSelection(descriptor, piece, zarr::DestinationOrder::logical);
         if (!selection) {
             return selection.error();

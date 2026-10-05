@@ -93,8 +93,8 @@ private:
 //
 // An argument of Image::Read rather than a field of ReadOptions, because it is the only operation
 // that has anywhere to report from in these terms -- a reduction reports through its sink, and a
-// cube histogram through a CubeHistogramProgressCallback of its own. As a field it was a field four
-// of the five entry points silently ignored; as an argument it is simply not part of what they take.
+// cube histogram through a CubeHistogramProgressCallback of its own. As a field it would be one the
+// other entry points silently ignored; as an argument it is simply not part of what they take.
 //
 // A read that nothing interrupts is not made slower by supplying one: the pieces are sized to hold
 // enough chunks to decode in parallel, and at that size a split read measures the same as an
@@ -158,9 +158,6 @@ struct ReadOptions {
     // When Image::Read folds in the pixel mask it holds the flag for one piece, and a piece whose
     // flag would exceed this -- because no axis selects more than one element, or a single chunk is
     // still too large -- reports buffer_too_small rather than allocating past it.
-    //
-    // It was called temporary_memory_limit_bytes, which described that last case and none of the
-    // others.
     std::size_t read_budget_bytes = 0;
 };
 

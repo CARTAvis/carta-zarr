@@ -74,7 +74,10 @@ inline const char* ErrorCodeName(ErrorCode code) noexcept {
 }
 
 struct Error {
-    ErrorCode code;
+    // Always set where the library makes one. Initialized all the same, so an Error a caller declares
+    // and fills in later is never read with a code nobody gave it; it is the first code, as `Error{}`
+    // already made it.
+    ErrorCode code = ErrorCode::not_found;
     std::string message;
     std::string node_path;
 };

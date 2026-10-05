@@ -416,8 +416,16 @@ Result<DatasetSize> Dataset::Size(std::chrono::milliseconds stored_size_timeout)
         // The caller's timeout becomes a deadline here and nowhere lower: a timeout is measured from
         // whenever the caller asked, which is a fact only this end of the call knows. Everything
         // below speaks deadlines, as every other storage operation in this library does.
-        return internal::DatasetSizeBytes(*_impl->store,
-                                          std::chrono::steady_clock::now() + stored_size_timeout);
+        //
+        // One too far off for the clock is none at all. Added as it came, the milliseconds overflowed
+        // the clock's nanoseconds past about 292 years and wrapped into a deadline already past.
+        using Clock = std::chrono::steady_clock;
+        const auto now = Clock::now();
+        const auto room = std::chrono::duration_cast<std::chrono::milliseconds>(Clock::time_point::max() - now);
+        const auto deadline = stored_size_timeout >= room
+                                  ? Clock::time_point::max()
+                                  : now + std::chrono::duration_cast<Clock::duration>(stored_size_timeout);
+        return internal::DatasetSizeBytes(*_impl->store, deadline);
     });
 }
 

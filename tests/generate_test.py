@@ -67,6 +67,27 @@ class ClaimTest(unittest.TestCase):
                 self.assertTrue((self.source / "zarr.json").is_file(), f"{output} took the source with it")
                 self.assertFalse((self.source / "inside").exists(), "an output inside the source was made")
 
+    def test_an_output_holding_what_the_source_links_to_is_refused(self) -> None:
+        # A dataset's arrays are as often as not links to where the bytes are. --force deletes the
+        # output, and an output that holds what a link of the source points at takes those bytes
+        # with it however far from the source's own directory they are.
+        elsewhere = self.root / "elsewhere"
+        (elsewhere / "SKY").mkdir(parents=True)
+        (elsewhere / "SKY" / "zarr.json").write_text("{}")
+        (self.source / "SKY").symlink_to(elsewhere / "SKY")
+        for output in (elsewhere, elsewhere / "SKY", elsewhere / "SKY" / "inside"):
+            with self.subTest(output=str(output)):
+                with self.assertRaises(SystemExit) as refused:
+                    self.claim(output)
+                self.assertIn("--source", str(refused.exception))
+                self.assertTrue((elsewhere / "SKY" / "zarr.json").is_file(), f"{output} took the linked pixels")
+                self.assertFalse((elsewhere / "SKY" / "inside").exists(), "an output inside the link was made")
+        self.claim(self.root / "beside")
+
+    def test_a_link_back_up_the_source_does_not_loop(self) -> None:
+        (self.source / "loop").symlink_to(self.source)
+        self.claim(self.root / "beside")
+
     def test_the_same_dataset_is_reused_rather_than_written_again(self) -> None:
         output = dataset(self.root / "out.zarr")
         claimed = self.claim(output, force=False)
@@ -230,6 +251,19 @@ class IdentityTest(unittest.TestCase):
                 # had it not been moved on: what is left to tell them apart is that it was written.
                 os.utime(changed, ns=(stat.st_atime_ns, stat.st_mtime_ns + 1_000_000_000))
                 self.assertNotEqual(self.identity(), was, f"{changed.name} changed and the identity did not")
+
+    def test_a_source_whose_linked_pixels_change_is_another_dataset(self) -> None:
+        # The pixels are where the source's SKY links to: that they changed is what the rewrite has
+        # to see, however the source reaches them.
+        pixels = self.source.parent / "pixels"
+        (self.source / "SKY").rename(pixels)
+        (self.source / "SKY").symlink_to(pixels)
+        changed = pixels / "c" / "0" / "0"
+        was = self.identity()
+        stat = changed.stat()
+        changed.write_bytes(b"pixel 22")
+        os.utime(changed, ns=(stat.st_atime_ns, stat.st_mtime_ns + 1_000_000_000))
+        self.assertNotEqual(self.identity(), was, "linked pixels changed and the identity did not")
 
     def test_a_template_whose_arrays_change_is_another_synthetic_dataset(self) -> None:
         # A synthetic cube takes its coordinates and their metadata from the template's arrays, not

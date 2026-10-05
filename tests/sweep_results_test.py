@@ -63,7 +63,7 @@ def row(on: sweep.Layout, mode: str, seconds: float, stage: str = "stage1", sett
         "build_type": "Release", "tuning": "default", "bench_commit": "test", "status": "ok",
         "seconds": repr(seconds), "logical_bytes": "1048576", "elements": "262144", "late_frames": "",
         "late_max_s": "", "t_end_s": "", "trial": "0", "checksum": "", "process_index": "0", "op_index": "0",
-        "position": "pol=0;z=0", "animation_frames": "",
+        "position": "pol=0;z=0", "animation_frames": "", "chunk_decoded_bytes": "",
     }
     values.update(fields)
     return values
@@ -160,6 +160,28 @@ class WhatIsTimed(unittest.TestCase):
         self.assertEqual((stats.errors, len(stats.ops)), (1, 1))
 
 
+class WhatARunOfChunksHolds(unittest.TestCase):
+    """The cache a backend reading ahead needs is two runs of chunks along the spectrum, each every
+    chunk over the plane as the library decodes it: whole chunks, at the type they are stored as, with
+    their flags. Counted as float32 pixels over the plane alone, the advice fell short of what
+    ReadAhead::For then refused -- 160 bytes for the pixel fixture, against 200."""
+
+    def results(self, decoded: str) -> sweep.Results:
+        one = layout("one")
+        rows = [row(one, "plane", 0.1, shape="time=1;frequency=6;polarization=1;l=10;m=8",
+                    chunk_shape="time=1;frequency=2;polarization=1;l=4;m=8", chunk_decoded_bytes=decoded)]
+        return sweep.Results(rows, datasets(one))
+
+    def test_a_run_is_every_whole_chunk_over_the_plane_as_decoded(self) -> None:
+        # Three chunks along l, the last of them two thirds padding, and one along m.
+        dataset = sweep.dataset_key(layout("one"), False)
+        self.assertEqual(sweep.chunk_run_bytes(self.results("400"), dataset), 3 * 400)
+
+    def test_a_run_is_unknown_without_what_a_chunk_decodes_to(self) -> None:
+        dataset = sweep.dataset_key(layout("one"), False)
+        self.assertIsNone(sweep.chunk_run_bytes(self.results(""), dataset))
+
+
 class ReadingAlike(unittest.TestCase):
     """The same position of the same shape must read the same bytes whichever layout holds it."""
 
@@ -167,6 +189,20 @@ class ReadingAlike(unittest.TestCase):
         first, second = layout("first"), layout("second")
         rows = [row(first, "plane", 0.1, checksum="aa"), row(second, "plane", 0.1, checksum="bb")]
         self.assertEqual(len(sweep.Results(rows, datasets(first, second)).mismatches), 1)
+
+    def test_two_settings_reading_one_position_differently_are_a_mismatch(self) -> None:
+        # One layout read under two settings is two observations, not one written over the other.
+        one = layout("one")
+        other = ("4", str(CORES), str(1024 << 20), "0")
+        rows = [row(one, "plane", 0.1, checksum="aa"), row(one, "plane", 0.1, checksum="bb", setting=other)]
+        mismatches = sweep.Results(rows, datasets(one)).mismatches
+        self.assertEqual(len(mismatches), 1, "a setting that read other bytes went unnoticed")
+        self.assertIn("io=4", mismatches[0], "and the mismatch should say which settings disagree")
+
+    def test_two_stages_reading_one_position_differently_are_a_mismatch(self) -> None:
+        one = layout("one")
+        rows = [row(one, "plane", 0.1, checksum="aa"), row(one, "plane", 0.1, checksum="bb", stage="stage2")]
+        self.assertEqual(len(sweep.Results(rows, datasets(one)).mismatches), 1)
 
     def test_reading_alike_is_no_mismatch(self) -> None:
         first, second = layout("first"), layout("second")

@@ -72,7 +72,7 @@ from typing import Any, Iterator
 import numpy as np
 import zarr
 
-from fingerprint import source_content
+from fingerprint import reached, source_content
 
 MANIFEST_NAME = "bench-manifest.json"
 # Bumped whenever the same arguments would produce different bytes, so that a dataset written by an
@@ -1145,8 +1145,12 @@ class Output:
         `force` replaces even this dataset: it is how to write one again when what the identity can
         see of its origin is not all there is to it."""
         for flag, read in reads:
-            if overlaps(path, read):
-                raise SystemExit(f"{path} overlaps {flag} {read}; write the dataset somewhere else")
+            # What a link in the dataset points at is the dataset too, however far from its own
+            # directory: an output that holds it would delete those bytes or write among them.
+            for held in (read, *(entry.resolve() for entry in reached(read) if entry.is_symlink())):
+                if overlaps(path, held):
+                    where = "" if held == read else f" through a link to {held}"
+                    raise SystemExit(f"{path} overlaps {flag} {read}{where}; write the dataset somewhere else")
         if path.exists():
             manifest = read_manifest(path)
             if not force and manifest and manifest.get("identity_hash") == digest and manifest.get("complete"):

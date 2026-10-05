@@ -124,11 +124,10 @@ public:
                 continue;
             }
 
-            const auto relative_path = std::filesystem::relative(path, _root, error);
-            if (error) {
-                return Error{ErrorCode::io_error, "Unable to enumerate Zarr metadata: " + error.message(),
-                             path.string()};
-            }
+            // Named by where it sits in the store, which the walk spelt from the root: relative()
+            // resolves links first, so an array linked in from elsewhere came out as
+            // ../elsewhere/SKY, a name the store refuses.
+            const auto relative_path = path.lexically_relative(_root);
             if (relative_path.empty()) {
                 continue;
             }

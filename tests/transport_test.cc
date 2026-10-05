@@ -109,6 +109,23 @@ void TestADirectoryWithoutMetadataIsNotANode(const std::filesystem::path& root) 
     RequireListing(root, {"not_a_node/DEEPER"}, "a plain directory between the root and a node");
 }
 
+// An array linked in from elsewhere -- where the bytes of a large dataset as often as not are -- is
+// named by where it sits in the store, not by where the link resolves: resolved, it came out as
+// ../elsewhere/SKY, which the store refuses as a node name, and the dataset opened only when
+// consolidated. The same goes for a store reached through a link of its own.
+void TestALinkedArrayIsNamedWhereItSits(const std::filesystem::path& root) {
+    const auto store = root / "store";
+    WriteNode(store, "group");
+    WriteNode(root / "elsewhere" / "SKY", "array");
+    WriteNode(root / "elsewhere" / "GROUP", "group");
+    std::filesystem::create_directory_symlink(root / "elsewhere" / "SKY", store / "SKY");
+    std::filesystem::create_directory_symlink(root / "elsewhere" / "GROUP", store / "GROUP");
+    RequireListing(store, {"GROUP", "SKY"}, "a store whose array and group are links");
+
+    std::filesystem::create_directory_symlink(store, root / "alias");
+    RequireListing(root / "alias", {"GROUP", "SKY"}, "the same store reached through a link");
+}
+
 }  // namespace
 
 int main() {
@@ -119,6 +136,7 @@ int main() {
         TestEveryNodeIsListedExactlyOnce(root / "nested");
         TestChunksAreNotWalked(root / "chunks");
         TestADirectoryWithoutMetadataIsNotANode(root / "plain-directory");
+        TestALinkedArrayIsNamedWhereItSits(root / "linked");
         std::filesystem::remove_all(root);
     } catch (const std::exception& error) {
         std::fprintf(stderr, "transport test failed: %s\n", error.what());

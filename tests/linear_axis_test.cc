@@ -14,6 +14,7 @@
 #include <cmath>
 #include <exception>
 #include <iostream>
+#include <limits>
 #include <optional>
 #include <string>
 #include <vector>
@@ -226,6 +227,28 @@ void TestAnEvenSpectralAxisKeepsItsDescription() {
     Require(fit.diagnostics.empty(), "with nothing to report");
 }
 
+// A sample that is not a number fails every comparison, so a spacing test written as "refuse when
+// it differs" passes it: [1e9, NaN, 1.002e9] came out evenly spaced at 1e6. Such an axis has no
+// linear description, whichever kind it is, and a consumer told it had one would draw it.
+void TestANonFiniteSampleDescribesNoLinearAxis() {
+    const double nan = std::numeric_limits<double>::quiet_NaN();
+    const double inf = std::numeric_limits<double>::infinity();
+    for (const auto& channels : {std::vector<double>{1.0e9, nan, 1.002e9}, std::vector<double>{nan, 1.0e9, 1.001e9},
+                                 std::vector<double>{1.0e9, 1.001e9, inf}}) {
+        const auto underneath = FitLinearAxis(channels, 1.0e9, "frequency");
+        Require(!underneath.uniform && !underneath.increment && !underneath.reference_pixel,
+                "an axis with a non-finite sample was given a linear description");
+        const auto spectral = FitSpectralAxis(channels, 1.0e9, "frequency");
+        Require(!spectral.increment && !spectral.reference_pixel && !spectral.reference_value,
+                "a spectral axis with a non-finite sample reported a linear description");
+        Require(Diagnosed(spectral, carta::zarr::DiagnosticCode::nonuniform_axis), "and did not say why");
+        const auto direction = FitDirectionAxis({0.0, nan, 2.0e-4}, "l");
+        Require(!direction.increment && !direction.reference_pixel,
+                "a direction axis with a non-finite sample reported a linear description");
+        Require(Diagnosed(direction, carta::zarr::DiagnosticCode::degenerate_axis), "and did not say it is unusable");
+    }
+}
+
 }  // namespace
 
 int main() {
@@ -243,6 +266,7 @@ int main() {
         TestASpectralAxisWithholdsWhatItCannotDescribe();
         TestTheDroppedDiagnosticWasReallyThere();
         TestAnEvenSpectralAxisKeepsItsDescription();
+        TestANonFiniteSampleDescribesNoLinearAxis();
         std::cout << "carta-zarr linear axis tests passed\n";
         return 0;
     } catch (const std::exception& error) {

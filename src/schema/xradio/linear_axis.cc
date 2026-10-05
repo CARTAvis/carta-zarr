@@ -58,6 +58,17 @@ LinearAxisFit FitLinearAxis(const std::vector<double>& values, std::optional<dou
         return fit;
     }
 
+    // Checked before anything is fitted: a sample that is not a number fails every comparison, so
+    // the spacing test below would pass it and describe the axis around it as linear.
+    if (!std::all_of(values.begin(), values.end(), [](double value) { return std::isfinite(value); })) {
+        fit.diagnostics.push_back(MakeDiagnostic(DiagnosticCode::nonuniform_axis,
+                                                 "The " + std::string(axis_name) +
+                                                     " coordinate has a sample that is not a finite number, so it "
+                                                     "has no linear description",
+                                                 axis_name));
+        return fit;
+    }
+
     double increment = values.at(1) - values.at(0);
     fit.increment = increment;
     if (increment == 0.0) {
@@ -109,8 +120,8 @@ DirectionAxisFit FitDirectionAxis(const std::vector<double>& cosines, std::strin
     direction.diagnostics = std::move(fit.diagnostics);
     // A direction axis is linear by construction, so an axis that cannot be described linearly is a
     // store this library cannot make sense of rather than a coordinate it reports tabularly -- which
-    // is what a spectral axis in the same position is. Two ways to reach it: fewer than two samples,
-    // and two samples that are the same. Both leave the caller's reference pixel and increment at
+    // is what a spectral axis in the same position is. Three ways to reach it: fewer than two
+    // samples, two samples that are the same, and a sample that is not a finite number. Both leave the caller's reference pixel and increment at
     // whatever they were, and before this they left them there silently.
     //
     // Diagnosed here rather than in FitLinearAxis because a spectral axis with one channel is not
@@ -119,7 +130,7 @@ DirectionAxisFit FitDirectionAxis(const std::vector<double>& cosines, std::strin
         direction.diagnostics.push_back(
             MakeDiagnostic(DiagnosticCode::degenerate_axis,
                            "The " + std::string(axis_name) +
-                               " coordinate has fewer than two distinct samples, so it has no linear "
+                               " coordinate has fewer than two distinct finite samples, so it has no linear "
                                "description; any reference pixel or increment reported for it is not usable",
                            axis_name));
     }

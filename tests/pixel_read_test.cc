@@ -855,6 +855,39 @@ void TestAVariableNamedWithABackslashSaysWhyItIsNotRead(const char* fixture) {
 
 }  // namespace
 
+// The bytes of a large dataset are as often as not elsewhere, its arrays links to them. Unconsolidated,
+// as this fixture is, the store finds its nodes by walking the directory, and it named a linked array
+// by where the link resolved -- ../elsewhere/SKY, which it then refused -- so the dataset opened only
+// once it was consolidated.
+void TestAnImageWhoseArraysAreLinkedInReads(const char* fixture) {
+    const auto root = std::filesystem::temp_directory_path() / ("carta-zarr-linked-" + std::to_string(getpid()));
+    std::filesystem::remove_all(root);
+    struct Remove {
+        std::filesystem::path path;
+        ~Remove() {
+            std::error_code ignored;
+            std::filesystem::remove_all(path, ignored);
+        }
+    } const remove{root};
+    const auto store = root / "store";
+    std::filesystem::create_directories(root / "elsewhere");
+    std::filesystem::copy(fixture, store, std::filesystem::copy_options::recursive);
+    for (const char* const array : {"SKY", "FLAG"}) {
+        std::filesystem::rename(store / array, root / "elsewhere" / array);
+        std::filesystem::create_directory_symlink(root / "elsewhere" / array, store / array);
+    }
+    Require(!std::filesystem::exists(store / "zarr.json") ||
+                ReadText(store / "zarr.json").find("consolidated_metadata") == std::string::npos,
+            "the fixture is consolidated, so its listing is not walked and this asks nothing");
+
+    const auto sky = OpenSky(store.string().c_str());
+    TestWholeImage(sky);
+    carta::zarr::ReadRequest plane;
+    plane.axes = {{0, kL, 1}, {0, kM, 1}, {0, 1, 1}, {0, 1, 1}, {0, 1, 1}};
+    std::vector<float> masked(kL * kM);
+    Require(static_cast<bool>(sky.Read(plane, {masked.data(), masked.size()})), "a masked plane of linked arrays did not read");
+}
+
 int main() {
     std::vector<carta::zarr::AxisRole> fast_axes;
     for (const char* const fixture : kFixtures) {
@@ -887,6 +920,7 @@ int main() {
         TestAnImageWhoseArraysDisagreeWithTheirCopiesDoesNotOpen(kFixtures[0]);
         TestLabelsAreHeldToTheirOwnDocument(kFixtures[0]);
         TestAVariableNamedWithABackslashSaysWhyItIsNotRead(kFixtures[0]);
+        TestAnImageWhoseArraysAreLinkedInReads(kFixtures[0]);
         Require(fast_axes.size() == 2 && fast_axes.at(0) != fast_axes.at(1),
                 "the two fixtures should disagree about which spatial axis the store varies fastest; "
                 "if they agree, one of them was regenerated wrongly and half of this is untested");

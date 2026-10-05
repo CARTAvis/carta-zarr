@@ -28,7 +28,9 @@
 
 namespace carta::zarr::bench {
 
-inline constexpr int kCsvVersion = 9;
+// 10: region and exact cube-histogram operations ask for sum_sq_dev, as carta-backend does, so their
+// timings are of a heavier reduction than those of version 9.
+inline constexpr int kCsvVersion = 10;
 
 // What a dataset's bench-manifest.json says, for the columns the library cannot answer. Empty for a
 // dataset the generator did not write, which the bench reads as well as any other.

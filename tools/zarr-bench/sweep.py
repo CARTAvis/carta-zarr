@@ -72,7 +72,7 @@ MIN_FIRST_TOUCHES = 5
 # The version of results.csv this sweep reads, which is carta-zarr-bench's kCsvVersion in
 # bench/record.h; sweep_results_test.py holds the two equal. A version changes when what a column means
 # does, so a CSV of another one is refused rather than read as though it were this one.
-CSV_VERSION = 9
+CSV_VERSION = 10
 # carta-zarr-bench's operations per user per trial when measure.ops does not say.
 BENCH_DEFAULT_OPS = {"plane": 16, "animation": 2, "spectrum": 32, "region": 1, "cube-histogram": 1, "open": 8}
 # The modes of the trade-off between deep chunks and shallow ones, in the order the table shows them.

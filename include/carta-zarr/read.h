@@ -136,9 +136,10 @@ struct ReadControl {
 // been ignored does not compile.
 struct ReadOptions {
     ReadControl control;
-    // Write NaN wherever the pixel mask is false, so that one call answers what would otherwise be
-    // a pixel read plus a mask read. On by default: masking during the read costs one pass over
-    // data already in hand, while a caller doing it afterwards pays for a second traversal.
+    // Write NaN wherever the image's flag marks a pixel -- a nonzero flag value, XRADIO's true, which
+    // means the pixel is bad -- so that one call answers what would otherwise be a pixel read plus a
+    // flag read. On by default: masking during the read costs one pass over data already in hand,
+    // while a caller doing it afterwards pays for a second traversal.
     bool apply_pixel_mask = true;
     // How much decoded chunk data one read of the pixels should hold at once, in bytes. Zero means
     // the library's own budget, which it sizes from the image's chunks.

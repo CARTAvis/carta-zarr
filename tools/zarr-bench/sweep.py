@@ -1324,7 +1324,13 @@ class Analysis:
 
     def recommendations(self) -> tuple[Choice | None, Choice | None]:
         """The best choice for the data as it is, and the best one once it is in the best layout. A
-        setting the backend cannot be given -- any read budget but the library's -- is not one."""
+        setting the backend cannot be given -- any read budget but the library's -- is not one.
+
+        Neither while checksums disagree: one of the reads that disagree was wrong, and which is not
+        known, so the fastest choice may be fast because it read the wrong bytes. A recommendation
+        under a warning saying so was still a recommendation, and was confirmed and validated."""
+        if self.results.mismatches:
+            return None, None
         applicable = [choice for choice in self.stage2_choices()
                       if choice.setting.read_budget == 0 and math.isfinite(choice.score)]
         after = applicable[0] if applicable else None
@@ -1639,6 +1645,9 @@ def write_report(sweep: Sweep, layouts: list[Layout], invalid: list[tuple[Layout
                     warnings.append(f"**A read budget helps {mode}** on {layout.name}: {best[1].read_budget >> 20} MiB "
                                     f"is {(1 - best[0] / plain) * 100:.0f}% faster than the library's own. The backend "
                                     "has no setting for it yet; this is the case for adding one.")
+    elif results.mismatches:
+        conclusion.append("No recommendation: checksums disagree (see the warnings), so at least one layout or "
+                          "setting read the wrong bytes and its timings rank nothing.\n")
     else:
         conclusion.append("No recommendation yet: stage2 has no complete results.\n")
 

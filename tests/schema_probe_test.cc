@@ -839,11 +839,11 @@ void TestABeamTableWhoseAxesAreReorderedOnDiskIsRefused(const std::filesystem::p
                 beams.error().message);
 }
 
-// A beam table's values are decoded with its own document, so its unit is read from the same one.
-// The root's copy of it was what the unit used to come from: here the copy says rad and the array's
-// own document says deg, which the two can because attributes are not something the copy is held to.
-// One table is one document, its layout, its values and its unit alike.
-void TestABeamTablesUnitIsItsOwnDocuments(const std::filesystem::path& root) {
+// A beam table's values are decoded with its own document, and its unit used to be read from the
+// root's copy of it. Here the copy says rad and the array's own document says deg: the table is not
+// the one the copy described, and it is refused as a table chunked otherwise would be, rather than
+// read in either document's terms.
+void TestABeamTableWhoseUnitDisagreesWithItsCopyIsRefused(const std::filesystem::path& root) {
     std::filesystem::copy(CARTA_ZARR_REFERENCE_FIXTURE, root, std::filesystem::copy_options::recursive);
     const auto metadata_path = root / "BEAM" / "zarr.json";
     std::string text;
@@ -863,11 +863,10 @@ void TestABeamTablesUnitIsItsOwnDocuments(const std::filesystem::path& root) {
     const auto image = dataset.value().OpenImage("SKY");
     Require(static_cast<bool>(image), "SKY did not open in the copy with another BEAM unit");
     const auto beams = image.value().ReadBeams();
-    Require(beams && !beams.value().empty(), "the beam table with another unit was not read");
-    for (const auto& beam : beams.value()) {
-        Require(beam.unit == "deg", "a beam's unit was read from the root's copy, '" + beam.unit +
-                                        "', rather than from the document its values were decoded with");
-    }
+    Require(!beams, "a beam table whose unit disagrees with the root's copy was read");
+    Require(beams.error().code == ErrorCode::invalid_metadata && beams.error().node_path == "BEAM",
+            "a beam table whose unit disagrees with the root's copy was refused as something else: " +
+                beams.error().message);
 }
 
 void TestImageDatasetWithoutSky(const std::filesystem::path& root) {
@@ -1067,7 +1066,7 @@ int main() {
         TestEmptyAndOversizedMetadata(root / "metadata-bytes");
         TestBeamTableWithUnreadableLabels(root / "beam-labels");
         TestABeamTableWhoseAxesAreReorderedOnDiskIsRefused(root / "beam-axis-order");
-        TestABeamTablesUnitIsItsOwnDocuments(root / "beam-unit");
+        TestABeamTableWhoseUnitDisagreesWithItsCopyIsRefused(root / "beam-unit");
         TestANodeNameSpelledWithADotIsTheSameNode(root / "dotted-node");
         TestReferenceFixture();
         TestAnEntrySaysWhatOpeningWould();

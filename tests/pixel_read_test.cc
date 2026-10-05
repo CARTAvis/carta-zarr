@@ -21,6 +21,7 @@
 #include <fstream>
 #include <functional>
 #include <iostream>
+#include <limits>
 #include <iterator>
 #include <string>
 #include <thread>
@@ -163,6 +164,22 @@ void TestSubsetAndStride(const carta::zarr::Image& sky) {
     for (std::size_t i = 0; i < selected.size(); ++i) {
         Require(pixels.at(i) == ExpectedValue(selected.at(i).first, selected.at(i).second, 0, 1, 0),
                 "a strided read returned the wrong element at offset " + std::to_string(i));
+    }
+}
+
+// A stride says how far apart the elements an axis selects are, so on an axis selecting one it says
+// nothing, and any positive one is accepted. TensorStore takes a signed stride, and one of 2^63 or
+// more went through as a negative number: the single pixel that read at stride 1 failed at 2^63.
+void TestAStrideOverOneElementIsNoStride(const carta::zarr::Image& sky) {
+    for (const std::uint64_t stride : {std::uint64_t{1} << 63U, std::numeric_limits<std::uint64_t>::max()}) {
+        carta::zarr::ReadRequest request;
+        request.axes = {{1, 1, stride}, {3, 1, stride}, {0, 1, stride}, {1, 1, stride}, {0, 1, stride}};
+        float pixel = 0.0F;
+        const auto read = sky.Read(request, {&pixel, 1}, Unmasked());
+        Require(static_cast<bool>(read), "one pixel at a stride of " + std::to_string(stride) +
+                                             " was not read: " + (read ? std::string{} : read.error().message));
+        Require(pixel == ExpectedValue(1, 3, 0, 1, 0),
+                "one pixel at a stride of " + std::to_string(stride) + " read the wrong value");
     }
 }
 
@@ -762,6 +779,18 @@ void TestACoordinateDisagreeingWithItsConsolidatedCopyIsRefused(const char* fixt
     RequireRefusedAtOpen(copy.OpenSky(), "frequency", "a frequency coordinate disagreeing with its copy");
 }
 
+// What a coordinate's values mean is read from its attributes -- the unit, the frame, the reference
+// and rest frequencies -- and those were read from the root's copy while the values came from the
+// array's own document. A copy left behind by a rewrite of the attributes alone described the values
+// in the old terms: here the own document gives the rest frequency in GHz, and the image opened
+// reporting the copy's figure in Hz beside them. Refused, as a disagreement on the extent is.
+void TestACoordinateWhoseAttributesDisagreeWithItsCopyIsRefused(const char* fixture) {
+    const ConsolidatedCopy copy(fixture, "attribute-copy");
+    copy.RewriteOwn("frequency",
+                    [](std::string text) { return Replaced(std::move(text), "\"rest_frequency\"", "1420405751.0", "1.420405751"); });
+    RequireRefusedAtOpen(copy.OpenSky(), "frequency", "a frequency coordinate whose attributes disagree with its copy");
+}
+
 // An image that opens can be read. Its own array and its flag disagreeing with the root's copy used
 // to open, and then fail every read -- and for the flag, only every masked one. Both are refused
 // when the image is opened, naming the array that disagrees.
@@ -917,6 +946,7 @@ int main() {
             TestAxesAndGeometry(sky);
             TestWholeImage(sky);
             TestSubsetAndStride(sky);
+            TestAStrideOverOneElementIsNoStride(sky);
             TestMaskFusion(sky);
             TestRejectedRequests(sky);
             TestReadControls(sky);
@@ -937,6 +967,7 @@ int main() {
         TestAPoolDoesNotCarryOneDatasetsArraysIntoTheNext(kFixtures[0]);
         TestAChunkSaysWhatItDecodesTo(kFixtures[0]);
         TestACoordinateDisagreeingWithItsConsolidatedCopyIsRefused(kFixtures[0]);
+        TestACoordinateWhoseAttributesDisagreeWithItsCopyIsRefused(kFixtures[0]);
         TestAnImageWhoseArraysDisagreeWithTheirCopiesDoesNotOpen(kFixtures[0]);
         TestLabelsAreHeldToTheirOwnDocument(kFixtures[0]);
         TestAVariableNamedWithABackslashSaysWhyItIsNotRead(kFixtures[0]);

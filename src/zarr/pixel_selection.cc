@@ -65,7 +65,10 @@ Result<PixelSelection> BuildSelection(const ImageDescriptor& descriptor, const R
         }
         selection._start.at(stored) = range.start;
         selection._count.at(stored) = range.count;
-        selection._stride.at(stored) = range.stride;
+        // A stride over one element says nothing, so any positive one was accepted above; the readers
+        // take a signed stride, and one of 2^63 or more reached TensorStore as a negative number.
+        // Over two or more, the check above has already held it below the axis's length.
+        selection._stride.at(stored) = range.count == 1 ? 1 : range.stride;
         selection._destination_to_stored.at(logical) = stored;
     }
     // In stored order the destination's axis 0 is the last stored dimension -- the one the array is

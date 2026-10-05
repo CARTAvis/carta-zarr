@@ -33,14 +33,24 @@ exemption for a 1-D array naming no dimensions, because our parser takes `dimens
 attributes where TensorStore does not; comparing two of our own parses needs none.
 
 Held to each other on what the store takes from the copy: the extent, the names and order of the
-dimensions, the data type, and the chunks and shards a read is planned from. Not on how the chunks
-are encoded -- codecs, chunk keys, fill value, a string's length -- because the copy is never used to
-decode one. What `VerifyArray` hands back is the own document, and that is what a reader decodes
-with. A numeric array comes back bound to it, as a `NumericArray`, so whatever is read
-beside its values -- the dimension names they are addressed by, a beam table's unit -- comes from the
-document they were decoded with and never from the copy, whose attributes are compared with nothing. A stricter rule, the two documents equal but for attributes, was considered and not taken: a
-child rewritten by a later zarr-python that spells a default out is the same array, and refusing it
-would refuse a store every other reader opens.
+dimensions, the data type, the chunks and shards a read is planned from, and the attributes. Not on
+how the chunks are encoded -- codecs, chunk keys, fill value, a string's length -- because the copy is
+never used to decode one. What `VerifyArray` hands back is the own document, and that is what a
+reader decodes with. A numeric array comes back bound to it, as a `NumericArray`, so the dimension
+names its values are addressed by come from the document they were decoded with. A stricter rule, the
+two documents equal throughout, was considered and not taken: a child rewritten by a later
+zarr-python that spells a default out is the same array, and refusing it would refuse a store every
+other reader opens.
+
+The attributes were at first compared with nothing, on the reasoning that whatever is read beside the
+values would be read from the own document. It was not, and could not be everywhere: the listing
+reads an image's role and its axes' units from the copy, as it must to stay off the child documents,
+and describing read a coordinate's unit, frame, and reference and rest frequencies from it too. A
+copy left behind by a rewrite of the attributes alone then opened an image whose frequencies were
+decoded in Hz and reported in GHz. Reading every attribute from the own document instead would have
+left the listing and the opened image disagreeing about the same axis, so the attributes are held to
+the copy like the rest of what the store takes from it, and compared whole: which attributes a
+profile reads is the profile's business, not the store's.
 
 A copy naming an array whose own document is missing is `invalid_metadata`, naming the array: ADR
 0004 already calls such a store malformed, and said its error should name the missing document.

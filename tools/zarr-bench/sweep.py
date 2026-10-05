@@ -852,7 +852,7 @@ class Sweep:
         """One untimed run of every mode the runs will measure, each time a dataset is written, into a
         CSV of its own under logs/ that no report reads.
 
-        On the server's Lustre the first run after a dataset was written read a region a third to half
+        On one server's Lustre the first run after a dataset was written read a region a third to half
         again slower than every run after it, with the same caches emptied before each. Opening every
         file first did not change that, nor reading a byte of each, nor reading all of them, nor
         waiting two minutes: only a run of the bench did. Without it the first run on each layout --

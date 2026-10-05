@@ -31,9 +31,9 @@ explains why, and how they are measured.
 
 ## What the measurements found
 
-On the server (two Xeon Gold 6134, 32 logical cores, 1 TB RAM) against its Lustre 2.15 and BeeGFS file
-systems, with eight users reading at once and every cache emptied before each trial, and on the workstation
-(a 28-core desktop) against a local NVMe disk for comparison. The numbers below are medians per
+On a server (two Xeon Gold 6134, 32 logical cores, 1 TB RAM) against its Lustre 2.15 and BeeGFS file
+systems, with eight users reading at once and every cache emptied before each trial, and on a
+28-core desktop against a local NVMe disk for comparison. The numbers below are medians per
 operation; a plane read is what jumping to another channel costs, since carta-backend reads the whole
 plane of a Zarr cube into memory and downsamples it there.
 
@@ -188,7 +188,7 @@ tools exist so that it can be measured rather than assumed.
    how caches will be emptied, and whether striping can be set, and writes nothing.
 4. **Run it:** `./sweep.py my-sweep.toml`. It writes, measures and deletes one layout at a time, and
    the same command resumes it after an interruption. A sweep of four layouts of a 32 GiB cube took
-   about two hours on the server's Lustre.
+   about two hours on that server's Lustre.
 5. **Read `summary.md`**: the layout and the flags to use, as they would be pasted into the backend's
    command line or `settings.json`, then every warning, then the tables behind them.
 
@@ -196,14 +196,14 @@ tools exist so that it can be measured rather than assumed.
 
 A read that finds its data in memory measures memory. Between a CARTA server and the disks there are
 at least three caches: carta-zarr's own (each read in the bench starts without it), the client's page
-cache, and the storage servers'. On the server's Lustre a whole-cube read took 1.24 s with everything
+cache, and the storage servers'. On that server's Lustre a whole-cube read took 1.24 s with everything
 cached, 2.0 s with the client's page cache emptied, and 5.5 s with the servers' emptied too -- but
 11.9 s the first time after the cube was written. Something below what an ordinary user can empty
 keeps data that was read recently, and no later read was as slow as the first.
 
 The sweep therefore runs the bench once, untimed, every time it writes a dataset, before measuring
 it. Every layout is then measured in the same state, which is what a comparison needs, and its times
-are those of data read recently rather than data never read: on the server a third to half faster for a
+are those of data read recently rather than data never read: there, a third to half faster for a
 region of the cube's own layout. A first view of a cube nobody has opened in a while will be slower
 than the report says.
 
@@ -235,7 +235,7 @@ than the report says.
 - **Data that fits in memory.** A crop smaller than RAM measures caching unless caches are emptied
   before every trial; the sweep refuses one when they cannot be. Validation re-measures the
   recommendation on a copy larger than RAM, which is impossible on a server with as much memory as
-  the server's.
+  that one's.
 - **Synthetic pixels.** A layout's cost depends on how well its pixels compress, and noise compresses
   worse than sky. Rewrite a real cube when there is one.
 

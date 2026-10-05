@@ -56,7 +56,7 @@ wanted the spread. Asking for it brings `num_pixels` and `sum` with it, since a 
 a block reports them. A cube histogram always takes them: its loop is bound by the branch on
 finiteness and the histogram it writes, not by arithmetic.
 
-What it costs, measured with `carta_zarr_pass_timing` on the Apple-silicon Mac against the ASKAP cube
+What it costs, measured with `carta_zarr_pass_timing` on an Apple-silicon Mac against the ASKAP cube
 (aligned builds, six interleaved rounds, median of seven repeats each, paired by round):
 
 | entry | 1 thread | 4 threads |

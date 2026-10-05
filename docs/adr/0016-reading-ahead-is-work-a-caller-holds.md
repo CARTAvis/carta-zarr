@@ -30,7 +30,7 @@ started a thread.
 
 ## Why only when there is time over
 
-Measured on the server's Lustre with a 7763 x 4742 cube, a frame that enters a run of chunks decodes all
+Measured on a server's Lustre 2.15 with a 7763 x 4742 cube, a frame that enters a run of chunks decodes all
 of it: in 512 x 512 x 4 chunks it stalled for up to 135 ms every fourth frame at 5 frames a second,
 and in 512 x 512 x 16 chunks for up to 400 ms every sixteenth, while every other frame was served
 from the cache in a few milliseconds. Decoding the next run while the frames of this one played hid

@@ -12,6 +12,10 @@ execute_process(
 if(result)
     message(FATAL_ERROR "carta-zarr install failed: ${result}")
 endif()
+file(GLOB_RECURSE installed_notices "${prefix}/share/doc/*/THIRD_PARTY_NOTICES")
+if(NOT installed_notices)
+    message(FATAL_ERROR "The install carries no THIRD_PARTY_NOTICES for what the library links in")
+endif()
 
 execute_process(
     COMMAND "${CMAKE_COMMAND}"

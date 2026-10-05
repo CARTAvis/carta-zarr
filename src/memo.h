@@ -7,12 +7,28 @@
 #ifndef CARTA_ZARR_SRC_MEMO_H_
 #define CARTA_ZARR_SRC_MEMO_H_
 
+#include "carta-zarr/error.h"
+#include "carta-zarr/result.h"
+
+#include <list>
 #include <map>
 #include <mutex>
-#include <optional>
 #include <utility>
 
 namespace carta::zarr::internal {
+
+// Whether a remembered value is to be computed again when it is next asked for: a read that could not
+// be made, rather than an answer about the store. An I/O error may not happen the next time, and a
+// cancelled read was stopped by its caller, not by what it read; neither says anything about the
+// store that the next caller should be held to. Every other value, failures included, is an answer.
+template <typename Value>
+bool AskAgain(const Value& /*value*/) {
+    return false;
+}
+template <typename T>
+bool AskAgain(const Result<T>& value) {
+    return !value && (value.error().code == ErrorCode::io_error || value.error().code == ErrorCode::cancelled);
+}
 
 /**
  * A table of values computed on first use and remembered thereafter.
@@ -24,11 +40,13 @@ namespace carta::zarr::internal {
  *
  * A failed computation is remembered like any other value. That is deliberate for a read-only view
  * of a store: a node that was missing stays missing for the life of the view, so what a caller
- * observes does not change under it.
+ * observes does not change under it. A read that could not be made is the exception (AskAgain): it
+ * is no answer about the store, so it is computed again when next asked for, until there is one.
  *
- * Values are handed back by reference. An entry is written once and never erased or replaced, and a
- * std::map does not move the ones it already holds when another is inserted, so a reference stays
- * valid for as long as the table does -- which is what makes a table of parsed JSON documents worth
+ * Values are handed back by reference. An entry is written once and never erased or replaced -- one
+ * computed again is added after the one it supersedes, which stays where it was -- and neither a
+ * std::map nor a std::list moves the values it already holds, so a reference stays valid for as long
+ * as the table does -- which is what makes a table of parsed JSON documents worth
  * having at all. A caller that stores one keeps the table alive for at least as long.
  */
 template <typename Key, typename Value>
@@ -44,12 +62,11 @@ public:
     template <typename Compute>
     const Value& GetOrCompute(const Key& key, Compute compute) const {
         std::scoped_lock const lock(_mutex);
-        const auto found = _entries.find(key);
-        if (found != _entries.end()) {
-            return found->second;
+        auto& answers = _entries[key];
+        if (answers.empty() || AskAgain(answers.back())) {
+            answers.push_back(compute());
         }
-        const auto insertion = _entries.emplace(key, compute());
-        return insertion.first->second;
+        return answers.back();
     }
 
     // Put a value in that was not computed here. It is for a table whose entries are already in
@@ -58,18 +75,23 @@ public:
     // there wins, because it is the one callers may be holding a reference to.
     void Insert(Key key, Value value) const {
         std::scoped_lock const lock(_mutex);
-        _entries.emplace(std::move(key), std::move(value));
+        auto& answers = _entries[std::move(key)];
+        if (answers.empty()) {
+            answers.push_back(std::move(value));
+        }
     }
 
 private:
     mutable std::mutex _mutex;
-    mutable std::map<Key, Value> _entries;
+    // Each key's answers in the order they were computed, the last the current one.
+    mutable std::map<Key, std::list<Value>> _entries;
 };
 
 /**
  * One value computed on first use and remembered thereafter: Memo with nothing to key on.
  *
- * Shares Memo's contract, including that a failed computation is remembered.
+ * Shares Memo's contract, including that a failed computation is remembered unless AskAgain says it
+ * is no answer.
  */
 template <typename Value>
 class Lazy {
@@ -84,15 +106,15 @@ public:
     template <typename Compute>
     const Value& GetOrCompute(Compute compute) const {
         std::scoped_lock const lock(_mutex);
-        if (!_value.has_value()) {
-            _value.emplace(compute());
+        if (_answers.empty() || AskAgain(_answers.back())) {
+            _answers.push_back(compute());
         }
-        return *_value;
+        return _answers.back();
     }
 
 private:
     mutable std::mutex _mutex;
-    mutable std::optional<Value> _value;
+    mutable std::list<Value> _answers;
 };
 
 }  // namespace carta::zarr::internal

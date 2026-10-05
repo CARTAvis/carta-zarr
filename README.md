@@ -83,6 +83,32 @@ cmake --install build --prefix /your/prefix
 
 The first configure builds TensorStore, which takes a while; later ones do not.
 
+### Without network access
+
+Build farms such as Launchpad and most RPM builders have no network. Configure once on a machine
+that has, pack the 43 archives that configure downloaded, and point the offline configure at them:
+
+```bash
+# Where there is network, after a configure into build/:
+(cd build/_deps && find . -maxdepth 4 -path '*-subbuild/*-populate-prefix/src/*' -type f \
+    | tar czf ../../carta-zarr-deps.tar.gz -T -)
+
+# Where there is not:
+mkdir deps && tar xzf carta-zarr-deps.tar.gz -C deps
+cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DFETCHCONTENT_BASE_DIR=$PWD/deps
+```
+
+Each archive is checked against the hash TensorStore pins and then not downloaded again. It is the
+archives that move, not the unpacked sources: TensorStore patches each source as it unpacks it, and
+the patches name the build tree they were made for, so neither copying another tree's `_deps` nor
+`FETCHCONTENT_SOURCE_DIR_<name>` gives a tree that configures.
+
+## Licence of what it links in
+
+The ten libraries linked into `libcarta-zarr`, and the header-only `half`, are listed with their
+licences in `THIRD_PARTY_NOTICES`, which the build writes from their sources and installs beside
+`LICENSE`. A binary distribution of the library carries that file.
+
 ## Using it from CMake
 
 ```cmake

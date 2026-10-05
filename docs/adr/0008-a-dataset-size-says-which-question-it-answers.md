@@ -70,6 +70,7 @@ tell should not be the one asserting.
 
 ## What this does not decide
 
-`FileInfo::size_is_upper_bound` and the frontend's `≤` are unchanged. carta-backend-2 now derives
-that flag itself, with a comment saying what it is assuming. Whether the frontend should keep
-showing `≤` for a Zarr store is a question for the protocol and the frontend, not for this library.
+`FileInfo::size_is_upper_bound` and the frontend's `≤` were left as they were, for the protocol and
+the frontend to decide. They have since followed this: the field is `size_is_declared`, the backend
+passes the basis through without inferring a comparison, and the file browser marks a declared size
+with `~` rather than `≤`.

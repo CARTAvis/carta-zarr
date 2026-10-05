@@ -63,7 +63,7 @@ def row(on: sweep.Layout, mode: str, seconds: float, stage: str = "stage1", sett
         "build_type": "Release", "tuning": "default", "bench_commit": "test", "status": "ok",
         "seconds": repr(seconds), "logical_bytes": "1048576", "elements": "262144", "late_frames": "",
         "late_max_s": "", "t_end_s": "", "trial": "0", "checksum": "", "process_index": "0", "op_index": "0",
-        "position": "pol=0;z=0", "animation_frames": "",
+        "position": "pol=0;z=0", "animation_frames": "", "chunk_decoded_bytes": "",
     }
     values.update(fields)
     return values
@@ -158,6 +158,28 @@ class WhatIsTimed(unittest.TestCase):
         one = layout("one")
         stats = self.stats([row(one, "plane", 0.1), row(one, "plane", 0.0, status="error", op_index="1")], one, "plane")
         self.assertEqual((stats.errors, len(stats.ops)), (1, 1))
+
+
+class WhatARunOfChunksHolds(unittest.TestCase):
+    """The cache a backend reading ahead needs is two runs of chunks along the spectrum, each every
+    chunk over the plane as the library decodes it: whole chunks, at the type they are stored as, with
+    their flags. Counted as float32 pixels over the plane alone, the advice fell short of what
+    ReadAhead::For then refused -- 160 bytes for the pixel fixture, against 200."""
+
+    def results(self, decoded: str) -> sweep.Results:
+        one = layout("one")
+        rows = [row(one, "plane", 0.1, shape="time=1;frequency=6;polarization=1;l=10;m=8",
+                    chunk_shape="time=1;frequency=2;polarization=1;l=4;m=8", chunk_decoded_bytes=decoded)]
+        return sweep.Results(rows, datasets(one))
+
+    def test_a_run_is_every_whole_chunk_over_the_plane_as_decoded(self) -> None:
+        # Three chunks along l, the last of them two thirds padding, and one along m.
+        dataset = sweep.dataset_key(layout("one"), False)
+        self.assertEqual(sweep.chunk_run_bytes(self.results("400"), dataset), 3 * 400)
+
+    def test_a_run_is_unknown_without_what_a_chunk_decodes_to(self) -> None:
+        dataset = sweep.dataset_key(layout("one"), False)
+        self.assertIsNone(sweep.chunk_run_bytes(self.results(""), dataset))
 
 
 class ReadingAlike(unittest.TestCase):

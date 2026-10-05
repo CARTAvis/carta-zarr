@@ -72,7 +72,7 @@ MIN_FIRST_TOUCHES = 5
 # The version of results.csv this sweep reads, which is carta-zarr-bench's kCsvVersion in
 # bench/record.h; sweep_results_test.py holds the two equal. A version changes when what a column means
 # does, so a CSV of another one is refused rather than read as though it were this one.
-CSV_VERSION = 8
+CSV_VERSION = 9
 # carta-zarr-bench's operations per user per trial when measure.ops does not say.
 BENCH_DEFAULT_OPS = {"plane": 16, "animation": 2, "spectrum": 32, "region": 1, "cube-histogram": 1, "open": 8}
 # The modes of the trade-off between deep chunks and shallow ones, in the order the table shows them.
@@ -1126,6 +1126,8 @@ class Results:
         # The tuning overrides each label's rows were measured with, as carta-zarr-bench reports them.
         self.tunings: dict[str, set[str]] = {}
         self.shapes: dict[str, str] = {}
+        # What one chunk of each dataset keeps in a cache decoded, flags and all, as the library says.
+        self.chunk_bytes: dict[str, int] = {}
         rows = [row for row in rows if row["dataset_identity_hash"] in by_identity]
         trial_ends: dict[tuple[GroupKey, str], float] = {}
         checksums: dict[tuple[Any, ...], dict[str, str]] = {}
@@ -1138,6 +1140,8 @@ class Results:
             if row["chunk_shape"]:
                 self.chunk_shapes[dataset] = row["chunk_shape"]
                 self.shapes[dataset] = row["shape"]
+            if row.get("chunk_decoded_bytes"):
+                self.chunk_bytes[dataset] = int(row["chunk_decoded_bytes"])
             # An animation is timed per frame after the first -- its turn, and whatever a late frame
             # added to it -- which is what playing one feels like. The first is a cold read whatever
             # the layout, and is a plane's to rank.
@@ -1197,6 +1201,23 @@ class Results:
             stats = self.get(stage, dataset, setting, users, mode)
             result[mode] = stats.ranked if stats else math.inf
         return result
+
+
+def chunk_run_bytes(results: Results, dataset: str) -> int | None:
+    """What a run of chunks along the spectrum holds decoded, which is what a backend reading ahead
+    keeps two of: every chunk of one depth over the plane, whole -- the padding of the last along each
+    axis included -- at what the library says one decodes to, which is the type it is stored as and
+    its flags. None when the bench did not say."""
+    shape = axis_lengths(results.shapes.get(dataset, ""))
+    chunk = axis_lengths(results.chunk_shapes.get(dataset, ""))
+    decoded = results.chunk_bytes.get(dataset)
+    if not shape or not decoded:
+        return None
+    chunks = 1
+    for axis in ("l", "m"):
+        length, along = shape.get(axis, 1), max(chunk.get(axis, 1), 1)
+        chunks *= -(-length // along)
+    return chunks * decoded
 
 
 def score(medians: dict[str, float], best: dict[str, float], weights: dict[str, float]) -> tuple[float, float]:
@@ -1890,12 +1911,9 @@ def tradeoff_section(sweep: Sweep, analysis: Analysis, ranking: list[tuple[Layou
         stats = results.get("stage1", dataset_key(layout, False), sweep.baseline, target, "animation")
         return seconds_text(stats.longest_stall) if stats and stats.paced_frames else "–"
 
-    def run_bytes(chunk: dict[str, int], dataset: str) -> str:
-        # What a run of chunks along the spectrum holds decoded: every chunk of one depth over the plane.
-        shape = axis_lengths(results.shapes.get(dataset, ""))
-        if not shape:
-            return "–"
-        return bytes_text(shape.get("l", 1) * shape.get("m", 1) * chunk.get("frequency", 1) * 4)
+    def run_bytes(dataset: str) -> str:
+        held = chunk_run_bytes(results, dataset)
+        return "–" if held is None else bytes_text(held)
 
     header = ["layout", "chunk (l×m×channels)", "depth"] + [
         f"animation per frame, {fps:g} fps" if mode == "animation" else mode for mode in modes]
@@ -1904,7 +1922,7 @@ def tradeoff_section(sweep: Sweep, analysis: Analysis, ranking: list[tuple[Layou
     lines += table(header + ["front"],
                    [[layout.name, chunk_text(chunk), str(chunk.get("frequency", 1))] +
                     [cell(layout, mode) for mode in modes] +
-                    ([stall(layout), run_bytes(chunk, dataset_key(layout, False))] if "animation" in modes else []) +
+                    ([stall(layout), run_bytes(dataset_key(layout, False))] if "animation" in modes else []) +
                     ["yes" if layout.name in front else ""] for layout, chunk in rows])
     if "animation" in modes and fps:
         lines += [f"An animation plays at {fps:g} frames a second{' with the next run of chunks prefetched' if measure['animation_prefetch'] else ''}: "

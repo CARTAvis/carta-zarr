@@ -28,7 +28,7 @@
 
 namespace carta::zarr::bench {
 
-inline constexpr int kCsvVersion = 8;
+inline constexpr int kCsvVersion = 9;
 
 // What a dataset's bench-manifest.json says, for the columns the library cannot answer. Empty for a
 // dataset the generator did not write, which the bench reads as well as any other.
@@ -59,6 +59,9 @@ struct Row {
     std::string shape;
     std::string chunk_shape;
     std::string shard_shape;
+    // What one chunk keeps in a cache once decoded, flags included: Image::DecodedChunkBytes with
+    // the options the bench reads with, from which a sweep sizes the cache reading ahead needs.
+    std::uint64_t chunk_decoded_bytes = 0;
     std::string codec;
     std::string stripe_effective;
     std::string compression_ratio;

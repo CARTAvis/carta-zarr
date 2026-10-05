@@ -86,6 +86,7 @@ const std::vector<Column>& Columns() {
         {"shape", [](const Row& r) { return r.shape; }},
         {"chunk_shape", [](const Row& r) { return r.chunk_shape; }},
         {"shard_shape", [](const Row& r) { return r.shard_shape; }},
+        {"chunk_decoded_bytes", [](const Row& r) { return std::to_string(r.chunk_decoded_bytes); }},
         {"codec", [](const Row& r) { return r.codec; }},
         {"stripe_effective", [](const Row& r) { return r.stripe_effective; }},
         {"compression_ratio", [](const Row& r) { return r.compression_ratio; }},
@@ -570,6 +571,9 @@ void DescribeImage(Row& row, const Image& image) {
     row.shape = Shape(descriptor.axes, lengths);
     row.chunk_shape = Shape(descriptor.axes, geometry.chunk_shape);
     row.shard_shape = geometry.sharded ? Shape(descriptor.axes, geometry.shard_shape) : "";
+    // The bench reads with ReadOptions' defaults but for its deadline and budget, neither of which
+    // changes what a chunk decodes to.
+    row.chunk_decoded_bytes = image.DecodedChunkBytes();
     if (row.codec.empty()) {
         row.codec = geometry.compressor;
     }

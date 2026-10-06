@@ -1,8 +1,8 @@
-/*
- * This file is part of the CARTA Image Viewer: https://github.com/CARTAvis
- * Copyright 2026 Academia Sinica Institute of Astronomy and Astrophysics (ASIAA)
- * SPDX-License-Identifier: GPL-3.0-or-later
- */
+/* This file is part of the CARTA Image Viewer: https://github.com/CARTAvis/carta-zarr
+   Copyright 2026- Academia Sinica Institute of Astronomy and Astrophysics (ASIAA),
+   Associated Universities, Inc. (AUI) and the Inter-University Institute for Data Intensive Astronomy (IDIA)
+   SPDX-License-Identifier: GPL-3.0-or-later
+*/
 
 // open: Context::Create, Dataset::Open and OpenImage, with nothing cached. The one mode that reads no
 // cube: each operation brings its own context and image, so a process opens nothing before the clock

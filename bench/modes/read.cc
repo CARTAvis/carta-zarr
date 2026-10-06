@@ -1,8 +1,8 @@
-/*
- * This file is part of the CARTA Image Viewer: https://github.com/CARTAvis
- * Copyright 2026 Academia Sinica Institute of Astronomy and Astrophysics (ASIAA)
- * SPDX-License-Identifier: GPL-3.0-or-later
- */
+/* This file is part of the CARTA Image Viewer: https://github.com/CARTAvis/carta-zarr
+   Copyright 2026- Academia Sinica Institute of Astronomy and Astrophysics (ASIAA),
+   Associated Universities, Inc. (AUI) and the Inter-University Institute for Data Intensive Astronomy (IDIA)
+   SPDX-License-Identifier: GPL-3.0-or-later
+*/
 
 // plane and spectrum: one whole l x m plane at a random channel, and every channel at one random
 // pixel. Each times a first touch, reading through a cache pool of its own made before the clock

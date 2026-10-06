@@ -8,6 +8,11 @@
 # python-preference = "only-managed"
 # ///
 
+# This file is part of the CARTA Image Viewer: https://github.com/CARTAvis/carta-zarr
+# Copyright 2026- Academia Sinica Institute of Astronomy and Astrophysics (ASIAA),
+# Associated Universities, Inc. (AUI) and the Inter-University Institute for Data Intensive Astronomy (IDIA)
+# SPDX-License-Identifier: GPL-3.0-or-later
+
 """How tools/zarr-bench/sweep.py ranks what carta-zarr-bench measured, asked with rows written out here.
 
 The end-to-end test runs every stage on a fixture far too small to time, and checks that the report has

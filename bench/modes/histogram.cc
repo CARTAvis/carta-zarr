@@ -1,8 +1,8 @@
-/*
- * This file is part of the CARTA Image Viewer: https://github.com/CARTAvis
- * Copyright 2026 Academia Sinica Institute of Astronomy and Astrophysics (ASIAA)
- * SPDX-License-Identifier: GPL-3.0-or-later
- */
+/* This file is part of the CARTA Image Viewer: https://github.com/CARTAvis/carta-zarr
+   Copyright 2026- Academia Sinica Institute of Astronomy and Astrophysics (ASIAA),
+   Associated Universities, Inc. (AUI) and the Inter-University Institute for Data Intensive Astronomy (IDIA)
+   SPDX-License-Identifier: GPL-3.0-or-later
+*/
 
 // cube-histogram: a histogram of this process's share of the channels, as carta-backend computes one
 // with the --zarr_histogram_method it is given.

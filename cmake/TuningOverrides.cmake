@@ -1,3 +1,8 @@
+# This file is part of the CARTA Image Viewer: https://github.com/CARTAvis/carta-zarr
+# Copyright 2026- Academia Sinica Institute of Astronomy and Astrophysics (ASIAA),
+# Associated Universities, Inc. (AUI) and the Inter-University Institute for Data Intensive Astronomy (IDIA)
+# SPDX-License-Identifier: GPL-3.0-or-later
+
 # Replacements for the machine-dependent constants of src/reduce/tuning.h, for measuring them.
 #
 # CARTA_ZARR_TUNING_OVERRIDES is a list of NAME=VALUE, NAME one of the constants below without its

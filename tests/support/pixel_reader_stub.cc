@@ -1,8 +1,8 @@
-/*
- * This file is part of the CARTA Image Viewer: https://github.com/CARTAvis
- * Copyright 2026 Academia Sinica Institute of Astronomy and Astrophysics (ASIAA)
- * SPDX-License-Identifier: GPL-3.0-or-later
- */
+/* This file is part of the CARTA Image Viewer: https://github.com/CARTAvis/carta-zarr
+   Copyright 2026- Academia Sinica Institute of Astronomy and Astrophysics (ASIAA),
+   Associated Universities, Inc. (AUI) and the Inter-University Institute for Data Intensive Astronomy (IDIA)
+   SPDX-License-Identifier: GPL-3.0-or-later
+*/
 
 // Companion to value_reader_stub.cc: the schema profile tests link without TensorStore. The
 // in-memory transport holds no array data, so a pixel read has no answer to give and

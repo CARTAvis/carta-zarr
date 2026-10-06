@@ -1,3 +1,8 @@
+# This file is part of the CARTA Image Viewer: https://github.com/CARTAvis/carta-zarr
+# Copyright 2026- Academia Sinica Institute of Astronomy and Astrophysics (ASIAA),
+# Associated Universities, Inc. (AUI) and the Inter-University Institute for Data Intensive Astronomy (IDIA)
+# SPDX-License-Identifier: GPL-3.0-or-later
+
 # The notices installed beside the library name every library linked into it.
 #
 # libcarta-zarr carries TensorStore and the libraries it brings in, statically, so a binary

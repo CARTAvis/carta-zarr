@@ -1,8 +1,8 @@
-/*
- * This file is part of the CARTA Image Viewer: https://github.com/CARTAvis
- * Copyright 2026 Academia Sinica Institute of Astronomy and Astrophysics (ASIAA)
- * SPDX-License-Identifier: GPL-3.0-or-later
- */
+/* This file is part of the CARTA Image Viewer: https://github.com/CARTAvis/carta-zarr
+   Copyright 2026- Academia Sinica Institute of Astronomy and Astrophysics (ASIAA),
+   Associated Universities, Inc. (AUI) and the Inter-University Institute for Data Intensive Astronomy (IDIA)
+   SPDX-License-Identifier: GPL-3.0-or-later
+*/
 
 // Reading ahead of a real image, through nothing but what a consumer sees: that the run decoded ahead
 // is the one the next frames read, into the cache they read through, and that a cache with no room

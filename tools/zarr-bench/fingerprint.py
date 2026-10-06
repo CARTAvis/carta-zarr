@@ -1,3 +1,8 @@
+# This file is part of the CARTA Image Viewer: https://github.com/CARTAvis/carta-zarr
+# Copyright 2026- Academia Sinica Institute of Astronomy and Astrophysics (ASIAA),
+# Associated Universities, Inc. (AUI) and the Inter-University Institute for Data Intensive Astronomy (IDIA)
+# SPDX-License-Identifier: GPL-3.0-or-later
+
 """What a source dataset holds, as generate.py and sweep.py both have to say it.
 
 One function in a module of its own because the two must agree: the generator decides by it whether

@@ -236,4 +236,6 @@ request and options, `reduce.h` for reductions and histograms, `read_ahead.h` fo
 
 ## Licence
 
+Copyright 2026- Academia Sinica Institute of Astronomy and Astrophysics (ASIAA), Associated
+Universities, Inc. (AUI) and the Inter-University Institute for Data Intensive Astronomy (IDIA).
 GPL-3.0-or-later. See [LICENSE](LICENSE).

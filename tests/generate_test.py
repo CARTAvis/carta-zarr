@@ -11,6 +11,11 @@
 # python-preference = "only-managed"
 # ///
 
+# This file is part of the CARTA Image Viewer: https://github.com/CARTAvis/carta-zarr
+# Copyright 2026- Academia Sinica Institute of Astronomy and Astrophysics (ASIAA),
+# Associated Universities, Inc. (AUI) and the Inter-University Institute for Data Intensive Astronomy (IDIA)
+# SPDX-License-Identifier: GPL-3.0-or-later
+
 """What tools/zarr-bench/generate.py may do to the place it writes a dataset, asked of Output directly.
 
 --force deletes whatever is at the output, and the dataset being read must survive that whatever the

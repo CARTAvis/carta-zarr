@@ -1,3 +1,8 @@
+# This file is part of the CARTA Image Viewer: https://github.com/CARTAvis/carta-zarr
+# Copyright 2026- Academia Sinica Institute of Astronomy and Astrophysics (ASIAA),
+# Associated Universities, Inc. (AUI) and the Inter-University Institute for Data Intensive Astronomy (IDIA)
+# SPDX-License-Identifier: GPL-3.0-or-later
+
 # Writes the datasets tests/bench_generator_test.cc reads, with tools/zarr-bench/generate.py.
 #
 # Three synthetic cubes of one seed in three layouts -- plain zstd chunks; blosc in shards, without

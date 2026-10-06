@@ -1,3 +1,8 @@
+# This file is part of the CARTA Image Viewer: https://github.com/CARTAvis/carta-zarr
+# Copyright 2026- Academia Sinica Institute of Astronomy and Astrophysics (ASIAA),
+# Associated Universities, Inc. (AUI) and the Inter-University Institute for Data Intensive Astronomy (IDIA)
+# SPDX-License-Identifier: GPL-3.0-or-later
+
 # Runs tools/zarr-bench/sweep.py end to end on a committed fixture: every stage, then the same sweep
 # again, which must find everything done, and a dry run, which must write nothing. Timings are not
 # checked -- the fixture is far too small to mean anything -- only that the pipeline runs, writes a

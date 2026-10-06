@@ -1,3 +1,8 @@
+# This file is part of the CARTA Image Viewer: https://github.com/CARTAvis/carta-zarr
+# Copyright 2026- Academia Sinica Institute of Astronomy and Astrophysics (ASIAA),
+# Associated Universities, Inc. (AUI) and the Inter-University Institute for Data Intensive Astronomy (IDIA)
+# SPDX-License-Identifier: GPL-3.0-or-later
+
 # A version says which builds can stand in for one another, and the soname says the same thing.
 #
 # Before 1.0 the minor version is the one that breaks: 0.2 may change the ABI 0.1 had, so a consumer

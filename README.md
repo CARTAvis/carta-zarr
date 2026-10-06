@@ -93,8 +93,10 @@ Built and tested with:
   (`brew install cmake nasm python`) and the Xcode command line tools.
 - Ubuntu 24.04: GCC 13.3, CMake 3.28, Python 3.12, NASM 2.16
   (`sudo apt-get install build-essential cmake python3 nasm patch`).
-- AlmaLinux 8.10 with conda-forge's GCC 13, CMake 3.29 and Python 3.12. Its own GCC 8 and Python 3.6
-  are too old.
+- AlmaLinux 8.10 with the distribution's gcc-toolset-13 (GCC 13.3), CMake 3.26 and Python 3.12, with
+  PowerTools enabled for NASM (`sudo dnf install gcc-toolset-13-gcc-c++ cmake python3.12 nasm patch`).
+  Its own GCC 8 and Python 3.6 are too old: build in `scl enable gcc-toolset-13 bash`, and configure
+  with `-DPython3_EXECUTABLE=/usr/bin/python3.12`, since Python 3.6 is installed too.
 
 The storage benchmark, `-DCARTA_ZARR_BUILD_BENCH=ON`, also needs [`uv`](https://docs.astral.sh/uv/);
 see [tools/zarr-bench/README.md](tools/zarr-bench/README.md).

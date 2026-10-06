@@ -9,6 +9,7 @@
 
 - [ ] changelog updated / no changelog update needed
 - [ ] tests added or updated / no test change needed
+- [ ] formatted with `uvx clang-format==23.1.2 -i` on the changed C++ files
 - [ ] public headers unchanged / public API or ABI changed and the minor version raised (ADR 0020)
 - [ ] ADR added or updated / no decision to record
 - [ ] added reviewers and assignee

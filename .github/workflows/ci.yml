@@ -8,7 +8,7 @@ name: CI
 
 on:
   push:
-    branches: [main, dev]
+    branches: [dev]
   pull_request:
   workflow_dispatch:
 
@@ -20,6 +20,16 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  format:
+    name: clang-format
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      # The version is pinned because each clang-format release formats some constructs differently;
+      # locally the same one is `uvx clang-format==23.1.2`.
+      - name: Check formatting
+        run: git ls-files '*.h' '*.cc' | xargs pipx run --spec clang-format==23.1.2 clang-format --dry-run --Werror
+
   build:
     name: ${{ matrix.name }}
     runs-on: ${{ matrix.runner }}

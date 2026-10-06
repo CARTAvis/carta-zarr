@@ -7,7 +7,6 @@
 #include "build_identity.h"
 
 #include <carta-zarr/carta_zarr.h>
-
 #include <dlfcn.h>
 #if defined(__APPLE__)
 #include <mach-o/dyld.h>

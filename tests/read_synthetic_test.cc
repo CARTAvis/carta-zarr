@@ -14,9 +14,7 @@
 // Links no Store and no TensorStore.
 
 #include "read/pieces.h"
-
 #include "support/check.h"
-
 #include "support/synthetic_pixel_source.h"
 
 #include <cstdint>
@@ -32,8 +30,8 @@ using carta::zarr::BufferView;
 using carta::zarr::ChunkGeometry;
 using carta::zarr::ErrorCode;
 using carta::zarr::ImageDescriptor;
-using carta::zarr::Range;
 using carta::zarr::ProgressCallback;
+using carta::zarr::Range;
 using carta::zarr::ReadControl;
 using carta::zarr::ReadOptions;
 using carta::zarr::ReadRequest;
@@ -135,8 +133,9 @@ void TestAFailedFlagLeavesTheDestinationAlone() {
     source.fail_mask_read(1, ErrorCode::io_error);
 
     std::vector<float> destination(kElements, kUntouched);
-    const auto read = ReadInPieces(source, image, geometry, geometry, WholeCube(),
-                                   BufferView<float>{destination.data(), destination.size()}, ReadOptions{}, ProgressCallback{});
+    const auto read =
+        ReadInPieces(source, image, geometry, geometry, WholeCube(),
+                     BufferView<float>{destination.data(), destination.size()}, ReadOptions{}, ProgressCallback{});
 
     Require(!read && read.error().code == ErrorCode::io_error, "a failed flag read was not reported");
     Require(source.pixel_reads() == 0, "the pixels were read although the flag could not be");
@@ -156,8 +155,9 @@ void TestACeilingTooLowToFitIsRefused() {
     ReadOptions options;
     options.read_budget_bytes = 1;
     std::vector<float> destination(kElements, kUntouched);
-    const auto read = ReadInPieces(source, image, geometry, geometry, WholeCube(),
-                                   BufferView<float>{destination.data(), destination.size()}, options, ProgressCallback{});
+    const auto read =
+        ReadInPieces(source, image, geometry, geometry, WholeCube(),
+                     BufferView<float>{destination.data(), destination.size()}, options, ProgressCallback{});
 
     Require(!read && read.error().code == ErrorCode::buffer_too_small,
             "a flag buffer over the ceiling was allocated rather than refused");
@@ -253,9 +253,9 @@ void TestEachPieceIsHandedTheRestOfTheBuffer() {
     ReadOptions options;
     options.read_budget_bytes = kThreePieces;
     std::vector<float> destination(kElements + kSpare, kUntouched);
-    const auto read = ReadInPieces(source, image, geometry, geometry, WholeCube(),
-                                   BufferView<float>{destination.data(), destination.size()}, options,
-                                   ProgressCallback{});
+    const auto read =
+        ReadInPieces(source, image, geometry, geometry, WholeCube(),
+                     BufferView<float>{destination.data(), destination.size()}, options, ProgressCallback{});
     Require(static_cast<bool>(read) && read.value() == kElements, "a read into a roomier buffer failed");
 
     const std::vector<std::size_t> handed{kElements + kSpare, kElements + kSpare - kPiece,
@@ -267,7 +267,6 @@ void TestEachPieceIsHandedTheRestOfTheBuffer() {
     }
     destination.resize(kElements);
     RequireCubeMatchesTheFormula(destination, "a read into a roomier buffer");
-
 }
 
 // A flag the read can get is folded in, so a dropped pixel arrives as NaN rather than as a value
@@ -279,8 +278,9 @@ void TestAFlaggedPixelArrivesAsNaN() {
     source.set_flags([](const std::vector<std::uint64_t>& logical) { return logical.at(0) % 2 == 0; });
 
     std::vector<float> destination(kElements, kUntouched);
-    const auto read = ReadInPieces(source, image, geometry, geometry, WholeCube(),
-                                   BufferView<float>{destination.data(), destination.size()}, ReadOptions{}, ProgressCallback{});
+    const auto read =
+        ReadInPieces(source, image, geometry, geometry, WholeCube(),
+                     BufferView<float>{destination.data(), destination.size()}, ReadOptions{}, ProgressCallback{});
     Require(static_cast<bool>(read), "a masked read failed");
     Require(source.mask_reads() > 0, "the flag was never read");
 
@@ -309,8 +309,9 @@ void TestDecliningTheMaskReadsNoFlag() {
     ReadOptions options;
     options.apply_pixel_mask = false;
     std::vector<float> destination(kElements, kUntouched);
-    const auto read = ReadInPieces(source, image, geometry, geometry, WholeCube(),
-                                   BufferView<float>{destination.data(), destination.size()}, options, ProgressCallback{});
+    const auto read =
+        ReadInPieces(source, image, geometry, geometry, WholeCube(),
+                     BufferView<float>{destination.data(), destination.size()}, options, ProgressCallback{});
     Require(static_cast<bool>(read), "declining the mask still failed on a flag that cannot be read");
     Require(source.mask_reads() == 0, "declining the mask still read the flag");
     RequireCubeMatchesTheFormula(destination, "a read that declined the mask");
@@ -351,9 +352,10 @@ void TestAPrefetchDecodesWhatAReadWould() {
     const auto geometry = MakeGeometry();
     SyntheticPixelSource read_source(image, geometry, Value);
     std::vector<float> box(25 * 10 * 3, kUntouched);
-    Require(static_cast<bool>(ReadInPieces(read_source, image, geometry, geometry, UnalignedBox(),
-                                           BufferView<float>{box.data(), box.size()}, ReadOptions{}, ProgressCallback{})),
-            "the box could not be read");
+    Require(
+        static_cast<bool>(ReadInPieces(read_source, image, geometry, geometry, UnalignedBox(),
+                                       BufferView<float>{box.data(), box.size()}, ReadOptions{}, ProgressCallback{})),
+        "the box could not be read");
 
     SyntheticPixelSource source(image, geometry, Value);
     const auto chunks = PrefetchChunks(source, image, geometry, geometry, UnalignedBox(), ReadOptions{});

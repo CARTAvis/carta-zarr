@@ -12,14 +12,13 @@
 // None of this needs a store, a transport or a fixture, which is the point.
 
 #include "read/pieces.h"
+#include "support/check.h"
 
 #include <cstdint>
 #include <exception>
 #include <iostream>
 #include <string>
 #include <vector>
-
-#include "support/check.h"
 
 namespace {
 
@@ -84,14 +83,14 @@ std::uint64_t ElementCount(const ReadRequest& request) {
 }
 
 std::vector<Piece> Pieces(const ImageDescriptor& descriptor, const ChunkGeometry& geometry,
-                          const ChunkGeometry& flag_geometry, const ReadRequest& request,
-                          const ReadOptions& options, bool watching = false) {
+                          const ChunkGeometry& flag_geometry, const ReadRequest& request, const ReadOptions& options,
+                          bool watching = false) {
     return PlanPieces(descriptor, geometry, flag_geometry, request, options, watching);
 }
 
 // A flag chunked as its pixels are, which is every image here but one.
-std::vector<Piece> Pieces(const ImageDescriptor& descriptor, const ChunkGeometry& geometry,
-                          const ReadRequest& request, const ReadOptions& options, bool watching = false) {
+std::vector<Piece> Pieces(const ImageDescriptor& descriptor, const ChunkGeometry& geometry, const ReadRequest& request,
+                          const ReadOptions& options, bool watching = false) {
     return Pieces(descriptor, geometry, geometry, request, options, watching);
 }
 

@@ -38,8 +38,7 @@ Result<void> Placeable(const RegionMask& region, std::size_t index, PlaneExtent 
     }
     if (region.x_start >= plane.width || region.width > plane.width - region.x_start ||
         region.y_start >= plane.height || region.height > plane.height - region.y_start) {
-        return Error{ErrorCode::invalid_argument, "Region " + std::to_string(index) + " falls outside the image",
-                     node};
+        return Error{ErrorCode::invalid_argument, "Region " + std::to_string(index) + " falls outside the image", node};
     }
     // Both inside the plane, so their product is a pixel count and cannot overflow.
     const auto box = region.width * region.height;
@@ -66,8 +65,8 @@ Result<Occupancy> Occupancy::Of(BufferView<const RegionMask> regions, PlaneExten
     }
     if (region_count > kMaxSpectralRegions) {
         return Error{ErrorCode::invalid_argument,
-                     "A spectral reduction accepts at most " + std::to_string(kMaxSpectralRegions) +
-                         " regions, not " + std::to_string(region_count),
+                     "A spectral reduction accepts at most " + std::to_string(kMaxSpectralRegions) + " regions, not " +
+                         std::to_string(region_count),
                      node};
     }
     static_assert(kMaxSpectralRegions <= std::numeric_limits<std::uint32_t>::max(),
@@ -251,8 +250,8 @@ Result<Occupancy> Occupancy::Of(BufferView<const RegionMask> regions, PlaneExten
         region_first.at(i + 1) = incidence_cells.size();
     }
     if (too_many) {
-        return Error{ErrorCode::invalid_argument,
-                     "The regions together touch more chunks than one reduction can index", node};
+        return Error{ErrorCode::invalid_argument, "The regions together touch more chunks than one reduction can index",
+                     node};
     }
 
     // The occupied cells, and each incidence's place among them, found once.
@@ -286,12 +285,12 @@ Result<Occupancy> Occupancy::Of(BufferView<const RegionMask> regions, PlaneExten
         }
     }
 
-// The occupied runs of each chunk row.
-//
-// Reading the bounding box would be correct and still wrong: the box of a diagonal cut is the whole
-// image, while the cut touches one chunk per row. On a 4096^2 image that is 256 chunks decoded to
-// use 16. The runs are what the walk reads instead, so the cost follows the regions rather than the
-// rectangle that happens to contain them.
+    // The occupied runs of each chunk row.
+    //
+    // Reading the bounding box would be correct and still wrong: the box of a diagonal cut is the whole
+    // image, while the cut touches one chunk per row. On a 4096^2 image that is 256 chunks decoded to
+    // use 16. The runs are what the walk reads instead, so the cost follows the regions rather than the
+    // rectangle that happens to contain them.
     // Read off the occupied cells, which are in row order already.
     for (const auto cell : occupancy._cells) {
         const std::uint64_t row = cell / occupancy._columns;

@@ -70,13 +70,9 @@ public:
     constexpr StatisticSet() noexcept = default;
     constexpr StatisticSet(Statistic statistic) noexcept : _bits(static_cast<std::uint32_t>(statistic)) {}
 
-    constexpr bool empty() const noexcept {
-        return _bits == 0;
-    }
+    constexpr bool empty() const noexcept { return _bits == 0; }
     // Whether every statistic in `other` is in this one. The empty set is in every set.
-    constexpr bool Contains(StatisticSet other) const noexcept {
-        return (other._bits & ~_bits) == 0;
-    }
+    constexpr bool Contains(StatisticSet other) const noexcept { return (other._bits & ~_bits) == 0; }
 
     friend constexpr StatisticSet operator|(StatisticSet a, StatisticSet b) noexcept {
         return StatisticSet(a._bits | b._bits);
@@ -85,12 +81,8 @@ public:
         _bits |= other._bits;
         return *this;
     }
-    friend constexpr bool operator==(StatisticSet a, StatisticSet b) noexcept {
-        return a._bits == b._bits;
-    }
-    friend constexpr bool operator!=(StatisticSet a, StatisticSet b) noexcept {
-        return a._bits != b._bits;
-    }
+    friend constexpr bool operator==(StatisticSet a, StatisticSet b) noexcept { return a._bits == b._bits; }
+    friend constexpr bool operator!=(StatisticSet a, StatisticSet b) noexcept { return a._bits != b._bits; }
 
 private:
     constexpr explicit StatisticSet(std::uint32_t bits) noexcept : _bits(bits) {}
@@ -103,7 +95,6 @@ private:
 inline constexpr StatisticSet operator|(Statistic a, Statistic b) noexcept {
     return StatisticSet(a) | StatisticSet(b);
 }
-
 
 // Which planes of an image a reduction is over: a range along the spectral coordinate, one
 // polarization, and one time.
@@ -122,7 +113,6 @@ struct PlaneSelection {
     std::uint64_t polarization = 0;
     std::uint64_t time = 0;
 };
-
 
 // A 2D (x, y) mask in logical image coordinates, addressed row-major with x fastest.
 //
@@ -316,8 +306,6 @@ struct CubeHistogramRequest {
     std::uint64_t spatial_sample = 1;
 };
 
-
-
 // The largest number of bins one histogram accepts. CARTA's automatic bin count is the square root
 // of the plane's pixel count, which is 32,768 for the largest image anyone has; this is a guard
 // against an uninitialised count, not a capacity estimate.
@@ -329,7 +317,6 @@ inline constexpr std::uint32_t kMaxHistogramBins = 1u << 20;
 // per pixel along an image diagonal, which is 46,341 for a 32768^2 image. The bound exists so that
 // a caller passing an uninitialised count gets invalid_argument instead of a 16 GB allocation.
 inline constexpr std::size_t kMaxSpectralRegions = 1u << 20;
-
 
 struct SpectralReduceRequest {
     PlaneSelection planes;

@@ -10,6 +10,8 @@
 
 #include "schema/xradio/linear_axis.h"
 
+#include "support/check.h"
+
 #include <algorithm>
 #include <cmath>
 #include <exception>
@@ -18,8 +20,6 @@
 #include <optional>
 #include <string>
 #include <vector>
-
-#include "support/check.h"
 
 namespace {
 
@@ -146,8 +146,8 @@ void TestADirectionAxisReportsDegrees() {
     const auto fit = FitDirectionAxis(cosines, "l");
     Require(fit.increment.has_value(), "a direction axis always has an increment");
     Require(Near(*fit.increment, 1.0e-4 * kRadToDeg),
-            "the increment was not converted from radians to degrees: expected " +
-                std::to_string(1.0e-4 * kRadToDeg) + ", got " + std::to_string(*fit.increment));
+            "the increment was not converted from radians to degrees: expected " + std::to_string(1.0e-4 * kRadToDeg) +
+                ", got " + std::to_string(*fit.increment));
     Require(!Near(*fit.increment, 1.0e-4), "the increment was left in radians");
     Require(fit.reference_pixel.has_value() && Near(*fit.reference_pixel, 3.0),
             "the tangent point is the third sample, 1-based");

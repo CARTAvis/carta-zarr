@@ -13,6 +13,8 @@
 
 #include "zarr/transport.h"
 
+#include "support/check.h"
+
 #include <algorithm>
 #include <chrono>
 #include <cstdio>
@@ -21,8 +23,6 @@
 #include <fstream>
 #include <string>
 #include <vector>
-
-#include "support/check.h"
 
 namespace {
 

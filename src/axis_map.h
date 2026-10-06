@@ -35,18 +35,32 @@ inline Result<AxisMap> MapAxes(const ImageDescriptor& descriptor) {
     for (std::size_t i = 0; i < descriptor.axes.size(); ++i) {
         const auto& axis = descriptor.axes.at(i);
         switch (axis.role) {
-            case AxisRole::spatial_x: map.x = i; has_x = true; break;
-            case AxisRole::spatial_y: map.y = i; has_y = true; break;
-            case AxisRole::spectral: map.spectral = i; has_spectral = true; break;
-            case AxisRole::polarization: map.polarization = i; map.has_polarization = true; break;
-            case AxisRole::time: map.time = i; map.has_time = true; break;
+            case AxisRole::spatial_x:
+                map.x = i;
+                has_x = true;
+                break;
+            case AxisRole::spatial_y:
+                map.y = i;
+                has_y = true;
+                break;
+            case AxisRole::spectral:
+                map.spectral = i;
+                has_spectral = true;
+                break;
+            case AxisRole::polarization:
+                map.polarization = i;
+                map.has_polarization = true;
+                break;
+            case AxisRole::time:
+                map.time = i;
+                map.has_time = true;
+                break;
             case AxisRole::other:
                 // Taking index 0 of an axis nobody named would report a number for a plane the
                 // caller never asked about.
                 if (axis.length != 1) {
                     return Error{ErrorCode::not_implemented,
-                                 "Axis '" + axis.name + "' has no known role and is not degenerate",
-                                 descriptor.id};
+                                 "Axis '" + axis.name + "' has no known role and is not degenerate", descriptor.id};
                 }
                 break;
         }

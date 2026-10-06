@@ -5,15 +5,16 @@
  */
 
 #include "carta-zarr/carta_zarr.h"
+
 #include "carta-zarr/read_ahead.h"
 
 #include "chunk_blocks.h"
 #include "pixel_mask.h"
 #include "read/pieces.h"
 #include "read_ahead.h"
-#include "reducible_image.h"
 #include "reduce/plane_histogram.h"
 #include "reduce/spectral_reduce.h"
+#include "reducible_image.h"
 #include "schema/profile.h"
 #include "store.h"
 #include "store_pixel_source.h"
@@ -31,9 +32,9 @@
 #include <optional>
 #include <string>
 #include <string_view>
-#include <vector>
 #include <unordered_map>
 #include <utility>
+#include <vector>
 
 namespace carta::zarr {
 namespace {
@@ -204,11 +205,11 @@ const ChunkGeometry& Image::chunk_geometry() const noexcept {
     return _impl->geometry;
 }
 
-Result<std::size_t> Image::Read(const ReadRequest& request, BufferView<float> destination,
-                                const ReadOptions& options, const ProgressCallback& progress) const {
+Result<std::size_t> Image::Read(const ReadRequest& request, BufferView<float> destination, const ReadOptions& options,
+                                const ProgressCallback& progress) const {
     return Guarded(ErrorCode::io_error, _impl->descriptor.id, [&] {
-        return internal::ReadInPieces(_impl->source, _impl->descriptor, _impl->geometry, _impl->flag_geometry,
-                                      request, destination, options, progress);
+        return internal::ReadInPieces(_impl->source, _impl->descriptor, _impl->geometry, _impl->flag_geometry, request,
+                                      destination, options, progress);
     });
 }
 
@@ -272,12 +273,8 @@ public:
         return internal::PlaneRunBytes(descriptor, _image.chunk_geometry(), _flag_geometry,
                                        internal::AppliesPixelMask(_options, descriptor));
     }
-    internal::CacheShare Cache() const override {
-        return _cache;
-    }
-    std::string Name() const override {
-        return _image.descriptor().id;
-    }
+    internal::CacheShare Cache() const override { return _cache; }
+    std::string Name() const override { return _image.descriptor().id; }
     // Stopped by either reading ahead or the caller's own cancellation, whichever says so first.
     bool Prefetch(const ReadRequest& plane, const std::function<bool()>& cancelled) const override {
         ReadOptions options = _options;
@@ -423,8 +420,8 @@ Result<DatasetSize> Dataset::Size(std::chrono::milliseconds stored_size_timeout)
         const auto now = Clock::now();
         const auto room = std::chrono::duration_cast<std::chrono::milliseconds>(Clock::time_point::max() - now);
         const auto deadline = stored_size_timeout >= room
-                                  ? Clock::time_point::max()
-                                  : now + std::chrono::duration_cast<Clock::duration>(stored_size_timeout);
+                                ? Clock::time_point::max()
+                                : now + std::chrono::duration_cast<Clock::duration>(stored_size_timeout);
         return internal::DatasetSizeBytes(*_impl->store, deadline);
     });
 }
@@ -434,9 +431,9 @@ Result<Image> Dataset::OpenImage(std::string_view image_id) const {
         std::scoped_lock const lock(_impl->mutex);
         const std::string image_name(image_id);
         const auto make_image = [&](const internal::DescribedImage& described) {
-            return Image{std::make_shared<Image::Impl>(_impl->context, _impl->location, _impl->profile,
-                                                      _impl->store, described.descriptor, described.geometry,
-                                                      described.flag_geometry)};
+            return Image{std::make_shared<Image::Impl>(_impl->context, _impl->location, _impl->profile, _impl->store,
+                                                       described.descriptor, described.geometry,
+                                                       described.flag_geometry)};
         };
         const auto cached = _impl->image_descriptors.find(image_name);
         if (cached != _impl->image_descriptors.end()) {

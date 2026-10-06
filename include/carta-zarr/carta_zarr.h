@@ -33,9 +33,7 @@ public:
     Context& operator=(const Context&) = default;
     // A copy, so that the handle moved from still refers to what it did. See above.
     Context(Context&& other) noexcept : Context(other) {}
-    Context& operator=(Context&& other) noexcept {
-        return *this = other;
-    }
+    Context& operator=(Context&& other) noexcept { return *this = other; }
     ~Context();
 
     static Result<Context> Create(const ContextOptions& options = {});
@@ -63,9 +61,7 @@ public:
     Image& operator=(const Image&) = default;
     // A copy, so that the handle moved from still refers to what it did. See above.
     Image(Image&& other) noexcept : Image(other) {}
-    Image& operator=(Image&& other) noexcept {
-        return *this = other;
-    }
+    Image& operator=(Image&& other) noexcept { return *this = other; }
     ~Image();
 
     const ImageDescriptor& descriptor() const noexcept;
@@ -88,8 +84,8 @@ public:
     //
     // A progress callback watches it as it advances, which also splits it into pieces. See
     // ProgressCallback.
-    Result<std::size_t> Read(const ReadRequest& request, BufferView<float> destination,
-                             const ReadOptions& options = {}, const ProgressCallback& progress = {}) const;
+    Result<std::size_t> Read(const ReadRequest& request, BufferView<float> destination, const ReadOptions& options = {},
+                             const ProgressCallback& progress = {}) const;
 
     // Decodes the chunks a Read of `request` would decode, into the cache that options.control
     // names, and returns how many chunks that was. Nothing is written anywhere the caller can see:
@@ -176,9 +172,7 @@ public:
     Dataset& operator=(const Dataset&) = default;
     // A copy, so that the handle moved from still refers to what it did. See above.
     Dataset(Dataset&& other) noexcept : Dataset(other) {}
-    Dataset& operator=(Dataset&& other) noexcept {
-        return *this = other;
-    }
+    Dataset& operator=(Dataset&& other) noexcept { return *this = other; }
     ~Dataset();
 
     static Result<Dataset> Open(const Context& context, std::string_view location);
@@ -193,8 +187,7 @@ public:
     //
     // The timeout is not named after a directory because a dataset need not live in one: what can
     // be sized, and how quickly, is the transport's affair.
-    Result<DatasetSize> Size(
-        std::chrono::milliseconds stored_size_timeout = std::chrono::milliseconds(50)) const;
+    Result<DatasetSize> Size(std::chrono::milliseconds stored_size_timeout = std::chrono::milliseconds(50)) const;
     Result<Image> OpenImage(std::string_view image_id) const;
 
 private:

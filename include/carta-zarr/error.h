@@ -82,6 +82,6 @@ struct Error {
     std::string node_path;
 };
 
-} // namespace carta::zarr
+}  // namespace carta::zarr
 
-#endif // CARTA_ZARR_ERROR_H_
+#endif  // CARTA_ZARR_ERROR_H_

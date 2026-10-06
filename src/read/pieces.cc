@@ -50,8 +50,8 @@ std::uint64_t UnitsPerPiece(const ReadRequest& request, const ChunkGeometry& geo
         const auto& range = request.axes.at(i);
         // The chunks this axis decodes, which a stride of a chunk or more makes fewer than the chunks
         // its first and last element span. An axis with no chunk to speak of is one.
-        other_chunks *= chunk == 0 ? 1 : std::max<std::uint64_t>(1, ChunksTouched(range.start, range.count,
-                                                                                  range.stride, chunk));
+        other_chunks *=
+            chunk == 0 ? 1 : std::max<std::uint64_t>(1, ChunksTouched(range.start, range.count, range.stride, chunk));
     }
     const auto row_bytes = cost.chunk_bytes * other_chunks;
     // At least one chunk: a piece smaller than that would decode the same chunk twice.

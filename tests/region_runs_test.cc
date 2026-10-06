@@ -13,6 +13,8 @@
 
 #include "reduce/region_runs.h"
 
+#include "support/check.h"
+
 #include <algorithm>
 #include <cstdint>
 #include <cstdio>
@@ -20,8 +22,6 @@
 #include <string>
 #include <utility>
 #include <vector>
-
-#include "support/check.h"
 
 namespace {
 

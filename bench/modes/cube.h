@@ -24,17 +24,11 @@ public:
     CubeRunner(Image image, CubeAxes axes)
         : _image(std::move(image)), _axes(axes), _item_size(ItemSize(_image.descriptor().stored_type)) {}
 
-    void Record(Row& result) const override {
-        result.logical_bytes = result.elements * _item_size;
-    }
+    void Record(Row& result) const override { result.logical_bytes = result.elements * _item_size; }
 
 protected:
-    const Image& image() const noexcept {
-        return _image;
-    }
-    const CubeAxes& axes() const noexcept {
-        return _axes;
-    }
+    const Image& image() const noexcept { return _image; }
+    const CubeAxes& axes() const noexcept { return _axes; }
 
 private:
     Image _image;

@@ -11,6 +11,8 @@
 // can be made to fail once. Only the calling thread's are counted because the library's own threads
 // allocate whenever they like; and only once, because a report is a string and making it allocates.
 
+#include "support/check.h"
+
 #include <cstddef>
 #include <cstdlib>
 #include <exception>
@@ -21,8 +23,6 @@
 #include <typeinfo>
 
 #include <carta-zarr/carta_zarr.h>
-
-#include "support/check.h"
 
 namespace {
 

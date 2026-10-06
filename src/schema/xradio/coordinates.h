@@ -24,11 +24,11 @@
 // It takes a Store, as qualification does, because that is the narrowest thing its tests can stand
 // up for everything but the values (ADR 0006).
 
-#include "../../store.h"
-#include "../../zarr/array_metadata.h"
-
 #include "carta-zarr/descriptor.h"
 #include "carta-zarr/result.h"
+
+#include "../../store.h"
+#include "../../zarr/array_metadata.h"
 
 #include <array>
 #include <cstddef>

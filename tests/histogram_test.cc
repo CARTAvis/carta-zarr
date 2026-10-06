@@ -7,7 +7,7 @@
 // Plane histograms, against counts recomputed from the fixture's encoding. An integer count is the
 // one thing here that can be checked exactly rather than to a tolerance, so it is.
 
-#include <carta-zarr/carta_zarr.h>
+#include "support/check.h"
 
 #include <cmath>
 #include <cstdint>
@@ -18,7 +18,7 @@
 #include <string>
 #include <vector>
 
-#include "support/check.h"
+#include <carta-zarr/carta_zarr.h>
 
 namespace {
 
@@ -44,8 +44,7 @@ float ExpectedValue(std::uint64_t l, std::uint64_t m, std::uint64_t frequency, s
 }
 
 carta::zarr::Image OpenSky(const char* fixture, const carta::zarr::ContextOptions& options = {}) {
-    Require(std::filesystem::exists(fixture),
-            "the pixel fixture is missing; run tests/data/generate_zarr_fixtures.py");
+    Require(std::filesystem::exists(fixture), "the pixel fixture is missing; run tests/data/generate_zarr_fixtures.py");
     const auto context = carta::zarr::Context::Create(options);
     Require(static_cast<bool>(context), "Context::Create failed");
     auto dataset = carta::zarr::Dataset::Open(context.value(), fixture);
@@ -87,23 +86,26 @@ Collected Collect(const carta::zarr::Image& sky, const carta::zarr::HistogramReq
     Collected collected;
     collected.per_channel.assign(static_cast<std::size_t>(request.planes.spectral.count), {});
     std::uint64_t next_channel = 0;
-    const auto result = sky.ComputeHistogram(request, [&](const carta::zarr::HistogramBlock& block) {
-        Require(block.first_channel == next_channel, "blocks should tile the spectral selection in order");
-        Require(block.bin_count == request.bins, "a block should report the bins that were asked for");
-        if (!block.complete) {
-            Require(block.completeness > 0.0 && block.completeness < 1.0,
-                    "an unfinished block should report a fraction of itself");
-            ++collected.partial_blocks;
+    const auto result = sky.ComputeHistogram(
+        request,
+        [&](const carta::zarr::HistogramBlock& block) {
+            Require(block.first_channel == next_channel, "blocks should tile the spectral selection in order");
+            Require(block.bin_count == request.bins, "a block should report the bins that were asked for");
+            if (!block.complete) {
+                Require(block.completeness > 0.0 && block.completeness < 1.0,
+                        "an unfinished block should report a fraction of itself");
+                ++collected.partial_blocks;
+                return true;
+            }
+            for (std::uint64_t c = 0; c < block.channel_count; ++c) {
+                const auto* row = block.Counts(c);
+                collected.per_channel.at(static_cast<std::size_t>(block.first_channel + c))
+                    .assign(row, row + block.bin_count);
+            }
+            next_channel += block.channel_count;
             return true;
-        }
-        for (std::uint64_t c = 0; c < block.channel_count; ++c) {
-            const auto* row = block.Counts(c);
-            collected.per_channel.at(static_cast<std::size_t>(block.first_channel + c))
-                .assign(row, row + block.bin_count);
-        }
-        next_channel += block.channel_count;
-        return true;
-    }, options);
+        },
+        options);
     Require(static_cast<bool>(result),
             std::string("the histogram failed: ") + (result.has_value() ? "" : result.error().message));
     Require(next_channel == request.planes.spectral.count, "the blocks should cover the whole spectral selection");
@@ -167,9 +169,9 @@ void TestCountsMatchTheOracle(const carta::zarr::Image& sky) {
             const auto& actual = collected.per_channel.at(static_cast<std::size_t>(f));
             for (std::size_t bin = 0; bin < expected.size(); ++bin) {
                 Require(actual.at(bin) == expected.at(bin),
-                        "bin " + std::to_string(bin) + " of channel " + std::to_string(f) +
-                            " polarization " + std::to_string(polarization) + ": expected " +
-                            std::to_string(expected.at(bin)) + ", got " + std::to_string(actual.at(bin)));
+                        "bin " + std::to_string(bin) + " of channel " + std::to_string(f) + " polarization " +
+                            std::to_string(polarization) + ": expected " + std::to_string(expected.at(bin)) + ", got " +
+                            std::to_string(actual.at(bin)));
             }
         }
     }
@@ -264,8 +266,7 @@ void TestEachBlockCountsItsOwnChannels(const carta::zarr::Image& sky) {
         by_channel.at(block.first_channel).assign(block.Counts(0), block.Counts(0) + block.bin_count);
         return true;
     });
-    Require(static_cast<bool>(result),
-            std::string("the histogram failed: ") + (result ? "" : result.error().message));
+    Require(static_cast<bool>(result), std::string("the histogram failed: ") + (result ? "" : result.error().message));
     Require(complete_blocks == kFrequency, "one complete block for each channel");
 
     for (std::uint64_t f = 0; f < kFrequency; ++f) {
@@ -280,11 +281,11 @@ void TestEachBlockCountsItsOwnChannels(const carta::zarr::Image& sky) {
 
 void TestSinkCancels(const carta::zarr::Image& sky) {
     int calls = 0;
-    const auto result = sky.ComputeHistogram(WholeSpectrum(0, 0.0F, 2000.0F, 16),
-                                             [&](const carta::zarr::HistogramBlock&) {
-                                                 ++calls;
-                                                 return false;
-                                             });
+    const auto result =
+        sky.ComputeHistogram(WholeSpectrum(0, 0.0F, 2000.0F, 16), [&](const carta::zarr::HistogramBlock&) {
+            ++calls;
+            return false;
+        });
     Require(!result && result.error().code == carta::zarr::ErrorCode::cancelled,
             "a sink that says stop should report cancelled");
     Require(calls == 1, "a sink that says stop should not be asked again");
@@ -325,8 +326,7 @@ void TestOnePassMatchesTheTwoPassAnswer(const carta::zarr::Image& sky) {
     request.bins = 12;
     const auto one_pass = sky.ComputeCubeHistogram(request);
     Require(static_cast<bool>(one_pass),
-            std::string("the one-pass histogram failed: ") +
-                (one_pass.has_value() ? "" : one_pass.error().message));
+            std::string("the one-pass histogram failed: ") + (one_pass.has_value() ? "" : one_pass.error().message));
     const auto& result = one_pass.value();
 
     // The extremes and the sums, from the fixture's encoding.
@@ -376,9 +376,9 @@ void TestOnePassMatchesTheTwoPassAnswer(const carta::zarr::Image& sky) {
         for (std::uint64_t f = 0; f < kFrequency; ++f) {
             summed += two_pass.per_channel.at(static_cast<std::size_t>(f)).at(bin);
         }
-        Require(result.counts.at(bin) == summed,
-                "bin " + std::to_string(bin) + ": one pass said " + std::to_string(result.counts.at(bin)) +
-                    ", two passes said " + std::to_string(summed));
+        Require(result.counts.at(bin) == summed, "bin " + std::to_string(bin) + ": one pass said " +
+                                                     std::to_string(result.counts.at(bin)) + ", two passes said " +
+                                                     std::to_string(summed));
     }
 }
 
@@ -426,7 +426,8 @@ void TestSamplingTakesFewerPixels(const carta::zarr::Image& sky) {
     const auto origin_only = [&](std::uint64_t stride, const std::string& what) {
         request.spatial_sample = stride;
         const auto result = sky.ComputeCubeHistogram(request);
-        Require(static_cast<bool>(result), what + " was refused" + (result ? std::string{} : ": " + result.error().message));
+        Require(static_cast<bool>(result),
+                what + " was refused" + (result ? std::string{} : ": " + result.error().message));
         Require(result.value().totals.num_pixels + result.value().totals.nan_count == kFrequency,
                 what + " did not keep the one pixel at each plane's origin");
     };
@@ -662,13 +663,14 @@ void TestOnePassReportsWhatItHasSoFar(const carta::zarr::Image& sky) {
     const auto result = sky.ComputeCubeHistogram(request, options, progress);
     Require(static_cast<bool>(result), "the one-pass histogram failed");
     Require(updates > 0, "a walk taking several reads should have reported at least once");
-    Require(result.value().totals.num_pixels >= last_pixels, "the answer should hold at least what the last snapshot did");
+    Require(result.value().totals.num_pixels >= last_pixels,
+            "the answer should hold at least what the last snapshot did");
     Require(result.value().totals.min <= widest_low && result.value().totals.max >= widest_high,
             "the answer's range should contain every range reported on the way");
 
     // Saying no stops the walk, and says why.
-    const auto cancelled = sky.ComputeCubeHistogram(
-        request, options, [](const carta::zarr::CubeHistogramProgress&) { return false; });
+    const auto cancelled =
+        sky.ComputeCubeHistogram(request, options, [](const carta::zarr::CubeHistogramProgress&) { return false; });
     Require(!cancelled && cancelled.error().code == carta::zarr::ErrorCode::cancelled,
             "refusing a progress update should cancel the walk");
 }
@@ -695,8 +697,10 @@ void TestOnePassKeepsItsContractAtAnyThreadCount(const char* fixture) {
     }
     const auto& first = answers.front();
     for (const auto& answer : answers) {
-        Require(answer.totals.num_pixels == first.totals.num_pixels, "the finite pixel count must not move with the threads");
-        Require(answer.totals.nan_count == first.totals.nan_count, "the absent pixel count must not move with the threads");
+        Require(answer.totals.num_pixels == first.totals.num_pixels,
+                "the finite pixel count must not move with the threads");
+        Require(answer.totals.nan_count == first.totals.nan_count,
+                "the absent pixel count must not move with the threads");
         Require(answer.totals.min == first.totals.min, "the minimum must not move with the threads");
         Require(answer.totals.max == first.totals.max, "the maximum must not move with the threads");
         Require(std::abs(answer.totals.sum - first.totals.sum) <= 1e-12 * (1.0 + std::abs(first.totals.sum)),
@@ -730,8 +734,7 @@ void TestThreadCountDoesNotChangeTheCounts(const char* fixture) {
         answers.push_back(std::move(flat));
     }
     for (std::size_t index = 1; index < answers.size(); ++index) {
-        Require(answers[index] == answers.front(),
-                "the counts changed with the thread count, which they must not");
+        Require(answers[index] == answers.front(), "the counts changed with the thread count, which they must not");
     }
 }
 

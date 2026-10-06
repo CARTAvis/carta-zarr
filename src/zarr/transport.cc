@@ -38,10 +38,9 @@ public:
     // `root` is resolved already: the transport's root always is.
     LinkedWalk(const std::filesystem::path& root, Unreadable unreadable)
         : iterator(root,
-                   unreadable == Unreadable::skipped
-                       ? std::filesystem::directory_options::skip_permission_denied |
-                             std::filesystem::directory_options::follow_directory_symlink
-                       : std::filesystem::directory_options::follow_directory_symlink,
+                   unreadable == Unreadable::skipped ? std::filesystem::directory_options::skip_permission_denied |
+                                                           std::filesystem::directory_options::follow_directory_symlink
+                                                     : std::filesystem::directory_options::follow_directory_symlink,
                    error),
           _ancestors{root} {}
 
@@ -80,8 +79,7 @@ Result<std::filesystem::path> NormalizeLocation(std::string_view location) {
     if (location_string.rfind("file://", 0) == 0) {
         path = std::filesystem::path(location_string.substr(7));
     } else if (location_string.find("://") != std::string::npos) {
-        return Error{ErrorCode::unsupported_transport,
-                     "Only local filesystem and file:// Zarr stores are supported"};
+        return Error{ErrorCode::unsupported_transport, "Only local filesystem and file:// Zarr stores are supported"};
     } else {
         path = std::filesystem::path(location_string);
     }
@@ -208,8 +206,7 @@ public:
             }
         }
         if (error) {
-            return Error{ErrorCode::io_error, "Unable to enumerate Zarr metadata: " + error.message(),
-                         _root.string()};
+            return Error{ErrorCode::io_error, "Unable to enumerate Zarr metadata: " + error.message(), _root.string()};
         }
         return nodes;
     }
@@ -220,8 +217,7 @@ public:
         auto& iterator = walk.iterator;
         std::error_code& error = walk.error;
         if (error) {
-            return Error{ErrorCode::io_error, "Unable to enumerate the Zarr store: " + error.message(),
-                         _root.string()};
+            return Error{ErrorCode::io_error, "Unable to enumerate the Zarr store: " + error.message(), _root.string()};
         }
 
         const std::filesystem::recursive_directory_iterator end;
@@ -270,12 +266,12 @@ public:
         const std::filesystem::path relative(node);
         if (relative.empty() || relative.is_absolute() || relative.has_root_name() ||
             node.find('\\') != std::string_view::npos) {
-            return Error{ErrorCode::invalid_argument,
-                         "Invalid Zarr array path " + std::string(node) +
-                             (node.find('\\') != std::string_view::npos
-                                  ? ": TensorStore reads a backslash as a path separator"
-                                  : ""),
-                         std::string(node)};
+            return Error{
+                ErrorCode::invalid_argument,
+                "Invalid Zarr array path " + std::string(node) +
+                    (node.find('\\') != std::string_view::npos ? ": TensorStore reads a backslash as a path separator"
+                                                               : ""),
+                std::string(node)};
         }
         for (const auto& component : relative) {
             if (component == "." || component == "..") {

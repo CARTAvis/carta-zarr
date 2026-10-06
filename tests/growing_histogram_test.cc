@@ -16,6 +16,8 @@
 
 #include "reduce/growing_histogram.h"
 
+#include "support/check.h"
+
 #include <cmath>
 #include <cstdint>
 #include <cstdio>
@@ -23,8 +25,6 @@
 #include <limits>
 #include <string>
 #include <vector>
-
-#include "support/check.h"
 
 namespace {
 

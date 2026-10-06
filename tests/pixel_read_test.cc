@@ -9,7 +9,7 @@
 // different lengths, so a wrong order changes the shape, and a right shape with a wrong order
 // changes the values.
 
-#include <carta-zarr/carta_zarr.h>
+#include "support/check.h"
 
 #include <algorithm>
 #include <atomic>
@@ -21,16 +21,15 @@
 #include <fstream>
 #include <functional>
 #include <iostream>
-#include <limits>
 #include <iterator>
+#include <limits>
 #include <string>
 #include <thread>
 #include <utility>
 #include <vector>
 
+#include <carta-zarr/carta_zarr.h>
 #include <unistd.h>
-
-#include "support/check.h"
 
 namespace {
 
@@ -132,8 +131,7 @@ void TestWholeImage(const carta::zarr::Image& sky) {
                 for (std::uint64_t l = 0; l < kL; ++l) {
                     const float value = pixels.at(LogicalOffset(l, m, f, p));
                     const std::string where = "at l=" + std::to_string(l) + " m=" + std::to_string(m) +
-                                              " frequency=" + std::to_string(f) +
-                                              " polarization=" + std::to_string(p);
+                                              " frequency=" + std::to_string(f) + " polarization=" + std::to_string(p);
                     if (InMissingChunk(l, f, p)) {
                         // A chunk that was never written resolves to the array's fill value, which
                         // this fixture declares as NaN.
@@ -295,8 +293,7 @@ void TestReadControls(const carta::zarr::Image& sky) {
     // has to be split, and splitting is enough.
     budgeted.read_budget_bytes = elements - 1;
     std::vector<float> budgeted_pixels(elements, 0.0F);
-    const auto budgeted_read =
-        sky.Read(request, {budgeted_pixels.data(), budgeted_pixels.size()}, budgeted);
+    const auto budgeted_read = sky.Read(request, {budgeted_pixels.data(), budgeted_pixels.size()}, budgeted);
     Require(static_cast<bool>(budgeted_read),
             "a read with a memory ceiling was refused instead of split" +
                 (budgeted_read ? std::string{} : ": " + budgeted_read.error().message));
@@ -381,8 +378,8 @@ void TestConcurrentReads(const carta::zarr::Image& sky) {
                         for (std::uint64_t m = 0; m < kM; ++m) {
                             for (std::uint64_t l = 0; l < kL; ++l) {
                                 const float value = pixels.at(LogicalOffset(l, m, f, p));
-                                const bool ok = InMissingChunk(l, f, p) ? std::isnan(value)
-                                                                        : value == ExpectedValue(l, m, f, p, 0);
+                                const bool ok =
+                                    InMissingChunk(l, f, p) ? std::isnan(value) : value == ExpectedValue(l, m, f, p, 0);
                                 if (!ok) {
                                     ++failures;
                                     return;
@@ -423,8 +420,8 @@ void TestProgressiveRead(const carta::zarr::Image& sky) {
         Require(reported.empty() || written > reported.back(), "the finished prefix should only grow");
         // The point of a prefix rather than a count: what has been reported is already readable.
         for (std::size_t i = 0; i < written; ++i) {
-            const bool matches = pixels.at(i) == expected.at(i) ||
-                                 (std::isnan(pixels.at(i)) && std::isnan(expected.at(i)));
+            const bool matches =
+                pixels.at(i) == expected.at(i) || (std::isnan(pixels.at(i)) && std::isnan(expected.at(i)));
             Require(matches, "a reported prefix should already hold its final values");
         }
         reported.push_back(written);
@@ -460,8 +457,8 @@ void TestProgressiveRead(const carta::zarr::Image& sky) {
             "a progressive masked read failed");
     Require(masked_pieces > 1, "the masked read should have been split too");
     for (std::size_t i = 0; i < total; ++i) {
-        const bool matches = masked.at(i) == masked_expected.at(i) ||
-                             (std::isnan(masked.at(i)) && std::isnan(masked_expected.at(i)));
+        const bool matches =
+            masked.at(i) == masked_expected.at(i) || (std::isnan(masked.at(i)) && std::isnan(masked_expected.at(i)));
         Require(matches, "a progressive masked read should return what an ordinary one returns");
     }
 
@@ -502,9 +499,8 @@ void TestAnOpenImageOutlivesTheWorkingDirectory(const char* fixture) {
     const auto context = carta::zarr::Context::Create();
     Require(static_cast<bool>(context), "Context::Create failed");
     const auto dataset = carta::zarr::Dataset::Open(context.value(), located.filename().string());
-    Require(static_cast<bool>(dataset),
-            "Dataset::Open failed for a relative location" +
-                (dataset ? std::string{} : ": " + dataset.error().message));
+    Require(static_cast<bool>(dataset), "Dataset::Open failed for a relative location" +
+                                            (dataset ? std::string{} : ": " + dataset.error().message));
     const auto image = dataset.value().OpenImage("SKY");
     Require(static_cast<bool>(image),
             "OpenImage failed for a relative location" + (image ? std::string{} : ": " + image.error().message));
@@ -515,8 +511,7 @@ void TestAnOpenImageOutlivesTheWorkingDirectory(const char* fixture) {
 
     const auto& sky = image.value();
     std::vector<float> pixels(static_cast<std::size_t>(kL * kM * kFrequency * kPolarization * kTime), 0.0F);
-    const auto read =
-        sky.Read(WholeImage(sky.descriptor()), {pixels.data(), pixels.size()}, Unmasked());
+    const auto read = sky.Read(WholeImage(sky.descriptor()), {pixels.data(), pixels.size()}, Unmasked());
     Require(static_cast<bool>(read), "an image opened relatively could not be read from another directory" +
                                          (read ? std::string{} : ": " + read.error().message));
     Require(pixels.at(LogicalOffset(1, 2, 1, 2)) == ExpectedValue(1, 2, 1, 2, 0),
@@ -581,8 +576,8 @@ void TestAPrefetchedPlaneIsReadFromThePool(const char* fixture, std::uint64_t ex
 
     std::vector<float> pixels(kL * kM, 123.0F);
     const auto read = sky.Read(plane(0), {pixels.data(), pixels.size()}, options);
-    Require(static_cast<bool>(read), "a prefetched plane went to storage for its chunks" +
-                                         (read ? std::string{} : ": " + read.error().message));
+    Require(static_cast<bool>(read),
+            "a prefetched plane went to storage for its chunks" + (read ? std::string{} : ": " + read.error().message));
     for (std::size_t i = 0; i < pixels.size(); ++i) {
         Require((std::isnan(pixels.at(i)) && std::isnan(reference.at(i))) || pixels.at(i) == reference.at(i),
                 "a prefetched plane read back differently at offset " + std::to_string(i));
@@ -623,7 +618,8 @@ void TestAPoolDoesNotCarryOneDatasetsArraysIntoTheNext(const char* fixture) {
         Require(static_cast<bool>(sky), "SKY could not be opened in the copy");
         std::vector<float> pixels(kL * kM, 123.0F);
         const auto outcome = sky->Read(plane, {pixels.data(), pixels.size()}, with);
-        Require(static_cast<bool>(outcome), "the plane did not read" + (outcome ? std::string{} : ": " + outcome.error().message));
+        Require(static_cast<bool>(outcome),
+                "the plane did not read" + (outcome ? std::string{} : ": " + outcome.error().message));
         return pixels;
     };
     const auto before = read(options);
@@ -737,9 +733,7 @@ public:
         std::filesystem::remove_all(_path, ignored);
     }
 
-    const std::filesystem::path& path() const {
-        return _path;
-    }
+    const std::filesystem::path& path() const { return _path; }
 
     // Rewrite a node's own document, leaving the root's copy of it as it was.
     void RewriteOwn(const std::string& node, const Rewrite& rewrite) const {
@@ -785,8 +779,9 @@ void TestACoordinateDisagreeingWithItsConsolidatedCopyIsRefused(const char* fixt
 // reporting the copy's figure in Hz beside them. Refused, as a disagreement on the extent is.
 void TestACoordinateWhoseAttributesDisagreeWithItsCopyIsRefused(const char* fixture) {
     const ConsolidatedCopy copy(fixture, "attribute-copy");
-    copy.RewriteOwn("frequency",
-                    [](std::string text) { return Replaced(std::move(text), "\"rest_frequency\"", "1420405751.0", "1.420405751"); });
+    copy.RewriteOwn("frequency", [](std::string text) {
+        return Replaced(std::move(text), "\"rest_frequency\"", "1420405751.0", "1.420405751");
+    });
     RequireRefusedAtOpen(copy.OpenSky(), "frequency", "a frequency coordinate whose attributes disagree with its copy");
 }
 
@@ -795,9 +790,8 @@ void TestACoordinateWhoseAttributesDisagreeWithItsCopyIsRefused(const char* fixt
 // when the image is opened, naming the array that disagrees.
 void TestAnImageWhoseArraysDisagreeWithTheirCopiesDoesNotOpen(const char* fixture) {
     const ConsolidatedCopy sky(fixture, "sky-copy");
-    sky.RewriteOwn("SKY", [](std::string text) {
-        return Replaced(std::move(text), "\"data_type\"", "float32", "float64");
-    });
+    sky.RewriteOwn("SKY",
+                   [](std::string text) { return Replaced(std::move(text), "\"data_type\"", "float32", "float64"); });
     RequireRefusedAtOpen(sky.OpenSky(), "SKY", "a SKY whose own document holds another data type");
 
     // Chunked otherwise, every pixel still reads -- TensorStore decodes with the array's own
@@ -808,7 +802,8 @@ void TestAnImageWhoseArraysDisagreeWithTheirCopiesDoesNotOpen(const char* fixtur
     RequireRefusedAtOpen(chunks.OpenSky(), "SKY", "a SKY chunked otherwise than its copy says");
 
     const ConsolidatedCopy flag(fixture, "flag-copy");
-    flag.RewriteOwn("FLAG", [](std::string text) { return Replaced(std::move(text), "\"data_type\"", "bool", "uint8"); });
+    flag.RewriteOwn("FLAG",
+                    [](std::string text) { return Replaced(std::move(text), "\"data_type\"", "bool", "uint8"); });
     RequireRefusedAtOpen(flag.OpenSky(), "FLAG", "a flag whose own document holds another data type");
 }
 
@@ -817,10 +812,9 @@ void TestAnImageWhoseArraysDisagreeWithTheirCopiesDoesNotOpen(const char* fixtur
 // the first label and then the fill value for the rest, and a label array whose directory was gone
 // read as nothing but fill. Both opened an image with labels that were not the store's.
 void TestLabelsAreHeldToTheirOwnDocument(const char* fixture) {
-    const ConsolidatedCopy rechunked(fixture, "label-copy",
-                                     {{"polarization", [](std::string text) {
-                                           return Replaced(std::move(text), "\"chunk_shape\"", "3", "1");
-                                       }}});
+    const ConsolidatedCopy rechunked(
+        fixture, "label-copy",
+        {{"polarization", [](std::string text) { return Replaced(std::move(text), "\"chunk_shape\"", "3", "1"); }}});
     RequireRefusedAtOpen(rechunked.OpenSky(), "polarization", "labels chunked otherwise than their copy says");
 
     const ConsolidatedCopy missing(fixture, "label-gone");
@@ -831,16 +825,15 @@ void TestLabelsAreHeldToTheirOwnDocument(const char* fixture) {
     // the document that wrote them, so a copy naming a compressor they were never written with
     // reads them as they are.
     const ConsolidatedCopy recompressed(
-        fixture, "label-codec", {{"polarization", [](std::string text) {
-                                      const auto codecs = text.find("\"codecs\"");
-                                      const auto end = text.find(']', codecs);
-                                      Require(codecs != std::string::npos && end != std::string::npos,
-                                              "the labels name no codecs");
-                                      return text.replace(
-                                          codecs, end + 1 - codecs,
-                                          R"("codecs":[{"name":"bytes","configuration":{"endian":"little"}},)"
-                                          R"({"name":"zstd","configuration":{"level":1,"checksum":false}}])");
-                                  }}});
+        fixture, "label-codec",
+        {{"polarization", [](std::string text) {
+              const auto codecs = text.find("\"codecs\"");
+              const auto end = text.find(']', codecs);
+              Require(codecs != std::string::npos && end != std::string::npos, "the labels name no codecs");
+              return text.replace(codecs, end + 1 - codecs,
+                                  R"("codecs":[{"name":"bytes","configuration":{"endian":"little"}},)"
+                                  R"({"name":"zstd","configuration":{"level":1,"checksum":false}}])");
+          }}});
     const auto image = recompressed.OpenSky();
     Require(static_cast<bool>(image), "labels whose copy names another compressor did not open: " +
                                           (image ? std::string{} : image.error().message));
@@ -871,8 +864,8 @@ void TestAVariableNamedWithABackslashSaysWhyItIsNotRead(const char* fixture) {
     const auto dataset = carta::zarr::Dataset::Open(context.value(), copy.string());
     Require(static_cast<bool>(dataset), "Dataset::Open failed on the copy with a backslash in a name");
     const auto image = dataset->OpenImage("SKY\\2");
-    Require(static_cast<bool>(image), "the variable named with a backslash did not open: " +
-                                          (image ? std::string{} : image.error().message));
+    Require(static_cast<bool>(image),
+            "the variable named with a backslash did not open: " + (image ? std::string{} : image.error().message));
     std::vector<float> pixels(kL * kM * kFrequency * kPolarization * kTime);
     const auto read = image->Read(WholeImage(image->descriptor()), {pixels.data(), pixels.size()}, Unmasked());
     Require(!read, "the variable named with a backslash was read, from wherever TensorStore found it");
@@ -913,7 +906,8 @@ void TestAnImageWhoseArraysAreLinkedInReads(const char* fixture) {
     carta::zarr::ReadRequest plane;
     plane.axes = {{0, kL, 1}, {0, kM, 1}, {0, 1, 1}, {0, 1, 1}, {0, 1, 1}};
     std::vector<float> masked(kL * kM);
-    Require(static_cast<bool>(sky.Read(plane, {masked.data(), masked.size()})), "a masked plane of linked arrays did not read");
+    Require(static_cast<bool>(sky.Read(plane, {masked.data(), masked.size()})),
+            "a masked plane of linked arrays did not read");
 }
 
 // What a caller's callback throws is the caller's business, and need not be a std::exception: an

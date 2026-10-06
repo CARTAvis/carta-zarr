@@ -7,7 +7,6 @@
 #include "profile.h"
 
 #include "xradio/image.h"
-
 #include "zarr/array_metadata.h"
 
 #include <algorithm>
@@ -23,8 +22,8 @@ Result<void> RequireOpenableDataset(const ProbeResult& probe, std::string_view l
     if (probe.kind != ProbeKind::supported_dataset) {
         // Malformed and unrecognised are different answers, and a consumer acts on the difference:
         // one is a file to complain about, the other is a file this library is not for.
-        const ErrorCode code = probe.kind == ProbeKind::invalid_dataset ? ErrorCode::invalid_metadata
-                                                                       : ErrorCode::unsupported_schema;
+        const ErrorCode code =
+            probe.kind == ProbeKind::invalid_dataset ? ErrorCode::invalid_metadata : ErrorCode::unsupported_schema;
         return Error{code, RejectionMessage(probe.diagnostics, "No built-in schema profile matched the Zarr store"),
                      std::string(location)};
     }
@@ -32,16 +31,14 @@ Result<void> RequireOpenableDataset(const ProbeResult& probe, std::string_view l
     // matched -- so there are no diagnostics to report, and a consumer opening this would get a
     // dataset it can do nothing with.
     if (probe.images.empty()) {
-        return Error{ErrorCode::invalid_metadata, "Supported schema has no image variables",
-                     std::string(location)};
+        return Error{ErrorCode::invalid_metadata, "Supported schema has no image variables", std::string(location)};
     }
     return {};
 }
 
 const std::vector<SchemaProfile::Entry>& SchemaProfile::BuiltIn() {
-    static const std::vector<SchemaProfile::Entry> profiles{
-        {SchemaProfile::Entry{SchemaId(kXradioImageSchema), &xradio::InspectImages, &xradio::DescribeImage,
-                              &xradio::ReadBeams}}};
+    static const std::vector<SchemaProfile::Entry> profiles{{SchemaProfile::Entry{
+        SchemaId(kXradioImageSchema), &xradio::InspectImages, &xradio::DescribeImage, &xradio::ReadBeams}}};
     return profiles;
 }
 
@@ -50,8 +47,7 @@ Result<SchemaProfile> SchemaProfile::For(std::string_view schema_id) {
     const auto found = std::find_if(profiles.begin(), profiles.end(),
                                     [&](const Entry& candidate) { return candidate.id == schema_id; });
     if (found == profiles.end()) {
-        return Error{ErrorCode::unsupported_schema,
-                     "No built-in profile exists for schema " + std::string(schema_id)};
+        return Error{ErrorCode::unsupported_schema, "No built-in profile exists for schema " + std::string(schema_id)};
     }
     return SchemaProfile{*found};
 }

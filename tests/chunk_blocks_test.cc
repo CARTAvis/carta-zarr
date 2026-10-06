@@ -11,14 +11,14 @@
 
 #include "chunk_blocks.h"
 
+#include "support/check.h"
+
 #include <cstdint>
 #include <cstdio>
 #include <exception>
 #include <string>
 #include <utility>
 #include <vector>
-
-#include "support/check.h"
 
 namespace {
 
@@ -56,20 +56,15 @@ void TestRealChunkShapesGetEnoughChunks() {
         const char* what;
         std::uint64_t bytes;
     } cases[]{
-        {"HD163296 128x128x2", 128 * 128 * 2 * 4},
-        {"ASKAP 512x512x1", 512 * 512 * 1 * 4},
-        {"ASKAP 256x256x3", 256 * 256 * 3 * 4},
-        {"IRC 256x256x1 over four stokes", 256 * 256 * 1 * 4 * 4},
-        {"XRADIO 256x256x6", 256 * 256 * 6 * 4},
-        {"XRADIO 256x256x6 over four stokes", 256 * 256 * 6 * 4 * 4},
-        {"XRADIO 512x512x4", 512 * 512 * 4 * 4},
-        {"XRADIO 512x512x4 over four stokes", 512 * 512 * 4 * 4 * 4},
+        {"HD163296 128x128x2", 128 * 128 * 2 * 4}, {"ASKAP 512x512x1", 512 * 512 * 1 * 4},
+        {"ASKAP 256x256x3", 256 * 256 * 3 * 4},    {"IRC 256x256x1 over four stokes", 256 * 256 * 1 * 4 * 4},
+        {"XRADIO 256x256x6", 256 * 256 * 6 * 4},   {"XRADIO 256x256x6 over four stokes", 256 * 256 * 6 * 4 * 4},
+        {"XRADIO 512x512x4", 512 * 512 * 4 * 4},   {"XRADIO 512x512x4 over four stokes", 512 * 512 * 4 * 4 * 4},
     };
     for (const auto& one : cases) {
         const auto chunks = ChunksPerRead(one.bytes);
-        Require(chunks >= kMinChunksPerRead,
-                std::string(one.what) + " gets only " + std::to_string(chunks) +
-                    " chunks per request, which does not keep the decode pool busy");
+        Require(chunks >= kMinChunksPerRead, std::string(one.what) + " gets only " + std::to_string(chunks) +
+                                                 " chunks per request, which does not keep the decode pool busy");
     }
 }
 

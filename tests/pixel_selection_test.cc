@@ -15,13 +15,13 @@
 
 #include "zarr/pixel_selection.h"
 
+#include "support/check.h"
+
 #include <cstdint>
 #include <cstdio>
 #include <exception>
 #include <string>
 #include <vector>
-
-#include "support/check.h"
 
 namespace {
 
@@ -110,8 +110,9 @@ void TestTheOrderDoesNotChangeWhatIsRead() {
     request.axes.at(2) = Range{0, 2, 2};
     const auto logical = Built(DestinationOrder::logical, request);
     const auto stored = Built(DestinationOrder::stored, request);
-    Require(logical.start() == stored.start() && logical.count() == stored.count() && logical.stride() == stored.stride(),
-            "the destination's order changed which pixels the selection reads");
+    Require(
+        logical.start() == stored.start() && logical.count() == stored.count() && logical.stride() == stored.stride(),
+        "the destination's order changed which pixels the selection reads");
     // In stored order, whatever the request.
     Require(logical.start() == std::vector<std::uint64_t>{0, 0, 0, 1, 0} &&
                 logical.count() == std::vector<std::uint64_t>{1, 2, 2, 2, 5} &&

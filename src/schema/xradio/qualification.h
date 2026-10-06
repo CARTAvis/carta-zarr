@@ -19,10 +19,10 @@
 // metadata and nothing else, and a Store over the in-memory transport costs a map entry. See ADR
 // 0006.
 
-#include "../../store.h"
-
 #include "carta-zarr/descriptor.h"
 #include "carta-zarr/result.h"
+
+#include "../../store.h"
 
 #include <optional>
 #include <string_view>

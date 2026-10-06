@@ -9,6 +9,7 @@
 
 #include "carta-zarr/descriptor.h"
 #include "carta-zarr/result.h"
+
 #include "zarr/storage_layout.h"
 
 #include <nlohmann/json.hpp>
@@ -82,6 +83,6 @@ bool IsFixedLengthUtf32(const ArrayMetadata& metadata);
 std::optional<std::size_t> FindDimensionIndex(const ArrayMetadata& metadata, std::string_view name);
 const char* ErrorCodeName(ErrorCode code) noexcept;
 
-} // namespace carta::zarr::internal::zarr
+}  // namespace carta::zarr::internal::zarr
 
-#endif // CARTA_ZARR_SRC_ZARR_ARRAY_METADATA_H_
+#endif  // CARTA_ZARR_SRC_ZARR_ARRAY_METADATA_H_

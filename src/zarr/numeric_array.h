@@ -43,16 +43,10 @@ public:
     static Result<NumericArray> Make(std::string node, ArrayMetadata metadata, std::vector<double> values);
 
     // The node the values were read from, so an error about them can say which variable it is about.
-    const std::string& node() const noexcept {
-        return _node;
-    }
-    const ArrayMetadata& metadata() const noexcept {
-        return _metadata;
-    }
+    const std::string& node() const noexcept { return _node; }
+    const ArrayMetadata& metadata() const noexcept { return _metadata; }
     // In C order, flattened.
-    const std::vector<double>& values() const noexcept {
-        return _values;
-    }
+    const std::vector<double>& values() const noexcept { return _values; }
 
     // Takes a vector so a caller can name a dimension conditionally; a braced list still works.
     Result<double> At(const std::vector<NamedIndex>& indices) const;

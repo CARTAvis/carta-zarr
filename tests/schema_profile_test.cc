@@ -20,12 +20,10 @@
 #include "schema/xradio/flag.h"
 #include "schema/xradio/image.h"
 #include "store.h"
+#include "support/check.h"
+#include "support/in_memory_transport.h"
 #include "zarr/array_metadata.h"
 #include "zarr/pixel_selection.h"
-
-#include "support/check.h"
-
-#include "support/in_memory_transport.h"
 
 #include <algorithm>
 #include <chrono>
@@ -42,8 +40,8 @@
 namespace {
 
 using carta::zarr::ErrorCode;
-using carta::zarr::internal::ProbeKind;
 using carta::zarr::SchemaMatchKind;
+using carta::zarr::internal::ProbeKind;
 using carta::zarr::internal::xradio::DetermineFlag;
 using carta::zarr::testing::MakeInMemoryTransport;
 
@@ -151,14 +149,15 @@ std::map<std::string, std::string> ConsolidatedStore(std::map<std::string, std::
         const auto copy = copies.find(child.first);
         metadata += "\"" + child.first + "\":" + (copy != copies.end() ? copy->second : child.second);
     }
-    nodes[""] = "{\"attributes\":{\"coordinate_system_info\":{"
-                "\"projection\":\"SIN\","
-                "\"reference_direction\":{\"data\":[1.0,0.5]},"
-                "\"native_pole_direction\":{\"data\":[0.0,1.5707963267948966]},"
-                "\"pixel_coordinate_transformation_matrix\":[[1.0,0.0],[0.0,1.0]]}},"
-                "\"zarr_format\":3,\"node_type\":\"group\","
-                "\"consolidated_metadata\":{\"kind\":\"inline\",\"must_understand\":false,\"metadata\":{" +
-                metadata + "}}}";
+    nodes[""] =
+        "{\"attributes\":{\"coordinate_system_info\":{"
+        "\"projection\":\"SIN\","
+        "\"reference_direction\":{\"data\":[1.0,0.5]},"
+        "\"native_pole_direction\":{\"data\":[0.0,1.5707963267948966]},"
+        "\"pixel_coordinate_transformation_matrix\":[[1.0,0.0],[0.0,1.0]]}},"
+        "\"zarr_format\":3,\"node_type\":\"group\","
+        "\"consolidated_metadata\":{\"kind\":\"inline\",\"must_understand\":false,\"metadata\":{" +
+        metadata + "}}}";
     return nodes;
 }
 
@@ -191,8 +190,7 @@ void TestDatasetWithoutSkyMatches() {
     nodes.erase("SKY");
     nodes["RESIDUAL"] = SkyArray();
     const auto probe = Probe(nodes);
-    Require(probe.kind == SchemaMatchKind::match,
-            "an image dataset with only RESIDUAL was incorrectly rejected");
+    Require(probe.kind == SchemaMatchKind::match, "an image dataset with only RESIDUAL was incorrectly rejected");
 }
 
 void TestNonMatch() {
@@ -293,7 +291,8 @@ void TestUndecodableLabelsAreInvalid() {
         R"("codecs":[{"name":"bytes","configuration":{"endian":"little"}},{"name":"bz2"}],)"
         R"("attributes":{},"dimension_names":["polarization"],"zarr_format":3,"node_type":"array"})";
     const auto probe = Probe(nodes);
-    Require(probe.kind == SchemaMatchKind::invalid, "polarization labels in a codec this library cannot run were accepted");
+    Require(probe.kind == SchemaMatchKind::invalid,
+            "polarization labels in a codec this library cannot run were accepted");
     Require(HasDiagnostic(probe.diagnostics, carta::zarr::DiagnosticCode::invalid_metadata),
             "the undecodable polarization labels produced no diagnostic");
 }
@@ -312,8 +311,7 @@ void TestAMissingCoordinateSystemIsInvalid() {
     nodes[""] = RootGroup(false);
     const auto probe = Probe(nodes);
     Require(probe.kind == SchemaMatchKind::invalid, "a store with no coordinate_system_info was accepted");
-    Require(!probe.diagnostics.empty() &&
-                probe.diagnostics.front().node_path == "/attributes/coordinate_system_info",
+    Require(!probe.diagnostics.empty() && probe.diagnostics.front().node_path == "/attributes/coordinate_system_info",
             "the refusal should name the attribute that is missing");
 }
 
@@ -482,8 +480,8 @@ void TestARefusalCarriesTheVariablesOwnReason() {
     Require(!complex && complex.error().code == ErrorCode::unsupported_data_type,
             "a listed but unopenable variable should be refused as an unsupported data type");
 
-    const auto listed = std::find_if(images.begin(), images.end(),
-                                     [](const auto& image) { return image.id == "COMPLEX"; });
+    const auto listed =
+        std::find_if(images.begin(), images.end(), [](const auto& image) { return image.id == "COMPLEX"; });
     Require(listed != images.end() && !listed->diagnostics.empty(),
             "the complex variable was not listed with a diagnostic to pass on");
     Require(complex.error().message == listed->diagnostics.front().message,
@@ -610,8 +608,7 @@ void TestConsolidatedMetadataDiscovery() {
     Require(static_cast<bool>(plain_discovery), "discovery without consolidated metadata reported an error");
     Require(OpenableImageIds(plain_discovery.value().images) == OpenableImageIds(discovery.value().images),
             "the two metadata layouts did not describe the same images");
-    Require(plain->nodes_read().size() > 1,
-            "a store without consolidated metadata has to read its children");
+    Require(plain->nodes_read().size() > 1, "a store without consolidated metadata has to read its children");
 }
 
 // A consolidated key is filed under the canonical name of the node it describes. A block is entitled
@@ -746,9 +743,8 @@ void TestANodeThatWillNotParseIsDiagnosedNotRefused() {
             "a node that never said it was an array was called one");
 
     // The declared size counts the arrays it can see, and a node it cannot read is not one of them.
-    const auto size = carta::zarr::internal::DatasetSizeBytes(store.value(),
-                                                              std::chrono::steady_clock::now() +
-                                                                  std::chrono::seconds(5));
+    const auto size = carta::zarr::internal::DatasetSizeBytes(
+        store.value(), std::chrono::steady_clock::now() + std::chrono::seconds(5));
     Require(size && size.value().bytes == 592, "an unparseable node left the dataset without a declared size");
 }
 
@@ -786,7 +782,7 @@ void TestAnArrayWithAMalformedCodecIsDiagnosedNotRefused() {
 // openable image and never gets as far as the requirements below.
 void TestFirstFaultIsTheOnlyDiagnostic() {
     auto nodes = CompleteStore();
-    nodes["frequency"] = NumericArray("[3]", R"(["x"])");     // right length, names another axis
+    nodes["frequency"] = NumericArray("[3]", R"(["x"])");      // right length, names another axis
     nodes["polarization"] = PolarizationArray("\"float64\"");  // wrong data type
 
     const auto probe = Probe(nodes);
@@ -886,7 +882,8 @@ void TestADeclaredFlagThatCannotMaskClosesTheImageInTheListing() {
              "a flag that is not boolean"},
         };
         if (by_group) {
-            unusable.emplace_back(usable_flag, R"({"base":{"sky":"SKY","flag":"MASK_0"},"robust":{"sky":"SKY","flag":"MASK_1"}})",
+            unusable.emplace_back(usable_flag,
+                                  R"({"base":{"sky":"SKY","flag":"MASK_0"},"robust":{"sky":"SKY","flag":"MASK_1"}})",
                                   "two different flags");
         }
         for (const auto& [flag_node, data_groups, what] : unusable) {
@@ -894,7 +891,8 @@ void TestADeclaredFlagThatCannotMaskClosesTheImageInTheListing() {
             const auto with = "an image with " + what + how;
             Require(ImageIds(discovery.images) == std::vector<std::string>{"SKY", "MODEL"},
                     with + " was dropped from the listing rather than listed with its reason");
-            Require(OpenableImageIds(discovery.images) == std::vector<std::string>{"MODEL"}, with + " was listed openable");
+            Require(OpenableImageIds(discovery.images) == std::vector<std::string>{"MODEL"},
+                    with + " was listed openable");
             Require(discovery.default_image_id == "MODEL", with + " was chosen as the default");
             Require(HasDiagnostic(discovery.images.front().diagnostics, carta::zarr::DiagnosticCode::invalid_metadata),
                     with + " was listed without saying why it will not open");
@@ -908,8 +906,8 @@ void TestADeclaredFlagThatCannotMaskClosesTheImageInTheListing() {
 // openable and described with five, so every read of it failed on the rank it had not been told.
 void TestAnImageWithAnAxisBeyondTheFiveIsNotOpenable() {
     auto nodes = CompleteStore();
-    nodes["MODEL"] = NumericArray("[1,3,2,4,5,1]", R"(["time","frequency","polarization","l","m","extra"])",
-                                  "float32", R"({"units":"Jy/beam"})");
+    nodes["MODEL"] = NumericArray("[1,3,2,4,5,1]", R"(["time","frequency","polarization","l","m","extra"])", "float32",
+                                  R"({"units":"Jy/beam"})");
 
     auto store = Open(nodes);
     Require(static_cast<bool>(store), "the extra-axis store failed to open");
@@ -929,7 +927,7 @@ void TestAnImageWithAnAxisBeyondTheFiveIsNotOpenable() {
 }
 
 carta::zarr::Result<std::string> FlagOfSky(const std::map<std::string, std::string>& nodes,
-                              std::vector<carta::zarr::Diagnostic>& diagnostics) {
+                                           std::vector<carta::zarr::Diagnostic>& diagnostics) {
     auto store = Open(nodes);
     Require(static_cast<bool>(store), "the data-group store did not open");
     const auto& image = store.value().ReadArrayMetadata("SKY");
@@ -946,7 +944,8 @@ void TestADataGroupDeclaresItsSkysFlag() {
     nodes["FLAG_1"] = NumericArray("[1,3,2,4,5]", sky_dimensions, "bool", R"({"type":"flag"})");
     nodes["FLAG_2"] = NumericArray("[1,3,2,4,5]", sky_dimensions, "int8", R"({"type":"flag","dtype":"bool"})");
 
-    nodes[""] = RootGroupWithDataGroups(R"({"base":{"sky":"SKY","flag":"FLAG_2"},"other":{"sky":"OTHER","flag":"FLAG_1"}})");
+    nodes[""] =
+        RootGroupWithDataGroups(R"({"base":{"sky":"SKY","flag":"FLAG_2"},"other":{"sky":"OTHER","flag":"FLAG_1"}})");
     std::vector<carta::zarr::Diagnostic> diagnostics;
     auto declared = FlagOfSky(nodes, diagnostics);
     Require(declared && declared.value() == "FLAG_2", "the flag data_groups names for SKY was not the one chosen");
@@ -976,14 +975,16 @@ void TestADataGroupDeclaresItsSkysFlag() {
             "an unusable flag data_groups declares did not close the image");
 
     // Two groups of the same sky naming different flags contradict each other.
-    nodes[""] = RootGroupWithDataGroups(R"({"base":{"sky":"SKY","flag":"FLAG_1"},"robust":{"sky":"SKY","flag":"FLAG_2"}})");
+    nodes[""] =
+        RootGroupWithDataGroups(R"({"base":{"sky":"SKY","flag":"FLAG_1"},"robust":{"sky":"SKY","flag":"FLAG_2"}})");
     diagnostics.clear();
     auto contradictory = FlagOfSky(nodes, diagnostics);
     Require(!contradictory && contradictory.error().code == ErrorCode::invalid_metadata,
             "two different flags declared for one image were not refused");
 
     // The same flag named by both is one declaration.
-    nodes[""] = RootGroupWithDataGroups(R"({"base":{"sky":"SKY","flag":"FLAG_1"},"robust":{"sky":"SKY","flag":"FLAG_1"}})");
+    nodes[""] =
+        RootGroupWithDataGroups(R"({"base":{"sky":"SKY","flag":"FLAG_1"},"robust":{"sky":"SKY","flag":"FLAG_1"}})");
     diagnostics.clear();
     auto agreeing = FlagOfSky(nodes, diagnostics);
     Require(agreeing && agreeing.value() == "FLAG_1", "two groups naming the same flag were refused");
@@ -997,7 +998,8 @@ void TestADataGroupDeclaresItsSkysFlag() {
         return FlagOfSky(nodes, diagnostics);
     };
     auto others = spelt(R"({"base":{"sky":"SKY"},"other":{"sky":"OTHER","flag":"./FLAG_1"}})");
-    Require(others && others.value() == "FLAG_2", "a flag another image's group spells ./FLAG_1 was a candidate for SKY");
+    Require(others && others.value() == "FLAG_2",
+            "a flag another image's group spells ./FLAG_1 was a candidate for SKY");
     auto dotted = spelt(R"({"base":{"sky":"SKY","flag":"./FLAG_2"}})");
     Require(dotted && dotted.value() == "FLAG_2", "a declared ./FLAG_2 was not chosen as the node FLAG_2");
     auto aliases = spelt(R"({"base":{"sky":"SKY","flag":"FLAG_1"},"robust":{"sky":"SKY","flag":"./FLAG_1"}})");
@@ -1059,9 +1061,9 @@ void TestANullConsolidatedBlockIsNoConsolidation() {
     Require(static_cast<bool>(store), "a root with null consolidated metadata was refused");
     Require(Probe(nodes).kind == SchemaMatchKind::match, "a store with null consolidated metadata was not matched");
     const auto discovery = XradioProfile().Discover(store.value());
-    Require(static_cast<bool>(discovery) &&
-                OpenableImageIds(discovery.value().images) == std::vector<std::string>{"SKY"},
-            "the image of a store with null consolidated metadata was not found by listing");
+    Require(
+        static_cast<bool>(discovery) && OpenableImageIds(discovery.value().images) == std::vector<std::string>{"SKY"},
+        "the image of a store with null consolidated metadata was not found by listing");
 }
 
 void TestStoreRejections() {
@@ -1085,7 +1087,6 @@ void TestStoreRejections() {
     Require(!unknown && unknown.error().code == ErrorCode::unsupported_schema, "an unknown schema id was accepted");
 }
 
-
 // How large a dataset is, when the transport cannot say how much room it takes.
 //
 // The measured half of this answer used to be the facade's: it re-parsed the location string and
@@ -1096,23 +1097,20 @@ void TestSizeFallsBackWhenTheStoreCannotBeMeasured() {
     auto store = Open(CompleteStore());
     Require(static_cast<bool>(store), "OpenStore rejected the in-memory store");
 
-    const auto size = carta::zarr::internal::DatasetSizeBytes(store.value(),
-                                                              std::chrono::steady_clock::now() +
-                                                                  std::chrono::seconds(5));
+    const auto size = carta::zarr::internal::DatasetSizeBytes(
+        store.value(), std::chrono::steady_clock::now() + std::chrono::seconds(5));
     Require(static_cast<bool>(size), "sizing an in-memory store failed");
     Require(size.value().basis == carta::zarr::SizeBasis::declared,
             "a size the transport could not measure must be reported as the declared one");
     // SKY is 120 float32 at 480 bytes; time, frequency, l and m are 1, 3, 4 and 5 float64 at 8, 24,
     // 32 and 40; polarization is two four-byte labels at 8. The arrays, not the store.
-    Require(size.value().bytes == 592,
-            "the logical total was " + std::to_string(size.value().bytes) + ", not 592");
+    Require(size.value().bytes == 592, "the logical total was " + std::to_string(size.value().bytes) + ", not 592");
 
     // A deadline that has already passed reaches the same answer by the same route: this transport
     // refuses whatever the clock says, and every way of failing to measure means the declared size.
     const auto expired = carta::zarr::internal::DatasetSizeBytes(
         store.value(), std::chrono::steady_clock::now() - std::chrono::seconds(1));
-    Require(expired && expired.value().basis == carta::zarr::SizeBasis::declared &&
-                expired.value().bytes == 592,
+    Require(expired && expired.value().basis == carta::zarr::SizeBasis::declared && expired.value().bytes == 592,
             "an expired deadline did not reach the same declared size");
 }
 
@@ -1122,10 +1120,8 @@ void TestSizeRefusesAStoreWithNoArrays() {
     auto store = Open({{"", RootGroup()}});
     Require(static_cast<bool>(store), "OpenStore rejected a bare root group");
 
-    const auto size = carta::zarr::internal::DatasetSizeBytes(store.value(),
-                                                              std::chrono::steady_clock::now());
-    Require(!size && size.error().code == ErrorCode::invalid_metadata,
-            "a store holding no arrays was given a size");
+    const auto size = carta::zarr::internal::DatasetSizeBytes(store.value(), std::chrono::steady_clock::now());
+    Require(!size && size.error().code == ErrorCode::invalid_metadata, "a store holding no arrays was given a size");
 }
 
 // Every rule that turns metadata and coordinate values into a descriptor, reached with the values
@@ -1137,8 +1133,9 @@ void TestADescriptionIsBuiltFromTheValuesItIsGiven() {
     using carta::zarr::internal::xradio::DescribeImageFrom;
 
     auto nodes = CompleteStore();
-    nodes["frequency"] = NumericArray("[3]", R"(["frequency"])", "float64",
-                                      R"({"units":"Hz","reference_frequency":{"data":1.402e9,"attrs":{"observer":"lsrk"}},
+    nodes["frequency"] =
+        NumericArray("[3]", R"(["frequency"])", "float64",
+                     R"({"units":"Hz","reference_frequency":{"data":1.402e9,"attrs":{"observer":"lsrk"}},
                                           "rest_frequency":{"data":1.420405751e9}})");
     nodes["time"] = NumericArray("[1]", R"(["time"])", "float64", R"({"units":"s","scale":"utc","format":"unix"})");
     auto store = Open(nodes);
@@ -1205,8 +1202,8 @@ std::string ArrayDocument(const std::string& shape, const std::string& chunks, c
 
 void RequireRefusedAs(const carta::zarr::Error& error, ErrorCode code, const std::string& node,
                       const std::string& what) {
-    Require(error.code == code, what + " was refused as " + carta::zarr::ErrorCodeName(error.code) +
-                                    " rather than " + carta::zarr::ErrorCodeName(code) + ": " + error.message);
+    Require(error.code == code, what + " was refused as " + carta::zarr::ErrorCodeName(error.code) + " rather than " +
+                                    carta::zarr::ErrorCodeName(code) + ": " + error.message);
     Require(error.node_path == node, what + " was refused naming '" + error.node_path + "' rather than '" + node + "'");
 }
 
@@ -1229,12 +1226,14 @@ void TestAnArrayDisagreeingWithTheRootsCopyIsRefused() {
                                       "index_codecs":[{"name":"bytes","configuration":{"endian":"little"}}]}}])")},
         // The same chunks, each now read out of a shard the copy does not mention: the chunk shape
         // agrees and the shard shape a read is planned around does not.
-        {"shards around the same chunks", ArrayDocument("[4]", "[4]", R"(["l"])", "float64",
-                                                        R"([{"name":"sharding_indexed","configuration":{"chunk_shape":[4],
+        {"shards around the same chunks",
+         ArrayDocument("[4]", "[4]", R"(["l"])", "float64",
+                       R"([{"name":"sharding_indexed","configuration":{"chunk_shape":[4],
                                                              "codecs":[{"name":"bytes","configuration":{"endian":"little"}}],
                                                              "index_codecs":[{"name":"bytes","configuration":{"endian":"little"}}]}}])")},
         // What the values mean: a unit the copy does not give them.
-        {"other attributes", [] {
+        {"other attributes",
+         [] {
              auto document = ArrayDocument("[4]", "[4]", R"(["l"])");
              return document.replace(document.find("\"attributes\":{}"), 15, R"("attributes":{"units":"deg"})");
          }()},
@@ -1263,7 +1262,8 @@ void TestAnArrayDisagreeingWithTheRootsCopyIsRefused() {
 
     // Labels are decoded without TensorStore, and are held to the same rule.
     auto labels = ConsolidatedStore();
-    labels["polarization"] = R"({"shape":[2],"data_type":{"name":"fixed_length_utf32","configuration":{"length_bytes":4}},
+    labels["polarization"] =
+        R"({"shape":[2],"data_type":{"name":"fixed_length_utf32","configuration":{"length_bytes":4}},
         "chunk_grid":{"name":"regular","configuration":{"chunk_shape":[1]}},"attributes":{},
         "dimension_names":["polarization"],"zarr_format":3,"node_type":"array"})";
     auto labels_store = Open(labels);
@@ -1284,7 +1284,8 @@ void TestAnArrayIsNotHeldToHowItsChunksAreEncoded() {
                                R"([{"name":"bytes","configuration":{"endian":"little"}},
                                    {"name":"zstd","configuration":{"level":3,"checksum":false}}])",
                                "\"NaN\"");
-    nodes["polarization"] = R"({"shape":[2],"data_type":{"name":"fixed_length_utf32","configuration":{"length_bytes":4}},
+    nodes["polarization"] =
+        R"({"shape":[2],"data_type":{"name":"fixed_length_utf32","configuration":{"length_bytes":4}},
         "chunk_grid":{"name":"regular","configuration":{"chunk_shape":[2]}},"attributes":{},"fill_value":"V",
         "codecs":[{"name":"bytes","configuration":{"endian":"little"}},{"name":"zstd","configuration":{"level":1}}],
         "dimension_names":["polarization"],"zarr_format":3,"node_type":"array"})";
@@ -1403,8 +1404,9 @@ void TestAnAxisReportsItsCoordinatesUnit() {
     using carta::zarr::internal::xradio::DescribeImageFrom;
 
     auto nodes = CompleteStore();
-    nodes["frequency"] = NumericArray("[3]", R"(["frequency"])", "float64",
-                                      R"({"reference_frequency":{"data":1.4e9,"attrs":{"units":"Hz","observer":"lsrk"}}})");
+    nodes["frequency"] =
+        NumericArray("[3]", R"(["frequency"])", "float64",
+                     R"({"reference_frequency":{"data":1.4e9,"attrs":{"units":"Hz","observer":"lsrk"}}})");
     nodes["time"] = NumericArray("[1]", R"(["time"])", "float64", R"({"units":"s"})");
     auto store = Open(nodes);
     Require(static_cast<bool>(store), "the in-memory store failed to open");

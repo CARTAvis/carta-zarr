@@ -221,7 +221,7 @@ struct DirectionCoordinate {
 
 struct SpectralCoordinate {
     std::string unit;
-    std::string system;                     // SPECSYS, e.g. "LSRK", "BARY", "TOPOCENT"
+    std::string system;  // SPECSYS, e.g. "LSRK", "BARY", "TOPOCENT"
     // CRPIX3, 1-based as DirectionCoordinate::reference_pixel is. Absent, with the two below it,
     // when the channels are not evenly spaced: there is then no linear description to give and a
     // consumer builds a tabular axis from channel_frequencies instead.

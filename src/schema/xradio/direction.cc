@@ -6,10 +6,9 @@
 
 #include "direction.h"
 
+#include "../../zarr/array_metadata.h"
 #include "attributes.h"
 #include "linear_axis.h"
-
-#include "../../zarr/array_metadata.h"
 
 #include <array>
 #include <iterator>
@@ -102,8 +101,7 @@ Result<DirectionCoordinate> ReadCoordinateSystem(const nlohmann::json& root_attr
 }
 
 Result<DirectionCoordinate> DescribeDirection(const nlohmann::json& root_attributes,
-                                              const std::vector<double>& l_values,
-                                              const std::vector<double>& m_values,
+                                              const std::vector<double>& l_values, const std::vector<double>& m_values,
                                               std::vector<Diagnostic>& diagnostics) {
     auto read = ReadCoordinateSystem(root_attributes);
     if (!read) {

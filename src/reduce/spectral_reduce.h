@@ -21,8 +21,8 @@ namespace carta::zarr::internal {
  * translate a request and hand it to the store, while this walks a chunk grid and owns an inner
  * loop whose shape is the entire reason the API takes N regions at once.
  */
-Result<void> ReduceSpectral(const ReducibleImage& image, const SpectralReduceRequest& request,
-                            const SpectralSink& sink, const ReadOptions& options);
+Result<void> ReduceSpectral(const ReducibleImage& image, const SpectralReduceRequest& request, const SpectralSink& sink,
+                            const ReadOptions& options);
 
 }  // namespace carta::zarr::internal
 

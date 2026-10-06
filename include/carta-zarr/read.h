@@ -59,9 +59,7 @@ public:
     CachePool& operator=(const CachePool&) = default;
     // A copy, so that the handle moved from still refers to what it did. See ADR 0013.
     CachePool(CachePool&& other) noexcept : CachePool(other) {}
-    CachePool& operator=(CachePool&& other) noexcept {
-        return *this = other;
-    }
+    CachePool& operator=(CachePool&& other) noexcept { return *this = other; }
     // Inline, unlike the other handles': ReadControl holds one, and the parts of this library that
     // are built and tested without the rest of it take a ReadControl. A shared_ptr's deleter is fixed
     // where it was made, so nothing here needs Impl to be complete.

@@ -29,8 +29,8 @@ namespace carta::zarr::internal {
  * alternative, splitting by plane, is capped at however many planes one read holds, which for a
  * large image is often one.
  */
-Result<void> ComputeHistogram(const ReducibleImage& image, const HistogramRequest& request,
-                              const HistogramSink& sink, const ReadOptions& options);
+Result<void> ComputeHistogram(const ReducibleImage& image, const HistogramRequest& request, const HistogramSink& sink,
+                              const ReadOptions& options);
 
 /**
  * One histogram for the whole selection in a single pass. See CubeHistogramRequest.
@@ -46,8 +46,7 @@ Result<void> ComputeHistogram(const ReducibleImage& image, const HistogramReques
  * -- once per worker instead of once, which is why this is the one reduction here whose counts are
  * not the serial answer exactly.
  */
-Result<CubeHistogramResult> ComputeCubeHistogram(const ReducibleImage& image,
-                                                 const CubeHistogramRequest& request,
+Result<CubeHistogramResult> ComputeCubeHistogram(const ReducibleImage& image, const CubeHistogramRequest& request,
                                                  const ReadOptions& options,
                                                  const CubeHistogramProgressCallback& progress);
 

@@ -68,7 +68,10 @@ Result<CubeAxes> CubeAxes::Of(const ImageDescriptor& descriptor) {
     if (!x || !y || !spectral) {
         return Error{ErrorCode::invalid_argument,
                      "the bench reads cubes, and image " + descriptor.id + " has no " +
-                         (!x ? "spatial x" : !y ? "spatial y" : "spectral") + " axis",
+                         (!x   ? "spatial x"
+                          : !y ? "spatial y"
+                               : "spectral") +
+                         " axis",
                      descriptor.id};
     }
     CubeAxes cube;

@@ -58,8 +58,7 @@ inline constexpr std::size_t kMaxDecodedBytesPerRead = 256u << 20;
 // What one request may decode when the caller has not said otherwise.
 inline std::uint64_t DefaultReadBytes(std::uint64_t chunk_bytes) {
     const std::uint64_t wanted = std::max<std::uint64_t>(1, chunk_bytes) * kMinChunksPerRead;
-    return std::min<std::uint64_t>(kMaxDecodedBytesPerRead,
-                                   std::max<std::uint64_t>(kDecodedBytesPerRead, wanted));
+    return std::min<std::uint64_t>(kMaxDecodedBytesPerRead, std::max<std::uint64_t>(kDecodedBytesPerRead, wanted));
 }
 
 // How many units of `chunks_per_unit` chunks a read that may decode `chunks_per_read` chunks affords.
@@ -167,8 +166,8 @@ struct ReadCost {
         cost.apply_mask = AppliesPixelMask(options, descriptor);
         cost.chunk_bytes = DecodedChunkBytes(descriptor, geometry) +
                            (cost.apply_mask ? DecodedFlagBytes(descriptor, geometry, flag_geometry) : 0);
-        cost.budget_bytes = options.read_budget_bytes != 0 ? options.read_budget_bytes
-                                                                      : DefaultReadBytes(cost.chunk_bytes);
+        cost.budget_bytes =
+            options.read_budget_bytes != 0 ? options.read_budget_bytes : DefaultReadBytes(cost.chunk_bytes);
         return cost;
     }
 };

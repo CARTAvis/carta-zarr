@@ -16,29 +16,29 @@
 
 #include "zarr/array_metadata.h"
 
+#include "support/check.h"
+
 #include <cstdio>
 #include <exception>
 #include <string>
 #include <vector>
 
-#include "support/check.h"
-
 namespace {
 
 using carta::zarr::ErrorCode;
-using carta::zarr::internal::zarr::StorageLayout;
 using carta::zarr::internal::zarr::ArrayMetadata;
 using carta::zarr::internal::zarr::ParseArrayMetadata;
 using carta::zarr::internal::zarr::ParseStorageLayout;
+using carta::zarr::internal::zarr::StorageLayout;
 
 using carta::zarr::testing::Require;
 
 // One array document, with whatever codec chain the case is about.
 std::string Document(const std::string& codecs, const std::string& chunk_shape = "[4,4]") {
     return R"({"shape":[8,8],"data_type":"float32","chunk_grid":{"name":"regular","configuration":)"
-           R"({"chunk_shape":)" + chunk_shape + R"(}},"attributes":{},"dimension_names":["l","m"],)" +
-           (codecs.empty() ? std::string{} : "\"codecs\":" + codecs + ",") +
-           R"("zarr_format":3,"node_type":"array"})";
+           R"({"chunk_shape":)" +
+           chunk_shape + R"(}},"attributes":{},"dimension_names":["l","m"],)" +
+           (codecs.empty() ? std::string{} : "\"codecs\":" + codecs + ",") + R"("zarr_format":3,"node_type":"array"})";
 }
 
 ArrayMetadata Parsed(const std::string& document) {
@@ -90,10 +90,9 @@ void TestASharedArrayReportsTheChunksInsideTheShard() {
     // The chunk_grid describes the shard. What is decoded is the sharding codec's own chunk_shape,
     // and the compressor that applies to it is the one inside the sharding codec -- not any that
     // happens to sit beside the sharding codec in the outer chain.
-    const auto layout = LayoutOf(
-        R"([{"name":"sharding_indexed","configuration":{"chunk_shape":[2,1],)"
-        R"("codecs":[{"name":"bytes"},{"name":"blosc"}]}}])",
-        "[8,8]");
+    const auto layout = LayoutOf(R"([{"name":"sharding_indexed","configuration":{"chunk_shape":[2,1],)"
+                                 R"("codecs":[{"name":"bytes"},{"name":"blosc"}]}}])",
+                                 "[8,8]");
 
     Require(layout.sharded, "a sharding_indexed codec was not reported as sharding");
     Require(layout.shard_shape == std::vector<std::uint64_t>{8, 8}, "the shard shape is the chunk grid's");
@@ -109,14 +108,15 @@ void TestAShardedArraysChunksAreUntransposed() {
     const auto sharded = [](const std::string& transposes, const std::string& inner) {
         return "[" + transposes + R"({"name":"sharding_indexed","configuration":{"chunk_shape":)" + inner + "}}]";
     };
-    Require(LayoutOf(sharded(R"({"name":"transpose","configuration":{"order":[1,0]}},)", "[4,1]"), "[8,8]")
-                    .chunk_shape == std::vector<std::uint64_t>{1, 4},
-            "a transpose before the sharding codec was not undone");
-    Require(LayoutOf(sharded(R"({"name":"transpose","configuration":{"order":"F"}},)", "[4,1]"), "[8,8]")
-                    .chunk_shape == std::vector<std::uint64_t>{1, 4},
+    Require(
+        LayoutOf(sharded(R"({"name":"transpose","configuration":{"order":[1,0]}},)", "[4,1]"), "[8,8]").chunk_shape ==
+            std::vector<std::uint64_t>{1, 4},
+        "a transpose before the sharding codec was not undone");
+    Require(LayoutOf(sharded(R"({"name":"transpose","configuration":{"order":"F"}},)", "[4,1]"), "[8,8]").chunk_shape ==
+                std::vector<std::uint64_t>{1, 4},
             "the order F reverses the axes");
-    Require(LayoutOf(sharded(R"({"name":"transpose","configuration":{"order":"C"}},)", "[4,1]"), "[8,8]")
-                    .chunk_shape == std::vector<std::uint64_t>{4, 1},
+    Require(LayoutOf(sharded(R"({"name":"transpose","configuration":{"order":"C"}},)", "[4,1]"), "[8,8]").chunk_shape ==
+                std::vector<std::uint64_t>{4, 1},
             "the order C leaves them as they are");
 
     const auto three = [](const std::string& codecs) {
@@ -147,21 +147,17 @@ void TestAShardedArraysChunksAreUntransposed() {
 void TestTheOuterCompressorIsNotUsedForShardedChunks() {
     // A sharding codec whose configuration names no codecs leaves the compressor unset, and the
     // outer chain is then consulted -- which is what `layout.compressor.empty()` guards.
-    const auto layout = LayoutOf(
-        R"([{"name":"sharding_indexed","configuration":{"chunk_shape":[2,1]}},{"name":"zstd"}])", "[8,8]");
-    Require(layout.sharded && layout.chunk_shape == std::vector<std::uint64_t>{2, 1},
-            "the inner chunk shape was lost");
+    const auto layout =
+        LayoutOf(R"([{"name":"sharding_indexed","configuration":{"chunk_shape":[2,1]}},{"name":"zstd"}])", "[8,8]");
+    Require(layout.sharded && layout.chunk_shape == std::vector<std::uint64_t>{2, 1}, "the inner chunk shape was lost");
     Require(layout.compressor == "zstd", "with no codecs inside the shard, the outer chain answers");
 }
 
 void TestAShardingCodecWithAnUnusableChunkShapeIsRefused() {
-    const auto zeroed = RefusedDocument(
-        R"([{"name":"sharding_indexed","configuration":{"chunk_shape":[0,1]}}])");
-    Require(zeroed.code == ErrorCode::invalid_metadata,
-            "a zero inner chunk dimension should be invalid metadata");
+    const auto zeroed = RefusedDocument(R"([{"name":"sharding_indexed","configuration":{"chunk_shape":[0,1]}}])");
+    Require(zeroed.code == ErrorCode::invalid_metadata, "a zero inner chunk dimension should be invalid metadata");
 
-    const auto wrong_rank = RefusedDocument(
-        R"([{"name":"sharding_indexed","configuration":{"chunk_shape":[2]}}])");
+    const auto wrong_rank = RefusedDocument(R"([{"name":"sharding_indexed","configuration":{"chunk_shape":[2]}}])");
     Require(wrong_rank.code == ErrorCode::invalid_metadata,
             "an inner chunk shape of the wrong rank should be invalid metadata");
 

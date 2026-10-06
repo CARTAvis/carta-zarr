@@ -89,8 +89,7 @@ struct SpectralAxisFit {
  * one is dropped when the description is withheld. The reason why is kept, because it is what tells
  * the consumer to go tabular.
  */
-SpectralAxisFit FitSpectralAxis(const std::vector<double>& channels, double reference,
-                                std::string_view axis_name);
+SpectralAxisFit FitSpectralAxis(const std::vector<double>& channels, double reference, std::string_view axis_name);
 
 }  // namespace carta::zarr::internal::xradio
 

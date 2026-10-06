@@ -14,6 +14,8 @@
 
 #include "read_ahead.h"
 
+#include "support/check.h"
+
 #include <chrono>
 #include <condition_variable>
 #include <cstdint>
@@ -26,8 +28,6 @@
 #include <thread>
 #include <utility>
 #include <vector>
-
-#include "support/check.h"
 
 namespace {
 
@@ -42,10 +42,10 @@ using carta::zarr::Range;
 using carta::zarr::ReadRequest;
 using carta::zarr::internal::CacheShare;
 using carta::zarr::internal::PlaneRunBytes;
-using carta::zarr::internal::RunRequest;
 using carta::zarr::internal::ReadingAhead;
 using carta::zarr::internal::Run;
 using carta::zarr::internal::RunOf;
+using carta::zarr::internal::RunRequest;
 using carta::zarr::internal::RunSource;
 
 using carta::zarr::testing::Require;

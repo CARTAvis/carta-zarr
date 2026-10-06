@@ -15,12 +15,12 @@
 
 #include "schema/xradio/flag.h"
 
+#include "support/check.h"
+
 #include <exception>
 #include <iostream>
 #include <string>
 #include <vector>
-
-#include "support/check.h"
 
 namespace {
 

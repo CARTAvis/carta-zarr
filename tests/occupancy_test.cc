@@ -15,6 +15,8 @@
 
 #include "reduce/occupancy.h"
 
+#include "support/check.h"
+
 #include <algorithm>
 #include <cstdint>
 #include <cstdio>
@@ -25,8 +27,6 @@
 #include <string>
 #include <utility>
 #include <vector>
-
-#include "support/check.h"
 
 namespace {
 
@@ -86,8 +86,7 @@ PlaneExtent Covering(const std::vector<RegionMask>& regions) {
 Occupancy Built(const std::vector<RegionMask>& regions, std::uint64_t chunk_u, std::uint64_t chunk_v,
                 AxisRole fastest = AxisRole::spatial_x) {
     auto built = Occupancy::Of({regions.data(), regions.size()}, Covering(regions), chunk_u, chunk_v, fastest, "TEST");
-    Require(static_cast<bool>(built),
-            "Occupancy::Of failed: " + (built ? std::string{} : built.error().message));
+    Require(static_cast<bool>(built), "Occupancy::Of failed: " + (built ? std::string{} : built.error().message));
     return std::move(built.value());
 }
 
@@ -347,8 +346,7 @@ void TestAGridTooLargeToIndexIsRefused() {
     const std::vector<RegionMask> regions{Box(0, 0, 65536, 65536)};
     const auto refused =
         Occupancy::Of({regions.data(), regions.size()}, Covering(regions), 1, 1, AxisRole::spatial_x, "TEST");
-    Require(!refused && refused.error().code == ErrorCode::invalid_argument,
-            "a grid of 2^32 chunks was accepted");
+    Require(!refused && refused.error().code == ErrorCode::invalid_argument, "a grid of 2^32 chunks was accepted");
 }
 
 // What Of refuses rather than places: a set it cannot index, and a region that is not a box of the
@@ -494,11 +492,11 @@ void TestDistantSmallRegionsCostWhatTheyOccupy() {
     for (const std::uint64_t side : {std::uint64_t{32768}, std::uint64_t{1} << 20}) {
         const std::vector<RegionMask> regions{Box(0, 0, 1, 1), Box(side - 1, side - 1, 1, 1)};
         g_allocation_limit = std::size_t{1} << 20;
-        auto built = Occupancy::Of({regions.data(), regions.size()}, PlaneExtent{side, side}, 1, 1,
-                                   AxisRole::spatial_x, "TEST");
+        auto built =
+            Occupancy::Of({regions.data(), regions.size()}, PlaneExtent{side, side}, 1, 1, AxisRole::spatial_x, "TEST");
         g_allocation_limit = std::numeric_limits<std::size_t>::max();
-        Require(static_cast<bool>(built), "two distant pixels were refused: " +
-                                              (built ? std::string{} : built.error().message));
+        Require(static_cast<bool>(built),
+                "two distant pixels were refused: " + (built ? std::string{} : built.error().message));
         const auto& occupancy = built.value();
         Require(occupancy.LayerChunks() == 2, "two pixels occupy two chunks");
         Require(occupancy.entries().size() == 2, "and are two incidences");

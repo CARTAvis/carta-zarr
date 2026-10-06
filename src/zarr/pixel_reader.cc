@@ -30,8 +30,8 @@ namespace carta::zarr::internal::zarr {
 namespace {
 
 template <typename Element>
-Result<void> ReadInto(const std::filesystem::path& array_path, const StoreContextPtr& context,
-                      std::string_view node, const PixelSelection& selection, tensorstore::DataType target_dtype,
+Result<void> ReadInto(const std::filesystem::path& array_path, const StoreContextPtr& context, std::string_view node,
+                      const PixelSelection& selection, tensorstore::DataType target_dtype,
                       BufferView<Element> destination, const ReadControl& control) {
     if (destination.data == nullptr) {
         return Error{ErrorCode::invalid_argument, "Destination buffer is null", std::string(node)};
@@ -93,13 +93,12 @@ Result<void> ReadInto(const std::filesystem::path& array_path, const StoreContex
         auto sliced = store | tensorstore::AllDims().TranslateSizedInterval(start, count, stride);
         if (!sliced.ok()) {
             return Error{ErrorCode::invalid_argument,
-                         "Requested region is outside the array: " + sliced.status().ToString(),
-                         std::string(node)};
+                         "Requested region is outside the array: " + sliced.status().ToString(), std::string(node)};
         }
         auto transposed = std::move(sliced).value() | tensorstore::Dims(order).Transpose();
         if (!transposed.ok()) {
-            return Error{ErrorCode::invalid_argument,
-                         "Failed to reorder axes: " + transposed.status().ToString(), std::string(node)};
+            return Error{ErrorCode::invalid_argument, "Failed to reorder axes: " + transposed.status().ToString(),
+                         std::string(node)};
         }
 
         // Conversion rides the same copy, so a float64 or integer array is never materialized in
@@ -107,8 +106,7 @@ Result<void> ReadInto(const std::filesystem::path& array_path, const StoreContex
         auto converted = tensorstore::Cast(std::move(transposed).value(), target_dtype);
         if (!converted.ok()) {
             return Error{ErrorCode::unsupported_data_type,
-                         "Array cannot be converted to the requested output type: " +
-                             converted.status().ToString(),
+                         "Array cannot be converted to the requested output type: " + converted.status().ToString(),
                          std::string(node)};
         }
 
@@ -136,21 +134,19 @@ Result<void> ReadInto(const std::filesystem::path& array_path, const StoreContex
 
 }  // namespace
 
-Result<void> ReadFloat32(const std::filesystem::path& array_path, const StoreContextPtr& context,
-                         std::string_view node, const PixelSelection& selection, BufferView<float> destination,
-                         const ReadControl& control) {
+Result<void> ReadFloat32(const std::filesystem::path& array_path, const StoreContextPtr& context, std::string_view node,
+                         const PixelSelection& selection, BufferView<float> destination, const ReadControl& control) {
     return ReadInto(array_path, context, node, selection, tensorstore::dtype_v<float>, destination, control);
 }
 
 Result<void> ReadMaskBytes(const std::filesystem::path& array_path, const StoreContextPtr& context,
-                           std::string_view node, const PixelSelection& selection,
-                           BufferView<std::uint8_t> destination, const ReadControl& control) {
+                           std::string_view node, const PixelSelection& selection, BufferView<std::uint8_t> destination,
+                           const ReadControl& control) {
     // The caller's buffer holds bytes, so the read converts into bytes. Asking TensorStore for
     // bool and writing it through a reinterpret_cast of that buffer assumed bool and uint8_t are
     // the same object, which C++ does not say they are; the conversion costs nothing here because
     // it rides the copy the read already performs.
-    return ReadInto(array_path, context, node, selection, tensorstore::dtype_v<std::uint8_t>, destination,
-                    control);
+    return ReadInto(array_path, context, node, selection, tensorstore::dtype_v<std::uint8_t>, destination, control);
 }
 
 }  // namespace carta::zarr::internal::zarr

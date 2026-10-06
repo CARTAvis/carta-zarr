@@ -10,14 +10,14 @@
 
 #include "zarr/numeric_array.h"
 
+#include "support/check.h"
+
 #include <cstdint>
 #include <exception>
 #include <iostream>
 #include <string>
 #include <utility>
 #include <vector>
-
-#include "support/check.h"
 
 namespace {
 

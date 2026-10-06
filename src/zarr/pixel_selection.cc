@@ -25,10 +25,10 @@ Result<PixelSelection> BuildSelection(const ImageDescriptor& descriptor, const R
                                       DestinationOrder order) {
     const auto rank = descriptor.axes.size();
     if (request.axes.size() != rank) {
-        return Error{ErrorCode::invalid_argument,
-                     "Request has " + std::to_string(request.axes.size()) + " axes but the image has " +
-                         std::to_string(rank),
-                     descriptor.id};
+        return Error{
+            ErrorCode::invalid_argument,
+            "Request has " + std::to_string(request.axes.size()) + " axes but the image has " + std::to_string(rank),
+            descriptor.id};
     }
 
     PixelSelection selection;
@@ -41,12 +41,10 @@ Result<PixelSelection> BuildSelection(const ImageDescriptor& descriptor, const R
         const auto& axis = descriptor.axes.at(logical);
         const auto& range = request.axes.at(logical);
         if (range.stride == 0) {
-            return Error{ErrorCode::invalid_argument, "Axis '" + axis.name + "' has a zero stride",
-                         descriptor.id};
+            return Error{ErrorCode::invalid_argument, "Axis '" + axis.name + "' has a zero stride", descriptor.id};
         }
         if (range.count == 0) {
-            return Error{ErrorCode::invalid_argument, "Axis '" + axis.name + "' selects no elements",
-                         descriptor.id};
+            return Error{ErrorCode::invalid_argument, "Axis '" + axis.name + "' selects no elements", descriptor.id};
         }
         // The last selected index is what has to fall inside the axis. It is compared by dividing
         // the room that is left rather than by multiplying out the span, because the span
@@ -54,8 +52,7 @@ Result<PixelSelection> BuildSelection(const ImageDescriptor& descriptor, const R
         // passed this check and went on to size a buffer and drive the loops.
         if (range.start >= axis.length || range.count - 1 > (axis.length - 1 - range.start) / range.stride) {
             return Error{ErrorCode::invalid_argument,
-                         "Axis '" + axis.name + "' request exceeds its length of " +
-                             std::to_string(axis.length),
+                         "Axis '" + axis.name + "' request exceeds its length of " + std::to_string(axis.length),
                          descriptor.id};
         }
         const auto stored = axis.storage_index;

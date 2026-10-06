@@ -4,6 +4,8 @@
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
 
+#include "support/check.h"
+
 #include <algorithm>
 #include <array>
 #include <chrono>
@@ -20,8 +22,6 @@
 #include <vector>
 
 #include <carta-zarr/carta_zarr.h>
-
-#include "support/check.h"
 
 namespace {
 
@@ -178,7 +178,8 @@ void TestValidAndTimeAxis(const std::filesystem::path& root) {
     // A timeout too long to add to the clock is no timeout. It used to wrap -- milliseconds converted
     // to the clock's nanoseconds overflow past about 292 years -- into a deadline already past, and the
     // longest wait anyone could ask for answered as though they would not wait at all.
-    for (const auto forever : {std::chrono::milliseconds::max(), std::chrono::milliseconds(std::chrono::hours(24 * 365 * 1000))}) {
+    for (const auto forever :
+         {std::chrono::milliseconds::max(), std::chrono::milliseconds(std::chrono::hours(24 * 365 * 1000))}) {
         const auto patient = dataset.value().Size(forever);
         Require(patient && patient.value().basis == carta::zarr::SizeBasis::measured,
                 "a timeout of " + std::to_string(forever.count()) + " ms was taken for none");
@@ -215,8 +216,7 @@ void TestValidAndTimeAxis(const std::filesystem::path& root) {
 void TestTimeGreaterThanOne(const std::filesystem::path& root) {
     CreateValidStore(root, 2);
     const auto result = carta::zarr::ProbeSchema(root.string(), carta::zarr::kXradioImageSchema);
-    Require(result && result.value().kind == SchemaMatchKind::match,
-            "time > 1 must remain valid at library level");
+    Require(result && result.value().kind == SchemaMatchKind::match, "time > 1 must remain valid at library level");
     const auto context = carta::zarr::Context::Create();
     const auto dataset = carta::zarr::Dataset::Open(context.value(), root.string());
     Require(static_cast<bool>(dataset), "Dataset::Open rejected time > 1");
@@ -255,8 +255,7 @@ void TestAMalformedStoreIsAnImageOnlyOnEvidence(const std::filesystem::path& roo
     };
 
     const auto visibilities = root / "visibilities";
-    Write(visibilities / "zarr.json",
-          R"({"zarr_format":3,"node_type":"group","attributes":{"type":"visibility"}})");
+    Write(visibilities / "zarr.json", R"({"zarr_format":3,"node_type":"group","attributes":{"type":"visibility"}})");
     Write(visibilities / "WEIGHT" / "zarr.json", unreadable);
     Require(probe(visibilities) == SchemaMatchKind::no_match,
             "a visibility dataset with a malformed weights array was matched as a malformed image store");
@@ -272,8 +271,7 @@ void TestAMalformedStoreIsAnImageOnlyOnEvidence(const std::filesystem::path& roo
             "a store whose one malformed node is nothing of an image was matched as a malformed image store");
 
     const auto typed = root / "typed";
-    Write(typed / "zarr.json",
-          R"({"zarr_format":3,"node_type":"group","attributes":{"type":"image_dataset"}})");
+    Write(typed / "zarr.json", R"({"zarr_format":3,"node_type":"group","attributes":{"type":"image_dataset"}})");
     Write(typed / "WEIGHT" / "zarr.json", unreadable);
     Require(probe(typed) == SchemaMatchKind::invalid,
             "a store saying it is an image dataset, with a malformed node and no image, was not invalid");
@@ -329,8 +327,7 @@ void TestOpenSaysWhyItRefused(const std::filesystem::path& root) {
     Require(!opened && opened.error().code == ErrorCode::invalid_metadata,
             "a malformed store was not reported as invalid metadata");
     Require(opened.error().message == probe.value().diagnostics.front().message,
-            "Dataset::Open replaced the probe's diagnostic with a message of its own: " +
-                opened.error().message);
+            "Dataset::Open replaced the probe's diagnostic with a message of its own: " + opened.error().message);
 }
 
 void TestMissingAndUnsupported(const std::filesystem::path& root) {
@@ -380,8 +377,7 @@ void TestReferenceFixture() {
     Require(std::filesystem::exists(fixture), "the XRADIO reference fixture is missing from tests/data");
 
     const auto result = carta::zarr::ProbeSchema(fixture.string(), carta::zarr::kXradioImageSchema);
-    Require(result && result.value().kind == SchemaMatchKind::match,
-            "the XRADIO reference fixture did not match");
+    Require(result && result.value().kind == SchemaMatchKind::match, "the XRADIO reference fixture did not match");
 
     // Resource limits must be accepted and applied to every read made through this context.
     carta::zarr::ContextOptions options;
@@ -397,8 +393,7 @@ void TestReferenceFixture() {
 
     const auto& desc = image.value().descriptor();
     const auto image_ids = ImageIds(dataset.value().descriptor().images);
-    Require(image_ids ==
-                std::vector<std::string>{"SKY", "MODEL", "RESIDUAL", "MASK_DECONVOLVE", "APERTURE", "COMPLEX"},
+    Require(image_ids == std::vector<std::string>{"SKY", "MODEL", "RESIDUAL", "MASK_DECONVOLVE", "APERTURE", "COMPLEX"},
             "discovery did not enumerate the multi-image fixture in display order");
     Require(dataset.value().descriptor().default_image_id == "SKY", "default image was not the first openable image");
     // right_ascension and declination are float64 over (l, m) with no type attribute. Matching only
@@ -480,8 +475,7 @@ void TestCompatibilityFixture() {
     const std::filesystem::path fixture(CARTA_ZARR_LEGACY_FIXTURE);
     Require(std::filesystem::exists(fixture), "the compatibility fixture is missing");
     const auto result = carta::zarr::ProbeSchema(fixture.string(), carta::zarr::kXradioImageSchema);
-    Require(result && result.value().kind == SchemaMatchKind::match,
-            "the compatibility fixture did not match");
+    Require(result && result.value().kind == SchemaMatchKind::match, "the compatibility fixture did not match");
 }
 
 void TestDiscoveryIgnoresNameAllowlist(const std::filesystem::path& root) {
@@ -556,8 +550,9 @@ void TestCoordinateCompletion(const std::filesystem::path& root) {
     Require(uniform_desc.spectral->reference_pixel == 1.0 && uniform_desc.spectral->reference_value == 100.0 &&
                 uniform_desc.spectral->increment == 2.0,
             "uniform spectral coordinates did not expose the linear description");
-    Require(uniform_desc.direction->reference_pixel.at(0) == 3.0 && uniform_desc.direction->reference_pixel.at(1) == 5.0,
-            "exact direction reference pixels were not found by index");
+    Require(
+        uniform_desc.direction->reference_pixel.at(0) == 3.0 && uniform_desc.direction->reference_pixel.at(1) == 5.0,
+        "exact direction reference pixels were not found by index");
 
     CreateValidStore(root / "inexact");
     Write(root / "inexact" / "l" / "zarr.json", NumericArray("[4]", R"(["l"])", "float64"));
@@ -628,10 +623,9 @@ void TestADisagreeingImageIsRefusedThroughTheDataset(const std::filesystem::path
     const auto& images = dataset.value().descriptor().images;
     Require(ImageIds(images) == std::vector<std::string>{"SKY", "MODEL"},
             "the dataset dropped the disagreeing image instead of listing it with its reason");
-    const auto listed = std::find_if(images.begin(), images.end(),
-                                     [](const auto& image) { return image.id == "MODEL"; });
-    Require(listed != images.end() && !listed->openable,
-            "the dataset offered an image that opening would refuse");
+    const auto listed =
+        std::find_if(images.begin(), images.end(), [](const auto& image) { return image.id == "MODEL"; });
+    Require(listed != images.end() && !listed->openable, "the dataset offered an image that opening would refuse");
 
     Require(static_cast<bool>(dataset.value().OpenImage("SKY")),
             "the image that agrees with the coordinates did not open");
@@ -651,9 +645,8 @@ void TestADatasetWithAnUnparseableNodeStillOpens(const std::filesystem::path& ro
     const auto context = carta::zarr::Context::Create();
     Require(static_cast<bool>(context), "Context::Create failed for an unparseable node");
     const auto dataset = carta::zarr::Dataset::Open(context.value(), root.string());
-    Require(static_cast<bool>(dataset),
-            "a dataset holding one unparseable node did not open" +
-                (dataset ? std::string{} : ": " + dataset.error().message));
+    Require(static_cast<bool>(dataset), "a dataset holding one unparseable node did not open" +
+                                            (dataset ? std::string{} : ": " + dataset.error().message));
 
     const auto& said = dataset.value().descriptor().diagnostics;
     const auto junk = std::find_if(said.begin(), said.end(), [](const carta::zarr::Diagnostic& diagnostic) {
@@ -685,8 +678,8 @@ void TestANodeNameSpelledWithADotIsTheSameNode(const std::filesystem::path& root
           "\"chunk_grid\":{\"name\":\"regular\",\"configuration\":{\"chunk_shape\":[1,3,2,4,5]}},"
           "\"chunk_key_encoding\":{\"name\":\"default\",\"configuration\":{\"separator\":\"/\"}},"
           "\"fill_value\":true,\"codecs\":[{\"name\":\"bytes\"}],"
-          "\"attributes\":{\"type\":\"flag\"},\"dimension_names\":" + dimensions +
-              ",\"zarr_format\":3,\"node_type\":\"array\"}");
+          "\"attributes\":{\"type\":\"flag\"},\"dimension_names\":" +
+              dimensions + ",\"zarr_format\":3,\"node_type\":\"array\"}");
 
     const auto context = carta::zarr::Context::Create();
     Require(static_cast<bool>(context), "Context::Create failed for the dotted node name");
@@ -707,7 +700,6 @@ void TestANodeNameSpelledWithADotIsTheSameNode(const std::filesystem::path& root
             std::string("an image whose flag is spelled ./MASK_0 opened and then could not be read: ") +
                 (read ? "" : read.error().message));
 }
-
 
 // A sharding codec whose inner chunk shape describes nothing leaves the array unreadable, and this
 // pins where that is noticed: at the parse, not after it.
@@ -743,10 +735,8 @@ void TestAShardingCodecThatDescribesNoChunks(const std::filesystem::path& root) 
                                    [](const carta::zarr::Diagnostic& diagnostic) {
                                        return diagnostic.code == carta::zarr::DiagnosticCode::unreadable_array;
                                    });
-    Require(said != probe.value().diagnostics.end(),
-            "the store lost its image without saying which node or why");
-    Require(said->node_path.find("SKY") != std::string::npos,
-            "the diagnostic did not name the node that was skipped");
+    Require(said != probe.value().diagnostics.end(), "the store lost its image without saying which node or why");
+    Require(said->node_path.find("SKY") != std::string::npos, "the diagnostic did not name the node that was skipped");
 }
 // A sharded array grids its store by shard; the inner chunk shape lives in the sharding codec.
 // An image dataset without SKY is valid: discovery identifies the dataset from its image variables.
@@ -1029,9 +1019,9 @@ void TestAnEntrySaysWhatOpeningWould() {
         const auto image = dataset->OpenImage(entry.id);
         Require(static_cast<bool>(image), "entry " + entry.id + " is openable and did not open");
         const auto& described = image->descriptor();
-        Require(entry.image_role == described.image_role,
-                "entry " + entry.id + " says its role is '" + entry.image_role + "' and opens as '" +
-                    described.image_role + "'");
+        Require(entry.image_role == described.image_role, "entry " + entry.id + " says its role is '" +
+                                                              entry.image_role + "' and opens as '" +
+                                                              described.image_role + "'");
         Require(entry.axes.size() == described.axes.size(),
                 "entry " + entry.id + " reports a different number of axes than it opens with");
         for (std::size_t axis = 0; axis < entry.axes.size(); ++axis) {

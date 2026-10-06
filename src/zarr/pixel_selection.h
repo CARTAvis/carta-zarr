@@ -67,15 +67,9 @@ Result<PixelSelection> BuildSelection(const ImageDescriptor& descriptor, const R
 class PixelSelection {
 public:
     // All in stored axis order, one entry per stored dimension.
-    const std::vector<std::uint64_t>& start() const noexcept {
-        return _start;
-    }
-    const std::vector<std::uint64_t>& count() const noexcept {
-        return _count;
-    }
-    const std::vector<std::uint64_t>& stride() const noexcept {
-        return _stride;
-    }
+    const std::vector<std::uint64_t>& start() const noexcept { return _start; }
+    const std::vector<std::uint64_t>& count() const noexcept { return _count; }
+    const std::vector<std::uint64_t>& stride() const noexcept { return _stride; }
 
     // destination_to_stored()[i] is the stored dimension that the destination's axis i is. The
     // destination is dense with its axis 0 fastest-varying.
@@ -86,14 +80,10 @@ public:
     // coordinates from it got a plane that was consistent with itself and transposed. The order is
     // chosen when the selection is built now, and which logical axis a stored dimension is stays
     // with the descriptor, where it was all along.
-    const std::vector<std::size_t>& destination_to_stored() const noexcept {
-        return _destination_to_stored;
-    }
+    const std::vector<std::size_t>& destination_to_stored() const noexcept { return _destination_to_stored; }
 
     // How many elements the selection produces. Never zero, and counted once, when it was built.
-    std::uint64_t elements() const noexcept {
-        return _elements;
-    }
+    std::uint64_t elements() const noexcept { return _elements; }
 
     // How far one step along each stored dimension moves in the destination, by stored dimension.
     std::vector<std::uint64_t> DestinationStrides() const;

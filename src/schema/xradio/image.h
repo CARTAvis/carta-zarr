@@ -29,8 +29,7 @@ Result<DescribedImage> DescribeImage(const Store& store, std::string_view image_
 // up. Reading a value goes to the filesystem through TensorStore, and the profile tests build with
 // neither, so while this read its own values those tests could reach only the paths that refuse an
 // image. Given the values, they reach the ones that describe it.
-Result<DescribedImage> DescribeImageFrom(const Store& store, std::string_view image_id,
-                                         const CoordinateValues& values);
+Result<DescribedImage> DescribeImageFrom(const Store& store, std::string_view image_id, const CoordinateValues& values);
 Result<std::vector<Beam>> ReadBeams(const Store& store, std::string_view image_id);
 
 }  // namespace carta::zarr::internal::xradio

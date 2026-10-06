@@ -13,10 +13,11 @@
 
 #include "zarr/store_context.h"
 
+#include "support/check.h"
+
 #include <tensorstore/internal/cache/cache_pool_resource.h>
 #include <tensorstore/internal/data_copy_concurrency_resource.h>
 #include <tensorstore/internal/file_io_concurrency_resource.h>
-
 #include <tensorstore/tensorstore.h>
 
 #include <cstddef>
@@ -29,12 +30,10 @@
 
 #include <unistd.h>
 
-#include "support/check.h"
-
 namespace {
 
-using carta::zarr::testing::Require;
 using carta::zarr::internal::StoreContextPtr;
+using carta::zarr::testing::Require;
 
 std::size_t PoolLimit(const StoreContextPtr& store_context) {
     auto pool = store_context->context.GetResource<tensorstore::internal::CachePoolResource>();
@@ -114,8 +113,7 @@ void TestNothingKeepsAPoolItsHolderLetGo() {
 // handle that read them the array reads back unchanged, and opened afresh it no longer reads at all,
 // so what answered the second read was the cache and not the files.
 void TestACachedChunkIsNotCheckedAgain() {
-    const auto copy = std::filesystem::temp_directory_path() /
-                      ("carta-zarr-recheck-" + std::to_string(getpid()));
+    const auto copy = std::filesystem::temp_directory_path() / ("carta-zarr-recheck-" + std::to_string(getpid()));
     std::filesystem::remove_all(copy);
     std::filesystem::copy(std::string(CARTA_ZARR_PIXEL_FIXTURE_WIDE) + "/SKY", copy,
                           std::filesystem::copy_options::recursive);
@@ -144,8 +142,7 @@ void TestACachedChunkIsNotCheckedAgain() {
 
     Require(after.ok(), "a cached chunk was checked against storage and found changed");
     const auto bytes = before->num_elements() * before->dtype().size();
-    Require(after->num_elements() == before->num_elements() &&
-                std::memcmp(after->data(), before->data(), bytes) == 0,
+    Require(after->num_elements() == before->num_elements() && std::memcmp(after->data(), before->data(), bytes) == 0,
             "a cached chunk read back differently");
     Require(!afresh_reads, "truncated chunks still read, so this test shows nothing about the cache");
 }

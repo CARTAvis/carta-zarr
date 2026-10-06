@@ -6,12 +6,12 @@
 
 #include "plane_histogram.h"
 
-#include "chunk_blocks.h"
 #include "axis_map.h"
-#include "reduce/tuning.h"
+#include "chunk_blocks.h"
 #include "reduce/pass.h"
 #include "reduce/plane_selection.h"
 #include "reduce/provisional_histograms.h"
+#include "reduce/tuning.h"
 
 #include <algorithm>
 #include <cmath>
@@ -27,9 +27,7 @@ namespace carta::zarr::internal {
 class HistogramBlocks {
 public:
     // `counts` is [channel][bin], block.bin_count wide.
-    static void Hold(HistogramBlock& block, const std::uint64_t* counts) noexcept {
-        block._counts = counts;
-    }
+    static void Hold(HistogramBlock& block, const std::uint64_t* counts) noexcept { block._counts = counts; }
 };
 
 namespace {
@@ -40,8 +38,7 @@ namespace {
 Result<void> ValidateBins(const std::string& node, std::uint32_t bins) {
     if (bins == 0 || bins > kMaxHistogramBins) {
         return Error{ErrorCode::invalid_argument,
-                     "A histogram needs between 1 and " + std::to_string(kMaxHistogramBins) + " bins",
-                     node};
+                     "A histogram needs between 1 and " + std::to_string(kMaxHistogramBins) + " bins", node};
     }
     return {};
 }
@@ -70,8 +67,8 @@ Result<void> ValidateRange(const std::string& node, const HistogramRequest& requ
 
 }  // namespace
 
-Result<void> ComputeHistogram(const ReducibleImage& image, const HistogramRequest& request,
-                              const HistogramSink& sink, const ReadOptions& options) {
+Result<void> ComputeHistogram(const ReducibleImage& image, const HistogramRequest& request, const HistogramSink& sink,
+                              const ReadOptions& options) {
     const auto& descriptor = image.descriptor();
     const auto& source = image.source();
     const auto& node = descriptor.id;
@@ -136,7 +133,8 @@ Result<void> ComputeHistogram(const ReducibleImage& image, const HistogramReques
         const std::uint64_t v_count = slab.v_count;
         for (std::uint64_t offset = 0; offset < slab.channel_count; ++offset) {
             const float* plane = slab.pixels + (offset * stride_z);
-            std::uint64_t* into = counts.data() + (static_cast<std::size_t>((slab.first_channel + offset).index) * bins);
+            std::uint64_t* into =
+                counts.data() + (static_cast<std::size_t>((slab.first_channel + offset).index) * bins);
 
             // One loop per way of binning, each its own instantiation, so that the common one is the
             // loop it always was. The caller's own rule in both: a pixel outside the range is not
@@ -224,8 +222,7 @@ Result<void> ComputeHistogram(const ReducibleImage& image, const HistogramReques
         });
 }
 
-Result<CubeHistogramResult> ComputeCubeHistogram(const ReducibleImage& image,
-                                                 const CubeHistogramRequest& request,
+Result<CubeHistogramResult> ComputeCubeHistogram(const ReducibleImage& image, const CubeHistogramRequest& request,
                                                  const ReadOptions& options,
                                                  const CubeHistogramProgressCallback& progress) {
     const auto& descriptor = image.descriptor();

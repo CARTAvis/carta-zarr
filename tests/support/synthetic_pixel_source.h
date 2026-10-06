@@ -38,13 +38,11 @@ public:
     // Whether the pixel at those coordinates is good. Only consulted when the read applies a mask.
     using FlagFormula = std::function<bool(const std::vector<std::uint64_t>& logical)>;
 
-    SyntheticPixelSource(const carta::zarr::ImageDescriptor& descriptor,
-                        const carta::zarr::ChunkGeometry& geometry, Formula formula)
+    SyntheticPixelSource(const carta::zarr::ImageDescriptor& descriptor, const carta::zarr::ChunkGeometry& geometry,
+                         Formula formula)
         : _descriptor(&descriptor), _geometry(&geometry), _formula(std::move(formula)) {}
 
-    void set_flags(FlagFormula flags) {
-        _flags = std::move(flags);
-    }
+    void set_flags(FlagFormula flags) { _flags = std::move(flags); }
 
     // Serve one value everywhere, without the per-pixel call the formula costs. For the tests that
     // are about how the pass splits a cube rather than about what is in it: at the sizes those use,
@@ -98,8 +96,7 @@ public:
         _mask_destinations.push_back(destination.size);
         _mask_selections.push_back(selection.elements());
         if (_mask_fail_at != 0 && _mask_reads == _mask_fail_at) {
-            return carta::zarr::Error{_mask_fail_code, "The synthetic source was told to fail this flag read",
-                                      "FLAG"};
+            return carta::zarr::Error{_mask_fail_code, "The synthetic source was told to fail this flag read", "FLAG"};
         }
         return Fill(selection, destination.size, [&](const std::vector<std::uint64_t>& logical, std::size_t at) {
             // A flag byte is true for a flagged pixel, as XRADIO writes it: the opposite of the formula.
@@ -109,32 +106,18 @@ public:
 
     // What the pass asked for. The chunk counts are the assertion the fixture-driven tests cannot
     // make: a walk that decodes a chunk twice reads the same cell twice, whatever its answer.
-    std::uint64_t pixel_reads() const {
-        return _pixel_reads;
-    }
-    std::uint64_t mask_reads() const {
-        return _mask_reads;
-    }
+    std::uint64_t pixel_reads() const { return _pixel_reads; }
+    std::uint64_t mask_reads() const { return _mask_reads; }
     // How long a destination each read was handed, in the order they were asked. What a caller
     // hands across the seam is its own buffer, so this is what says whether it handed that or
     // restated the selection's size -- the one mistake a check at the seam cannot see from inside.
-    const std::vector<std::size_t>& pixel_destinations() const {
-        return _pixel_destinations;
-    }
-    const std::vector<std::size_t>& mask_destinations() const {
-        return _mask_destinations;
-    }
+    const std::vector<std::size_t>& pixel_destinations() const { return _pixel_destinations; }
+    const std::vector<std::size_t>& mask_destinations() const { return _mask_destinations; }
     // How many elements each flag read selected.
-    const std::vector<std::uint64_t>& mask_selections() const {
-        return _mask_selections;
-    }
-    std::uint64_t elements_read() const {
-        return _elements;
-    }
+    const std::vector<std::uint64_t>& mask_selections() const { return _mask_selections; }
+    std::uint64_t elements_read() const { return _elements; }
     // How many chunk cells were touched more than once, and the most any one of them was touched.
-    std::size_t chunks_touched() const {
-        return _chunk_hits.size();
-    }
+    std::size_t chunks_touched() const { return _chunk_hits.size(); }
     std::uint64_t most_hits_on_one_chunk() const {
         std::uint64_t most = 0;
         for (const auto& entry : _chunk_hits) {
@@ -154,8 +137,7 @@ private:
     // every test would pass while the real writer -- TensorStore, which lays the destination out
     // from the permutation and not from that function -- disagreed. Deriving it again is the
     // cross-check.
-    std::vector<std::uint64_t> DestinationStrides(
-        const carta::zarr::internal::zarr::PixelSelection& selection) const {
+    std::vector<std::uint64_t> DestinationStrides(const carta::zarr::internal::zarr::PixelSelection& selection) const {
         const auto rank = selection.count().size();
         std::vector<std::uint64_t> strides(rank, 1);
         std::uint64_t running = 1;

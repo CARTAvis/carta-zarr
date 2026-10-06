@@ -19,4 +19,4 @@
 #define CARTA_ZARR_EXPORT
 #endif
 
-#endif // CARTA_ZARR_EXPORT_H_
+#endif  // CARTA_ZARR_EXPORT_H_

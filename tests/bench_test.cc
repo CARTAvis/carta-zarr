@@ -16,13 +16,12 @@
 // Run with `layouts <dir>` it checks that last one against the generator's datasets, which only
 // exist when uv does; without arguments it needs nothing but the committed fixtures.
 
-#include <carta-zarr/carta_zarr.h>
-
 #include "cold.h"
-#include "options.h"
-#include "record.h"
 #include "mode.h"
 #include "modes/cube.h"
+#include "options.h"
+#include "record.h"
+#include "support/check.h"
 
 #include <algorithm>
 #include <chrono>
@@ -41,9 +40,8 @@
 #include <string>
 #include <vector>
 
+#include <carta-zarr/carta_zarr.h>
 #include <unistd.h>
-
-#include "support/check.h"
 
 namespace {
 
@@ -113,8 +111,8 @@ std::vector<std::string> Positions(Mode mode, const std::vector<Operation>& oper
 }
 
 // Every operation of a trial, every process's, in process order.
-std::vector<Operation> Trial(Mode mode, const CubeAxes& axes, unsigned processes, unsigned ops,
-                             std::uint64_t seed = 1, unsigned trial = 0, double region_fraction = 0.05) {
+std::vector<Operation> Trial(Mode mode, const CubeAxes& axes, unsigned processes, unsigned ops, std::uint64_t seed = 1,
+                             unsigned trial = 0, double region_fraction = 0.05) {
     std::vector<Operation> all;
     for (unsigned process = 0; process < processes; ++process) {
         const auto some = Plan(mode, axes, seed, trial, processes, process, ops, region_fraction);
@@ -171,8 +169,10 @@ void TestTheCommandLine() {
     Require(defaults.animation.fps == 5.0 && !defaults.animation.prefetch,
             "an animation does not default to CARTA's 5 frames a second without prefetch");
     const auto played = Get<RunOptions>(Parse({"run", "cube.zarr", "--animation-fps", "0", "--animation-prefetch"}));
-    Require(played.animation.fps == 0.0 && played.animation.prefetch, "--animation-fps or --animation-prefetch was lost");
-    Require(Get<Usage>(Parse({"run", "cube.zarr", "--animation-fps", "-1"})).error, "a negative frame rate was accepted");
+    Require(played.animation.fps == 0.0 && played.animation.prefetch,
+            "--animation-fps or --animation-prefetch was lost");
+    Require(Get<Usage>(Parse({"run", "cube.zarr", "--animation-fps", "-1"})).error,
+            "a negative frame rate was accepted");
     Require(defaults.FirstTouchCacheBytes() == std::size_t{1} << 30,
             "a first touch does not get the backend's default cache when the context's is left to TensorStore");
     Require(Get<RunOptions>(Parse({"run", "cube.zarr", "--animation-frames", "8"})).animation.frames == 8,
@@ -184,8 +184,8 @@ void TestTheCommandLine() {
             "operations per trial do not default by mode");
     Require(!defaults.context.cache_bytes, "the cache is not left to TensorStore by default");
 
-    const auto set = Get<RunOptions>(Parse({"run", "--mode=plane,open", "cube.zarr", "--cache-bytes", "0", "--ops",
-                                            "3", "--read-budget-bytes=1G", "--cold", "off", "--trial-timeout", "9"}));
+    const auto set = Get<RunOptions>(Parse({"run", "--mode=plane,open", "cube.zarr", "--cache-bytes", "0", "--ops", "3",
+                                            "--read-budget-bytes=1G", "--cold", "off", "--trial-timeout", "9"}));
     Require(set.modes == std::vector<Mode>{Mode::plane, Mode::open}, "--mode was not read as a list");
     Require(set.context.cache_bytes == std::size_t{0}, "--cache-bytes 0 is not a cache of nothing");
     Require(set.FirstTouchCacheBytes() == 0, "a first touch does not get the context's cache size");
@@ -195,8 +195,7 @@ void TestTheCommandLine() {
 
     const auto shaped = Get<RunOptions>(Parse({"run", "cube.zarr", "--ops", "8,spectrum=64,region=2",
                                                "--region-fraction", "0.2", "--histogram-method", "sampled:8"}));
-    Require(shaped.OpsFor(Mode::plane) == 8 && shaped.OpsFor(Mode::spectrum) == 64 &&
-                shaped.OpsFor(Mode::region) == 2,
+    Require(shaped.OpsFor(Mode::plane) == 8 && shaped.OpsFor(Mode::spectrum) == 64 && shaped.OpsFor(Mode::region) == 2,
             "--ops does not give a mode its own count over the one for every mode");
     Require(Get<RunOptions>(Parse({"run", "cube.zarr", "--ops", "spectrum=64"})).OpsFor(Mode::plane) == 16,
             "a count for one mode moved another mode off its default");
@@ -206,8 +205,7 @@ void TestTheCommandLine() {
     Require(defaults.histogram.kind == HistogramMethod::Kind::exact,
             "a cube histogram is not exact by default, as the backend's is");
     for (const char* bad : {"plane=0", "cube=3", "", "spectrum="}) {
-        Require(Get<Usage>(Parse({"run", "cube.zarr", "--ops", bad})).error,
-                std::string("--ops accepted ") + bad);
+        Require(Get<Usage>(Parse({"run", "cube.zarr", "--ops", bad})).error, std::string("--ops accepted ") + bad);
     }
     for (const char* bad : {"0", "1.5", "x", "-0.1"}) {
         Require(Get<Usage>(Parse({"run", "cube.zarr", "--region-fraction", bad})).error,
@@ -309,8 +307,8 @@ void TestARegionCoversItsFraction() {
             Require(!box.overlap, "boxes that fit the grid were marked as overlapping");
             for (std::size_t other = 0; other < index; ++other) {
                 const auto& them = boxes[other];
-                Require(box.x + box.width <= them.x || them.x + them.width <= box.x ||
-                            box.y + box.height <= them.y || them.y + them.height <= box.y,
+                Require(box.x + box.width <= them.x || them.x + them.width <= box.x || box.y + box.height <= them.y ||
+                            them.y + them.height <= box.y,
                         "two region boxes of one trial overlap");
             }
         }
@@ -377,10 +375,10 @@ void TestTheRunKeyIsTheSettings() {
     const auto key = RowTemplate(options, Mode::plane, ColdMethod::fadvise, facts, "run-a").run_key;
     Require(key == RowTemplate(options, Mode::plane, ColdMethod::fadvise, facts, "run-b").run_key,
             "the run key depends on the run id, so nothing could ever resume");
-    Require(key == RowTemplate(SomeOptions(), Mode::plane, ColdMethod::fadvise, DatasetFacts{"abc123", "", "", ""},
-                               "run-a")
-                       .run_key,
-            "the run key depends on what the manifest says about bytes rather than on its identity");
+    Require(
+        key == RowTemplate(SomeOptions(), Mode::plane, ColdMethod::fadvise, DatasetFacts{"abc123", "", "", ""}, "run-a")
+                   .run_key,
+        "the run key depends on what the manifest says about bytes rather than on its identity");
 
     auto threads = options;
     threads.context.decode_threads = 8;
@@ -416,9 +414,10 @@ void TestTheRunKeyIsTheSettings() {
     Require(RowTemplate(options, Mode::cube_histogram, ColdMethod::fadvise, facts, "run-a").run_key !=
                 RowTemplate(binned, Mode::cube_histogram, ColdMethod::fadvise, facts, "run-a").run_key,
             "the histogram method does not change the cube histogram's run key");
-    Require(key != RowTemplate(options, Mode::plane, ColdMethod::fadvise, DatasetFacts{"def456", "", "", ""}, "run-a")
-                       .run_key,
-            "two datasets share a run key");
+    Require(
+        key !=
+            RowTemplate(options, Mode::plane, ColdMethod::fadvise, DatasetFacts{"def456", "", "", ""}, "run-a").run_key,
+        "two datasets share a run key");
 
     // Another build of the bench or of the library it reads with is another measurement: a reader
     // changed since a trial ran would otherwise be skipped as done.
@@ -742,7 +741,8 @@ void TestSharedChunksAreMarked() {
 // spectrum of a 32768-square image held 4 GiB a process for the few kilobytes it wrote.
 void TestARunnerHoldsWhatItsModeReads() {
     const auto axes = Cube(32768, 32768, 4, 1);
-    Require(carta::zarr::bench::PixelsRead(axes, true) == std::size_t{32768} * 32768, "a plane is not a plane's pixels");
+    Require(carta::zarr::bench::PixelsRead(axes, true) == std::size_t{32768} * 32768,
+            "a plane is not a plane's pixels");
     Require(carta::zarr::bench::PixelsRead(axes, false) == 4, "a spectrum is not a spectrum's pixels");
 }
 
@@ -858,8 +858,8 @@ void TestEachModeReads() {
     const auto read = [&](Mode mode, unsigned processes = 1) {
         const auto operation = Plan(mode, *axes, 1, 0, processes, 0, 1).front();
         const auto elements = runner(mode).Run(operation, {});
-        Require(elements.has_value(), std::string(ModeName(mode)) + " failed: " +
-                                          (elements ? std::string() : elements.error().message));
+        Require(elements.has_value(),
+                std::string(ModeName(mode)) + " failed: " + (elements ? std::string() : elements.error().message));
         return std::make_pair(operation, *elements);
     };
 
@@ -967,8 +967,7 @@ void TestTheColdMethodIsChosenOrRefused() {
             "auto does not prefer the administrator's command");
     Require(ChooseColdMethod(ColdMethod::off, "").error.empty(), "off was refused");
     if (geteuid() != 0) {
-        Require(!ChooseColdMethod(ColdMethod::drop_caches, "").error.empty(),
-                "drop-caches was accepted without root");
+        Require(!ChooseColdMethod(ColdMethod::drop_caches, "").error.empty(), "drop-caches was accepted without root");
     }
     Require(DropCaches(ColdMethod::command, "true", "").empty(), "a command that succeeded was reported failing");
     Require(!DropCaches(ColdMethod::command, "false", "").empty(), "a command that failed was reported working");

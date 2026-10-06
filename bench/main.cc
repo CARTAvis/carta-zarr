@@ -13,11 +13,9 @@
 #include "build_identity.h"
 #include "cold.h"
 #include "options.h"
+#include "plan.h"
 #include "record.h"
 #include "trial.h"
-#include "plan.h"
-
-#include <carta-zarr/carta_zarr.h>
 
 #include <nlohmann/json.hpp>
 
@@ -25,6 +23,8 @@
 #include <cstdio>
 #include <random>
 #include <string>
+
+#include <carta-zarr/carta_zarr.h>
 
 namespace {
 
@@ -85,8 +85,7 @@ int Probe(const ProbeOptions& options) {
 
     const auto probe = ProbeSchema(options.dataset, kXradioImageSchema);
     if (!probe) {
-        return finish("ProbeSchema: " + std::string(ErrorCodeName(probe.error().code)) + ": " +
-                      probe.error().message);
+        return finish("ProbeSchema: " + std::string(ErrorCodeName(probe.error().code)) + ": " + probe.error().message);
     }
     report["schema"] = {{"match", MatchName(probe->kind)},
                         {"id", probe->schema_id},

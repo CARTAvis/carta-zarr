@@ -7,10 +7,10 @@
 #ifndef CARTA_ZARR_SRC_SCHEMA_XRADIO_BEAM_TABLE_H_
 #define CARTA_ZARR_SRC_SCHEMA_XRADIO_BEAM_TABLE_H_
 
-#include "../../zarr/numeric_array.h"
-
 #include "carta-zarr/descriptor.h"
 #include "carta-zarr/result.h"
+
+#include "../../zarr/numeric_array.h"
 
 #include <string>
 #include <vector>

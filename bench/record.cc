@@ -8,8 +8,6 @@
 
 #include "mode.h"
 
-#include <unistd.h>
-
 #include <nlohmann/json.hpp>
 
 #include <array>
@@ -23,6 +21,8 @@
 #include <stdexcept>
 #include <system_error>
 #include <utility>
+
+#include <unistd.h>
 
 #ifndef CARTA_ZARR_BENCH_COMMIT
 #define CARTA_ZARR_BENCH_COMMIT "unknown"
@@ -264,14 +264,29 @@ Row RowTemplate(const RunOptions& options, Mode mode, ColdMethod cold, const Dat
     // build measuring it by the bytes it runs, since a reader changed since is another measurement.
     std::error_code ignored;
     const auto identity = facts.identity_hash.empty()
-                              ? std::filesystem::absolute(options.dataset, ignored).lexically_normal().string()
-                              : facts.identity_hash;
+                            ? std::filesystem::absolute(options.dataset, ignored).lexically_normal().string()
+                            : facts.identity_hash;
     std::string key = std::to_string(kCsvVersion);
-    for (const auto& part :
-         {identity, build, row.tuning, options.image_id, row.mode, std::to_string(row.processes), std::to_string(row.io_threads),
-          std::to_string(row.decode_threads), row.cache_bytes, std::to_string(row.read_budget_bytes),
-          std::to_string(row.seed), std::to_string(row.ops), row.region_fraction, row.histogram_method, row.animation_frames, row.animation_fps, row.animation_prefetch,
-          std::to_string(row.trial_timeout_s), row.cold_method, row.label}) {
+    for (const auto& part : {identity,
+                             build,
+                             row.tuning,
+                             options.image_id,
+                             row.mode,
+                             std::to_string(row.processes),
+                             std::to_string(row.io_threads),
+                             std::to_string(row.decode_threads),
+                             row.cache_bytes,
+                             std::to_string(row.read_budget_bytes),
+                             std::to_string(row.seed),
+                             std::to_string(row.ops),
+                             row.region_fraction,
+                             row.histogram_method,
+                             row.animation_frames,
+                             row.animation_fps,
+                             row.animation_prefetch,
+                             std::to_string(row.trial_timeout_s),
+                             row.cold_method,
+                             row.label}) {
         key += '|';
         key += part;
     }
@@ -388,8 +403,7 @@ bool DropLineCutShort(const std::string& path, std::string& error) {
         error = "cannot drop the line " + path + " was cut short in: " + failed.message();
         return false;
     }
-    std::fprintf(stderr, "note: dropped the last line of %s, which a write stopped part-way through\n",
-                 path.c_str());
+    std::fprintf(stderr, "note: dropped the last line of %s, which a write stopped part-way through\n", path.c_str());
     return true;
 }
 
@@ -436,8 +450,8 @@ std::optional<CsvOutput> CsvOutput::Open(const std::string& path, std::string& e
             auto& coverage = trials[row->run_key][row->trial];
             const std::pair<unsigned, unsigned> grid{row->processes, row->ops};
             // Rows of one trial disagreeing about its size cannot all be its rows.
-            coverage.error = coverage.error || row->status == "error" || !row->op_index ||
-                             (coverage.grid && *coverage.grid != grid);
+            coverage.error =
+                coverage.error || row->status == "error" || !row->op_index || (coverage.grid && *coverage.grid != grid);
             coverage.grid = grid;
             if (row->op_index && row->process_index < row->processes && *row->op_index < row->ops) {
                 coverage.reported.emplace(row->process_index, *row->op_index);

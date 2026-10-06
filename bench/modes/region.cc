@@ -70,9 +70,7 @@ public:
     }
 
     // Each channel's pixel count, NaN count and extremes, which are exact; not its sums.
-    std::uint64_t Fingerprint() const override {
-        return bench::Fingerprint(_exact.data(), _exact.size());
-    }
+    std::uint64_t Fingerprint() const override { return bench::Fingerprint(_exact.data(), _exact.size()); }
 
 private:
     std::vector<double> _exact;
@@ -110,15 +108,14 @@ public:
             std::clamp<std::uint64_t>(std::llround(side * static_cast<double>(axes.width)), 1, cell_width);
         const auto box_height =
             std::clamp<std::uint64_t>(std::llround(side * static_cast<double>(axes.height)), 1, cell_height);
-        return PlanDraws(mode(), at, ops, cells_x * cells_y,
-                         [&](std::uint64_t value, Stream& details, Operation& operation) {
-                             operation.width = box_width;
-                             operation.height = box_height;
-                             operation.x = (value % cells_x) * cell_width + details.Below(cell_width - box_width + 1);
-                             operation.y =
-                                 (value / cells_x) * cell_height + details.Below(cell_height - box_height + 1);
-                             operation.polarization = details.Below(axes.polarizations);
-                         });
+        return PlanDraws(
+            mode(), at, ops, cells_x * cells_y, [&](std::uint64_t value, Stream& details, Operation& operation) {
+                operation.width = box_width;
+                operation.height = box_height;
+                operation.x = (value % cells_x) * cell_width + details.Below(cell_width - box_width + 1);
+                operation.y = (value / cells_x) * cell_height + details.Below(cell_height - box_height + 1);
+                operation.polarization = details.Below(axes.polarizations);
+            });
     }
 
     std::string Describe(const Operation& operation) const override {
@@ -129,10 +126,10 @@ public:
 
     std::optional<ChunkBox> ChunksRead(const Operation& operation, const CubeAxes& axes,
                                        const std::vector<std::uint64_t>& chunk_shape) const override {
-        return ChunkBox::Spanning({operation.x, operation.y, 0, operation.polarization},
-                                  {operation.x + operation.width, operation.y + operation.height, axes.channels,
-                                   operation.polarization + 1},
-                                  axes, chunk_shape);
+        return ChunkBox::Spanning(
+            {operation.x, operation.y, 0, operation.polarization},
+            {operation.x + operation.width, operation.y + operation.height, axes.channels, operation.polarization + 1},
+            axes, chunk_shape);
     }
 
     Result<std::unique_ptr<Runner>> MakeRunner(const Context& context, Image image) const override {

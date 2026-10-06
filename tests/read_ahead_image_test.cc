@@ -9,8 +9,7 @@
 // for two runs is declined in words that say why. What is decided when is tested beside the module,
 // against images whose prefetch the test can hold; see read_ahead_test.cc.
 
-#include <carta-zarr/carta_zarr.h>
-#include <carta-zarr/read_ahead.h>
+#include "support/check.h"
 
 #include <algorithm>
 #include <chrono>
@@ -24,9 +23,9 @@
 #include <utility>
 #include <vector>
 
+#include <carta-zarr/carta_zarr.h>
+#include <carta-zarr/read_ahead.h>
 #include <unistd.h>
-
-#include "support/check.h"
 
 namespace {
 

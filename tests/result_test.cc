@@ -7,6 +7,8 @@
 // Result's accessors, as a consumer reaches them. They are named after std::expected's so that a
 // reader already knows what each does; this pins that each does it.
 
+#include "support/check.h"
+
 #include <iostream>
 #include <memory>
 #include <set>
@@ -17,8 +19,6 @@
 
 #include <carta-zarr/descriptor.h>
 #include <carta-zarr/result.h>
-
-#include "support/check.h"
 
 namespace {
 

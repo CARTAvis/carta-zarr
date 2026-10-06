@@ -16,6 +16,7 @@
 #include "schema/xradio/direction.h"
 
 #include "schema/xradio/linear_axis.h"
+#include "support/check.h"
 
 #include <algorithm>
 #include <cmath>
@@ -23,8 +24,6 @@
 #include <iostream>
 #include <string>
 #include <vector>
-
-#include "support/check.h"
 
 namespace {
 
@@ -71,8 +70,8 @@ DirectionCoordinate Describe(const nlohmann::json& changes, const std::vector<do
 // The matrix that was never read back. Every fixture writes the identity, so a transposed copy is
 // the same array; only an asymmetric one can tell.
 void TestTheTransformationMatrixKeepsItsShape() {
-    const auto direction = Describe({{"pixel_coordinate_transformation_matrix",
-                                      nlohmann::json{{0.36, 0.48}, {-0.8, 0.6}}}});
+    const auto direction =
+        Describe({{"pixel_coordinate_transformation_matrix", nlohmann::json{{0.36, 0.48}, {-0.8, 0.6}}}});
     Require(Near(direction.transformation_matrix.at(0).at(0), 0.36), "element (0, 0)");
     Require(Near(direction.transformation_matrix.at(0).at(1), 0.48),
             "element (0, 1) -- a transposed copy puts -0.8 here");
@@ -100,8 +99,8 @@ void TestAnIncompleteCoordinateSystemIsRefused() {
         without.erase(field);
         refused(Root(without), std::string("a coordinate system without ") + field);
     }
-    for (const auto& matrix : {nlohmann::json{{1.0, 2.0, 3.0}}, nlohmann::json{"not a matrix"},
-                               nlohmann::json{{"a", "b"}, {"c", "d"}}}) {
+    for (const auto& matrix :
+         {nlohmann::json{{1.0, 2.0, 3.0}}, nlohmann::json{"not a matrix"}, nlohmann::json{{"a", "b"}, {"c", "d"}}}) {
         auto malformed = Complete();
         malformed["pixel_coordinate_transformation_matrix"] = matrix;
         refused(Root(malformed), "a matrix that is not two by two of numbers");
@@ -119,8 +118,8 @@ void TestAnIncompleteCoordinateSystemIsRefused() {
 void TestRadiansBecomeDegrees() {
     const double ra = 1.0;
     const double dec = 0.5;
-    const auto direction = Describe({{"reference_direction", {{"data", {ra, dec}}}},
-                                     {"native_pole_direction", {{"data", {0.0, M_PI / 2.0}}}}});
+    const auto direction = Describe(
+        {{"reference_direction", {{"data", {ra, dec}}}}, {"native_pole_direction", {{"data", {0.0, M_PI / 2.0}}}}});
     Require(Near(direction.reference_value.at(0), ra * kRadToDeg), "the reference right ascension");
     Require(Near(direction.reference_value.at(1), dec * kRadToDeg), "the reference declination");
     Require(Near(direction.native_pole_direction.at(1), 90.0),
@@ -133,7 +132,8 @@ void TestRadiansBecomeDegrees() {
 // An equinox arrives as a number or as a string with a leading letter naming the system.
 void TestEquinoxIsReadInEveryFormXradioWrites() {
     const auto with = [](const nlohmann::json& equinox) {
-        return Describe({{"reference_direction", {{"data", {0.0, 0.0}}, {"attrs", {{"frame", "fk5"}, {"equinox", equinox}}}}}});
+        return Describe(
+            {{"reference_direction", {{"data", {0.0, 0.0}}, {"attrs", {{"frame", "fk5"}, {"equinox", equinox}}}}}});
     };
     Require(with(2000.0).equinox == 2000.0, "a numeric equinox");
     Require(with("J2000").equinox == 2000.0, "J2000");
@@ -144,9 +144,8 @@ void TestEquinoxIsReadInEveryFormXradioWrites() {
 }
 
 void TestTheFrameAndProjectionAreUpperCased() {
-    const auto direction =
-        Describe({{"projection", "sin"},
-                  {"reference_direction", {{"data", {0.0, 0.0}}, {"attrs", {{"frame", "icrs"}}}}}});
+    const auto direction = Describe(
+        {{"projection", "sin"}, {"reference_direction", {{"data", {0.0, 0.0}}, {"attrs", {{"frame", "icrs"}}}}}});
     Require(direction.projection == "SIN", "the projection is reported upper case");
     Require(direction.reference_frame == "ICRS", "and so is the frame");
 }
@@ -154,8 +153,7 @@ void TestTheFrameAndProjectionAreUpperCased() {
 void TestProjectionParametersAreCarried() {
     const auto direction = Describe({{"projection", "SIN"}, {"projection_parameters", {0.25, -0.5}}});
     Require(direction.projection_parameters.size() == 2, "both parameters");
-    Require(Near(direction.projection_parameters.at(0), 0.25) &&
-                Near(direction.projection_parameters.at(1), -0.5),
+    Require(Near(direction.projection_parameters.at(0), 0.25) && Near(direction.projection_parameters.at(1), -0.5),
             "in the order they were written -- they become longPole and latPole");
 }
 

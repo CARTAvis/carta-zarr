@@ -142,8 +142,8 @@ protected:
                            std::uint64_t& chunks_done, BeforeRead&& before_read, Visit&& visit) {
         // The chunk rows and columns the sample has a pixel in -- every one unless it steps over some
         // -- in bands of as many rows as a read affords. A chunk the sample steps over is neither read
-        // nor counted, so what progress is a fraction of is what is decoded; it used to be counted as
-        // it was passed, which a sampled walk's report could never reach the end of.
+        // nor counted, so what progress is a fraction of is what is decoded, and a sampled walk's
+        // report reaches its end.
         const auto rows = ChunksSampled(_plan.v_length, _plan.chunk_v, _plan.sample);
         const auto columns = ChunksSampled(_plan.u_length, _plan.chunk_u, _plan.sample);
         for (std::uint64_t row = 0; row < rows.size();) {

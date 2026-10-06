@@ -117,8 +117,9 @@ void TestSpectralAndPolarization(const carta::zarr::ImageDescriptor& sky) {
     RequireClose(spectral.channel_frequencies.at(0), 1.4e9, 1.0, "first channel frequency");
     RequireClose(spectral.channel_frequencies.at(1), 1.401e9, 1.0, "second channel frequency");
     Require(spectral.unit == "Hz", "the frequency unit was not taken from reference_frequency's attrs");
-    // The spectral axis reports the unit its coordinate does. XRADIO writes it on reference_frequency's
-    // attrs rather than as a units attribute, and the axis used to read only the latter.
+    // The spectral axis reports the unit its coordinate does. XRADIO writes it on
+    // reference_frequency's attrs rather than as a units attribute, so reading only the latter
+    // would leave the axis unitless.
     const auto spectral_axis = carta::zarr::AxisIndex(sky.axes, carta::zarr::AxisRole::spectral);
     Require(spectral_axis && sky.axes.at(*spectral_axis).unit == spectral.unit,
             "the spectral axis reported a unit other than its coordinate's");

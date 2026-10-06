@@ -123,11 +123,9 @@ void TestDescendingAxis() {
 // ---------------------------------------------------------------------------------------------
 // What the two callers make of a fit.
 //
-// The fit reports; these decide, and they decide opposite things for opposite reasons. Both
-// decisions used to be written out at their call sites inside a 101-line function that only a
-// directory tree could reach, so neither was covered: DirectionCoordinate::increment is asserted
-// nowhere in the suite, which means the conversion below could have been deleted and every test
-// would still have passed while l and m reached the consumer wrong by a factor of 57.3.
+// The fit reports; these decide, and they decide opposite things for opposite reasons. Each is
+// reached here without a directory tree, and DirectionCoordinate::increment is asserted, so l and m
+// cannot reach the consumer wrong by the factor of 57.3 between radians and degrees.
 
 template <typename Fit>
 bool Diagnosed(const Fit& fit, carta::zarr::DiagnosticCode code) {
@@ -167,9 +165,9 @@ void TestADirectionAxisKeepsAnUnevenIncrement() {
 
 // A direction axis is linear by construction, so one that cannot be described linearly is a store
 // this library cannot make sense of -- unlike a spectral axis in the same position, which is a
-// continuum image taking the tabular path. It said nothing about it until now: DescribeDirection
-// leaves the caller's reference pixel and increment at their defaults, and a consumer received a
-// DirectionCoordinate reading 0 for both with no indication that it was not an answer.
+// continuum image taking the tabular path. DescribeDirection leaves the caller's reference pixel
+// and increment at their defaults, and says so: a DirectionCoordinate reading 0 for both is not to
+// be taken for an answer.
 void TestADegenerateDirectionAxisSaysSo() {
     const auto one = FitDirectionAxis({1.0e-4}, "l");
     Require(!one.increment && !one.reference_pixel, "a single sample describes no axis");

@@ -6,10 +6,8 @@
 
 // What a pixel selection is, stated directly.
 //
-// A selection was reached by no test until this: every claim about it was made by reading pixels
-// and checking the answer, which is how a selection whose order field had been overwritten to mean
-// something else -- consistent with itself, and transposed -- could have gone unnoticed by any test
-// that only compared totals.
+// A selection is asserted here directly rather than through the pixels it reads, so that one
+// consistent with itself and transposed cannot pass a test that only compares totals.
 //
 // This target links nothing. The question is a descriptor and a request in, a selection out.
 
@@ -85,8 +83,8 @@ void TestALogicalDestinationFollowsTheImage() {
 }
 
 // Stored order lays it out as the array was written, the last stored dimension fastest, so that a
-// plane arrives untransposed. The strides are the ones a pass used to work out for itself: the last
-// stored dimension steps by one and each earlier one by the product of those after it.
+// plane arrives untransposed: the last stored dimension steps by one and each earlier one by the
+// product of those after it.
 void TestAStoredDestinationFollowsTheArray() {
     const auto selection = Built(DestinationOrder::stored);
     Require(selection.destination_to_stored() == std::vector<std::size_t>{4, 3, 2, 1, 0},
@@ -165,8 +163,8 @@ void TestAMalformedRequestNeverBecomesASelection() {
     wrapping.axes.at(0) = Range{0, (std::uint64_t{1} << 32) + 1, std::uint64_t{1} << 32};
     refused(MakeImage(std::uint64_t{1} << 40), wrapping, "a span that only fits when it overflows");
 
-    // Every axis in range, and more elements than a count can hold. This used to come back as a
-    // count of zero, which a read reported as a destination too small for the request.
+    // Every axis in range, and more elements than a count can hold. A count of zero here would be
+    // reported by a read as a destination too small for the request.
     const auto huge = MakeImage(std::uint64_t{1} << 32, std::uint64_t{1} << 32, std::uint64_t{1} << 32);
     ReadRequest everything = Whole();
     everything.axes.at(0) = Range{0, std::uint64_t{1} << 32, 1};

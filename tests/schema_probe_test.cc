@@ -175,9 +175,9 @@ void TestValidAndTimeAxis(const std::filesystem::path& root) {
                 measured_size.value().basis == carta::zarr::SizeBasis::measured,
             "the measured Zarr size calculation was not used");
 
-    // A timeout too long to add to the clock is no timeout. It used to wrap -- milliseconds converted
-    // to the clock's nanoseconds overflow past about 292 years -- into a deadline already past, and the
-    // longest wait anyone could ask for answered as though they would not wait at all.
+    // A timeout too long to add to the clock is no timeout. Milliseconds converted to the clock's
+    // nanoseconds overflow past about 292 years, and wrapping would make a deadline already past:
+    // the longest wait anyone could ask for answered as though they would not wait at all.
     for (const auto forever :
          {std::chrono::milliseconds::max(), std::chrono::milliseconds(std::chrono::hours(24 * 365 * 1000))}) {
         const auto patient = dataset.value().Size(forever);
@@ -571,8 +571,7 @@ void TestCoordinateCompletion(const std::filesystem::path& root) {
 }
 
 // The probe accepts a coordinate stored in any real type, so opening one has to accept the same
-// set. A float32 coordinate used to probe as a match and then fail to open, which told a consumer
-// the dataset was supported and then refused it.
+// set: a float32 coordinate that probes as a match also opens.
 void TestNonDoubleCoordinates(const std::filesystem::path& root) {
     CreateValidStore(root);
     Write(root / "frequency" / "zarr.json", NumericArray("[3]", R"(["frequency"])", "float32", R"({"units":"Hz"})"));
@@ -636,8 +635,7 @@ void TestADisagreeingImageIsRefusedThroughTheDataset(const std::filesystem::path
 }
 
 // The same through the facade, which is where a consumer meets it: a dataset holding one stray
-// document that will not parse opens, says which node it could not read, and opens its image. It
-// used to be a dataset that did not open at all.
+// document that will not parse opens, says which node it could not read, and opens its image.
 void TestADatasetWithAnUnparseableNodeStillOpens(const std::filesystem::path& root) {
     CreateValidStore(root);
     Write(root / "JUNK" / "zarr.json", "{not valid json");
@@ -704,10 +702,10 @@ void TestANodeNameSpelledWithADotIsTheSameNode(const std::filesystem::path& root
 // A sharding codec whose inner chunk shape describes nothing leaves the array unreadable, and this
 // pins where that is noticed: at the parse, not after it.
 //
-// It used to be noticed after. ParseStorageLayout refused such an array, DescribeImage dropped the
-// refusal, and the image opened reporting a chunk geometry synthesised from its own shape -- one
-// chunk covering the whole image, unsharded, uncompressed, with no diagnostic. That geometry is
-// what the reduction plans its blocks from, so a walk would have taken the cube as a single chunk.
+// Refused before the image opens. Otherwise it would open reporting a chunk geometry synthesised
+// from its own shape -- one chunk covering the whole image, unsharded, uncompressed, with no
+// diagnostic -- and that geometry is what the reduction plans its blocks from, so a walk would take
+// the cube as a single chunk.
 //
 // Now the array does not parse, so it never becomes an image. What is asserted here is that this
 // does not happen in silence: the store reports no images, and the reason names the node.
@@ -838,10 +836,10 @@ void TestABeamTableWhoseAxesAreReorderedOnDiskIsRefused(const std::filesystem::p
                 beams.error().message);
 }
 
-// A beam table's values are decoded with its own document, and its unit used to be read from the
-// root's copy of it. Here the copy says rad and the array's own document says deg: the table is not
-// the one the copy described, and it is refused as a table chunked otherwise would be, rather than
-// read in either document's terms.
+// A beam table's values are decoded with its own document, so its unit is read from it too, not
+// from the root's copy. Here the copy says rad and the array's own document says deg: the table is
+// not the one the copy described, and it is refused as a table chunked otherwise would be, rather
+// than read in either document's terms.
 void TestABeamTableWhoseUnitDisagreesWithItsCopyIsRefused(const std::filesystem::path& root) {
     std::filesystem::copy(CARTA_ZARR_REFERENCE_FIXTURE, root, std::filesystem::copy_options::recursive);
     const auto metadata_path = root / "BEAM" / "zarr.json";
@@ -941,8 +939,8 @@ void TestShardedStorageLayout(const std::filesystem::path& root) {
 
 }  // namespace
 
-// A handle moved from still refers to what it did. Moving used to null it, which was an empty
-// state every entry point had to refuse and nothing but std::move could reach; a move is now a copy.
+// A handle moved from still refers to what it did: a move is a copy, so there is no empty state for
+// an entry point to refuse.
 //
 // Against the reference fixture rather than a store built here, because the last step reads pixels
 // and a store written by this file holds metadata alone.

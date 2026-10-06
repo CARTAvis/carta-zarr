@@ -280,10 +280,8 @@ void TestReadControls(const carta::zarr::Image& sky) {
     Require(!expired_read && expired_read.error().code == carta::zarr::ErrorCode::cancelled,
             "a read past its deadline was not rejected");
 
-    // A stated ceiling splits the read to fit rather than refusing it, and it does so whether or not
-    // anyone asked to watch. This used to depend on supplying a progress callback: a caller who said
-    // how much memory the read could have and did not care to watch was told no, which is the one
-    // thing the ceiling was not asking for.
+    // A stated ceiling splits the read to fit rather than refusing it, whether or not anyone asked
+    // to watch: a caller who says how much memory the read can have is not told no.
     std::vector<float> reference(elements, 0.0F);
     const auto reference_read = sky.Read(request, {reference.data(), reference.size()});
     Require(static_cast<bool>(reference_read), "the unrestricted read this compares against failed");
@@ -586,11 +584,12 @@ void TestAPrefetchedPlaneIsReadFromThePool(const char* fixture, std::uint64_t ex
             "a plane that was not prefetched still read from emptied chunks, so this shows nothing about the prefetch");
 }
 
-// A pool outlives the datasets read through it, and what it keeps of one is not the next one's. Here a
-// dataset is read through a pool, closed, rewritten -- every pixel chunk removed, so every pixel is the
-// fill value -- and opened again through the same pool: it reads the fill value, as a read through the
-// session's pool does. The array handle the pool used to keep by path answered with the chunks it had
-// decoded before, since a chunk cached after a handle was opened is never asked about again (ADR 0015).
+// A pool outlives the datasets read through it, and what it keeps of one is not the next one's.
+// Here a dataset is read through a pool, closed, rewritten -- every pixel chunk removed, so every
+// pixel is the fill value -- and opened again through the same pool: it reads the fill value, as a
+// read through the session's pool does. An array handle kept by path would answer with the chunks
+// it had decoded before, since a chunk cached after a handle was opened is never asked about again
+// (ADR 0015).
 void TestAPoolDoesNotCarryOneDatasetsArraysIntoTheNext(const char* fixture) {
     const auto copy = std::filesystem::temp_directory_path() / ("carta-zarr-pool-reopen-" + std::to_string(getpid()));
     std::filesystem::remove_all(copy);
@@ -763,9 +762,9 @@ void RequireRefusedAtOpen(const carta::zarr::Result<carta::zarr::Image>& image, 
 
 // A coordinate is the image's only when it is the array the image was qualified against. With
 // consolidated metadata the store qualifies an image on the root's copy, while the coordinate's
-// values come from the array's own document; here the copy says two channels, as the image has,
-// and the array's own says one. That image used to open describing two channels with one
-// frequency. It is refused as the pixels would be, for an array that is not what the store said.
+// values come from the array's own document; here the copy says two channels, as the image has, and
+// the array's own says one. Rather than opening described as two channels with one frequency, it is
+// refused as the pixels would be, for an array that is not what the store said.
 void TestACoordinateDisagreeingWithItsConsolidatedCopyIsRefused(const char* fixture) {
     const ConsolidatedCopy copy(fixture, "coordinate-copy");
     copy.RewriteOwn("frequency", [](std::string text) { return Replaced(std::move(text), "\"shape\"", "2", "1"); });

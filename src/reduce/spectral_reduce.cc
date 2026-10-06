@@ -32,8 +32,8 @@ constexpr double kInfinity = std::numeric_limits<double>::infinity();
 
 // The per-pixel loop, written so that a compiler can vectorise it.
 //
-// Both template parameters are loop invariants that used to be runtime tests, and each one on its
-// own was enough to stop vectorisation: the u stride is 1 for every image, since the walk runs
+// Both template parameters are loop invariants rather than runtime tests, because each one on its
+// own is enough to stop vectorisation: the u stride is 1 for every image, since the walk runs
 // along the axis the store varies fastest, but the compiler cannot know that and pays a multiply
 // per pixel for the possibility; and a mask cost a branch per pixel. Only a raster too fragmented to
 // be worth runs still takes that branch -- every other masked region reaches here as runs, which
@@ -183,9 +183,9 @@ Result<void> ReduceSpectral(const ReducibleImage& image, const SpectralReduceReq
     // the spectrum, and the block becomes the single chunk layer the walk is already reading -- the
     // results are handed over a layer at a time because that is when they are finished, not sooner.
     //
-    // Emitting only at the end instead, which is what a zero used to mean, is silent for as long as
-    // the whole reduction takes. One layer of a 7763x4742 image is 160 MiB and 70 ms; a thousand
-    // channels of it is a minute of work with no partial answer and nowhere to cancel.
+    // Emitting only at the end instead is silent for as long as the whole reduction takes. One layer of a 7763x4742
+    // image is 160 MiB and 70 ms; a thousand channels of it is a minute of work with no partial answer and nowhere to
+    // cancel.
     auto pass =
         PassOverFootprints(source, plan, options, footprints, "The spectral reduction was cancelled by its sink");
 
@@ -280,18 +280,14 @@ Result<void> ReduceSpectral(const ReducibleImage& image, const SpectralReduceReq
             }
         };
 
-        // The unit order is the order the nested loops used to run in -- channel, then
-        // chunk row, then chunk column -- so a single task reproduces the old sums bit
-        // for bit. Several tasks do not: each one sums its own contiguous run of units
-        // and the partials are added in task order, which is deterministic but a
-        // different association.
-        // The statistics are doubles over as many as 5x10^11 values, and partial sums
-        // are if anything the more accurate arrangement; the tests compare to 1e-9
-        // relative for exactly this reason, and the counts and extrema are unaffected
-        // because integers and min/max do not care what order they arrive in.
-        // One per task, so the split is also an allocation and a memset of this size
-        // once per slab, which is why the split is made here rather than once: a
-        // partial is as long as the slab. See kSpectralPartialBudgetBytes.
+        // The unit order is channel, then chunk row, then chunk column, so a single task
+        // sums in the order a plain nested loop would. Several tasks do not: each one sums its own contiguous run of
+        // units and the partials are added in task order, which is deterministic but a different association. The
+        // statistics are doubles over as many as 5x10^11 values, and partial sums are if anything the more accurate
+        // arrangement; the tests compare to 1e-9 relative for exactly this reason, and the counts and extrema are
+        // unaffected because integers and min/max do not care what order they arrive in. One per task, so the split is
+        // also an allocation and a memset of this size once per slab, which is why the split is made here rather than
+        // once: a partial is as long as the slab. See kSpectralPartialBudgetBytes.
         const auto split = image.Split(kSpectralPartialBudgetBytes, partial_bytes);
         const std::size_t tasks = split.Tasks(plan.chunk_u * plan.chunk_v, units);
 
@@ -302,10 +298,9 @@ Result<void> ReduceSpectral(const ReducibleImage& image, const SpectralReduceReq
             partials.at(task).Reset(layout, request.regions.size, slab_length);
         }
 
-        // Contiguous runs of units, cut the way the histograms cut their rows. They were
-        // dealt out round-robin once, for no recorded reason, and that measured slower
-        // rather than better balanced: on a 7763x4742 plane of 31x19 chunk cells, 5-13%
-        // slower at ten threads and no different at four, and never measurably faster.
+        // Contiguous runs of units, cut the way the histograms cut their rows. Dealing
+        // them out round-robin instead measured 5-13% slower at ten threads on a
+        // 7763x4742 plane, and never faster.
         split.Run(tasks, units, [&](std::size_t task, std::uint64_t first, std::uint64_t last) {
             StatisticSlots& partial = partials.at(task);
             for (std::uint64_t unit = first; unit < last; ++unit) {

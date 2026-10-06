@@ -9,11 +9,9 @@
 
 // Whether this profile will open a variable, and what it has to say about one it will not.
 //
-// One module rather than a rule per stage. Discovery decided what to list, and describing an image
-// decided again whether it was an image at all, on a weaker rule -- so a listing could offer a
-// variable that opening would refuse. Everything that needs the answer asks here, which is what
-// makes an entry in the listing a statement about opening rather than about what a variable looks
-// like.
+// One module rather than a rule per stage. Everything that needs the answer asks here, which is
+// what makes an entry in the listing a statement about opening rather than about what a variable
+// looks like: a listing cannot offer a variable that opening would refuse.
 //
 // It takes a Store because that is the narrowest thing its tests can stand up: it reads array
 // metadata and nothing else, and a Store over the in-memory transport costs a map entry. See ADR

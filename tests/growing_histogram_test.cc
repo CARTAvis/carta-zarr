@@ -6,11 +6,9 @@
 
 // The one-pass histogram's arithmetic, against chosen values and exact counts.
 //
-// Every assertion here used to be a tolerance over a fixture: the class was file-local, so reaching
-// it meant ComputeCubeHistogram over a directory tree, compared against a two-pass oracle to within
-// a fraction of a bin. Its first two fixes were each a defect in one of the things below and neither
-// could be stated in those terms: 9c21397 gave a straddling bin whole to one side, and 6ba0ce2
-// seeded the range at one rather than at the pixel it saw.
+// Every assertion here is an exact count over a few pixels, not a tolerance against a two-pass
+// oracle: how a bin straddling a target edge is split, and where the range seeds itself, are each a
+// defect this can state in its own terms.
 //
 // This target links nothing. A growing histogram takes floats and gives back counts.
 

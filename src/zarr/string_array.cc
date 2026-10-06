@@ -469,8 +469,8 @@ Result<std::vector<std::string>> ReadFixedLengthUtf32StringArray(const std::file
         return Error{failure.code, failure.what(), std::string(node)};
     } catch (const std::bad_alloc&) {
         // A shortage of memory says nothing about the chunks. Store::ReadStringArray1D reports it as a
-        // read it could not make, which it asks again; as a decode_error it was an answer about the
-        // array, remembered for the store's life.
+        // read it could not make, which it asks again, rather than as a decode_error, an answer about
+        // the array remembered for the store's life.
         throw;
     } catch (const std::exception& error) {
         return Error{ErrorCode::decode_error, error.what(), std::string(node)};

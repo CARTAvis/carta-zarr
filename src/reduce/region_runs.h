@@ -11,10 +11,9 @@
 //
 // Runs are what the walk would rather have, for the two reasons RegionMask gives: they say which
 // chunks a region occupies without reading its raster again, and every pixel of a run is selected,
-// so a run is accumulated by the loop an unmasked region uses. They used to be the caller's to make,
-// along whichever spatial axis the store varies fastest -- which every caller then had to be told,
-// and which for XRADIO, whose m axis is stored last, is y: a raster whose x varies fastest read a
-// column at a time. That read, a whole row's stride per byte, was most of what making them cost.
+// so a run is accumulated by the loop an unmasked region uses. They are made here, along whichever
+// spatial axis the store varies fastest, so that no caller has to be told which that is; for
+// XRADIO, whose m axis is stored last, it is y.
 //
 // Neither encoder here reads the raster any other way than a row at a time. Along x that is the
 // obvious scan, skipping eight bytes at once where nothing changes. Along y every place one row

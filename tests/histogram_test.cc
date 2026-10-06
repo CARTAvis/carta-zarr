@@ -124,10 +124,9 @@ carta::zarr::HistogramRequest WholeSpectrum(std::uint64_t polarization, double l
 }
 
 // A caller may decline the pixel mask here exactly as it may for a read, and then a flagged pixel
-// is counted like any other. The public comment on ComputeHistogram used to say the mask was
-// applied full stop, which was never what the code did -- the pass reads the flag only when the
-// caller has not declined it. Pinned through the public API, because that is where the two
-// disagreed; the pass's own test covers the same switch a level down.
+// is counted like any other: the pass reads the flag only when the caller has not declined it.
+// Pinned through the public API, because that is what ComputeHistogram's comment promises; the
+// pass's own test covers the same switch a level down.
 //
 // A pixel in the deleted chunk stays absent either way: the flag says a pixel is bad, and a missing
 // chunk means there is no pixel to speak of.

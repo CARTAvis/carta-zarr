@@ -44,13 +44,11 @@ namespace {
 // from what it says: nlohmann throws on a value that is not the type it is read as, and the standard
 // library throws on a length it cannot allocate. This is where that becomes a report.
 //
-// It is the only try in this file. Three entry points used to write their own beside the twelve
-// that went through here, with fallback codes of their own, so whether one caught was a question you
-// answered by reading to the end of it.
+// It is the only try in this file, so that whether an entry point catches is never a question.
 //
-// The node is a view, and it becomes a string only in the handler. Taken as a string, it was built
-// at the call -- the location or the image id, copied before the try it was meant to be reported
-// from -- so an allocation that failed there escaped every entry point that named its node first.
+// The node is a view, and it becomes a string only in the handler. Taken as a string it would be
+// copied at the call, before the try it is meant to be reported from, and an allocation that failed
+// there would escape.
 // The report is a string too, and under the same shortage it may not be possible to make one: then
 // the code is what reaches the caller, with nothing to say, which is still a Result.
 template <typename Function>
@@ -78,9 +76,7 @@ auto Guarded(ErrorCode code, std::string_view node, Function&& function) -> decl
 // failure says which image it was about, build the ReducibleImage, and guard the lot. Image::Read
 // does the first and the last and not the middle, because a read is not a reduction.
 //
-// There is no empty handle to refuse here. A handle's _impl is never null -- see carta_zarr.h -- so
-// the checks every entry point used to open with guarded a state nothing could reach but a move,
-// and a move is now a copy.
+// There is no empty handle to refuse here: a handle's _impl is never null; see carta_zarr.h.
 //
 // The handle is a template parameter because Image::Impl is private to Image and this is not.
 // Deducing the type asks nothing of access control, where naming it would.

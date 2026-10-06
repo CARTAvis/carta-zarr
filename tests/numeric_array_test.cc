@@ -4,9 +4,9 @@
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
 
-// NumericArray is where a Zarr array's stored order stops being the caller's problem. The cases that
-// matter are the ones a schema profile used to get wrong silently: a dimension it does not have, an
-// index past the end of one it does, and a buffer of another length than the shape claims.
+// NumericArray is where a Zarr array's stored order stops being the caller's problem. The cases
+// that matter are the ones a schema profile could get wrong silently: a dimension it does not have,
+// an index past the end of one it does, and a buffer of another length than the shape claims.
 
 #include "zarr/numeric_array.h"
 
@@ -99,10 +99,10 @@ void TestIndexPastTheEndIsAnError() {
             "an index past the end of a dimension was not reported as an invalid slice");
 }
 
-// The case the old hand-rolled indexing turned into a silent 0.0: metadata promising more elements
-// than the store actually holds. It is refused when the values are bound to their metadata rather
-// than when an element past the end is asked for, so an array that exists can always be read. A
-// buffer longer than the shape is as wrong, and used to be addressed as if it were not.
+// Metadata promising more elements than the store actually holds, which indexing by hand would turn
+// into a silent 0.0. It is refused when the values are bound to their metadata rather than when an
+// element past the end is asked for, so an array that exists can always be read. A buffer longer
+// than the shape is as wrong.
 void TestValuesAreAsManyAsTheShapeDeclares() {
     for (const std::size_t count : {std::size_t{4}, std::size_t{13}, std::size_t{0}}) {
         const auto refused = NumericArray::Make("BEAM", BeamShapedMetadata(), CountingValues(count));

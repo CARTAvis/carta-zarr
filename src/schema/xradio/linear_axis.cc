@@ -120,8 +120,8 @@ DirectionAxisFit FitDirectionAxis(const std::vector<double>& cosines, std::strin
     // A direction axis is linear by construction, so an axis that cannot be described linearly is a
     // store this library cannot make sense of rather than a coordinate it reports tabularly -- which
     // is what a spectral axis in the same position is. Three ways to reach it: fewer than two
-    // samples, two samples that are the same, and a sample that is not a finite number. Both leave the caller's
-    // reference pixel and increment at whatever they were, and before this they left them there silently.
+    // samples, two samples that are the same, and a sample that is not a finite number. Each leaves the
+    // caller's reference pixel and increment at whatever they were, and says so.
     //
     // Diagnosed here rather than in FitLinearAxis because a spectral axis with one channel is not
     // degenerate, it is a continuum image, and it takes the tabular path by design.

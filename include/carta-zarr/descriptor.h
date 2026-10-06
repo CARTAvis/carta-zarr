@@ -269,9 +269,8 @@ struct ChunkGeometry {
     // The spatial axis the store varies fastest, which is the one a reduction walks along.
     //
     // Reading a plane with the other one fastest means transposing every chunk on the way into the
-    // destination, and that is not a rounding error: measured on two stores holding the same
-    // 2048x2048x16 image and differing only in whether l or m is written last, a whole-plane
-    // spectral profile took 172.3 ms against 130.3 with zstd and 139.7 against 94.5 uncompressed.
+    // destination, and that is not a rounding error: on the same 2048x2048x16 image stored both ways,
+    // a whole-plane spectral profile took a third to a half longer along the wrong axis.
     //
     // So the walk follows the store rather than the other way round, and the runs a reduction makes
     // from a region's raster lie along this axis.

@@ -98,10 +98,8 @@ constexpr std::uint64_t kZ = 8;
 // A plane large enough for the binning to be worth splitting across workers.
 //
 // Both histograms hand a plane to PlanRowTasks and bin it in place when it comes back with one
-// task, and the split is where a private accumulator per task is merged -- 9c21397 and 6ba0ce2 were
-// both in that neighbourhood. kX by kY is 66,560 pixels, one under the 65,536 a task has to be
-// worth, so every reduction in this file until now took the serial branch. The committed 512x520
-// fixture was the only thing in the repository that reached the other one.
+// task, and the split is where a private accumulator per task is merged. kSplitX by kSplitY is a
+// plane large enough to be split, so the runs below reach the merge as well as the serial branch.
 constexpr std::uint64_t kSplitX = 384;
 constexpr std::uint64_t kSplitY = 390;
 constexpr std::uint64_t kSplitZ = 4;
@@ -393,11 +391,9 @@ void TestASpectralReductionAgreesWithTheFormula() {
 
 // A region occupies the chunks its mask touches, not the chunks its bounding box covers.
 //
-// This is what the reduction's chunk index is for, and until now the only thing asserting it was a
-// pair of cases on a 4 x 5 x 2 x 3 fixture that ran a reduction, saw that no hand-over was left
-// unfinished, and reasoned backwards to "so it read one chunk" -- both saying in their own comments
-// that they stop testing anything if the chunk shape ever changes. Here the source is asked what it
-// was given instead, at a size where the box and the occupancy are four times apart.
+// This is what the reduction's chunk index is for. The source is asked what it was given, rather
+// than a reduction's hand-overs reasoned backwards from, at a size where the box and the occupancy
+// are four times apart.
 //
 // Occupancy's own tests say the index is right. This says the reduction walks it: an index that is
 // correct and then ignored reads all sixteen chunks and still returns the right statistics.
@@ -484,7 +480,7 @@ void TestAMaskedRegionReadsOnlyTheChunksItOccupies() {
     };
 
     // This image varies y fastest, so the runs the reduction makes from the raster are ranges of
-    // rows, one line per column -- the case that used to cost a column walk down the raster.
+    // rows, one line per column, made without walking down a column of the raster.
     carta::zarr::RegionMask rastered{0, 0, kSide, kSide, {raster.data(), raster.size()}};
     reduce(rastered, "as a raster");
 }
@@ -1053,8 +1049,8 @@ std::string Describe(const std::vector<double>& reported) {
 // Sampled every eighth pixel, a 16 x 16 plane of 4 x 4 chunks keeps pixels only in the chunks whose
 // first row and column are multiples of eight: four of sixteen. Those four are the run, and the
 // chunks the sample steps over are neither read nor counted, so it reports at one, two and three
-// quarters. It used to count the stepped-over chunks as it passed them, which made the fraction jump
-// over what it did not read -- 2/16, 8/16, 10/16 -- and end three quarters short of the whole.
+// quarters. Counting the stepped-over chunks as it passed them would make the fraction jump over
+// what it did not read and end three quarters short of the whole.
 void TestACubeHistogramReportsEveryReadButItsFirst() {
     {
         const auto image = MakeImage(8, 8, 8);

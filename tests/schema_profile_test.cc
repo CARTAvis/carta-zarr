@@ -304,8 +304,8 @@ void TestMalformedCoordinateSystemIsInvalid() {
     Require(probe.kind == SchemaMatchKind::invalid, "malformed coordinate_system_info was accepted");
 }
 
-// Every XRADIO writes coordinate_system_info, so a store without it is malformed too. The probe
-// used to look only when it was there, and such a store opened with a direction of "" at (0, 0).
+// Every XRADIO writes coordinate_system_info, so a store without it is malformed too, and refused
+// rather than opened with a direction of "" at (0, 0).
 void TestAMissingCoordinateSystemIsInvalid() {
     auto nodes = CompleteStore();
     nodes[""] = RootGroup(false);
@@ -383,8 +383,8 @@ void TestOpenableGate() {
 
 // Coordinates belong to the dataset and every image references them by dimension name, so an image
 // whose own extent disagrees with the coordinate it names cannot be described with it: it would be
-// reported with three channels' worth of coordinates over seven channels of pixels. It used to be
-// listed as openable and refused when a consumer tried to open it.
+// reported with three channels' worth of coordinates over seven channels of pixels. It is not
+// listed as openable.
 void TestAnImageDisagreeingWithACoordinateIsNotOpenable() {
     auto nodes = CompleteStore();
     // Seven channels of pixels where the dataset's frequency coordinate has three.
@@ -458,10 +458,8 @@ void TestANestedGroupIsNotABrokenArray() {
 
 // A refusal names the variable's own reason rather than answering generically.
 //
-// This used to be what two copies of the openability rule disagreed about: the facade passed the
-// listing's diagnostic through and the profile answered "not openable by this profile", so a
-// consumer got a worse explanation depending on which way it had arrived. The copies are one
-// decision now, and what is asserted here is the half that a single rule does not guarantee on its
+// The reason an image is not openable is the same whichever way a consumer arrives at it. One rule
+// decides openability; what is asserted here is the half a single rule does not guarantee on its
 // own -- that the reason survives the trip from the listing to the refusal.
 void TestARefusalCarriesTheVariablesOwnReason() {
     auto nodes = CompleteStore();
@@ -491,17 +489,16 @@ void TestARefusalCarriesTheVariablesOwnReason() {
     Require(!absent && absent.error().code == ErrorCode::not_found,
             "a variable that is not there should be reported as missing, not as unopenable");
 
-    // A node that is there and will not parse is neither of those. It used to answer "not found",
-    // because the rule ran against a listing the node had already dropped out of, which is a
-    // different thing from a name the dataset does not have.
+    // A node that is there and will not parse is neither of those, and not "not found" either,
+    // which is a name the dataset does not have.
     const auto broken = profile.Describe(store.value(), "BROKEN");
     Require(!broken && broken.error().code == ErrorCode::invalid_metadata,
             "a node that is present and will not parse was reported as a missing variable");
 }
 
-// The dataset-level counterpart, and the three answers it has to keep apart. This used to be
-// written out in Dataset::Open, so a probe's refusal meant whatever the facade decided it meant --
-// and none of it was reachable without a store on disk shaped to produce each kind.
+// The dataset-level counterpart, and the three answers it has to keep apart: what a probe's refusal
+// means is the profile's to say, and each kind is reached here without a store on disk shaped to
+// produce it.
 void TestOneRuleDecidesWhatDatasetIsOpenable() {
     using carta::zarr::internal::RequireOpenableDataset;
 
@@ -646,7 +643,7 @@ void TestAConsolidatedBlockThatMisnamesItsNodesIsRefused() {
     Require(!outside && outside.error().code == ErrorCode::invalid_metadata,
             "a consolidated key naming a path outside the store was accepted");
 
-    // One node under two spellings. Which document won used to depend on the order the object was
+    // One node under two spellings. Which document wins does not depend on the order the object is
     // walked in.
     auto doubled = ConsolidatedStore();
     auto& doubled_root = doubled[""];
@@ -656,9 +653,8 @@ void TestAConsolidatedBlockThatMisnamesItsNodesIsRefused() {
             "a consolidated block listing one node twice was accepted");
 }
 
-// The inventory decides once what each node is. Its callers used to decide it three ways -- one read
-// node_type out of the document, one parsed every node and looked again when a parse failed, one
-// parsed every node and ignored the answer -- and agreed only where the three happened to coincide.
+// The inventory decides once what each node is, so its callers cannot decide it three different
+// ways.
 void TestTheInventorySaysWhatEachNodeIs() {
     using carta::zarr::internal::NodeKind;
     auto nodes = CompleteStore();
@@ -708,10 +704,9 @@ void TestTheInventorySaysWhatEachNodeIs() {
             "discovery could not walk a store holding a node whose node_type is not a string");
 }
 
-// A node whose document will not parse is diagnosed, not refused. CONTEXT.md says so of a node whose
-// metadata would not parse -- the rest of the dataset is still readable -- and the listing used to
-// refuse the whole hierarchy over one, so a stray broken document beside a perfectly good image
-// closed the dataset.
+// A node whose document will not parse is diagnosed, not refused. CONTEXT.md says so of a node
+// whose metadata would not parse -- the rest of the dataset is still readable -- so a stray broken
+// document beside a perfectly good image does not close the dataset.
 void TestANodeThatWillNotParseIsDiagnosedNotRefused() {
     auto nodes = CompleteStore();
     nodes["JUNK"] = "{not valid json";
@@ -749,8 +744,8 @@ void TestANodeThatWillNotParseIsDiagnosedNotRefused() {
 }
 
 // The dataset-level half of a codec that will not parse: the array is diagnosed, and the dataset
-// beside it is not. A numeric codec name used to throw past every per-node diagnostic and close the
-// store.
+// beside it is not. A numeric codec name does not throw past every per-node diagnostic and close
+// the store.
 void TestAnArrayWithAMalformedCodecIsDiagnosedNotRefused() {
     auto nodes = CompleteStore();
     nodes["JUNK"] = R"({"shape":[2],"data_type":"float32",)"
@@ -902,8 +897,8 @@ void TestADeclaredFlagThatCannotMaskClosesTheImageInTheListing() {
     }
 }
 
-// An image is described by the five axes this profile knows. One with a sixth used to be listed
-// openable and described with five, so every read of it failed on the rank it had not been told.
+// An image is described by the five axes this profile knows. One with a sixth is not listed
+// openable, since every read of it would fail on the rank it had not been told.
 void TestAnImageWithAnAxisBeyondTheFiveIsNotOpenable() {
     auto nodes = CompleteStore();
     nodes["MODEL"] = NumericArray("[1,3,2,4,5,1]", R"(["time","frequency","polarization","l","m","extra"])", "float32",
@@ -1048,9 +1043,9 @@ void TestAmbiguousFlagsSelectNone() {
     Require(single_diagnostics.empty(), "one matching flag produced an ambiguity diagnostic");
 }
 
-// A root that says its consolidated metadata is null has none, which is how zarr-python reads it: it
-// opens the hierarchy by listing, as a root without the member would. It used to be refused as a
-// malformed block, closing a store whose every node was fine.
+// A root that says its consolidated metadata is null has none, which is how zarr-python reads it:
+// it opens the hierarchy by listing, as a root without the member would, rather than refusing a
+// malformed block and closing a store whose every node is fine.
 void TestANullConsolidatedBlockIsNoConsolidation() {
     auto nodes = CompleteStore();
     auto root = RootGroup();
@@ -1089,10 +1084,9 @@ void TestStoreRejections() {
 
 // How large a dataset is, when the transport cannot say how much room it takes.
 //
-// The measured half of this answer used to be the facade's: it re-parsed the location string and
-// walked the directory itself, so the fallback could only be reached from here by pointing at a real
-// store and setting the timeout to zero to make the walk give up. An in-memory transport gives up
-// honestly instead -- it holds no bytes -- so the branch is reachable with a map.
+// An in-memory transport gives up measuring honestly -- it holds no bytes -- so the fallback to the
+// declared size is reachable with a map, rather than by pointing at a real store and setting the
+// timeout to zero.
 void TestSizeFallsBackWhenTheStoreCannotBeMeasured() {
     auto store = Open(CompleteStore());
     Require(static_cast<bool>(store), "OpenStore rejected the in-memory store");
@@ -1328,8 +1322,8 @@ void TestCheckingAnArrayReadsItsOwnDocumentOnce() {
 }
 
 // Describing an image holds the image's own array to the store's copy before any value is read, so
-// an image that opens can be read: its own document disagreeing used to open, and then fail every
-// read. Its flag is held to it as soon as the flag is known.
+// an image that opens can be read: one whose own document disagrees does not open only to fail
+// every read. Its flag is held to it as soon as the flag is known.
 void TestDescribingAnImageHoldsItsArraysToTheirOwnDocuments() {
     using carta::zarr::internal::xradio::CoordinateValues;
     using carta::zarr::internal::xradio::DescribeImage;
@@ -1434,8 +1428,8 @@ void TestAnAxisReportsItsCoordinatesUnit() {
             "the spectral axis and the spectral coordinate disagree about the unit");
 }
 
-// The coordinates are said once, and every list the profile used to keep is read off that table. The
-// sky plane's are the five an image carries, in the order its axes are reported; the aperture plane
+// The coordinates are said once, and every list the profile keeps is read off that table. The sky
+// plane's are the five an image carries, in the order its axes are reported; the aperture plane
 // shares three of them and has its own two.
 void TestTheCoordinatesAreOneTable() {
     using carta::zarr::internal::xradio::AxisCount;

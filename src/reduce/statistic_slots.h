@@ -10,11 +10,8 @@
 // Where a spectral reduction keeps what it has counted, and the block it hands that over as.
 //
 // The layout is [region][statistic][channel], with only the statistics that were asked for, in
-// kStatisticOrder. It used to be worked out in six places inside ReduceSpectral -- the slot table,
-// the identities a block starts from, the six writes after each row, the per-task partials and their
-// merge, and turning untouched extrema into NaN and back -- and then a seventh time by every caller
-// of the block. The block accumulator and each task's private partial are the same thing at two
-// extents, so they are one type here, and nothing outside this file indexes into either.
+// kStatisticOrder, and nothing outside this file indexes into it. The block accumulator and each
+// task's private partial are the same thing at two extents, so they are one type here.
 //
 // Not the cube histogram's accumulator, although it counts the same statistics. It keeps them
 // in registers for one region and one channel, decides an extremum is untouched by num_pixels being
@@ -138,8 +135,8 @@ public:
     // every region in every chunk, so it stays inline and asks only the questions Reset answered.
     //
     // kDeviations says whether the layout has sum_sq_dev, which the caller knows once for every row
-    // it folds: as a question asked here, of every row, it cost a reduction of one-pixel strips 2%
-    // whether or not it was asked for the spread.
+    // it folds: asked here, of every row, it would cost a reduction of one-pixel strips 2% whether or
+    // not it was asked for the spread.
     template <bool kDeviations>
     void Fold(std::size_t region, std::uint64_t channel, const RowTotals& row) noexcept {
         assert(region < _regions && channel < _channels);

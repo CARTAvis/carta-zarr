@@ -6,10 +6,9 @@
 
 // Which chunks a set of regions occupies, stated directly.
 //
-// Every claim here used to be reached by running a whole spectral reduction over a 4 x 5 x 2 x 3
-// fixture and counting how many times a result was handed over -- two tests that said in their own
-// comments that they stop testing anything if the chunk shape ever changes. Two of the refusals
-// below were reachable from no test at all.
+// Every claim here is asked of the occupancy itself, rather than read off how many times a whole
+// spectral reduction handed a result over -- which would stop testing anything if a fixture's chunk
+// shape changed -- and each refusal below is reached.
 //
 // This target links nothing. The question is regions and a chunk shape in, an index out.
 
@@ -350,10 +349,10 @@ void TestAGridTooLargeToIndexIsRefused() {
 }
 
 // What Of refuses rather than places: a set it cannot index, and a region that is not a box of the
-// plane with a raster cut for it. Each of these was the caller's to rule out, and each one let through
-// used to be undefined: a raster shorter than its box read past its end, an empty box or an empty set
-// wrapped an extent around zero, and a count past what an incidence can number was truncated. Asked
-// of Of itself, so that nothing has to be checked before it is called.
+// plane with a raster cut for it. Each one let through would be undefined: a raster shorter than
+// its box read past its end, an empty box or an empty set wrapping an extent around zero, and a
+// count past what an incidence can number truncated. Asked of Of itself, so that nothing has to be
+// checked before it is called.
 void TestRegionsThatCannotBePlacedAreRefused() {
     const PlaneExtent plane{8, 6};
     // Refused for the reason given, rather than for whatever a region let through runs into later:
@@ -414,9 +413,9 @@ void TestRegionsThatCannotBePlacedAreRefused() {
 // Which pixels of a chunk cell a region selects, a row at a time.
 //
 // The occupancy above says which cells a region touches; a reduction then has to know which pixels
-// of each cell to add up, and that used to be worked out again inside the accumulation -- the run
-// encoding, the raster's strides, and the clipping to the cell -- where nothing but a whole
-// reduction against an oracle could see it.
+// of each cell to add up -- the run encoding, the raster's strides, and the clipping to the cell --
+// and that is asserted here, outside the accumulation, where more than a whole reduction against an
+// oracle can see it.
 
 // A region that is its whole box is one span a row, clipped to the cell, and no rows at all in a cell
 // it misses along either axis.

@@ -77,10 +77,10 @@ void TestANumericVariableIsNotAMask() {
             "a numeric variable was accepted as a pixel mask");
 }
 
-// The read applies the mask element by element against the selection it read pixels with, so a
-// flag that is the image's own shape in another order is not a mask of it. Both halves matter: a
-// reshaped flag and a transposed one fail for the same reason and neither used to be checked
-// without a store.
+// The read applies the mask element by element against the selection it read pixels with, so a flag
+// that is the image's own shape in another order is not a mask of it. Both halves matter: a
+// reshaped flag and a transposed one fail for the same reason, and both are checked without a
+// store.
 void TestTheFlagMustMatchTheImagesOwnDimensions() {
     const auto reshaped = RequireUsableFlag(Flag("bool", {1, 3, 2, 4, 4}), Image(), "MASK_0");
     Require(!reshaped && reshaped.error().code == ErrorCode::invalid_metadata,

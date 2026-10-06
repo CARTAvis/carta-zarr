@@ -14,11 +14,8 @@
 namespace carta::zarr::internal::zarr {
 
 // How an array is laid out, in the order its own dimensions are stored. What a consumer is told is
-// ChunkGeometry, the same facts permuted into logical order; this is what that is built from.
-//
-// It used to be reported as well, as ImageDescriptor::storage, beside the geometry made from it: one
-// fact in two orders, of which a consumer had to pick one -- and carta-backend's own comment said
-// which one it picked.
+// ChunkGeometry, the same facts permuted into logical order; this is what that is built from, and
+// it is not reported beside it, so a consumer never has to pick between one fact in two orders.
 struct StorageLayout {
     std::vector<std::uint64_t> chunk_shape;
     std::vector<std::uint64_t> shard_shape;

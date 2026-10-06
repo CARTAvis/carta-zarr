@@ -10,8 +10,8 @@
 //
 // Only the reads are stubbed. Building a selection, counting what it holds and checking the read
 // controls are arithmetic rather than reads, so they come from src/zarr/pixel_selection.cc -- the
-// same code the real build runs. They used to be copied out by hand here, which meant a build that
-// reads no pixels could disagree with the one that does about which requests are legal.
+// same code the real build runs -- and a build that reads no pixels agrees with the one that does
+// about which requests are legal.
 
 #include "zarr/pixel_reader.h"
 

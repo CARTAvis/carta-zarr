@@ -132,8 +132,7 @@ public:
     // divided by -- a selection holds at least one channel, and one that occupies nothing still
     // reports against a whole.
     //
-    // A block's completeness and a cube histogram's progress are both this number, and each used to
-    // multiply it out for itself.
+    // A block's completeness and a cube histogram's progress are both this number.
     std::uint64_t ChunksCovering(std::uint64_t layer_chunks, SelectionChannel begin, SelectionChannel end) const {
         return std::max<std::uint64_t>(1, layer_chunks * ChunksTouched(begin, end));
     }
@@ -150,8 +149,7 @@ public:
     // chunk_blocks.h, asked with this plan's budget.
     //
     // A unit is at least one chunk. The one caller that can mean none -- a region set occupying
-    // nothing -- says so itself, in EmitChannels; this used to answer it with the budget's byte
-    // count standing in for a count of units.
+    // nothing -- says so itself, in EmitChannels.
     std::uint64_t UnitsAffordable(std::uint64_t chunks_per_unit) const {
         return ::carta::zarr::internal::UnitsAffordable(ChunksPerRead(), chunks_per_unit);
     }
@@ -187,9 +185,8 @@ private:
                              const ChunkGeometry& flag_geometry, const AxisMap& map, const CheckedPlanes& planes,
                              std::uint64_t sample, const ReadOptions& options);
 
-    // Steps towards the answers above rather than answers themselves, and the two a caller used to
-    // divide by itself: the chunk-count rule was written out in six places and the slab-sizing rule
-    // in two. Nothing asserts either directly -- what a test has to say about them it says through
+    // Steps towards the answers above rather than answers themselves, kept here so that no caller
+    // divides them out for itself. Nothing asserts either directly -- what a test has to say about them it says through
     // SlabChannels and ChunksTouched, which are the questions a caller actually asks.
     std::uint64_t _chunk_depth = 1;
     std::uint64_t _least_channels = 1;

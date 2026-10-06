@@ -7,10 +7,9 @@
 // What a pass decides before it reads anything.
 //
 // This is the half of the pass with an answer worth checking on its own: how deep a slab goes, how
-// wide a band is, which spatial axis is the inner one, and how much a read may decode. Every one of
-// those has moved at least once, and until now each could only be observed through a reduction's
-// output against a directory tree on disk -- so the tests that cover them assert how many times a
-// result was handed over and reason backwards to what the walk must have read.
+// wide a band is, which spatial axis is the inner one, and how much a read may decode. Each is
+// asserted directly here, rather than reasoned backwards from how many times a reduction handed a
+// result over.
 //
 // None of it needs a store, a transport or a fixture, which is the point.
 
@@ -128,9 +127,9 @@ void TestTheInnerAxisFollowsTheStore() {
 }
 
 // A budget is in decoded chunk bytes, and a masked read decodes the flag too -- at the flag's own
-// cost, which is the thing this used to get wrong. RequireUsableFlag holds a flag to bool over the
-// image's shape, so beside a float32 chunk it is a quarter of one and not a second one. Counting it
-// as a second one shrank every masked read by the difference.
+// cost. RequireUsableFlag holds a flag to bool over the image's shape, so beside a float32 chunk it
+// is a quarter of one and not a second one; counting it as a second one would shrink every masked
+// read by the difference.
 void TestAMaskCostsWhatTheFlagCosts() {
     const Range spectral{0, 32, 1};
     const auto geometry = MakeGeometry(256, 260, 2, AxisRole::spatial_y);
@@ -253,9 +252,8 @@ void TestABandIsNeverEmpty() {
 }
 
 // A region set that occupies no chunk at all -- a mask of zeroes -- costs nothing per layer, so
-// nothing spatial bounds how many channels one emitted block holds. The budget used to answer "how
-// many units of no chunks" with its own byte count, which is large enough to look right until the
-// budget is smaller than the spectrum: here it is one byte, and the block was two channels.
+// nothing spatial bounds how many channels one emitted block holds. A budget smaller than the
+// spectrum is where answering with the budget's own byte count would go wrong: here it is one byte.
 void TestARegionSetOccupyingNothingBoundsNoBlock() {
     const auto image = MakeImage(512, 520, 32);
     const auto geometry = MakeGeometry(256, 260, 2, AxisRole::spatial_y);
@@ -525,9 +523,10 @@ void TestASampledRowSplitsAlongItToo() {
     Require(walked.pixels == 4, "every sixteenth pixel each way");
     Require(source.pixel_reads() == 4, "and only the pieces holding one are read");
     // Sixteen chunks to the plane, and four the sample has a pixel in: every other one of the first
-    // row of eight, and none of the second. Each read after the first is told the chunks before it of
-    // those four. Counting the chunks stepped over as well, as this used to, told it 2/16, 4/16 and
-    // 6/16 and never reached the whole: the last eight were passed after the last read.
+    // row of eight, and none of the second. Each read after the first is told the chunks before it
+    // of those four, so the fraction reaches the whole. Counting the chunks stepped over as well
+    // would report 2/16, 4/16 and 6/16 and never reach it, since the last eight are passed after
+    // the last read.
     Require(reported == std::vector<double>{1.0 / 4, 2.0 / 4, 3.0 / 4},
             "the fractions were not of the chunks the sample reads");
 }
@@ -565,8 +564,7 @@ std::uint64_t ChannelOf(const Slab& slab, std::uint64_t z) {
 // chunk four deep still emits blocks of four.
 //
 // And what a block's walk reads is the block it is handed over as: a later block's slab starts at
-// zero, counted from the block, and holds that block's channels rather than the first block's --
-// which is e97066f, where every block after the first re-read the first one's.
+// zero, counted from the block, and holds that block's channels rather than the first block's.
 void TestBlocksAreCutOnChunkBoundaries() {
     const auto image = MakeImage(64, 64, 32);
     const auto geometry = MakeGeometry(64, 64, 4, AxisRole::spatial_y);

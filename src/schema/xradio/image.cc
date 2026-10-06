@@ -306,9 +306,8 @@ Result<DescribedImage> DescribeImage(const Store& store, std::string_view image_
 
 Result<DescribedImage> DescribeImageFrom(const Store& store, std::string_view image_id,
                                          const CoordinateValues& values) {
-    // Asked rather than decided again. This used to classify the variable itself, on a weaker rule
-    // than the one the listing was built with -- l and m rather than the whole axis set -- so the
-    // two could disagree about what an image is.
+    // Asked rather than decided again, so that describing an image and the listing cannot disagree
+    // about what an image is.
     if (auto qualified = RequireQualified(store, image_id); !qualified) {
         return qualified.error();
     }
@@ -401,9 +400,8 @@ Result<std::vector<Beam>> ReadBeams(const Store& store, std::string_view image_i
 
     // The image named a beam table, so what the table needs to be read is required rather than
     // optional. A label array that cannot be read -- absent, malformed, or written with a codec
-    // this build does not carry -- used to be discarded here, and the parameter indices it did not
-    // yield then returned an empty beam list: the answer for an image that has no beam at all,
-    // which this one is not.
+    // this build does not carry -- fails the read: an empty beam list is the answer for an image
+    // that has no beam at all, which this one is not.
     auto parameter_labels = store.ReadStringArray1D("beam_params_label");
     if (!parameter_labels) {
         return parameter_labels.error();

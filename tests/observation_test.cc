@@ -7,9 +7,8 @@
 // What an image variable's attributes say about the observation that produced it.
 //
 // Optional metadata comes from a file, so its shape is whatever was written rather than whatever
-// the schema describes. The contract is that a field it cannot read is skipped and the rest is
-// kept -- nothing here can close an image. Checking that used to mean writing a store and opening
-// it; this takes JSON.
+// the schema describes. The contract is that a field it cannot read is skipped and the rest is kept
+// -- nothing here can close an image. This takes JSON, so no store is written.
 //
 // The geodetic-to-cartesian conversion is asserted here for the first time. It was reachable only
 // through a store, and no fixture wrote a position that would show a swapped axis.
@@ -68,9 +67,9 @@ void TestTheTelescopePositionBecomesCartesian() {
     Require(Near(position.at(2), radius * std::sin(lat)), "OBSGEO-Z was not the expected element");
 }
 
-// A telescope position holding a string where a number belongs used to throw out of nlohmann and
-// past the Result the caller is holding. It is a value the image can do without: the readable
-// metadata beside it survives and only the position is missing.
+// A telescope position holding a string where a number belongs does not throw out of nlohmann past
+// the Result the caller is holding. It is a value the image can do without: the readable metadata
+// beside it survives and only the position is missing.
 void TestAMalformedPositionIsSkippedRatherThanConverted() {
     const auto observation = Describe(nlohmann::json{
         {"object_name", "Zarr test source"},

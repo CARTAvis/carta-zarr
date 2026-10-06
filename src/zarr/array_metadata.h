@@ -25,10 +25,8 @@ struct ArrayMetadata {
     nlohmann::json data_type_configuration;
     nlohmann::json attributes;
     std::vector<std::uint64_t> chunk_shape;
-    // Copied out of the document rather than left in it, the same way attributes is, because the
-    // alternative is what this used to be: the parsed metadata and the raw document travelling
-    // together to every caller that needed a field this struct did not carry, each of them reaching
-    // back into the json and each deciding for itself what "absent" meant.
+    // Copied out of the document rather than left in it, the same way attributes is, so that no
+    // caller reaches back into the json and decides for itself what "absent" means.
     //
     // Carried, not interpreted. What a chain means differs by who is asking -- a storage layout
     // wants to know whether it is sharded and what compressed it, a string decoder wants the order
@@ -43,11 +41,10 @@ struct ArrayMetadata {
     // extent of the array's rank. That is the same well-formedness rule it applies to `shape`,
     // `dimension_names` and the outer `chunk_grid`, asked at the same gate, and it keeps nothing.
     //
-    // Deliberately not left to ParseStorageLayout, which is where it used to live. Its one caller
-    // dropped the error, so an array with a malformed sharding codec opened and then reported a
-    // chunk geometry synthesised from its own shape -- an image that says every one of its chunks
-    // is the whole image, with no diagnostic. Checking at the gate is what makes that unreachable
-    // rather than guarded against.
+    // Checked here rather than in ParseStorageLayout, which is infallible: an array with a malformed
+    // sharding codec must not open and report a chunk geometry synthesised from its own shape -- an
+    // image that says every one of its chunks is the whole image. Checking at the gate makes that
+    // unreachable rather than guarded against.
     nlohmann::json codecs = nlohmann::json::array();
     nlohmann::json chunk_key_encoding = nlohmann::json::object();
     // What a chunk never written reads as, carried as written for the same reason the codecs are:
@@ -63,9 +60,8 @@ Result<ArrayMetadata> ParseArrayMetadata(const nlohmann::json& metadata, std::st
 // gathered into shards, and what compressed them.
 //
 // A projection of the document rather than a second reading of it, which is why it is here and not
-// on Store. It was a Store method reaching into the raw node metadata, so the one thing it decides
-// -- what a sharding codec says about the real chunk shape -- could only be exercised by writing a
-// store to a directory and opening an image out of it. Nothing in it touches a transport.
+// on Store: what a sharding codec says about the real chunk shape can be tested without a store.
+// Nothing in it touches a transport.
 //
 // Reports invalid_metadata for a sharding codec whose chunk_shape is not positive integers, or does
 // not have the rank of the shard it sits in.

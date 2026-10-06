@@ -276,10 +276,9 @@ using CubeHistogramProgressCallback = std::function<bool(const CubeHistogramProg
 // The walk runs on as many threads as the context was given, each with a provisional histogram of
 // its own that it re-aggregates onto the same target grid at the end, so the counts depend on the
 // thread count and a caller who needs the same ones every time asks for one decode thread. It is
-// not much of a dependence. On a billion-pixel ASKAP cube against the two-pass answer over the same
-// range, one thread misplaced 0.007% of pixels and twenty-eight misplaced 0.004%; the two disagreed
-// with each other about 0.007% of pixels, no target bin by more than 0.002 of an average one, and
-// every percentile CARTA offers landed within 0.003 of a bin of the two-pass answer on both.
+// not much of a dependence: on a billion-pixel cube, at one thread or twenty-eight, fewer than
+// 0.01% of pixels landed in a different bin than the two-pass answer's, and every percentile CARTA
+// offers within 0.003 of a bin of it.
 //
 // The result is one histogram for the whole selection, not one per plane: no plane's counts can be
 // settled until the last pixel has been read, and holding a provisional histogram for every plane

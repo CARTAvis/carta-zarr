@@ -8,9 +8,8 @@
 //
 // Separate from pixel_reader.cc so that it links without TensorStore. Translating a request over
 // the logical axes into the stored order, checking it against the descriptor, and counting what it
-// selects are arithmetic over the descriptor; a build that reads no pixels still needs all three,
-// and until now got them from a hand-written copy in tests/support that could disagree with this
-// one about the very ranges it exists to reject.
+// selects are arithmetic over the descriptor, and a build that reads no pixels, such as a test's,
+// still needs all three.
 
 #include "zarr/pixel_selection.h"
 
@@ -76,8 +75,8 @@ Result<PixelSelection> BuildSelection(const ImageDescriptor& descriptor, const R
         }
     }
 
-    // Counted here, once. It used to be counted by whoever needed it, and a count that did not fit
-    // came back as zero -- which the read reported as a destination too small for the request.
+    // Counted here, once, and a count that does not fit is an error rather than a zero, which a read
+    // would report as a destination too small for the request.
     std::uint64_t elements = 1;
     for (const auto count : selection._count) {
         if (elements > std::numeric_limits<std::uint64_t>::max() / count) {

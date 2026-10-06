@@ -6,11 +6,10 @@
 
 // The layout a spectral reduction accumulates in, and the block it hands that over as.
 //
-// Everything here used to be six lambdas inside ReduceSpectral, reachable only through a whole
-// reduction over a fixture. None of it needs a pixel: which slot a statistic lands in, what a slot
-// starts as, how two partials combine, and what an untouched extremum is reported as are all
-// questions about doubles in a buffer. So this links nothing but the header, and reads every answer
-// through the one block a sink is ever given.
+// None of this needs a pixel: which slot a statistic lands in, what a slot starts as, how two
+// partials combine, and what an untouched extremum is reported as are all questions about doubles
+// in a buffer. So this links nothing but the header, and reads every answer through the one block a
+// sink is ever given.
 
 #include "reduce/statistic_slots.h"
 

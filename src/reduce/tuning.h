@@ -43,11 +43,10 @@ inline constexpr std::array<Statistic, 7> kStatisticOrder{Statistic::num_pixels,
 // provisional histogram is eight bytes a bin and there is one per worker, so the ones nobody needs
 // are paid for in cache. A thousand target bins get 16,384 of them, which is 128 kB.
 //
-// Held between 4,096 and 65,536. Measured on a billion-pixel ASKAP cube against the exact two-pass
-// answer, with the walk on twenty-eight threads: 65,536 misplaced 0.003% of pixels in 3.64 s,
-// 16,384 misplaced 0.004% in 2.40 s, 8,192 misplaced 0.006% in 2.21 s, 4,096 misplaced 0.011% in
-// 2.14 s, and below that both numbers get worse at once. Sixteen is where the time has flattened
-// out, with a few times the resolution the error would need.
+// Held between 4,096 and 65,536. On a billion-pixel cube against the exact two-pass answer, the
+// error rose from 0.003% of pixels at 65,536 to 0.011% at 4,096 while the time fell from 3.64 s to
+// 2.14 s, and below 4,096 both get worse at once. Sixteen is where the time has flattened out, with
+// a few times the resolution the error would need.
 inline constexpr std::uint32_t kProvisionalBinsPerBin = 16;
 inline constexpr std::uint32_t kLeastProvisionalBins = 1u << 12;
 inline constexpr std::uint32_t kMostProvisionalBins = 1u << 16;
@@ -57,21 +56,18 @@ inline constexpr std::uint32_t kMostProvisionalBins = 1u << 16;
 inline constexpr std::size_t kSpectralEmitBudgetBytes = 64u << 20;
 
 // Below this a task is not worth its share of a dispatch, so the work is done on the calling thread
-// instead. It is the floor TaskSplit hands PlanRowTasks for every reduction. All three used to have
-// their own copy of the number -- two under one name and one under another, which is why the two
-// looked like different rules rather than the same one written three times.
+// instead. It is the floor TaskSplit hands PlanRowTasks for every reduction.
 //
 // A statement about pixels, whatever the thing being split is counted in: a plane histogram splits
 // rows of a plane, a cube histogram splits rows across the planes of a read, and a spectral
 // reduction splits chunk cells. PlanRowTasks multiplies out to pixels before it divides, so all
 // three are asking the same question of the same number.
 //
-// It was 65,536, which split a 512 x 512 plane into four tasks however many cores there were. Measured
-// on the 512x512x7776 ASKAP cube, warm, one user: at 16,384 the backend's exact cube histogram, which
-// bins plane by plane, took 4.91 s against 5.50 s on a 28-core desktop and 5.15 s against 6.24 s on a
-// 32-thread two-socket server; at 262,144 it took 6.99 s and 10.52 s. With eight users at once every
-// value tried, 4,096 to 1,048,576, was within 6% on both, and regions within 3%. 4,096 gained a few
-// percent more on both, which is less than it risks for a small read on a slower dispatch. ADR 0014.
+// At 65,536 a 512 x 512 plane would be four tasks however many cores there were. On a 512x512x7776
+// cube, warm, one user, an exact cube histogram binned plane by plane took 11-17% less time at
+// 16,384 than at 65,536 on both a desktop and a server, and far longer at 262,144; with eight users
+// every value tried was within 6%. 4,096 gained a few percent more, which is less than it risks for
+// a small read on a slower dispatch. ADR 0014 has the measurements.
 #ifndef CARTA_ZARR_TUNING_LEAST_PIXELS_PER_TASK
 #define CARTA_ZARR_TUNING_LEAST_PIXELS_PER_TASK (1u << 14)
 #endif

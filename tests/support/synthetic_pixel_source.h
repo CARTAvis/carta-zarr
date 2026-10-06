@@ -149,11 +149,10 @@ private:
         return strides;
     }
 
-    // The seam's guard, as the TensorStore reader has one: the destination is the caller's, and this
-    // writes through it as far as the selection reaches. Longer than the selection is the ordinary
-    // case -- a piece is handed the rest of the caller's buffer -- so only shorter is refused. This
-    // used to demand the two be equal, which held only because every caller passed the selection's
-    // own size as the destination's.
+    // The seam's guard, as the TensorStore reader has one: the destination is the caller's, and
+    // this writes through it as far as the selection reaches. Longer than the selection is the
+    // ordinary case -- a piece is handed the rest of the caller's buffer -- so only shorter is
+    // refused.
     static carta::zarr::Result<void> Fits(std::uint64_t total, std::size_t destination_elements) {
         if (total > destination_elements) {
             return carta::zarr::Error{carta::zarr::ErrorCode::invalid_argument, "Destination buffer is too small",

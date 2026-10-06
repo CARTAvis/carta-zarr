@@ -4,15 +4,10 @@
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
 
-// How large a dataset is, which is a question about a dataset and not about a node. It was a method
-// on Store, which is what made Store look like a dataset facade: it uses nothing private, holds no
-// state, and has one caller.
-//
-// Both halves of the answer live here now. The facade used to keep the measured half -- it parsed
-// the location string a second time and walked the directory itself -- which meant the rule for
-// what a location means existed twice, and the copy up there was the weaker one: it never resolved
-// the path, so a process that changed directory after opening the store measured somewhere else, or
-// nowhere, and silently fell back to the declared size instead.
+// How large a dataset is, which is a question about a dataset and not about a node, so it is not a
+// method on Store. Both halves of the answer, measured and declared, live here, and the measured
+// one walks the location the store resolved when it opened rather than parsing the string again:
+// a process that changed directory since would otherwise measure somewhere else.
 
 #include "store.h"
 #include "zarr/data_type.h"

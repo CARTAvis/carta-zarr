@@ -7,29 +7,13 @@
 #ifndef CARTA_ZARR_SRC_REDUCE_GROWING_HISTOGRAM_H_
 #define CARTA_ZARR_SRC_REDUCE_GROWING_HISTOGRAM_H_
 
-// The one-pass histogram's arithmetic, on its own.
+// The one-pass histogram's arithmetic, on its own, so that its counts can be tested exactly rather
+// than through ComputeCubeHistogram against a two-pass oracle.
 //
-// It was already a deep module -- two methods over a range that seeds itself, doubles, merges and
-// re-aggregates -- but the seam was file-local inside plane_histogram.cc, so the only way to reach
-// it was ComputeCubeHistogram over a fixture on disk, compared against a two-pass oracle to a
-// tolerance. It is the most numerically subtle code in this library and it has had three fixes --
-// 9c21397 on how a straddling bin is split, 6ba0ce2 and then a narrower seed on where the range
-// seeds itself -- and each was a five-line exact-count test from here.
-//
-// Nothing about the arithmetic changed in the move, and ComputeCubeHistogram uses the class exactly
-// as before. One thing about its codegen did, and it is recorded here rather than left to be
-// rediscovered: `Grow` has to stay out of line.
-//
-// The class was file-local in an anonymous namespace, which told the compiler that nothing outside
-// that translation unit could call `Add`, and it inlined `Add` into the per-pixel loop. Given
-// external linkage it does the opposite -- it folds the cold `Grow`, which allocates a vector, into
-// `Add`, and the result is too large to inline into the loop that calls it a billion times. Marking
-// `Grow` as not-inline restores the choice the anonymous namespace used to make for free.
-//
-// Measured on build-release against tests/data/.../pixels_wide (512 x 520 x 4, four threads, nine
-// repeats), best median ComputeCubeHistogram of three runs: 1.49 ms file-local, 1.82 ms moved here
-// as-is, 1.38 ms moved here with `Grow` out of line. As ADR 0005 warns about the visitor, none of
-// this is visible in a Debug build or in any test that asserts.
+// `Grow` has to stay out of line. Otherwise the compiler folds it, cold and allocating, into `Add`,
+// and `Add` is then too large to inline into the per-pixel loop that calls it: ComputeCubeHistogram
+// took 1.82 ms against 1.38 on a 512 x 520 x 4 image at four threads. As ADR 0005 warns, none of
+// this shows in a Debug build or in a test that asserts.
 
 #include <algorithm>
 #include <cmath>
@@ -58,12 +42,6 @@ public:
             // guess that is too wide is permanent while one that is too narrow costs a few merges and
             // then fits -- each merge doubles it, so reaching any spread the pixels have is a few
             // dozen, once, against a cube of billions of pixels.
-            //
-            // It was seeded twice too wide before this. Anchored at one, it spent almost all of the
-            // resolution on the empty space between a Jansky and the hundredths of one the pixels
-            // actually are. Anchored at the pixel's own magnitude, it was 2000 wide around a first
-            // pixel of 1000, and pixels a sixteenth apart there shared one provisional bin and came
-            // out spread evenly over every target bin between them.
             //
             // A first pixel of exactly zero seeds at the least denormal, which is as narrow as it
             // gets: about a hundred and fifty merges to reach a spread of one. A range of zero width
@@ -94,11 +72,11 @@ public:
     // Re-aggregate over the range the caller wants, splitting each provisional bin between the
     // target bins it overlaps in proportion to how much of it each one covers.
     //
-    // Giving the whole of it to the bin its centre falls in is the obvious thing and it is what
-    // this used to do, but the error that leaves is a bias rather than a wobble: every provisional
-    // bin straddling a target edge leans the same way, and nothing averages it out. Splitting
-    // assumes the pixels are spread evenly inside one provisional bin, which is the assumption the
-    // caller's own percentile already makes between target bins.
+    // Giving the whole of it to the bin its centre falls in is the obvious thing, but the error
+    // that leaves is a bias rather than a wobble: every provisional bin straddling a target edge
+    // leans the same way, and nothing averages it out. Splitting assumes the pixels are spread
+    // evenly inside one provisional bin, which is the assumption the caller's own percentile
+    // already makes between target bins.
     //
     // Largest remainder, so the split still adds up: every pixel the walk binned comes out in some
     // target bin, which is what lets the caller compare the total against its own pixel count.

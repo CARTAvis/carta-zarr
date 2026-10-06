@@ -50,8 +50,7 @@ struct ProbeResult : DatasetDescriptor {
 
 // Which variables of a store a schema profile will open, and what it had to say about the ones it
 // would not. Defined here rather than in store.h because it is a statement about images, and a
-// Store deals in nodes and arrays; it used to sit down there only so that a cache down there could
-// be keyed by profile.
+// Store deals in nodes and arrays.
 struct ImageDiscovery {
     std::vector<ImageEntry> images;
     std::optional<std::string> default_image_id;
@@ -82,9 +81,8 @@ std::string RejectionMessage(const std::vector<Diagnostic>& diagnostics, std::st
 // image within a dataset: that one is about an image, this one about the dataset holding it.
 //
 // Three ways it is not, and they are three different errors: nothing matched, something matched and
-// was malformed, and a profile matched a store that has no images in it. Each used to be written
-// out at the one call site that needed it, beside a rejection-message rule that lived there too --
-// so what a probe's refusal means was decided by the facade, which is the profile's question.
+// was malformed, and a profile matched a store that has no images in it. Which one a refusal is,
+// and what it says, is the profile's question rather than the facade's.
 Result<void> RequireOpenableDataset(const ProbeResult& probe, std::string_view location);
 
 /**
@@ -111,9 +109,8 @@ public:
     Result<ImageDiscovery> Discover(const Store& store) const;
 
     // One of these rather than a verified and an unverified form. Describing an image establishes
-    // its own precondition now, against the one variable it was handed rather than by enumerating
-    // the store, so there is no longer a caller that has established it first and none that has to
-    // be told to.
+    // its own precondition, against the one variable it was handed rather than by enumerating the
+    // store, so no caller has to establish it first.
     Result<DescribedImage> Describe(const Store& store, std::string_view image_id) const;
     // Asks nothing about openability, deliberately: an Image handle exists only for a variable
     // Dataset::OpenImage already opened, so there is nothing left here to establish.

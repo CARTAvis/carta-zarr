@@ -30,9 +30,9 @@ namespace carta::zarr::internal {
 // parsed, so a mismatch is a caller that built a layout some other way -- `at` throws, and
 // Dataset::OpenImage is wrapped in Guarded, so it reaches that caller as invalid_metadata.
 //
-// Said with `at` rather than filled in. Falling back to the axis length is what this used to do, and
-// it turned "no layout here" into a geometry claiming one chunk covers the whole image -- a lie a
-// consumer cannot tell from an image that really is stored that way.
+// Said with `at` rather than filled in. Falling back to the axis length would turn "no layout here"
+// into a geometry claiming one chunk covers the whole image -- a lie a consumer cannot tell from an
+// image that really is stored that way.
 inline ChunkGeometry BuildChunkGeometry(const ImageDescriptor& descriptor, const zarr::StorageLayout& layout) {
     ChunkGeometry geometry;
     geometry.sharded = layout.sharded;
@@ -49,8 +49,7 @@ inline ChunkGeometry BuildChunkGeometry(const ImageDescriptor& descriptor, const
         const auto shard = layout.sharded ? layout.shard_shape.at(stored) : chunk;
         geometry.chunk_shape.at(logical) = chunk;
         geometry.shard_shape.at(logical) = shard;
-        // Both extents are positive by the same guarantee, so neither zero this divides by nor the
-        // shard of no extent the line above used to substitute for can arrive.
+        // Both extents are positive by the same guarantee, so no zero reaches this division.
         geometry.grid_shape.at(logical) = (axis.length + chunk - 1) / chunk;
     }
 

@@ -28,9 +28,8 @@ class Occupancy;
 // and v is the other, so that a plane arrives with u contiguous and never has to be transposed on
 // the way in. A caller's x and y are mapped onto these once, at the top of the reduction.
 //
-// Placed rather than "as the walk sees it", which is what it used to be called: a pass never knows
-// what a region is, so this is what a region looks like after the placement rather than something
-// the walk holds.
+// Placed, because a pass never knows what a region is: this is what a region looks like once it is
+// placed, not something the walk holds.
 class PlacedRegion {
 public:
     // The rows of this region inside the box [u0, u1) x [v0, v1), half-open. None when the region

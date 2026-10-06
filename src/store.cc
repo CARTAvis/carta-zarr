@@ -151,10 +151,9 @@ Result<void> RequireSameArray(const zarr_metadata::ArrayMetadata& copy, const za
 // Transport holds every Transport to the same rule, and yields the key the caches are stored under.
 //
 // A "." component is dropped rather than refused, because "./SKY" names the node "SKY" and a store
-// is entitled to spell it that way. This used to be the one place the two rules disagreed: a
-// metadata read went through here and was served, and the pixel read that followed went through
-// Transport::ArrayDirectory, which refused the same name -- so an image declaring `flag: "./MASK_0"`
-// described perfectly, reported a pixel mask, and then failed every masked read.
+// is entitled to spell it that way. A pixel read's name comes through here too before it reaches
+// Transport::ArrayDirectory, which refuses a "." outright, so an image declaring
+// `flag: "./MASK_0"` reads its mask as well as describing it.
 Result<std::string> NormalizeNodeName(std::string_view node) {
     const std::filesystem::path relative(node);
     if (relative.empty() || relative.is_absolute() || relative.has_root_path()) {
@@ -395,8 +394,7 @@ const Result<std::vector<NodeEntry>>& Store::Inventory() const {
                 // A document that was read and would not parse says nothing about what the node is,
                 // and that is an answer about the node rather than about the hierarchy: the other
                 // nodes were read, and the images among them still open. CONTEXT.md says so of a
-                // node whose metadata would not parse -- diagnosed rather than refused -- and this
-                // used to refuse the whole dataset over one.
+                // node whose metadata would not parse -- diagnosed rather than refused.
                 //
                 // Only that failure. A read that failed at all -- a transport error, a node listed
                 // and then gone -- says the hierarchy could not be taken, and is reported as such.

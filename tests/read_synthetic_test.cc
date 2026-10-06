@@ -238,11 +238,11 @@ void TestASplitReadAgreesWithAnUnsplitOne() {
 }
 
 // What crosses the seam is the caller's buffer from where a piece lands to its end, not the piece's
-// size restated. The seam's one check -- that the selection fits what it is writing into -- is only a
-// check if the length it is held to comes from the buffer: it used to be worked out from the very
-// selection it was compared with, so a piece planned to run past the caller's buffer would have
-// been written there. The buffer here is longer than the read, so the rest is visible, and so is
-// whether anything was written into it.
+// size restated. The seam's one check -- that the selection fits what it is writing into -- is only
+// a check if the length it is held to comes from the buffer rather than from the very selection it
+// is compared with; otherwise a piece planned to run past the caller's buffer would be written
+// there. The buffer here is longer than the read, so the rest is visible, and so is whether
+// anything was written into it.
 void TestEachPieceIsHandedTheRestOfTheBuffer() {
     const auto image = MakeImage();
     const auto geometry = MakeGeometry();

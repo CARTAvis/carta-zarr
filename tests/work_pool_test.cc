@@ -217,10 +217,10 @@ void RowRangesCoverEveryRowOnce() {
     Require(TaskRows(4, 5, 3).first == TaskRows(4, 5, 3).last, "a task past the last row is empty");
 }
 
-// A body that throws -- a histogram growing its bins is an allocation, and an allocation can fail --
-// reaches the thread that called Run, after every worker has stopped touching the caller's buffers.
-// Thrown on a pool thread, it used to end the process: nothing above a std::thread's function
-// catches.
+// A body that throws -- a histogram growing its bins is an allocation, and an allocation can fail
+// -- reaches the thread that called Run, after every worker has stopped touching the caller's
+// buffers. Left to propagate on a pool thread it would end the process: nothing above a
+// std::thread's function catches.
 void AThrowingBodyReachesTheCaller() {
     WorkPool pool(4);
     const auto caller = std::this_thread::get_id();

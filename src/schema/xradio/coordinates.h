@@ -11,13 +11,10 @@
 // holds, what makes one well formed, whether an image agrees with them, what unit each is in, and
 // reading their values.
 //
-// Each of those used to be said where it was needed. The five names were written out in four lists
-// in three files, polarization was special-cased as the one holding labels in two of them, and the
-// unit had two rules -- an axis read a units attribute, the spectral coordinate fell back to its
-// reference frequency's -- so one image reported its spectral axis unitless and its spectral
-// coordinate in Hz. ADR 0006 left the lists as a separate question; this is that question.
+// Said once so that an axis and its coordinate cannot disagree, about the unit above all: one rule
+// for it, so that no image reports its spectral axis unitless and its spectral coordinate in Hz.
 //
-// Who asks what is unchanged, and is ADR 0009's division: the probe asks whether each coordinate is
+// Who asks what is ADR 0009's division: the probe asks whether each coordinate is
 // well formed, which is a fact about the dataset; qualification asks whether an image agrees with
 // them, which is a fact about the image; describing an image reads them.
 //

@@ -37,12 +37,10 @@ inline constexpr std::size_t kDecodedBytesPerRead = 64u << 20;
 
 // The chunks one request should cover, below which the decode pool runs short of work.
 //
-// This is the same floor the budget above describes, stated in the unit it is actually in. Holding
-// everything else fixed and varying only the decode concurrency settles it: on a 1 MiB chunk image
-// a whole-plane profile took 97.8 ms at 64 chunks per request, 109.2 at 16, 119.8 at 8, 152.5 at 4
-// and 462.2 at 1 -- while the same sweep with the pool limited to one thread was flat at 410-459 ms
-// throughout. A request holding one chunk performs exactly as if there were no pool, because there
-// is nothing to spread over it.
+// This is the same floor the budget above describes, stated in the unit it is actually in. On a
+// 1 MiB chunk image a whole-plane profile took 98 ms at 64 chunks per request and 462 ms at one,
+// which is what it took with the pool limited to one thread: a request holding one chunk has
+// nothing to spread over the pool.
 //
 // So a budget in bytes alone is not enough: 64 MiB is sixteen chunks of a 4 MiB image and four of a
 // 16 MiB one, and XRADIO writes both -- 512x512x4 is 4 MiB with one polarization and 16 MiB with

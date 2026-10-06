@@ -6,8 +6,8 @@
 
 // Memo and Lazy carry two decisions the Store depends on but never states: a value is computed
 // exactly once, and a failed computation is remembered like any other. The second is what makes a
-// Store a stable read-only view -- a node that was missing stays missing -- and until now it was
-// only observable three layers up, through the metadata cache test.
+// Store a stable read-only view -- a node that was missing stays missing -- and it is asserted here
+// rather than three layers up.
 
 #include "memo.h"
 

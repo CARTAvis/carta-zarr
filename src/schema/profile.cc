@@ -82,9 +82,8 @@ Result<std::vector<Beam>> SchemaProfile::ReadBeams(const Store& store, std::stri
 
 Result<ProbeResult> ProbeStore(const Store& store) {
     ProbeResult result;
-    // Each profile is asked once, and answers with what it found as well as what it decided. The
-    // store used to be enumerated twice for a match -- once to probe and once to discover -- which
-    // is what a cache inside Store was there to hide.
+    // Each profile is asked once, and answers with what it found as well as what it decided, so a
+    // match enumerates the store once.
     std::vector<SchemaInspection> matches;
     std::vector<SchemaProbeResult> invalid;
     // What a profile that did not match had to say about the store anyway: a store of nothing but

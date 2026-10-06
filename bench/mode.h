@@ -12,12 +12,11 @@
 // what a process has to have before the clock starts, the reading itself, and what is written down
 // after it.
 //
-// Each mode used to be a case in a switch, in five files: its name and its default count of
-// operations, its positions, how a position is written, which chunks it spans, whether it reads
-// through a cache pool of its own, how it reads, its settings columns, and what a trial opens for it.
-// Adding a column to animations touched seven files. A mode is now one file under modes/ and a line
-// in Workload::For, and its name and default count in options.cc, which the command line needs before
-// there is a Workload to ask.
+// A mode is one file under modes/ and a line in Workload::For, and its name and default count in
+// options.cc, which the command line needs before there is a Workload to ask. Everything else about
+// it -- its positions, how a position is written, which chunks it spans, whether it reads through a
+// cache pool of its own, how it reads, its settings columns, and what a trial opens for it -- is in
+// that one file.
 
 #include "options.h"
 #include "plan.h"

@@ -173,8 +173,8 @@ void TestAShardingCodecWithAnUnusableChunkShapeIsRefused() {
 }
 
 // A codec named by something other than a string is a document that will not parse, and says so as
-// one. It used to throw out of the parse instead, from the lookup that matched codecs by name -- past
-// the per-node diagnostic, so one malformed array closed a dataset whose images were fine.
+// one, rather than throwing past the per-node diagnostic and closing a dataset whose images are
+// fine.
 void TestACodecNamedByANonStringIsRefused() {
     const auto outer = RefusedDocument(R"([{"name":"bytes"},{"name":17}])");
     Require(outer.code == ErrorCode::invalid_metadata, "a numeric codec name should be invalid metadata");

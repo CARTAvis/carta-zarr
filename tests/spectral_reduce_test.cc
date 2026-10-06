@@ -434,19 +434,13 @@ void TestAMaskWithHolesMatchesTheOracle(const carta::zarr::Image& sky) {
     CheckAgainstOracle(Collect(sky, WholeSpectrum(regions, 0)), regions, 0, "a mask with holes");
 }
 
-// Where the chunk-pruning cases went.
+// Where chunk pruning is asserted.
 //
-// Two tests lived here that ran a reduction with a budget of one chunk and read the pruning off
-// whether a block had been handed over unfinished -- "no hand-over, so it read one chunk". Both
-// said in their own comments that they stop testing anything if this fixture's chunk shape ever
-// changes, and this plane is two chunks wide, so the difference they could see was one chunk
-// against two.
-//
-// The claim is now made twice, in the two halves it was always two claims: carta-zarr-occupancy
-// asserts the index over a 4 x 4 chunk grid, and carta-zarr-reduce-synthetic asks the pixel source
-// how many chunks it was actually given -- sixteen against four, and it says which. What stays here
-// is what needs a real store: TestAMaskWithHolesMatchesTheOracle still checks a masked region's
-// statistics against the oracle through the public interface.
+// That a reduction reads only the chunks its regions occupy is asserted in two halves elsewhere:
+// carta-zarr-occupancy asserts the index over a 4 x 4 chunk grid, and carta-zarr-reduce-synthetic
+// asks the pixel source how many chunks it was actually given. What stays here is what needs a real
+// store: TestAMaskWithHolesMatchesTheOracle checks a masked region's statistics against the oracle
+// through the public interface.
 
 void TestABigRegionIsEmittedALayerAtATime(const carta::zarr::Image& sky) {
     const std::vector<carta::zarr::RegionMask> regions{{0, 0, kL, kM}};

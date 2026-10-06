@@ -33,8 +33,7 @@ public:
 namespace {
 
 // The one check both histograms make. It takes the count rather than a request because their two
-// requests are different types -- and because a cube histogram used to reach this by building a
-// stand-in HistogramRequest with bins = 1 over [0, 1], bounds that nothing ever read.
+// requests are different types.
 Result<void> ValidateBins(const std::string& node, std::uint32_t bins) {
     if (bins == 0 || bins > kMaxHistogramBins) {
         return Error{ErrorCode::invalid_argument,

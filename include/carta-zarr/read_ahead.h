@@ -47,10 +47,9 @@ struct ReadAheadStats {
 // CONTEXT.md, Run and Read-ahead, and ADR 0016.
 //
 // A frame that enters a run decodes all of it, which costs what jumping to the channel does, and every
-// frame after it in the run is served from the cache in a few milliseconds. Measured on Lustre, a
-// 7763 x 4742 cube in 512 x 512 x 4 chunks stalled for up to 135 ms every fourth frame at 5 frames a
-// second, and in 512 x 512 x 16 chunks for up to 400 ms every sixteenth; decoding the next run in the
-// time the frames of this one left over hid every stall for one viewer, at 5 and at 10 frames a second.
+// frame after it in the run is served from the cache in a few milliseconds. On Lustre, a 7763 x 4742
+// cube in 512 x 512 x 16 chunks stalled for up to 400 ms every sixteenth frame; decoding the next run
+// in the time the frames of this one left over hid every stall for one viewer.
 //
 // Only while that time is to be had. One prefetch is under way at a time, and once a frame is late
 // while one is, there are no more: with eight viewers animating that cube at once, prefetches that

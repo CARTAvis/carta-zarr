@@ -7,10 +7,8 @@
 // What a reduction is allowed to ask for, asked of nothing but a descriptor.
 //
 // This target compiles no implementation source at all. That is the argument for the module as much
-// as the assertions are: every one of these used to be reachable only through ComputeHistogram or
-// ReduceSpectral over a fixture, so the same refusal was asserted twice, in two suites that each
-// needed a store on disk to reach it -- and the spectral third of it was asserted somewhere else
-// again.
+// as the assertions are: each refusal is asserted once, here, rather than through ComputeHistogram
+// or ReduceSpectral over a fixture on disk.
 
 #include "reduce/plane_selection.h"
 
@@ -86,8 +84,8 @@ void Refuses(const ImageDescriptor& descriptor, const PlaneSelection& planes, co
     Require(checked.error().code == ErrorCode::invalid_argument, what + " should be refused as invalid_argument");
 }
 
-// A selection that fits comes back saying what it was asked for, and saying it once: a caller that
-// took three loose numbers had to carry all three to everywhere that needed any of them.
+// A selection that fits comes back saying what it was asked for, and saying it once, so a caller
+// carries one value rather than three loose numbers.
 void TestASelectionThatFitsIsReportedBack() {
     const auto image = MakeImage(32, 4, 2);
     const PlaneSelection planes{Range{2, 5, 3}, 3, 1};
@@ -119,8 +117,8 @@ void TestTheSpectralRangeHasToFit() {
     Refuses(image, {Range{0, 4, 0}, 0, 0}, "a stride of zero");
 }
 
-// cad6c8a, in the one place it can now be fixed. Multiplying the span out -- start + (count - 1) *
-// stride -- wraps for these, and a wrapped span lands back inside the image and passes.
+// Multiplying the span out -- start + (count - 1) * stride -- wraps for these, and a wrapped span
+// lands back inside the image and passes.
 void TestASpanThatWouldWrapIsRefused() {
     const auto image = MakeImage(32, 4, 2);
     constexpr std::uint64_t kHuge = std::uint64_t{1} << 32U;

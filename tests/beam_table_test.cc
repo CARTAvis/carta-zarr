@@ -7,9 +7,8 @@
 // The beams a beam fit parameter table holds.
 //
 // The table is a three- or four-dimensional array read through a flat buffer, and what decides
-// which element is which beam is dimension names against parameter labels. That used to be checked
-// by writing a store, opening it and calling ReadBeams; DescribeBeams takes the arrays already
-// read, so a case is a table and its labels.
+// which element is which beam is dimension names against parameter labels. DescribeBeams takes the
+// arrays already read, so a case is a table and its labels, with no store to write.
 //
 // Every plane and parameter gets a value that identifies it -- major = 100*frequency +
 // 10*polarization, minor and the position angle one and two above it -- so a pair of transposed
@@ -93,8 +92,8 @@ void TestParametersAreLocatedByLabel() {
     }
 }
 
-// A table with more than one time plane used to be read as its first plane only, silently. Time
-// varies slowest, so a single-plane table reads back in the order it always did.
+// A table with more than one time plane is read whole, not as its first plane only. Time varies
+// slowest, so a single-plane table reads back in the same order either way.
 void TestEveryTimePlaneIsReported() {
     const auto beams = DescribeBeams(
         Table({2, 3, 2, 3}, {"time", "frequency", "polarization", "beam_params_label"}, Values(2, 3, 2)), kLabels);
@@ -142,10 +141,8 @@ void TestLabelsMustNameEveryParameter() {
 }
 
 // The labels are the coordinate of the table's parameter dimension, one label a parameter. More
-// labels than parameters used to describe beams whenever the three it needed fell inside the
-// dimension, and were refused only when one fell past its end -- as a slice out of range rather than
-// as the store being malformed. Fewer always described beams, and left the rest unaccounted for.
-// Either way the labels were another table's.
+// labels than parameters, or fewer, are another table's, and refused as a malformed store rather
+// than read as far as they happen to reach.
 void TestLabelsAreOneAParameter() {
     const auto more =
         DescribeBeams(Table({1, 3, 2, 3}, {"time", "frequency", "polarization", "beam_params_label"}, Values(1, 3, 2)),

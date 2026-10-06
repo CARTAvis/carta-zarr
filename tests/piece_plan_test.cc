@@ -136,9 +136,8 @@ void TestAnUnconstrainedReadIsOnePiece() {
             "an uncut read should be one piece covering everything");
 }
 
-// Either reason on its own is enough. The memory ceiling is the half that used to be ignored unless
-// a progress callback came with it, which meant a caller who said how much memory the read could
-// have and did not care to watch was refused instead of served.
+// Either reason on its own is enough. A caller who says how much memory the read can have, and does
+// not care to watch, is served in pieces rather than refused.
 //
 // A watched read is cut to the library's own budget, so it takes one larger than that budget to show:
 // 8192 planes of 64 x 64 float32 is 128 MiB against 64. Planning allocates nothing, so the size costs

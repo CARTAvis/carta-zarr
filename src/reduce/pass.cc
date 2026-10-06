@@ -53,8 +53,7 @@ std::uint64_t PassPlan::EmitChannels(std::uint64_t layer_chunks, std::size_t byt
         std::max<std::uint64_t>(1, kSpectralEmitBudgetBytes / std::max<std::size_t>(1, bytes_per_channel));
     // A region set that occupies nothing costs nothing per layer, so the spatial walk leaves the whole
     // read budget and nothing bounds the block but the emit budget and the hint. Said here rather than
-    // left to UnitsAffordable, which used to answer "how many units of no chunks" with the budget's
-    // byte count -- large, and so right by accident, except under a budget smaller than the spectrum.
+    // left to UnitsAffordable, whose units are at least one chunk.
     const std::uint64_t spatial_channels =
         layer_chunks == 0 ? planes.spectral.count
                           : std::min(planes.spectral.count, UnitsAffordable(layer_chunks)) * _least_channels;

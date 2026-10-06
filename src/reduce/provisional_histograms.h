@@ -9,12 +9,10 @@
 
 // What a cube histogram counts into as it walks, and the answer it makes of that.
 //
-// All of this was inside ComputeCubeHistogram: the rule for how finely to bin, an accumulator per
-// task, the per-pixel loop that feeds them, and the collection that adds six totals across tasks
-// and re-aggregates each task's provisional histogram onto the caller's bins. The only way to reach
-// any of it was a whole walk over a fixture, compared against a two-pass answer to a tolerance --
-// and the public description of the first rule had already come apart from the code. Here each
-// can be asked a question with a few rows of pixels and an exact answer.
+// The rule for how finely to bin, an accumulator per task, the per-pixel loop that feeds them, and
+// the collection that adds six totals across tasks and re-aggregates each task's provisional
+// histogram onto the caller's bins. Each can be asked a question with a few rows of pixels and an
+// exact answer, rather than only through a whole walk compared against a two-pass answer.
 //
 // Not the spectral reduction's StatisticSlots, although it counts the same six statistics; that
 // header says why the two stay apart.

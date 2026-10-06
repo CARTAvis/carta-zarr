@@ -122,11 +122,11 @@ void TestASharedArrayKeepsBothGranularities() {
 
 // An axis the layout does not describe is refused rather than filled in.
 //
-// This case used to assert the opposite: a short chunk shape fell back to the axis length, and a
-// shard extent of zero fell back to the chunk. Both were dropped, because the first turned "no
-// layout for this image" into a geometry claiming one chunk covers the whole image, and a consumer
-// could not tell that from an image really stored that way. ParseArrayMetadata now refuses the
-// array that produced it, so a layout of the wrong rank is a caller that built one some other way.
+// A layout of the wrong rank is refused rather than filled in. Falling back to the axis length
+// would turn "no layout for this image" into a geometry claiming one chunk covers the whole image,
+// which a consumer could not tell from an image really stored that way. ParseArrayMetadata refuses
+// the array that would produce it, so a layout of the wrong rank is a caller that built one some
+// other way.
 void TestAnAxisTheLayoutDoesNotDescribe() {
     const auto image = MakeImage({0, 1, 2, 3, 4}, {64, 40, 6, 1, 1});
     StorageLayout layout;

@@ -74,12 +74,8 @@ public:
     // destination_to_stored()[i] is the stored dimension that the destination's axis i is. The
     // destination is dense with its axis 0 fastest-varying.
     //
-    // It says how the destination is laid out and nothing else. It used to be logical_to_stored --
-    // which logical axis each stored dimension is -- and a pass overwrote it with the reversed stored
-    // order to ask for a plane untransposed, after which the name was false: a reader taking
-    // coordinates from it got a plane that was consistent with itself and transposed. The order is
-    // chosen when the selection is built now, and which logical axis a stored dimension is stays
-    // with the descriptor, where it was all along.
+    // It says how the destination is laid out and nothing else. The order is chosen when the
+    // selection is built, and which logical axis a stored dimension is stays with the descriptor.
     const std::vector<std::size_t>& destination_to_stored() const noexcept { return _destination_to_stored; }
 
     // How many elements the selection produces. Never zero, and counted once, when it was built.

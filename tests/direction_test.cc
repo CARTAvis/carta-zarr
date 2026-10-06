@@ -81,9 +81,8 @@ void TestTheTransformationMatrixKeepsItsShape() {
 }
 
 // What every XRADIO writes is required, and one missing or malformed is refused rather than filled
-// in. This used to leave the identity for a bad matrix and "" for a missing projection -- a
-// leniency the probe made unreachable by refusing first, and that hid a store with no coordinate
-// system at all, which the probe did not look at.
+// in: an identity for a bad matrix, or "" for a missing projection, would hide a store with no
+// coordinate system at all.
 void TestAnIncompleteCoordinateSystemIsRefused() {
     const auto refused = [](const nlohmann::json& root, const std::string& what) {
         const auto read = carta::zarr::internal::xradio::ReadCoordinateSystem(root);
@@ -113,8 +112,8 @@ void TestAnIncompleteCoordinateSystemIsRefused() {
     refused(Root(short_pole), "a one-value native pole");
 }
 
-// XRADIO writes radians; the descriptor reports degrees. Three separate places convert, and all
-// three used to be unreachable.
+// XRADIO writes radians; the descriptor reports degrees. Each of the three places that convert is
+// reached here.
 void TestRadiansBecomeDegrees() {
     const double ra = 1.0;
     const double dec = 0.5;

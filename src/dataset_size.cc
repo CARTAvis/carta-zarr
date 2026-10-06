@@ -15,7 +15,6 @@
 // nowhere, and silently fell back to the declared size instead.
 
 #include "store.h"
-
 #include "zarr/data_type.h"
 
 #include <chrono>
@@ -33,8 +32,7 @@ Result<std::uint64_t> ElementSizeBytes(const zarr::ArrayMetadata& metadata, std:
 
     // XRADIO coordinate labels use the fixed_length_utf32 extension data type. Other fixed-length
     // extension types can be sized the same way when they declare length_bytes.
-    if (metadata.data_type_configuration.is_object() &&
-        metadata.data_type_configuration.contains("length_bytes")) {
+    if (metadata.data_type_configuration.is_object() && metadata.data_type_configuration.contains("length_bytes")) {
         const auto& length_bytes = metadata.data_type_configuration.at("length_bytes");
         if (zarr::IsPositiveInteger(length_bytes)) {
             return length_bytes.get<std::uint64_t>();
@@ -42,8 +40,7 @@ Result<std::uint64_t> ElementSizeBytes(const zarr::ArrayMetadata& metadata, std:
     }
 
     return Error{ErrorCode::unsupported_data_type,
-                 "Array " + std::string(node) + " has unsupported data_type " + metadata.data_type,
-                 std::string(node)};
+                 "Array " + std::string(node) + " has unsupported data_type " + metadata.data_type, std::string(node)};
 }
 
 // Every array in the hierarchy, at its uncompressed size: what the metadata declares the dataset
@@ -94,8 +91,7 @@ Result<std::uint64_t> TotalArraySizeBytes(const Store& store) {
                 break;
             }
             if (array_bytes > std::numeric_limits<std::uint64_t>::max() / dimension) {
-                return Error{ErrorCode::invalid_metadata,
-                             "Array " + node + " byte size overflows uint64_t", node};
+                return Error{ErrorCode::invalid_metadata, "Array " + node + " byte size overflows uint64_t", node};
             }
             array_bytes *= dimension;
         }

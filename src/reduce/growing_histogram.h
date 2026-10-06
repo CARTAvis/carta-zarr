@@ -72,8 +72,8 @@ public:
             const auto at = static_cast<float>(std::abs(v));
             const float above = std::nextafter(at, std::numeric_limits<float>::infinity());
             const double spacing = std::isinf(above)
-                                       ? static_cast<double>(at) - static_cast<double>(std::nextafter(at, 0.0F))
-                                       : static_cast<double>(above) - static_cast<double>(at);
+                                     ? static_cast<double>(at) - static_cast<double>(std::nextafter(at, 0.0F))
+                                     : static_cast<double>(above) - static_cast<double>(at);
             _width = spacing;
             _lower = v - (spacing * static_cast<double>(_counts.size() / 2));
             _seeded = true;

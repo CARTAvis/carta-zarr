@@ -9,8 +9,6 @@
 
 // What carta-zarr-bench was asked to do, parsed from its command line.
 
-#include <carta-zarr/descriptor.h>
-
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
@@ -20,6 +18,8 @@
 #include <string_view>
 #include <variant>
 #include <vector>
+
+#include <carta-zarr/descriptor.h>
 
 namespace carta::zarr::bench {
 
@@ -126,9 +126,7 @@ struct RunOptions {
     // and carta-backend's default --zarr_cache_size of 1 GiB when that is left to the library. Not
     // none, even then: a sharded layout keeps its shard index in the pool, and one that kept nothing
     // would read the index again for every chunk of a single read.
-    std::size_t FirstTouchCacheBytes() const noexcept {
-        return context.cache_bytes.value_or(std::size_t{1} << 30);
-    }
+    std::size_t FirstTouchCacheBytes() const noexcept { return context.cache_bytes.value_or(std::size_t{1} << 30); }
 
     unsigned OpsFor(Mode mode) const noexcept {
         if (const auto own = mode_ops.find(mode); own != mode_ops.end()) {

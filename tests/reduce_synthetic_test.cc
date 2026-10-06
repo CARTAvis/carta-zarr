@@ -17,11 +17,9 @@
 #include "reduce/pass.h"
 #include "reduce/plane_histogram.h"
 #include "reduce/spectral_reduce.h"
-#include "work_pool.h"
-
 #include "support/check.h"
-
 #include "support/synthetic_pixel_source.h"
+#include "work_pool.h"
 
 #include <algorithm>
 #include <cmath>
@@ -50,7 +48,7 @@ using carta::zarr::testing::SyntheticPixelSource;
 using carta::zarr::testing::Require;
 
 ReducibleImage Reducible(const SyntheticPixelSource& source, const ImageDescriptor& image,
-                       const ChunkGeometry& geometry, WorkPool& workers) {
+                         const ChunkGeometry& geometry, WorkPool& workers) {
     auto reducible = ReducibleImage::Of(source, image, geometry, geometry, workers);
     Require(static_cast<bool>(reducible), "the synthetic image's axes could not be mapped");
     return reducible.value();
@@ -132,7 +130,8 @@ void TestAHistogramCountsEveryPixel() {
     std::uint64_t blocks = 0;
     const auto reducible = Reducible(source, image, geometry, workers);
     const auto outcome = carta::zarr::internal::ComputeHistogram(
-        reducible, request, [&](const carta::zarr::HistogramBlock& block) {
+        reducible, request,
+        [&](const carta::zarr::HistogramBlock& block) {
             if (!block.complete) {
                 return true;
             }
@@ -143,7 +142,8 @@ void TestAHistogramCountsEveryPixel() {
                 }
             }
             return true;
-        }, options);
+        },
+        options);
     Require(static_cast<bool>(outcome),
             std::string("the histogram failed: ") + (outcome ? "" : outcome.error().message));
     Require(blocks > 1,
@@ -170,9 +170,9 @@ void TestAHistogramCountsEveryPixel() {
         }
     }
     for (std::size_t i = 0; i < expected.size(); ++i) {
-        Require(counts.at(i) == expected.at(i),
-                "bin " + std::to_string(i) + ": expected " + std::to_string(expected.at(i)) + ", got " +
-                    std::to_string(counts.at(i)));
+        Require(counts.at(i) == expected.at(i), "bin " + std::to_string(i) + ": expected " +
+                                                    std::to_string(expected.at(i)) + ", got " +
+                                                    std::to_string(counts.at(i)));
     }
     Require(source.most_hits_on_one_chunk() == 1, "and it decoded each chunk once getting there");
 }
@@ -203,12 +203,14 @@ void TestARangeWiderThanAFloatStillBinsItsPixels() {
     std::vector<std::uint64_t> counts;
     const auto reducible = Reducible(source, image, geometry, workers);
     const auto outcome = carta::zarr::internal::ComputeHistogram(
-        reducible, request, [&](const carta::zarr::HistogramBlock& block) {
+        reducible, request,
+        [&](const carta::zarr::HistogramBlock& block) {
             if (block.complete) {
                 counts.assign(block.Counts(0), block.Counts(0) + block.bin_count);
             }
             return true;
-        }, ReadOptions{});
+        },
+        ReadOptions{});
     Require(static_cast<bool>(outcome),
             std::string("the histogram failed: ") + (outcome ? "" : outcome.error().message));
 
@@ -217,9 +219,9 @@ void TestARangeWiderThanAFloatStillBinsItsPixels() {
     expected.at(6) = kRows;
     expected.at(9) = kRows;
     for (std::size_t bin = 0; bin < expected.size(); ++bin) {
-        Require(counts.at(bin) == expected.at(bin),
-                "bin " + std::to_string(bin) + ": expected " + std::to_string(expected.at(bin)) + ", got " +
-                    std::to_string(counts.at(bin)));
+        Require(counts.at(bin) == expected.at(bin), "bin " + std::to_string(bin) + ": expected " +
+                                                        std::to_string(expected.at(bin)) + ", got " +
+                                                        std::to_string(counts.at(bin)));
     }
 }
 
@@ -297,19 +299,21 @@ void TestEveryRangeIsBinnedAsTheCallerBinsIt() {
         std::vector<std::uint64_t> counts;
         const auto reducible = Reducible(source, image, geometry, workers);
         const auto outcome = carta::zarr::internal::ComputeHistogram(
-            reducible, request, [&](const carta::zarr::HistogramBlock& block) {
+            reducible, request,
+            [&](const carta::zarr::HistogramBlock& block) {
                 if (block.complete) {
                     counts.assign(block.Counts(0), block.Counts(0) + block.bin_count);
                 }
                 return true;
-            }, ReadOptions{});
-        Require(static_cast<bool>(outcome), std::string(c.what) + ": the histogram failed: " +
-                                                (outcome ? "" : outcome.error().message));
+            },
+            ReadOptions{});
+        Require(static_cast<bool>(outcome),
+                std::string(c.what) + ": the histogram failed: " + (outcome ? "" : outcome.error().message));
         const auto expected = CallerCounts(c.values, c.lower, c.upper, c.bins);
         for (std::size_t bin = 0; bin < expected.size(); ++bin) {
-            Require(counts.at(bin) == expected.at(bin),
-                    std::string(c.what) + ", bin " + std::to_string(bin) + ": the caller counts " +
-                        std::to_string(expected.at(bin)) + ", the library " + std::to_string(counts.at(bin)));
+            Require(counts.at(bin) == expected.at(bin), std::string(c.what) + ", bin " + std::to_string(bin) +
+                                                            ": the caller counts " + std::to_string(expected.at(bin)) +
+                                                            ", the library " + std::to_string(counts.at(bin)));
         }
     }
 }
@@ -339,7 +343,8 @@ void TestASpectralReductionAgreesWithTheFormula() {
     std::vector<double> maxima(regions.size() * kZ, 0.0);
     const auto reducible = Reducible(source, image, geometry, workers);
     const auto outcome = carta::zarr::internal::ReduceSpectral(
-        reducible, request, [&](const carta::zarr::SpectralBlock& block) {
+        reducible, request,
+        [&](const carta::zarr::SpectralBlock& block) {
             if (!block.complete) {
                 return true;
             }
@@ -354,7 +359,8 @@ void TestASpectralReductionAgreesWithTheFormula() {
                 }
             }
             return true;
-        }, options);
+        },
+        options);
     Require(static_cast<bool>(outcome),
             std::string("the reduction failed: ") + (outcome ? "" : outcome.error().message));
 
@@ -446,7 +452,8 @@ void TestAMaskedRegionReadsOnlyTheChunksItOccupies() {
         std::vector<double> counts(kChannels, 0.0);
         const auto reducible = Reducible(source, image, geometry, workers);
         const auto outcome = carta::zarr::internal::ReduceSpectral(
-            reducible, request, [&](const carta::zarr::SpectralBlock& block) {
+            reducible, request,
+            [&](const carta::zarr::SpectralBlock& block) {
                 if (!block.complete) {
                     return true;
                 }
@@ -457,13 +464,13 @@ void TestAMaskedRegionReadsOnlyTheChunksItOccupies() {
                     counts.at(block.first_channel + c) = block_counts[c];
                 }
                 return true;
-            }, options);
-        Require(static_cast<bool>(outcome), std::string(described) + ": the reduction failed: " +
-                                                (outcome ? "" : outcome.error().message));
+            },
+            options);
+        Require(static_cast<bool>(outcome),
+                std::string(described) + ": the reduction failed: " + (outcome ? "" : outcome.error().message));
 
         for (std::uint64_t z = 0; z < kChannels; ++z) {
-            Require(counts.at(z) == expected_count.at(z),
-                    std::string(described) + ": the diagonal's pixel count");
+            Require(counts.at(z) == expected_count.at(z), std::string(described) + ": the diagonal's pixel count");
             Require(std::abs(sums.at(z) - expected_sum.at(z)) <= 1e-9 * (1.0 + std::abs(expected_sum.at(z))),
                     std::string(described) + ": the diagonal's sum");
         }
@@ -473,8 +480,7 @@ void TestAMaskedRegionReadsOnlyTheChunksItOccupies() {
         Require(source.chunks_touched() == kGrid,
                 std::string(described) + ": read " + std::to_string(source.chunks_touched()) +
                     " chunks rather than the " + std::to_string(kGrid) + " the mask occupies");
-        Require(source.most_hits_on_one_chunk() == 1,
-                std::string(described) + ": a chunk was decoded more than once");
+        Require(source.most_hits_on_one_chunk() == 1, std::string(described) + ": a chunk was decoded more than once");
     };
 
     // This image varies y fastest, so the runs the reduction makes from the raster are ranges of
@@ -510,7 +516,8 @@ void TestAPlaneHistogramSplitAcrossWorkers() {
         const auto reducible = Reducible(source, image, geometry, workers);
         std::vector<std::uint64_t> counts(request.bins * kSplitZ, 0);
         const auto outcome = carta::zarr::internal::ComputeHistogram(
-            reducible, request, [&](const carta::zarr::HistogramBlock& block) {
+            reducible, request,
+            [&](const carta::zarr::HistogramBlock& block) {
                 if (!block.complete) {
                     return true;
                 }
@@ -520,7 +527,8 @@ void TestAPlaneHistogramSplitAcrossWorkers() {
                     }
                 }
                 return true;
-            }, options);
+            },
+            options);
         Require(static_cast<bool>(outcome),
                 std::string("the histogram failed: ") + (outcome ? "" : outcome.error().message));
         return counts;
@@ -531,9 +539,9 @@ void TestAPlaneHistogramSplitAcrossWorkers() {
     const auto in_place = counts_from(1);
     const auto split = counts_from(4);
     for (std::size_t i = 0; i < in_place.size(); ++i) {
-        Require(in_place.at(i) == split.at(i),
-                "bin " + std::to_string(i) + ": binning in place gave " + std::to_string(in_place.at(i)) +
-                    ", four workers gave " + std::to_string(split.at(i)));
+        Require(in_place.at(i) == split.at(i), "bin " + std::to_string(i) + ": binning in place gave " +
+                                                   std::to_string(in_place.at(i)) + ", four workers gave " +
+                                                   std::to_string(split.at(i)));
     }
 
     std::uint64_t total = 0;
@@ -629,11 +637,15 @@ struct Spread {
 std::vector<Spread> Spreads() {
     return {
         {"all 1e8", [](const std::vector<std::uint64_t>&) { return 1.0e8F; }},
-        {"1e6 + 0.5 noise", [](const std::vector<std::uint64_t>& at) { return static_cast<float>(1.0e6 + 0.5 * Noise(at)); }},
-        {"1e7 + 0.5 noise", [](const std::vector<std::uint64_t>& at) { return static_cast<float>(1.0e7 + 0.5 * Noise(at)); }},
-        {"1e8 + 20 noise", [](const std::vector<std::uint64_t>& at) { return static_cast<float>(1.0e8 + 20.0 * Noise(at)); }},
+        {"1e6 + 0.5 noise",
+         [](const std::vector<std::uint64_t>& at) { return static_cast<float>(1.0e6 + 0.5 * Noise(at)); }},
+        {"1e7 + 0.5 noise",
+         [](const std::vector<std::uint64_t>& at) { return static_cast<float>(1.0e7 + 0.5 * Noise(at)); }},
+        {"1e8 + 20 noise",
+         [](const std::vector<std::uint64_t>& at) { return static_cast<float>(1.0e8 + 20.0 * Noise(at)); }},
         // The walk's rows run along m, so every pixel at the start of a chunk's row is the outlier.
-        {"1e8 + 20 noise, the first of each row far out", [](const std::vector<std::uint64_t>& at) {
+        {"1e8 + 20 noise, the first of each row far out",
+         [](const std::vector<std::uint64_t>& at) {
              return static_cast<float>(1.0e8 + 20.0 * Noise(at) + (at.at(1) % 65 == 0 ? 1.0e5 : 0.0));
          }},
     };
@@ -642,8 +654,8 @@ std::vector<Spread> Spreads() {
 // The sum of squared deviations over the pixels `in` selects, worked out the slow way: in long
 // double, from a mean found first.
 template <typename Selected>
-double CentredReference(const SyntheticPixelSource::Formula& value, std::uint64_t channels_from, std::uint64_t channels_to,
-                        std::uint64_t x, std::uint64_t y, const Selected& in) {
+double CentredReference(const SyntheticPixelSource::Formula& value, std::uint64_t channels_from,
+                        std::uint64_t channels_to, std::uint64_t x, std::uint64_t y, const Selected& in) {
     long double count = 0.0L;
     long double sum = 0.0L;
     for (std::uint64_t z = channels_from; z < channels_to; ++z) {
@@ -715,7 +727,8 @@ void TestASpectralSpreadIsCentredWhateverTheMagnitude() {
         std::vector<double> deviations(regions.size() * kZ, -1.0);
         const auto reducible = Reducible(source, image, geometry, workers);
         const auto outcome = carta::zarr::internal::ReduceSpectral(
-            reducible, request, [&](const carta::zarr::SpectralBlock& block) {
+            reducible, request,
+            [&](const carta::zarr::SpectralBlock& block) {
                 Require(block.Carries(carta::zarr::Statistic::num_pixels | carta::zarr::Statistic::sum |
                                       carta::zarr::Statistic::sum_sq_dev),
                         "a block asked for sum_sq_dev carries the count and the sum it was made with");
@@ -727,16 +740,18 @@ void TestASpectralSpreadIsCentredWhateverTheMagnitude() {
                     }
                 }
                 return true;
-            }, options);
+            },
+            options);
         Require(static_cast<bool>(outcome),
                 std::string("the reduction failed: ") + (outcome ? "" : outcome.error().message));
 
         for (std::size_t r = 0; r < regions.size(); ++r) {
             for (std::uint64_t z = 0; z < kZ; ++z) {
-                const auto expected = CentredReference(spread.value, z, z + 1, kX, kY,
-                                                       [&](std::uint64_t l, std::uint64_t m) { return inside(r, l, m); });
-                RequireCentred(deviations.at((r * kZ) + z), expected,
-                               std::string(spread.name) + ", region " + std::to_string(r) + ", channel " + std::to_string(z));
+                const auto expected = CentredReference(
+                    spread.value, z, z + 1, kX, kY, [&](std::uint64_t l, std::uint64_t m) { return inside(r, l, m); });
+                RequireCentred(
+                    deviations.at((r * kZ) + z), expected,
+                    std::string(spread.name) + ", region " + std::to_string(r) + ", channel " + std::to_string(z));
             }
         }
     }
@@ -786,15 +801,15 @@ void TestProgressNeverClaimsTheWholeRunBeforeItsLastRead() {
 
     // Run to the end, and stopped short of it: a run whose ends both fall inside a chunk is the one
     // that covers a chunk more than its length suggests.
-    const Range runs[]{{0, 24, 1}, {1, 23, 1}, {1, 8, 1}, {3, 6, 1},
-                       {0, 8, 3}, {1, 8, 3}, {3, 7, 3}, {1, 4, 3}, {0, 3, 9}};
+    const Range runs[]{{0, 24, 1}, {1, 23, 1}, {1, 8, 1}, {3, 6, 1}, {0, 8, 3},
+                       {1, 8, 3},  {3, 7, 3},  {1, 4, 3}, {0, 3, 9}};
     std::string wrong;
     for (const auto& spectral : runs) {
         const auto start = spectral.start;
         const auto stride = spectral.stride;
         const auto count = spectral.count;
-        const std::string which = " (start " + std::to_string(start) + ", count " +
-                                  std::to_string(count) + ", stride " + std::to_string(stride) + ")";
+        const std::string which = " (start " + std::to_string(start) + ", count " + std::to_string(count) +
+                                  ", stride " + std::to_string(stride) + ")";
 
         carta::zarr::CubeHistogramRequest cube;
         cube.planes.spectral = spectral;
@@ -809,8 +824,8 @@ void TestProgressNeverClaimsTheWholeRunBeforeItsLastRead() {
         Require(!reported.empty(), "a one-byte budget should make the cube histogram report" + which);
         for (const double progress : reported) {
             if (progress >= 1.0) {
-                wrong += "\n  a cube histogram reported " + std::to_string(progress) +
-                         " with a read still to come" + which;
+                wrong +=
+                    "\n  a cube histogram reported " + std::to_string(progress) + " with a read still to come" + which;
                 break;
             }
         }
@@ -826,8 +841,8 @@ void TestProgressNeverClaimsTheWholeRunBeforeItsLastRead() {
             reducible, reduce,
             [&](const carta::zarr::SpectralBlock& block) {
                 if (!block.complete && block.completeness >= 1.0) {
-                    wrong += "\n  an unfinished block claimed " + std::to_string(block.completeness) +
-                             " of itself" + which;
+                    wrong +=
+                        "\n  an unfinished block claimed " + std::to_string(block.completeness) + " of itself" + which;
                 }
                 return true;
             },
@@ -875,8 +890,9 @@ void RequireHandOvers(const std::vector<HandOver>& handed, const std::vector<Han
 }
 
 std::vector<HandOver> ReduceAndRecord(const SyntheticPixelSource& source, const ImageDescriptor& image,
-                                      const ChunkGeometry& geometry, const std::vector<carta::zarr::RegionMask>& regions,
-                                      const Range& spectral, const ReadOptions& options) {
+                                      const ChunkGeometry& geometry,
+                                      const std::vector<carta::zarr::RegionMask>& regions, const Range& spectral,
+                                      const ReadOptions& options) {
     WorkPool workers(1);
     const auto reducible = Reducible(source, image, geometry, workers);
     carta::zarr::SpectralReduceRequest request;
@@ -891,7 +907,8 @@ std::vector<HandOver> ReduceAndRecord(const SyntheticPixelSource& source, const 
             return true;
         },
         options);
-    Require(static_cast<bool>(outcome), std::string("the reduction failed: ") + (outcome ? "" : outcome.error().message));
+    Require(static_cast<bool>(outcome),
+            std::string("the reduction failed: ") + (outcome ? "" : outcome.error().message));
     return handed;
 }
 
@@ -926,8 +943,14 @@ void TestAPlaneHistogramHandsOverAtEveryReadOfItsBlock() {
         options);
     Require(static_cast<bool>(outcome), "the histogram failed");
     RequireHandOvers(handed,
-                     {{0, 4, false, 0.25}, {0, 4, false, 0.5}, {0, 4, false, 0.75}, {0, 4, true, 1.0},
-                      {4, 4, false, 0.25}, {4, 4, false, 0.5}, {4, 4, false, 0.75}, {4, 4, true, 1.0}},
+                     {{0, 4, false, 0.25},
+                      {0, 4, false, 0.5},
+                      {0, 4, false, 0.75},
+                      {0, 4, true, 1.0},
+                      {4, 4, false, 0.25},
+                      {4, 4, false, 0.5},
+                      {4, 4, false, 0.75},
+                      {4, 4, true, 1.0}},
                      "a plane histogram");
     Require(source.pixel_reads() == 8, "eight one-chunk reads, not " + std::to_string(source.pixel_reads()));
 }
@@ -946,8 +969,14 @@ void TestARegionCoveringThePlaneHandsOverAsThePlaneDoes() {
 
     const auto handed = ReduceAndRecord(source, image, geometry, {{0, 0, 8, 8}}, Range{0, 8, 1}, options);
     RequireHandOvers(handed,
-                     {{0, 4, false, 0.25}, {0, 4, false, 0.5}, {0, 4, false, 0.75}, {0, 4, true, 1.0},
-                      {4, 4, false, 0.25}, {4, 4, false, 0.5}, {4, 4, false, 0.75}, {4, 4, true, 1.0}},
+                     {{0, 4, false, 0.25},
+                      {0, 4, false, 0.5},
+                      {0, 4, false, 0.75},
+                      {0, 4, true, 1.0},
+                      {4, 4, false, 0.25},
+                      {4, 4, false, 0.5},
+                      {4, 4, false, 0.75},
+                      {4, 4, true, 1.0}},
                      "a region covering the plane");
     Require(source.pixel_reads() == 8, "eight one-chunk reads, not " + std::to_string(source.pixel_reads()));
 }

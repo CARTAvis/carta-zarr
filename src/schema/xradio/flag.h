@@ -13,12 +13,12 @@
 // pixels. That rule lives in src/pixel_mask.h and is a different question from this one -- this
 // module only chooses the variable.
 
-#include "../../store.h"
-#include "../../zarr/array_metadata.h"
-
 #include "carta-zarr/descriptor.h"
 #include "carta-zarr/error.h"
 #include "carta-zarr/result.h"
+
+#include "../../store.h"
+#include "../../zarr/array_metadata.h"
 
 #include <string>
 #include <string_view>

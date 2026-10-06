@@ -1,0 +1,6 @@
+# Commits that only reformatted the code, which git blame skips when told to:
+#   git config blame.ignoreRevsFile .git-blame-ignore-revs
+# GitHub's blame view reads this file on its own.
+
+# style: format every C++ file with clang-format 23.1.2
+b010a7ec0dd45ca59333f9cf42b288c41afc0352

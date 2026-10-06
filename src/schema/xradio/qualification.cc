@@ -29,10 +29,10 @@ std::optional<Diagnostic> UnusableDeclaredFlag(const Store& store, const zarr_me
     if (declared) {
         return std::nullopt;
     }
-    return Diagnostic{DiagnosticCode::invalid_metadata,
-                      "Declared flag '" + declared.error().node_path + "' cannot mask this image: " +
-                          declared.error().message,
-                      std::string(node)};
+    return Diagnostic{
+        DiagnosticCode::invalid_metadata,
+        "Declared flag '" + declared.error().node_path + "' cannot mask this image: " + declared.error().message,
+        std::string(node)};
 }
 
 }  // namespace

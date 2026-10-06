@@ -118,9 +118,7 @@ struct ColumnRun {
     std::uint64_t first = 0;
     std::uint64_t last = 0;  // inclusive
 
-    bool operator==(const ColumnRun& other) const {
-        return first == other.first && last == other.last;
-    }
+    bool operator==(const ColumnRun& other) const { return first == other.first && last == other.last; }
 };
 
 // The regions touching one chunk, as a view into the index that holds them. Valid for as long as
@@ -132,12 +130,8 @@ struct RegionRefs {
     const std::uint32_t* data = nullptr;
     std::size_t size = 0;
 
-    const std::uint32_t* begin() const noexcept {
-        return data;
-    }
-    const std::uint32_t* end() const noexcept {
-        return data + size;
-    }
+    const std::uint32_t* begin() const noexcept { return data; }
+    const std::uint32_t* end() const noexcept { return data + size; }
 };
 
 /**
@@ -200,18 +194,14 @@ public:
 
     // The caller's regions on the walk's axes, in the order they were given. The accumulation
     // indexes this by what RegionsTouching hands back.
-    const std::vector<PlacedRegion>& regions() const noexcept {
-        return _regions;
-    }
+    const std::vector<PlacedRegion>& regions() const noexcept { return _regions; }
 
     // The chunks one spectral layer of the whole region set occupies. Zero when the regions select
     // nothing at all, which a mask of zeroes does.
     //
     // The same number as the chunks of every footprint added up, which is how a pass over them counts
     // it: occupancy_test holds the two equal.
-    std::uint64_t LayerChunks() const noexcept {
-        return _layer_chunks;
-    }
+    std::uint64_t LayerChunks() const noexcept { return _layer_chunks; }
 
     /**
      * What a reduction reads: the occupied chunk runs, cut into footprints one read can decode.
@@ -250,12 +240,8 @@ public:
     // The compressed-row index itself, one offset per occupied cell and one past the last. Exposed
     // because it is what Of promises -- the incidences of one chunk are contiguous and in region
     // order, which is what the counting sort is for -- and a test has nothing else to say that against.
-    const std::vector<std::uint64_t>& offsets() const noexcept {
-        return _offsets;
-    }
-    const std::vector<std::uint32_t>& entries() const noexcept {
-        return _entries;
-    }
+    const std::vector<std::uint64_t>& offsets() const noexcept { return _offsets; }
+    const std::vector<std::uint32_t>& entries() const noexcept { return _entries; }
 
     // The regions point into the runs this made, so it moves and is never copied.
     Occupancy(Occupancy&&) noexcept = default;

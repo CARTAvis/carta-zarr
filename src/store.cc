@@ -90,10 +90,10 @@ Result<void> CollectConsolidatedMetadata(nlohmann::json& metadata, const std::st
                              "zarr.json"};
             }
             if (!output.emplace(node.value(), std::move(value)).second) {
-                return Error{ErrorCode::invalid_metadata,
-                             "Zarr consolidated_metadata lists the node '" + node.value() + "' twice, once as '" +
-                                 spelled + "'",
-                             "zarr.json"};
+                return Error{
+                    ErrorCode::invalid_metadata,
+                    "Zarr consolidated_metadata lists the node '" + node.value() + "' twice, once as '" + spelled + "'",
+                    "zarr.json"};
             }
         } else if (value.is_object()) {
             if (auto nested = CollectConsolidatedMetadata(value, path, output); !nested) {
@@ -422,8 +422,8 @@ const Result<std::vector<NodeEntry>>& Store::Inventory() const {
                 entry.kind = NodeKind::array;
                 entry.array = &ReadArrayMetadata(entry.name);
             } else {
-                entry.reason = Error{ErrorCode::invalid_metadata, "Zarr node is neither a group nor an array",
-                                     entry.name};
+                entry.reason =
+                    Error{ErrorCode::invalid_metadata, "Zarr node is neither a group nor an array", entry.name};
             }
             entries.push_back(std::move(entry));
         }
@@ -437,10 +437,9 @@ const NodeEntry* Store::FindNode(std::string_view name) const {
         return nullptr;
     }
     const auto& entries = inventory.value();
-    const auto found = std::lower_bound(entries.begin(), entries.end(), name,
-                                        [](const NodeEntry& entry, std::string_view wanted) {
-                                            return std::string_view(entry.name) < wanted;
-                                        });
+    const auto found = std::lower_bound(
+        entries.begin(), entries.end(), name,
+        [](const NodeEntry& entry, std::string_view wanted) { return std::string_view(entry.name) < wanted; });
     return found != entries.end() && found->name == name ? &*found : nullptr;
 }
 
@@ -501,8 +500,7 @@ Result<void> Store::ReadPixelsInto(std::string_view node, const zarr::PixelSelec
         if constexpr (std::is_same_v<T, float>) {
             return zarr_metadata::ReadFloat32(target_path.value(), _context, node, selection, destination, control);
         } else {
-            return zarr_metadata::ReadMaskBytes(target_path.value(), _context, node, selection, destination,
-                                                control);
+            return zarr_metadata::ReadMaskBytes(target_path.value(), _context, node, selection, destination, control);
         }
     } catch (const std::exception& e) {
         return Error{ErrorCode::io_error, e.what(), std::string(node)};

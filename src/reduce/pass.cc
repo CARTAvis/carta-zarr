@@ -5,14 +5,12 @@
  */
 
 #include "reduce/pass_plan.h"
-
 #include "reduce/tuning.h"
 
 namespace carta::zarr::internal {
 
-PassPlan PlanPass(const ImageDescriptor& descriptor, const ChunkGeometry& geometry,
-                  const ChunkGeometry& flag_geometry, const AxisMap& map, const CheckedPlanes& planes,
-                  std::uint64_t sample, const ReadOptions& options) {
+PassPlan PlanPass(const ImageDescriptor& descriptor, const ChunkGeometry& geometry, const ChunkGeometry& flag_geometry,
+                  const AxisMap& map, const CheckedPlanes& planes, std::uint64_t sample, const ReadOptions& options) {
     const Range spectral = planes.spectral();
     PassPlan plan;
     plan.descriptor = &descriptor;
@@ -49,7 +47,6 @@ PassPlan PlanPass(const ImageDescriptor& descriptor, const ChunkGeometry& geomet
     return plan;
 }
 
-
 std::uint64_t PassPlan::EmitChannels(std::uint64_t layer_chunks, std::size_t bytes_per_channel,
                                      std::uint32_t hint) const {
     const std::uint64_t budget_channels =
@@ -61,8 +58,8 @@ std::uint64_t PassPlan::EmitChannels(std::uint64_t layer_chunks, std::size_t byt
     const std::uint64_t spatial_channels =
         layer_chunks == 0 ? planes.spectral.count
                           : std::min(planes.spectral.count, UnitsAffordable(layer_chunks)) * _least_channels;
-    return std::min({hint == 0 ? spatial_channels : static_cast<std::uint64_t>(hint), budget_channels,
-                     planes.spectral.count});
+    return std::min(
+        {hint == 0 ? spatial_channels : static_cast<std::uint64_t>(hint), budget_channels, planes.spectral.count});
 }
 
 }  // namespace carta::zarr::internal

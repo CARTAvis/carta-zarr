@@ -2,7 +2,7 @@
 # Based on Google / Modern C++ conventions with enhanced readability
 BasedOnStyle: Google
 Language: Cpp
-Standard: Latest
+Standard: c++17
 
 # Indentation & Alignment
 IndentWidth: 4

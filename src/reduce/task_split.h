@@ -54,9 +54,7 @@ public:
 
     // The most tasks any read will be split into, which is how many accumulators a reduction that
     // allocates them once has to hold. At least one.
-    std::size_t most() const noexcept {
-        return _most;
-    }
+    std::size_t most() const noexcept { return _most; }
 
     // How many tasks `units` units of `unit_pixels` pixels each are worth: one when they are too few
     // to be worth waking anyone for, and never more than `most`.

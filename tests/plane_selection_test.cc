@@ -14,13 +14,13 @@
 
 #include "reduce/plane_selection.h"
 
+#include "support/check.h"
+
 #include <cstdint>
 #include <cstdio>
 #include <exception>
 #include <string>
 #include <vector>
-
-#include "support/check.h"
 
 namespace {
 
@@ -83,8 +83,7 @@ void Accepts(const ImageDescriptor& descriptor, const PlaneSelection& planes, co
 void Refuses(const ImageDescriptor& descriptor, const PlaneSelection& planes, const std::string& what) {
     const auto checked = Check(descriptor, planes);
     Require(!checked, what + " should have been refused");
-    Require(checked.error().code == ErrorCode::invalid_argument,
-            what + " should be refused as invalid_argument");
+    Require(checked.error().code == ErrorCode::invalid_argument, what + " should be refused as invalid_argument");
 }
 
 // A selection that fits comes back saying what it was asked for, and saying it once: a caller that

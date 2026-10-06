@@ -49,8 +49,7 @@ Result<DirectionCoordinate> ReadCoordinateSystem(const nlohmann::json& root_attr
  * a 779-line translation unit before, and none of those was.
  */
 Result<DirectionCoordinate> DescribeDirection(const nlohmann::json& root_attributes,
-                                              const std::vector<double>& l_values,
-                                              const std::vector<double>& m_values,
+                                              const std::vector<double>& l_values, const std::vector<double>& m_values,
                                               std::vector<Diagnostic>& diagnostics);
 
 }  // namespace carta::zarr::internal::xradio

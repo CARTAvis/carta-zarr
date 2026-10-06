@@ -16,8 +16,6 @@
 #include "build_identity.h"
 #include "options.h"
 
-#include <carta-zarr/carta_zarr.h>
-
 #include <cstdint>
 #include <cstdio>
 #include <map>
@@ -25,6 +23,8 @@
 #include <set>
 #include <string>
 #include <vector>
+
+#include <carta-zarr/carta_zarr.h>
 
 namespace carta::zarr::bench {
 
@@ -164,9 +164,7 @@ public:
     // every process and no error among them. Rows are written a trial at a time, so a trial
     // interrupted part-way wrote none; but a CSV can still lose its tail, and a trial left with some
     // of its rows is not whole.
-    const std::map<std::string, std::set<unsigned>>& completed() const noexcept {
-        return _completed;
-    }
+    const std::map<std::string, std::set<unsigned>>& completed() const noexcept { return _completed; }
 
 private:
     CsvOutput(std::FILE* file, std::string path) : _file(file), _path(std::move(path)) {}

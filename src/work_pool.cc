@@ -161,8 +161,7 @@ std::size_t PlanRowTasks(std::uint64_t row_pixels, std::uint64_t rows, std::size
     }
     const std::uint64_t pixels = row_pixels * rows;
     const std::uint64_t affordable = std::max<std::uint64_t>(1, pixels / std::max<std::uint64_t>(1, least_pixels));
-    return static_cast<std::size_t>(
-        std::min<std::uint64_t>({static_cast<std::uint64_t>(max_tasks), affordable, rows}));
+    return static_cast<std::size_t>(std::min<std::uint64_t>({static_cast<std::uint64_t>(max_tasks), affordable, rows}));
 }
 
 RowRange TaskRows(std::size_t task, std::size_t tasks, std::uint64_t rows) {

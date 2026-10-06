@@ -12,7 +12,7 @@
 // chunk and shard shape its manifest says it was written with, and a rewritten fixture reads back as
 // the window of the original it was cut from. tests/run_bench_generator.cmake writes the datasets.
 
-#include <carta-zarr/carta_zarr.h>
+#include "support/check.h"
 
 #include <nlohmann/json.hpp>
 
@@ -24,7 +24,7 @@
 #include <string>
 #include <vector>
 
-#include "support/check.h"
+#include <carta-zarr/carta_zarr.h>
 
 namespace {
 

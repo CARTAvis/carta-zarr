@@ -6,11 +6,10 @@
 
 #include "store_context.h"
 
+#include <nlohmann/json.hpp>
 #include <tensorstore/open.h>
 #include <tensorstore/open_mode.h>
 #include <tensorstore/spec.h>
-
-#include <nlohmann/json.hpp>
 
 #include <atomic>
 #include <cstddef>
@@ -38,9 +37,9 @@ Result<tensorstore::TensorStore<>> OpenZarr3File(const std::string& path, const 
         return Error{ErrorCode::io_error, "Failed to create TensorStore spec: " + spec.status().ToString(),
                      std::string(node)};
     }
-    auto opened = tensorstore::Open(spec.value(), context, tensorstore::OpenMode::open,
-                                    tensorstore::ReadWriteMode::read)
-                      .result();
+    auto opened =
+        tensorstore::Open(spec.value(), context, tensorstore::OpenMode::open, tensorstore::ReadWriteMode::read)
+            .result();
     if (!opened.ok()) {
         return Error{ErrorCode::io_error, "Failed to open TensorStore: " + opened.status().ToString(),
                      std::string(node)};
@@ -140,7 +139,8 @@ Result<StoreContextPtr> MakeStoreContext(const ContextOptions& options) {
     auto context = tensorstore::Context::FromJson(std::move(spec));
     if (!context.ok()) {
         return Error{ErrorCode::invalid_argument,
-                     "Unable to apply the requested resource limits: " + context.status().ToString(), {}};
+                     "Unable to apply the requested resource limits: " + context.status().ToString(),
+                     {}};
     }
     return std::make_shared<const StoreContext>(std::move(context.value()));
 }

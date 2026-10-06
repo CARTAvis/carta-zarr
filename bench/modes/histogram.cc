@@ -144,9 +144,7 @@ public:
     CubeHistogram(const RunOptions& options, HistogramMethod method)
         : Workload(Mode::cube_histogram, options), _method(method) {}
 
-    void WriteSettings(Row& row) const override {
-        row.histogram_method = _method.Spell();
-    }
+    void WriteSettings(Row& row) const override { row.histogram_method = _method.Spell(); }
 
     // The operation covers the plane, so process p takes the p-th of the trial's contiguous runs of
     // channels, and each of its operations a polarization of its own.
@@ -172,9 +170,7 @@ public:
         return operations;
     }
 
-    std::string Describe(const Operation& operation) const override {
-        return DescribeChannels(operation);
-    }
+    std::string Describe(const Operation& operation) const override { return DescribeChannels(operation); }
 
     std::optional<ChunkBox> ChunksRead(const Operation& operation, const CubeAxes& axes,
                                        const std::vector<std::uint64_t>& chunk_shape) const override {

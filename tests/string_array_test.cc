@@ -6,6 +6,7 @@
 
 #include "zarr/string_array.h"
 
+#include "support/check.h"
 #include "zarr/array_metadata.h"
 
 #include <cstddef>
@@ -17,8 +18,6 @@
 #include <new>
 #include <string>
 #include <vector>
-
-#include "support/check.h"
 
 // One allocation on the calling thread can be made to fail once, so that a decode can be run with
 // each of its allocations failing in turn.
@@ -180,9 +179,9 @@ void TestAnAllocationThatFailsIsNotCorruptData() {
             }
             counting = false;
             failing = 0;
-            Require(outcome == "values" || outcome == "a std::bad_alloc", std::string("Decoding ") + name + " with allocation " +
-                                             std::to_string(which) + " of " + std::to_string(total) +
-                                             " failing gave " + outcome);
+            Require(outcome == "values" || outcome == "a std::bad_alloc",
+                    std::string("Decoding ") + name + " with allocation " + std::to_string(which) + " of " +
+                        std::to_string(total) + " failing gave " + outcome);
         }
     }
 }

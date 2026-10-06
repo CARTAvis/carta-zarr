@@ -56,9 +56,7 @@ public:
     WorkPool& operator=(const WorkPool&) = delete;
 
     // How many bodies may run at once, counting the calling thread. Always at least one.
-    std::size_t size() const noexcept {
-        return _workers.empty() ? 1 : _workers.size() + 1;
-    }
+    std::size_t size() const noexcept { return _workers.empty() ? 1 : _workers.size() + 1; }
 
     /**
      * Run `body(task, worker)` for every task in [0, tasks), and return once all of them are done.

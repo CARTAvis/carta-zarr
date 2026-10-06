@@ -17,14 +17,14 @@
 
 #include "schema/xradio/beam_table.h"
 
+#include "support/check.h"
+
 #include <cstdint>
 #include <exception>
 #include <iostream>
 #include <string>
 #include <utility>
 #include <vector>
-
-#include "support/check.h"
 
 namespace {
 
@@ -35,7 +35,6 @@ using carta::zarr::internal::zarr::ArrayMetadata;
 using carta::zarr::internal::zarr::NumericArray;
 
 using carta::zarr::testing::Require;
-
 
 // The value a plane's parameters are built from, so that every beam identifies where it came from.
 double Base(std::uint64_t time, std::uint64_t frequency, std::uint64_t polarization) {
@@ -112,8 +111,8 @@ void TestEveryTimePlaneIsReported() {
 // A table need not carry a time dimension; an absent one is a single implicit plane. Addressing the
 // array must not insist on naming a dimension the array lacks.
 void TestAnAbsentTimeDimensionIsOnePlane() {
-    const auto beams = DescribeBeams(
-        Table({3, 2, 3}, {"frequency", "polarization", "beam_params_label"}, Values(1, 3, 2)), kLabels);
+    const auto beams =
+        DescribeBeams(Table({3, 2, 3}, {"frequency", "polarization", "beam_params_label"}, Values(1, 3, 2)), kLabels);
     Require(static_cast<bool>(beams), "a beam table without a time dimension was not readable");
     Require(beams.value().size() == 6, "the time-less beam table did not report one beam per plane");
     for (const auto& beam : beams.value()) {
@@ -134,9 +133,9 @@ void TestATableMissingADimensionIsAnError() {
 // Same reasoning for the labels: parameters that cannot be located are a failure to read a beam,
 // not an image without one.
 void TestLabelsMustNameEveryParameter() {
-    const auto beams = DescribeBeams(
-        Table({1, 3, 2, 3}, {"time", "frequency", "polarization", "beam_params_label"}, Values(1, 3, 2)),
-        {"minor", "major", "angle"});
+    const auto beams =
+        DescribeBeams(Table({1, 3, 2, 3}, {"time", "frequency", "polarization", "beam_params_label"}, Values(1, 3, 2)),
+                      {"minor", "major", "angle"});
     Require(!beams && beams.error().code == ErrorCode::invalid_metadata,
             "labels that do not name a position angle produced beams anyway");
     Require(beams.error().node_path == "beam_params_label", "the error did not name the label array");
@@ -148,9 +147,9 @@ void TestLabelsMustNameEveryParameter() {
 // as the store being malformed. Fewer always described beams, and left the rest unaccounted for.
 // Either way the labels were another table's.
 void TestLabelsAreOneAParameter() {
-    const auto more = DescribeBeams(
-        Table({1, 3, 2, 3}, {"time", "frequency", "polarization", "beam_params_label"}, Values(1, 3, 2)),
-        {"minor", "major", "pa", "extra"});
+    const auto more =
+        DescribeBeams(Table({1, 3, 2, 3}, {"time", "frequency", "polarization", "beam_params_label"}, Values(1, 3, 2)),
+                      {"minor", "major", "pa", "extra"});
     Require(!more && more.error().code == ErrorCode::invalid_metadata,
             "more labels than the table has parameters produced beams anyway");
     Require(more.error().node_path == "beam_params_label", "the error did not name the label array");

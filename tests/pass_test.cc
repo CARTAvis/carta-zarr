@@ -76,8 +76,7 @@ ImageDescriptor MakeImage(std::uint64_t x, std::uint64_t y, std::uint64_t channe
     return descriptor;
 }
 
-ChunkGeometry MakeGeometry(std::uint64_t chunk_x, std::uint64_t chunk_y, std::uint64_t chunk_z,
-                           AxisRole fastest) {
+ChunkGeometry MakeGeometry(std::uint64_t chunk_x, std::uint64_t chunk_y, std::uint64_t chunk_z, AxisRole fastest) {
     ChunkGeometry geometry;
     geometry.fastest_spatial_axis = fastest;
     geometry.chunk_shape = {chunk_x, chunk_y, chunk_z, 1, 1};
@@ -193,8 +192,7 @@ void TestTheCallersCeilingWins() {
 
     const auto def = Plan(image, geometry, spectral, ReadOptions{});
     Require(def.slab_budget_bytes ==
-                carta::zarr::internal::DefaultReadBytes(
-                    carta::zarr::internal::DecodedChunkBytes(image, geometry)),
+                carta::zarr::internal::DefaultReadBytes(carta::zarr::internal::DecodedChunkBytes(image, geometry)),
             "without a limit the budget is the one chunk_blocks measured");
 }
 
@@ -236,10 +234,10 @@ void TestALayerIsCountedInWholeChunks() {
     // Sampled, a layer is the chunks the sample has a pixel in. Every sixteenth pixel of a 64-pixel
     // axis in chunks of 8 falls in chunks 0, 2, 4 and 6, and of a 16-pixel one in chunk 0 alone: four
     // of the sixteen there are.
-    const auto sampled = Plan(MakeImage(16, 64, 1), MakeGeometry(8, 8, 1, AxisRole::spatial_y), Range{0, 1, 1},
-                              ReadOptions{}, 16);
-    Require(sampled.layer_chunks == 4, "a sampled layer of " + std::to_string(sampled.layer_chunks) +
-                                           " chunks, not the four the sample reads");
+    const auto sampled =
+        Plan(MakeImage(16, 64, 1), MakeGeometry(8, 8, 1, AxisRole::spatial_y), Range{0, 1, 1}, ReadOptions{}, 16);
+    Require(sampled.layer_chunks == 4,
+            "a sampled layer of " + std::to_string(sampled.layer_chunks) + " chunks, not the four the sample reads");
 }
 
 // A budget below one chunk row does not produce a band of zero rows, which would read nothing and
@@ -275,8 +273,7 @@ void TestSamplingFloorsAtOne() {
     const auto geometry = MakeGeometry(256, 260, 2, AxisRole::spatial_y);
     Require(Plan(image, geometry, Range{0, 32, 1}, ReadOptions{}, 0).sample == 1,
             "a sample of zero reads every pixel rather than none");
-    Require(Plan(image, geometry, Range{0, 32, 1}, ReadOptions{}, 4).sample == 4,
-            "a sample the caller stated is kept");
+    Require(Plan(image, geometry, Range{0, 32, 1}, ReadOptions{}, 4).sample == 4, "a sample the caller stated is kept");
 }
 
 // The sampled range is the one the pass asks the store for. Its edges are where an off-by-one costs

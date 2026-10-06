@@ -17,6 +17,7 @@
 // order is not the logical one -- needed a directory tree to reach while it lived there.
 
 #include "carta-zarr/descriptor.h"
+
 #include "zarr/storage_layout.h"
 
 #include <cstddef>

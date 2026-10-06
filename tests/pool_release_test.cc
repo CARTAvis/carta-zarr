@@ -26,9 +26,9 @@
 #include <malloc.h>
 #endif
 
-#include <carta-zarr/carta_zarr.h>
-
 #include "support/check.h"
+
+#include <carta-zarr/carta_zarr.h>
 
 namespace {
 
@@ -70,18 +70,42 @@ void Free(void* memory) noexcept {
 
 }  // namespace
 
-void* operator new(std::size_t size) { return Allocate(size); }
-void* operator new[](std::size_t size) { return Allocate(size); }
-void* operator new(std::size_t size, std::align_val_t alignment) { return AllocateAligned(size, alignment); }
-void* operator new[](std::size_t size, std::align_val_t alignment) { return AllocateAligned(size, alignment); }
-void operator delete(void* memory) noexcept { Free(memory); }
-void operator delete[](void* memory) noexcept { Free(memory); }
-void operator delete(void* memory, std::size_t) noexcept { Free(memory); }
-void operator delete[](void* memory, std::size_t) noexcept { Free(memory); }
-void operator delete(void* memory, std::align_val_t) noexcept { Free(memory); }
-void operator delete[](void* memory, std::align_val_t) noexcept { Free(memory); }
-void operator delete(void* memory, std::size_t, std::align_val_t) noexcept { Free(memory); }
-void operator delete[](void* memory, std::size_t, std::align_val_t) noexcept { Free(memory); }
+void* operator new(std::size_t size) {
+    return Allocate(size);
+}
+void* operator new[](std::size_t size) {
+    return Allocate(size);
+}
+void* operator new(std::size_t size, std::align_val_t alignment) {
+    return AllocateAligned(size, alignment);
+}
+void* operator new[](std::size_t size, std::align_val_t alignment) {
+    return AllocateAligned(size, alignment);
+}
+void operator delete(void* memory) noexcept {
+    Free(memory);
+}
+void operator delete[](void* memory) noexcept {
+    Free(memory);
+}
+void operator delete(void* memory, std::size_t) noexcept {
+    Free(memory);
+}
+void operator delete[](void* memory, std::size_t) noexcept {
+    Free(memory);
+}
+void operator delete(void* memory, std::align_val_t) noexcept {
+    Free(memory);
+}
+void operator delete[](void* memory, std::align_val_t) noexcept {
+    Free(memory);
+}
+void operator delete(void* memory, std::size_t, std::align_val_t) noexcept {
+    Free(memory);
+}
+void operator delete[](void* memory, std::size_t, std::align_val_t) noexcept {
+    Free(memory);
+}
 
 namespace {
 
@@ -126,9 +150,8 @@ void TestWhatAPoolDecodedGoesWithThePool() {
                     std::to_string(live - before) + " bytes");
     }
     const std::int64_t after = live;
-    Require(after - before < decoded,
-            "letting go of every pool kept " + std::to_string(after - before) + " bytes, against " +
-                std::to_string(decoded) + " decoded by each");
+    Require(after - before < decoded, "letting go of every pool kept " + std::to_string(after - before) +
+                                          " bytes, against " + std::to_string(decoded) + " decoded by each");
 }
 
 }  // namespace

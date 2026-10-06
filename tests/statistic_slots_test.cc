@@ -12,9 +12,11 @@
 // questions about doubles in a buffer. So this links nothing but the header, and reads every answer
 // through the one block a sink is ever given.
 
-#include "reduce/deviations.h"
 #include "reduce/statistic_slots.h"
+
+#include "reduce/deviations.h"
 #include "reduce/tuning.h"
+#include "support/check.h"
 
 #include <algorithm>
 #include <array>
@@ -26,8 +28,6 @@
 #include <string>
 #include <type_traits>
 #include <vector>
-
-#include "support/check.h"
 
 namespace {
 
@@ -301,7 +301,8 @@ RowTotals RowOf(const std::vector<double>& pixels) {
         largest = std::max(largest, pixel);
     }
     auto row = Row(pixels.size(), 0, sum, sum_sq, smallest, largest);
-    const auto spread = Spread::OfSpan(static_cast<double>(pixels.size()), pixels.front(), distance_sum, distance_sum_sq);
+    const auto spread =
+        Spread::OfSpan(static_cast<double>(pixels.size()), pixels.front(), distance_sum, distance_sum_sq);
     row.base = spread.base;
     row.offset = spread.offset;
     row.sum_sq_dev = spread.sum_sq_dev;
@@ -332,7 +333,8 @@ void RequireDeviations(double actual, double expected, const std::string& where)
             where + ": sum_sq_dev " + std::to_string(actual) + ", the pixels' own " + std::to_string(expected));
 }
 
-const std::vector<std::vector<double>> kRows{{1.0e7, 1.0e7 + 1.0, 1.0e7 - 2.0}, {1.0e7 + 3.0, 1.0e7 + 3.5}, {9.0e6}, {}};
+const std::vector<std::vector<double>> kRows{
+    {1.0e7, 1.0e7 + 1.0, 1.0e7 - 2.0}, {1.0e7 + 3.0, 1.0e7 + 3.5}, {9.0e6}, {}};
 
 }  // namespace
 

@@ -18,13 +18,13 @@
 
 #include "options.h"
 
-#include <carta-zarr/carta_zarr.h>
-
 #include <array>
 #include <cstddef>
 #include <cstdint>
 #include <optional>
 #include <vector>
+
+#include <carta-zarr/carta_zarr.h>
 
 namespace carta::zarr::bench {
 

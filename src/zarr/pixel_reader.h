@@ -32,8 +32,8 @@ Result<void> ReadFloat32(const std::filesystem::path& array_directory, const Sto
 
 // Read a boolean array as one byte per element, true meaning a good pixel.
 Result<void> ReadMaskBytes(const std::filesystem::path& array_directory, const StoreContextPtr& context,
-                           std::string_view node, const PixelSelection& selection,
-                           BufferView<std::uint8_t> destination, const ReadControl& control);
+                           std::string_view node, const PixelSelection& selection, BufferView<std::uint8_t> destination,
+                           const ReadControl& control);
 
 }  // namespace carta::zarr::internal::zarr
 

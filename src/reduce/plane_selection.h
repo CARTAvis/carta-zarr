@@ -7,11 +7,11 @@
 #ifndef CARTA_ZARR_SRC_REDUCE_PLANE_SELECTION_H_
 #define CARTA_ZARR_SRC_REDUCE_PLANE_SELECTION_H_
 
-#include "axis_map.h"
-
 #include "carta-zarr/descriptor.h"
 #include "carta-zarr/reduce.h"
 #include "carta-zarr/result.h"
+
+#include "axis_map.h"
 
 #include <cstdint>
 
@@ -59,8 +59,8 @@ public:
             return Error{ErrorCode::invalid_argument, "The polarization index falls outside the image", node};
         }
         if (!map.has_time && planes.time != 0) {
-            return Error{ErrorCode::invalid_argument,
-                         "The image has no time axis, so only time 0 selects a plane", node};
+            return Error{ErrorCode::invalid_argument, "The image has no time axis, so only time 0 selects a plane",
+                         node};
         }
         if (map.has_time && planes.time >= descriptor.axes.at(map.time).length) {
             return Error{ErrorCode::invalid_argument, "The time index falls outside the image", node};
@@ -69,16 +69,10 @@ public:
         return CheckedPlanes(planes);
     }
 
-    const PlaneSelection& selection() const noexcept {
-        return _planes;
-    }
-    const Range& spectral() const noexcept {
-        return _planes.spectral;
-    }
+    const PlaneSelection& selection() const noexcept { return _planes; }
+    const Range& spectral() const noexcept { return _planes.spectral; }
     // How many planes were selected, which is what every block loop over the selection counts to.
-    std::uint64_t count() const noexcept {
-        return _planes.spectral.count;
-    }
+    std::uint64_t count() const noexcept { return _planes.spectral.count; }
 
 private:
     explicit CheckedPlanes(const PlaneSelection& planes) : _planes(planes) {}

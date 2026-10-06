@@ -6,8 +6,10 @@
 
 // Conformance: assert what this library believes about XRADIO against a store that XRADIO itself
 // produced. The fixtures come from tests/data/generate_conformance_fixtures.py, which converts a
-// FITS image, and two CASA images with internal masks, with a pinned XRADIO. When that pin is bumped and one of these fails, the failure names
-// the assumption the new XRADIO version broke.
+// FITS image, and two CASA images with internal masks, with a pinned XRADIO. When that pin is bumped and one of these
+// fails, the failure names the assumption the new XRADIO version broke.
+
+#include "support/check.h"
 
 #include <algorithm>
 #include <array>
@@ -24,8 +26,6 @@
 #include <carta-zarr/descriptor.h>
 #include <carta-zarr/read.h>
 #include <carta-zarr/reduce.h>
-
-#include "support/check.h"
 
 namespace {
 
@@ -239,9 +239,9 @@ void TestFlagsMaskTheirOwnImage(const carta::zarr::Dataset& dataset, const std::
             const auto pixels = ReadPlane(image, frequency, polarization, true);
             const auto valid = static_cast<std::uint64_t>(
                 std::count_if(pixels.begin(), pixels.end(), [](float value) { return std::isfinite(value); }));
-            Require(valid == kPlanePixels - dropped.size(),
-                    "a masked read of " + where + " kept " + std::to_string(valid) + " pixels, expected " +
-                        std::to_string(kPlanePixels - dropped.size()));
+            Require(valid == kPlanePixels - dropped.size(), "a masked read of " + where + " kept " +
+                                                                std::to_string(valid) + " pixels, expected " +
+                                                                std::to_string(kPlanePixels - dropped.size()));
             for (std::size_t i = 0; i < pixels.size(); ++i) {
                 const bool flagged = std::find(dropped.begin(), dropped.end(), unmasked.at(i)) != dropped.end();
                 Require(std::isfinite(unmasked.at(i)), "an unmasked read of " + where + " lost a pixel");

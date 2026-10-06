@@ -76,9 +76,7 @@ public:
         return static_cast<std::uint64_t>(*written);
     }
 
-    std::uint64_t Fingerprint() const override {
-        return bench::Fingerprint(_pixels.data(), _pixel_count);
-    }
+    std::uint64_t Fingerprint() const override { return bench::Fingerprint(_pixels.data(), _pixel_count); }
 
 private:
     Context _context;
@@ -139,9 +137,7 @@ public:
     }
 
 private:
-    bool plane() const noexcept {
-        return mode() == Mode::plane;
-    }
+    bool plane() const noexcept { return mode() == Mode::plane; }
 };
 
 }  // namespace

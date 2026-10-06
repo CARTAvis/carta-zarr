@@ -20,12 +20,17 @@ namespace zarr_metadata = ::carta::zarr::internal::zarr;
 // Where a numeric coordinate's samples go, by the axis it is.
 std::vector<double>* NumericValuesOf(CoordinateValues& values, AxisRole role) {
     switch (role) {
-        case AxisRole::spatial_x: return &values.l;
-        case AxisRole::spatial_y: return &values.m;
-        case AxisRole::spectral: return &values.frequency;
-        case AxisRole::time: return &values.time;
+        case AxisRole::spatial_x:
+            return &values.l;
+        case AxisRole::spatial_y:
+            return &values.m;
+        case AxisRole::spectral:
+            return &values.frequency;
+        case AxisRole::time:
+            return &values.time;
         case AxisRole::polarization:
-        case AxisRole::other: return nullptr;
+        case AxisRole::other:
+            return nullptr;
     }
     return nullptr;
 }
@@ -33,8 +38,9 @@ std::vector<double>* NumericValuesOf(CoordinateValues& values, AxisRole role) {
 }  // namespace
 
 std::size_t AxisCount(Plane plane) noexcept {
-    return static_cast<std::size_t>(std::count_if(kCoordinates.begin(), kCoordinates.end(),
-                                                  [plane](const Coordinate& coordinate) { return OnPlane(coordinate, plane); }));
+    return static_cast<std::size_t>(
+        std::count_if(kCoordinates.begin(), kCoordinates.end(),
+                      [plane](const Coordinate& coordinate) { return OnPlane(coordinate, plane); }));
 }
 
 bool CarriesPlane(const zarr_metadata::ArrayMetadata& variable, Plane plane) {

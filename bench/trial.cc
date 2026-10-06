@@ -9,14 +9,8 @@
 #include "cold.h"
 #include "mode.h"
 
-#include <carta-zarr/carta_zarr.h>
-
-#include <fcntl.h>
-#include <poll.h>
-#include <signal.h>
 #include <sys/resource.h>
 #include <sys/wait.h>
-#include <unistd.h>
 
 #include <algorithm>
 #include <array>
@@ -29,6 +23,12 @@
 #include <optional>
 #include <string>
 #include <vector>
+
+#include <carta-zarr/carta_zarr.h>
+#include <fcntl.h>
+#include <poll.h>
+#include <signal.h>
+#include <unistd.h>
 
 namespace carta::zarr::bench {
 
@@ -114,8 +114,7 @@ std::optional<std::uint64_t> StorageReadBytes() {
 std::string UtcNow() {
     const auto now = std::chrono::system_clock::now();
     const auto seconds = std::chrono::system_clock::to_time_t(now);
-    const auto millis =
-        std::chrono::duration_cast<std::chrono::milliseconds>(now.time_since_epoch()).count() % 1000;
+    const auto millis = std::chrono::duration_cast<std::chrono::milliseconds>(now.time_since_epoch()).count() % 1000;
     std::tm utc{};
     gmtime_r(&seconds, &utc);
     std::array<char, 40> buffer{};
@@ -126,8 +125,8 @@ std::string UtcNow() {
 
 // The operations of one process: open what it reads, say it is ready, wait to be released, read, and
 // report each operation as it ends. Never returns.
-[[noreturn]] void Child(const RunOptions& options, Mode mode, unsigned trial, unsigned process_index, Row row,
-                        int out, int go) {
+[[noreturn]] void Child(const RunOptions& options, Mode mode, unsigned trial, unsigned process_index, Row row, int out,
+                        int go) {
     const auto send = [out](const std::string& line) {
         const auto text = line + "\n";
         WriteAll(out, text.data(), text.size());
@@ -347,8 +346,8 @@ TrialOutcome RunTrial(const RunOptions& options, Mode mode, unsigned trial, Cold
 
     // Opening is given the trial's own timeout: a store that takes longer than that to open will not
     // read in time either.
-    const bool ready = Listen(processes, Clock::now() + options.trial_timeout,
-                              [](const Process& process) { return process.ready; });
+    const bool ready =
+        Listen(processes, Clock::now() + options.trial_timeout, [](const Process& process) { return process.ready; });
     if (ready) {
         const auto released = Clock::now();
         const std::int64_t released_ns = released.time_since_epoch().count();
@@ -396,8 +395,8 @@ TrialOutcome RunTrial(const RunOptions& options, Mode mode, unsigned trial, Cold
             Row missing = row;
             missing.process_index = index;
             missing.status = "error";
-            missing.error = process.killed ? "killed: not ready within the trial timeout"
-                                           : "not ready: " + ExitDescription(status);
+            missing.error =
+                process.killed ? "killed: not ready within the trial timeout" : "not ready: " + ExitDescription(status);
             process.rows.push_back(FormatRow(missing));
         }
         for (auto& line : process.rows) {

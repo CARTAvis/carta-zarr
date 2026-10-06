@@ -37,10 +37,25 @@ constexpr std::array<std::pair<ColdMethod, std::string_view>, 4> kColdMethods{{
 // The options of run that take a value, so that one it does not know is reported as unknown rather
 // than as missing its value.
 constexpr std::array<std::string_view, 19> kRunOptions{
-    "--image", "--mode", "--trials", "--ops", "--seed",
-    "--io-threads", "--decode-threads", "--cache-bytes", "--read-budget-bytes", "--processes",
-    "--cold", "--drop-cache-cmd", "--trial-timeout", "--csv", "--label",
-    "--region-fraction", "--histogram-method", "--animation-frames", "--animation-fps",
+    "--image",
+    "--mode",
+    "--trials",
+    "--ops",
+    "--seed",
+    "--io-threads",
+    "--decode-threads",
+    "--cache-bytes",
+    "--read-budget-bytes",
+    "--processes",
+    "--cold",
+    "--drop-cache-cmd",
+    "--trial-timeout",
+    "--csv",
+    "--label",
+    "--region-fraction",
+    "--histogram-method",
+    "--animation-frames",
+    "--animation-fps",
 };
 
 constexpr std::string_view kUsage = R"(usage:
@@ -130,9 +145,7 @@ struct Arguments {
     std::vector<std::string_view> words;
     std::size_t next = 0;
 
-    bool Done() const {
-        return next >= words.size();
-    }
+    bool Done() const { return next >= words.size(); }
 
     std::optional<std::string_view> Value(std::string_view& word) {
         if (const auto equals = word.find('='); equals != std::string_view::npos) {

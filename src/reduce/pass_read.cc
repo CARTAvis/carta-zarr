@@ -11,9 +11,8 @@
 // pins them compiles that translation unit alone, with no store, no transport and no TensorStore
 // behind them.
 
-#include "reduce/pass.h"
-
 #include "pixel_mask.h"
+#include "reduce/pass.h"
 
 namespace carta::zarr::internal {
 
@@ -30,8 +29,8 @@ Result<Slab> SlabWalk::ReadSlab(const SlabRequest& request) {
     read_request.axes.assign(rank, Range{0, 1, 1});
     read_request.axes.at(plan.axis_u) = Range{request.u_start, request.u_count, request.u_stride};
     read_request.axes.at(plan.axis_v) = Range{request.v_start, request.v_count, request.v_stride};
-    read_request.axes.at(plan.map.spectral) = Range{
-        spectral.start + (request.channel_index.index * spectral.stride), request.channel_count, spectral.stride};
+    read_request.axes.at(plan.map.spectral) =
+        Range{spectral.start + (request.channel_index.index * spectral.stride), request.channel_count, spectral.stride};
     if (plan.map.has_polarization) {
         read_request.axes.at(plan.map.polarization) = Range{plan.planes.polarization, 1, 1};
     }
@@ -57,8 +56,7 @@ Result<Slab> SlabWalk::ReadSlab(const SlabRequest& request) {
     }
     if (plan.apply_mask) {
         buffers.mask.resize(elements);
-        if (auto read =
-                source.ReadMask(selection.value(), {buffers.mask.data(), buffers.mask.size()}, options.control);
+        if (auto read = source.ReadMask(selection.value(), {buffers.mask.data(), buffers.mask.size()}, options.control);
             !read) {
             return read.error();
         }

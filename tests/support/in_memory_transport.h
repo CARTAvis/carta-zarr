@@ -74,12 +74,8 @@ public:
 
     // The nodes whose bytes were asked for, and how many times the hierarchy was listed. The root
     // is a node like any other, and reading it is what every open does first.
-    const std::set<std::string>& nodes_read() const {
-        return _nodes_read;
-    }
-    std::size_t listings() const {
-        return _listings;
-    }
+    const std::set<std::string>& nodes_read() const { return _nodes_read; }
+    std::size_t listings() const { return _listings; }
     // How many times one node's bytes were asked for. Whether a node was read at all cannot tell a
     // store that read a document once from one that went back for it.
     std::size_t reads(const std::string& node) const {

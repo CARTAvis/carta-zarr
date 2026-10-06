@@ -9,7 +9,7 @@
 // so a reduction that reads the right pixels in the wrong order, double-counts a region that spans
 // two chunks, or silently keeps a flagged pixel gets a different answer than the oracle.
 
-#include <carta-zarr/carta_zarr.h>
+#include "support/check.h"
 
 #include <array>
 #include <cmath>
@@ -21,7 +21,7 @@
 #include <string>
 #include <vector>
 
-#include "support/check.h"
+#include <carta-zarr/carta_zarr.h>
 
 namespace {
 
@@ -62,8 +62,7 @@ void RequireClose(double actual, double expected, const std::string& message) {
 }
 
 carta::zarr::Image OpenSky(const char* fixture, const carta::zarr::ContextOptions& options = {}) {
-    Require(std::filesystem::exists(fixture),
-            "the pixel fixture is missing; run tests/data/generate_zarr_fixtures.py");
+    Require(std::filesystem::exists(fixture), "the pixel fixture is missing; run tests/data/generate_zarr_fixtures.py");
     const auto context = carta::zarr::Context::Create(options);
     Require(static_cast<bool>(context), "Context::Create failed");
     auto dataset = carta::zarr::Dataset::Open(context.value(), fixture);
@@ -136,9 +135,8 @@ constexpr std::array<carta::zarr::Statistic, 7> kEveryStatistic{
     carta::zarr::Statistic::sum_sq_dev};
 
 carta::zarr::StatisticSet AllStatistics() {
-    return carta::zarr::Statistic::num_pixels | carta::zarr::Statistic::nan_count |
-           carta::zarr::Statistic::sum | carta::zarr::Statistic::sum_sq | carta::zarr::Statistic::min |
-           carta::zarr::Statistic::max;
+    return carta::zarr::Statistic::num_pixels | carta::zarr::Statistic::nan_count | carta::zarr::Statistic::sum |
+           carta::zarr::Statistic::sum_sq | carta::zarr::Statistic::min | carta::zarr::Statistic::max;
 }
 
 // One reduction, gathered into one record per region and channel over the whole spectral selection,
@@ -186,37 +184,40 @@ Collected Collect(const carta::zarr::Image& sky, const carta::zarr::SpectralRedu
     collected.region_count = request.regions.size;
     collected.channel_count = static_cast<std::size_t>(request.planes.spectral.count);
     std::uint64_t next_channel = 0;
-    const auto result = sky.ReduceSpectral(request, [&](const carta::zarr::SpectralBlock& block) {
-        Require(block.first_channel == next_channel, "blocks should tile the spectral selection in order");
-        Require(block.channel_count > 0, "a block should carry at least one channel");
-        Require(block.region_count == collected.region_count, "a block should report every region");
-        if (!block.complete) {
-            Require(block.completeness > 0.0 && block.completeness < 1.0,
-                    "an unfinished block should report a fraction of itself");
-            if (const double* counts = block.Series(0, carta::zarr::Statistic::num_pixels)) {
-                collected.partial_counts.emplace_back(block.first_channel, counts[0]);
+    const auto result = sky.ReduceSpectral(
+        request,
+        [&](const carta::zarr::SpectralBlock& block) {
+            Require(block.first_channel == next_channel, "blocks should tile the spectral selection in order");
+            Require(block.channel_count > 0, "a block should carry at least one channel");
+            Require(block.region_count == collected.region_count, "a block should report every region");
+            if (!block.complete) {
+                Require(block.completeness > 0.0 && block.completeness < 1.0,
+                        "an unfinished block should report a fraction of itself");
+                if (const double* counts = block.Series(0, carta::zarr::Statistic::num_pixels)) {
+                    collected.partial_counts.emplace_back(block.first_channel, counts[0]);
+                }
+                return true;
             }
-            return true;
-        }
-        Require(block.completeness == 1.0, "a finished block is all of itself");
-        next_channel += block.channel_count;
-        collected.block_lengths.push_back(block.channel_count);
-        if (collected.totals.empty()) {
-            for (const auto statistic : kEveryStatistic) {
-                if (block.Carries(statistic)) {
-                    collected.carried |= statistic;
+            Require(block.completeness == 1.0, "a finished block is all of itself");
+            next_channel += block.channel_count;
+            collected.block_lengths.push_back(block.channel_count);
+            if (collected.totals.empty()) {
+                for (const auto statistic : kEveryStatistic) {
+                    if (block.Carries(statistic)) {
+                        collected.carried |= statistic;
+                    }
+                }
+                collected.totals.resize(collected.region_count * collected.channel_count);
+            }
+            for (std::size_t r = 0; r < collected.region_count; ++r) {
+                for (std::uint64_t c = 0; c < block.channel_count; ++c) {
+                    collected.totals.at((r * collected.channel_count) +
+                                        static_cast<std::size_t>(block.first_channel + c)) = block.Totals(r, c);
                 }
             }
-            collected.totals.resize(collected.region_count * collected.channel_count);
-        }
-        for (std::size_t r = 0; r < collected.region_count; ++r) {
-            for (std::uint64_t c = 0; c < block.channel_count; ++c) {
-                collected.totals.at((r * collected.channel_count) +
-                                    static_cast<std::size_t>(block.first_channel + c)) = block.Totals(r, c);
-            }
-        }
-        return true;
-    }, options);
+            return true;
+        },
+        options);
     Require(static_cast<bool>(result),
             std::string("the reduction failed: ") + (result.has_value() ? "" : result.error().message));
     Require(next_channel == request.planes.spectral.count, "the blocks should cover the whole spectral selection");
@@ -232,8 +233,7 @@ void CheckAgainstOracle(const Collected& collected, const std::vector<carta::zar
     for (std::size_t r = 0; r < regions.size(); ++r) {
         for (std::uint64_t f = 0; f < collected.channel_count; ++f) {
             const auto expected = Expected(regions.at(r), f, polarization);
-            const std::string where =
-                label + " region " + std::to_string(r) + " channel " + std::to_string(f);
+            const std::string where = label + " region " + std::to_string(r) + " channel " + std::to_string(f);
             RequireClose(collected.At(r, carta::zarr::Statistic::num_pixels, f), expected.num_pixels,
                          where + " num_pixels");
             RequireClose(collected.At(r, carta::zarr::Statistic::nan_count, f), expected.nan_count,
@@ -277,8 +277,8 @@ void TestTheSpreadIsThePixelsOwn(const carta::zarr::Image& sky) {
     for (std::size_t i = 0; i < holes.size(); ++i) {
         holes[i] = static_cast<std::uint8_t>(i % 3 != 1);
     }
-    const std::vector<carta::zarr::RegionMask> regions{{0, 0, kL, kM}, {1, 1, 2, 2}, {3, 4, 1, 1},
-                                                        {0, 0, kL, kM, {holes.data(), holes.size()}}};
+    const std::vector<carta::zarr::RegionMask> regions{
+        {0, 0, kL, kM}, {1, 1, 2, 2}, {3, 4, 1, 1}, {0, 0, kL, kM, {holes.data(), holes.size()}}};
     for (std::uint64_t polarization = 0; polarization < kPolarization; ++polarization) {
         auto request = WholeSpectrum(regions, polarization);
         request.statistics = carta::zarr::Statistic::sum_sq_dev;
@@ -330,8 +330,7 @@ void TestRasterMaskAndNullMaskAgree(const carta::zarr::Image& sky) {
     const auto collected = Collect(sky, WholeSpectrum(regions, 1));
     CheckAgainstOracle(collected, regions, 1, "masked");
     for (std::uint64_t f = 0; f < kFrequency; ++f) {
-        RequireClose(collected.At(2, carta::zarr::Statistic::sum, f),
-                     collected.At(1, carta::zarr::Statistic::sum, f),
+        RequireClose(collected.At(2, carta::zarr::Statistic::sum, f), collected.At(1, carta::zarr::Statistic::sum, f),
                      "a null mask should select what a full mask selects");
     }
 }
@@ -382,8 +381,7 @@ void TestEmitGranularityIsReported(const carta::zarr::Image& sky) {
             "reason to split it");
     for (std::uint64_t f = 0; f < kFrequency; ++f) {
         RequireClose(collected.At(0, carta::zarr::Statistic::sum, f),
-                     in_one_block.At(0, carta::zarr::Statistic::sum, f),
-                     "streaming should not change the answer");
+                     in_one_block.At(0, carta::zarr::Statistic::sum, f), "streaming should not change the answer");
     }
 }
 
@@ -557,8 +555,8 @@ double ExpectedValue(std::uint64_t l, std::uint64_t m, std::uint64_t frequency, 
 void TestAWideRegionSplitsAndStillAgrees(const char* fixture) {
     const std::uint64_t polarization = 1;
     const std::vector<carta::zarr::RegionMask> regions{
-        {0, 0, kL, kM},        // the whole plane
-        {100, 60, 300, 400},   // an interior box across several chunks
+        {0, 0, kL, kM},       // the whole plane
+        {100, 60, 300, 400},  // an interior box across several chunks
     };
 
     // The oracle, recomputed from the fixture's encoding.
@@ -599,8 +597,8 @@ void TestAWideRegionSplitsAndStillAgrees(const char* fixture) {
         for (std::size_t r = 0; r < regions.size(); ++r) {
             for (std::uint64_t f = 0; f < kFrequency; ++f) {
                 const auto at = (r * kFrequency) + f;
-                const std::string where = "region " + std::to_string(r) + " channel " + std::to_string(f) +
-                                          " on " + std::to_string(threads) + " threads";
+                const std::string where = "region " + std::to_string(r) + " channel " + std::to_string(f) + " on " +
+                                          std::to_string(threads) + " threads";
                 RequireClose(collected.At(r, carta::zarr::Statistic::num_pixels, f), expected_pixels[at],
                              where + " pixels");
                 RequireClose(collected.At(r, carta::zarr::Statistic::nan_count, f), 0.0, where + " nan");
@@ -608,8 +606,7 @@ void TestAWideRegionSplitsAndStillAgrees(const char* fixture) {
                 RequireClose(collected.At(r, carta::zarr::Statistic::max, f), expected_max[at], where + " max");
                 const double sum = collected.At(r, carta::zarr::Statistic::sum, f);
                 Require(std::abs(sum - expected_sum[at]) <= 1e-9 * (1.0 + std::abs(expected_sum[at])),
-                        where + " sum: expected " + std::to_string(expected_sum[at]) + ", got " +
-                            std::to_string(sum));
+                        where + " sum: expected " + std::to_string(expected_sum[at]) + ", got " + std::to_string(sum));
             }
         }
     }

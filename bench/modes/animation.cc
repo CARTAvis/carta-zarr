@@ -10,8 +10,6 @@
 
 #include "cube.h"
 
-#include <carta-zarr/read_ahead.h>
-
 #include <algorithm>
 #include <array>
 #include <chrono>
@@ -19,6 +17,8 @@
 #include <optional>
 #include <thread>
 #include <vector>
+
+#include <carta-zarr/read_ahead.h>
 
 namespace carta::zarr::bench {
 
@@ -78,9 +78,9 @@ public:
         std::uint64_t elements = 0;
         Operation frame = operation;
         const auto& axes = this->axes();
-        const auto period =
-            _fps > 0.0 ? std::chrono::duration_cast<Clock::duration>(std::chrono::duration<double>(1.0 / _fps))
-                       : Clock::duration::zero();
+        const auto period = _fps > 0.0
+                              ? std::chrono::duration_cast<Clock::duration>(std::chrono::duration<double>(1.0 / _fps))
+                              : Clock::duration::zero();
         const auto plane_at = [&](std::uint64_t channel) {
             ReadRequest request;
             request.axes.assign(axes.rank, Range{0, 1, 1});
@@ -213,8 +213,7 @@ public:
     // so that no two of a trial's animations play the same planes while there are enough channels for
     // them.
     std::vector<Operation> Plan(const CubeAxes& axes, const PlanSeed& at, unsigned ops) const override {
-        const auto frames =
-            std::clamp<std::uint64_t>(_settings.frames, 1, std::max<std::uint64_t>(axes.channels, 1));
+        const auto frames = std::clamp<std::uint64_t>(_settings.frames, 1, std::max<std::uint64_t>(axes.channels, 1));
         const auto runs = std::max<std::uint64_t>(axes.channels / frames, 1);
         const auto run_cell = axes.channels / runs;
         return PlanDraws(mode(), at, ops, runs * axes.polarizations,
@@ -225,9 +224,7 @@ public:
                          });
     }
 
-    std::string Describe(const Operation& operation) const override {
-        return DescribeChannels(operation);
-    }
+    std::string Describe(const Operation& operation) const override { return DescribeChannels(operation); }
 
     // Not a first touch, so ChunksRead says nothing: it reuses chunks on purpose.
 

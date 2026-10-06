@@ -9,10 +9,9 @@
 // It names no Store: pixels arrive through the PixelSource seam, so everything under src/read/
 // compiles without one, the same way src/reduce/ already did.
 
-#include "read/pieces.h"
-
 #include "chunk_blocks.h"
 #include "pixel_mask.h"
+#include "read/pieces.h"
 #include "zarr/pixel_selection.h"
 
 #include <algorithm>
@@ -38,8 +37,7 @@ Result<zarr::PixelSelection> CheckRead(const ImageDescriptor& descriptor, const 
         return selection.error();
     }
     if (selection.value().elements() > destination_size) {
-        return Error{ErrorCode::invalid_argument, "Destination buffer is too small for the request",
-                     descriptor.id};
+        return Error{ErrorCode::invalid_argument, "Destination buffer is too small for the request", descriptor.id};
     }
 
     // Before allocating a mask or starting any storage work. A cancelled request must not consume
@@ -54,8 +52,8 @@ Result<zarr::PixelSelection> CheckRead(const ImageDescriptor& descriptor, const 
 
 Result<std::size_t> ReadInPieces(const PixelSource& source, const ImageDescriptor& descriptor,
                                  const ChunkGeometry& geometry, const ChunkGeometry& flag_geometry,
-                                 const ReadRequest& request, BufferView<float> destination,
-                                 const ReadOptions& options, const ProgressCallback& progress) {
+                                 const ReadRequest& request, BufferView<float> destination, const ReadOptions& options,
+                                 const ProgressCallback& progress) {
     const auto checked = CheckRead(descriptor, request, destination.size, options.control);
     if (!checked) {
         return checked.error();
@@ -84,10 +82,8 @@ Result<std::size_t> ReadInPieces(const PixelSource& source, const ImageDescripto
         if (apply_mask) {
             // The budget bounds the flag a piece holds, and a read that is not split is one piece,
             // so a request that cannot be cut any further still has to say so rather than allocate.
-            if (options.read_budget_bytes != 0 &&
-                piece_elements > options.read_budget_bytes) {
-                return Error{ErrorCode::buffer_too_small,
-                             "Pixel mask temporary buffer exceeds the read budget",
+            if (options.read_budget_bytes != 0 && piece_elements > options.read_budget_bytes) {
+                return Error{ErrorCode::buffer_too_small, "Pixel mask temporary buffer exceeds the read budget",
                              descriptor.id};
             }
             mask.assign(piece_elements, 0);
@@ -110,8 +106,7 @@ Result<std::size_t> ReadInPieces(const PixelSource& source, const ImageDescripto
 
         const auto finished = static_cast<std::size_t>(piece.first_element + piece_elements);
         if (progress && !progress(finished, static_cast<std::size_t>(elements))) {
-            return Error{ErrorCode::cancelled, "The read was cancelled by its progress callback",
-                         descriptor.id};
+            return Error{ErrorCode::cancelled, "The read was cancelled by its progress callback", descriptor.id};
         }
     }
     return static_cast<std::size_t>(elements);
@@ -167,7 +162,8 @@ Result<void> ForEachPiece(const ReadRequest& request, std::uint64_t most, Read&&
         }
         const auto& along = request.axes[cut];
         for (std::uint64_t first = 0; first < along.count; first += run) {
-            piece.axes[cut] = Range{along.start + (first * along.stride), std::min(run, along.count - first), along.stride};
+            piece.axes[cut] =
+                Range{along.start + (first * along.stride), std::min(run, along.count - first), along.stride};
             if (auto done = read(piece); !done) {
                 return done;
             }
@@ -239,8 +235,7 @@ Result<std::uint64_t> PrefetchChunks(const PixelSource& source, const ImageDescr
     // the least, as a read holds one however small the budget. The pixels' pieces go through
     // ReadInPieces, which cuts them by what their chunks decode to as it cuts any read -- down to a row
     // of chunks along the axis it splits, which is as far as Image::Read goes either.
-    const std::uint64_t flag_chunk_bytes =
-        ChunkElements(flag_geometry.chunk_shape.empty() ? geometry : flag_geometry);
+    const std::uint64_t flag_chunk_bytes = ChunkElements(flag_geometry.chunk_shape.empty() ? geometry : flag_geometry);
     const std::uint64_t flag_budget =
         options.read_budget_bytes != 0 ? options.read_budget_bytes : DefaultReadBytes(flag_chunk_bytes);
     const std::uint64_t flag_piece =

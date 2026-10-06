@@ -6,9 +6,7 @@
 
 #include "cold.h"
 
-#include <fcntl.h>
 #include <sys/wait.h>
-#include <unistd.h>
 
 #include <cerrno>
 #include <cstdlib>
@@ -16,6 +14,9 @@
 #include <filesystem>
 #include <fstream>
 #include <system_error>
+
+#include <fcntl.h>
+#include <unistd.h>
 
 namespace carta::zarr::bench {
 

@@ -13,6 +13,8 @@
 
 #include "work_pool.h"
 
+#include "support/check.h"
+
 #include <algorithm>
 #include <atomic>
 #include <chrono>
@@ -24,8 +26,6 @@
 #include <string>
 #include <thread>
 #include <vector>
-
-#include "support/check.h"
 
 namespace {
 
@@ -42,9 +42,8 @@ void EveryTaskRunsExactlyOnce() {
             std::vector<int> seen(tasks, 0);
             pool.Run(tasks, [&](std::size_t task, std::size_t) { ++seen[task]; });
             for (std::size_t task = 0; task < tasks; ++task) {
-                Require(seen[task] == 1, "task " + std::to_string(task) + " ran " +
-                                             std::to_string(seen[task]) + " times with " +
-                                             std::to_string(threads) + " threads");
+                Require(seen[task] == 1, "task " + std::to_string(task) + " ran " + std::to_string(seen[task]) +
+                                             " times with " + std::to_string(threads) + " threads");
             }
         }
     }
@@ -209,8 +208,8 @@ void RowRangesCoverEveryRowOnce() {
             }
             Require(next == rows, "the last range ends at the last row");
             for (std::uint64_t row = 0; row < rows; ++row) {
-                Require(seen[row] == 1, "row " + std::to_string(row) + " of " + std::to_string(rows) +
-                                            " was covered " + std::to_string(seen[row]) + " times");
+                Require(seen[row] == 1, "row " + std::to_string(row) + " of " + std::to_string(rows) + " was covered " +
+                                            std::to_string(seen[row]) + " times");
             }
         }
     }

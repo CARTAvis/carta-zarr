@@ -217,7 +217,6 @@ private:
      */
     Result<Slab> ReadSlab(const SlabRequest& request);
 
-
     const PixelSource& _source;
     const PassPlan& _plan;
     const ReadOptions& _options;

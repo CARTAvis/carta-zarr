@@ -7,17 +7,17 @@
 #ifndef CARTA_ZARR_SRC_REDUCIBLE_IMAGE_H_
 #define CARTA_ZARR_SRC_REDUCIBLE_IMAGE_H_
 
+#include "carta-zarr/descriptor.h"
+#include "carta-zarr/read.h"
+#include "carta-zarr/reduce.h"
+#include "carta-zarr/result.h"
+
 #include "axis_map.h"
 #include "pixel_source.h"
 #include "reduce/pass_plan.h"
 #include "reduce/plane_selection.h"
 #include "reduce/task_split.h"
 #include "work_pool.h"
-
-#include "carta-zarr/descriptor.h"
-#include "carta-zarr/read.h"
-#include "carta-zarr/reduce.h"
-#include "carta-zarr/result.h"
 
 namespace carta::zarr::internal {
 
@@ -54,8 +54,8 @@ public:
     // that is not degenerate, or a missing spatial or spectral axis. Built per call, so that
     // failure reaches the caller of the reduction that needed it and no other.
     static Result<ReducibleImage> Of(const PixelSource& source, const ImageDescriptor& descriptor,
-                                    const ChunkGeometry& geometry, const ChunkGeometry& flag_geometry,
-                                    WorkPool& workers) {
+                                     const ChunkGeometry& geometry, const ChunkGeometry& flag_geometry,
+                                     WorkPool& workers) {
         auto map = MapAxes(descriptor);
         if (!map) {
             return map.error();
@@ -63,15 +63,9 @@ public:
         return ReducibleImage(source, descriptor, geometry, flag_geometry, workers, map.value());
     }
 
-    const PixelSource& source() const noexcept {
-        return *_source;
-    }
-    const ImageDescriptor& descriptor() const noexcept {
-        return *_descriptor;
-    }
-    const AxisMap& map() const noexcept {
-        return _map;
-    }
+    const PixelSource& source() const noexcept { return *_source; }
+    const ImageDescriptor& descriptor() const noexcept { return *_descriptor; }
+    const AxisMap& map() const noexcept { return _map; }
 
     // The pass a reduction makes over `planes`, once they are checked against this image: every
     // reduction asked CheckedPlanes::Of and then PlanPass, from the same descriptor, geometry and
@@ -99,7 +93,7 @@ public:
 
 private:
     ReducibleImage(const PixelSource& source, const ImageDescriptor& descriptor, const ChunkGeometry& geometry,
-                  const ChunkGeometry& flag_geometry, WorkPool& workers, const AxisMap& map)
+                   const ChunkGeometry& flag_geometry, WorkPool& workers, const AxisMap& map)
         : _source(&source),
           _descriptor(&descriptor),
           _geometry(&geometry),

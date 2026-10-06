@@ -78,9 +78,7 @@ public:
     ReadAhead& operator=(const ReadAhead&) = default;
     // A copy, so that the handle moved from still refers to what it did. See ADR 0013.
     ReadAhead(ReadAhead&& other) noexcept : ReadAhead(other) {}
-    ReadAhead& operator=(ReadAhead&& other) noexcept {
-        return *this = other;
-    }
+    ReadAhead& operator=(ReadAhead&& other) noexcept { return *this = other; }
     ~ReadAhead();
 
     // Reading ahead of the animated `images`, each read with its options -- the cache a frame of it is

@@ -23,13 +23,13 @@
 #include "plan.h"
 #include "record.h"
 
-#include <carta-zarr/carta_zarr.h>
-
 #include <cstdint>
 #include <memory>
 #include <optional>
 #include <string>
 #include <vector>
+
+#include <carta-zarr/carta_zarr.h>
 
 namespace carta::zarr::bench {
 
@@ -80,15 +80,11 @@ public:
     Workload& operator=(Workload&&) = delete;
     virtual ~Workload() = default;
 
-    Mode mode() const noexcept {
-        return _mode;
-    }
+    Mode mode() const noexcept { return _mode; }
 
     // The settings columns only this mode has, which the run key is made from as well. Every other
     // mode leaves them empty.
-    virtual void WriteSettings(Row& row) const {
-        (void)row;
-    }
+    virtual void WriteSettings(Row& row) const { (void)row; }
 
     // The operations one process makes in one trial, a function of the seed, the trial and the cube's
     // logical shape and never of its layout. See PlanDraws.
@@ -126,9 +122,7 @@ public:
 protected:
     Workload(Mode mode, const RunOptions& options) : _mode(mode), _options(options) {}
 
-    const RunOptions& options() const noexcept {
-        return _options;
-    }
+    const RunOptions& options() const noexcept { return _options; }
 
 private:
     Mode _mode;

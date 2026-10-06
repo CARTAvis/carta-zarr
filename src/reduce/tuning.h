@@ -32,9 +32,8 @@
 namespace carta::zarr::internal {
 
 // Every statistic, in the order a SpectralBlock lays them out.
-inline constexpr std::array<Statistic, 7> kStatisticOrder{Statistic::num_pixels, Statistic::nan_count,
-                                                          Statistic::sum, Statistic::sum_sq,
-                                                          Statistic::min, Statistic::max,
+inline constexpr std::array<Statistic, 7> kStatisticOrder{Statistic::num_pixels, Statistic::nan_count, Statistic::sum,
+                                                          Statistic::sum_sq,     Statistic::min,       Statistic::max,
                                                           Statistic::sum_sq_dev};
 
 // The provisional resolution a cube histogram bins at when the caller does not choose one.

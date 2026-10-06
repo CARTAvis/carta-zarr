@@ -13,33 +13,32 @@
 
 #include "schema/chunk_geometry.h"
 
+#include "support/check.h"
+
 #include <cstdint>
 #include <cstdio>
 #include <exception>
-#include <string>
 #include <stdexcept>
+#include <string>
 #include <vector>
-
-#include "support/check.h"
 
 namespace {
 
 using carta::zarr::AxisRole;
 using carta::zarr::ImageDescriptor;
-using carta::zarr::internal::zarr::StorageLayout;
 using carta::zarr::internal::BuildChunkGeometry;
+using carta::zarr::internal::zarr::StorageLayout;
 
 using carta::zarr::testing::Require;
 
 // Five axes in logical order, with the stored index of each one given: that permutation is the
 // whole question this answers.
-ImageDescriptor MakeImage(const std::vector<std::size_t>& storage,
-                          const std::vector<std::uint64_t>& lengths) {
+ImageDescriptor MakeImage(const std::vector<std::size_t>& storage, const std::vector<std::uint64_t>& lengths) {
     ImageDescriptor descriptor;
     descriptor.id = "SKY";
     descriptor.stored_type = carta::zarr::DataType::float32;
-    const AxisRole roles[]{AxisRole::spatial_x, AxisRole::spatial_y, AxisRole::spectral,
-                           AxisRole::polarization, AxisRole::time};
+    const AxisRole roles[]{AxisRole::spatial_x, AxisRole::spatial_y, AxisRole::spectral, AxisRole::polarization,
+                           AxisRole::time};
     const char* names[]{"l", "m", "frequency", "polarization", "time"};
     for (std::size_t i = 0; i < storage.size(); ++i) {
         carta::zarr::AxisDescriptor axis;
@@ -68,8 +67,7 @@ void TestTheLayoutIsReadThroughThePermutation() {
             "the chunk shape should come back in logical order");
     Require(geometry.grid_shape == std::vector<std::uint64_t>{2, 2, 16, 4, 2},
             "and the grid should be each axis's length over its own chunk");
-    Require(geometry.fastest_spatial_axis == AxisRole::spatial_y,
-            "m is stored last, so a plane is contiguous along m");
+    Require(geometry.fastest_spatial_axis == AxisRole::spatial_y, "m is stored last, so a plane is contiguous along m");
     Require(!geometry.sharded && geometry.shard_shape == geometry.chunk_shape,
             "an unsharded array's shard is its chunk");
     Require(geometry.compressor == "zstd", "and the compressor is carried through");
@@ -115,8 +113,7 @@ void TestASharedArrayKeepsBothGranularities() {
     const auto geometry = BuildChunkGeometry(image, layout);
 
     Require(geometry.sharded, "a sharded layout is reported as one");
-    Require(geometry.chunk_shape == std::vector<std::uint64_t>{64, 65, 1, 1, 1},
-            "the inner chunk in logical order");
+    Require(geometry.chunk_shape == std::vector<std::uint64_t>{64, 65, 1, 1, 1}, "the inner chunk in logical order");
     Require(geometry.shard_shape == std::vector<std::uint64_t>{256, 260, 4, 1, 1},
             "and the shard in logical order, permuted the same way");
     Require(geometry.grid_shape == std::vector<std::uint64_t>{8, 8, 32, 4, 2},

@@ -190,23 +190,40 @@ std::optional<std::size_t> FindDimensionIndex(const ArrayMetadata& metadata, std
 
 const char* ErrorCodeName(ErrorCode code) noexcept {
     switch (code) {
-    case ErrorCode::not_found: return "not_found";
-    case ErrorCode::not_zarr: return "not_zarr";
-    case ErrorCode::unsupported_transport: return "unsupported_transport";
-    case ErrorCode::unsupported_zarr_version: return "unsupported_zarr_version";
-    case ErrorCode::unsupported_schema: return "unsupported_schema";
-    case ErrorCode::unsupported_schema_version: return "unsupported_schema_version";
-    case ErrorCode::ambiguous_schema: return "ambiguous_schema";
-    case ErrorCode::invalid_argument: return "invalid_argument";
-    case ErrorCode::invalid_metadata: return "invalid_metadata";
-    case ErrorCode::unsupported_data_type: return "unsupported_data_type";
-    case ErrorCode::unsupported_codec: return "unsupported_codec";
-    case ErrorCode::invalid_slice: return "invalid_slice";
-    case ErrorCode::buffer_too_small: return "buffer_too_small";
-    case ErrorCode::io_error: return "io_error";
-    case ErrorCode::decode_error: return "decode_error";
-    case ErrorCode::cancelled: return "cancelled";
-    case ErrorCode::not_implemented: return "not_implemented";
+        case ErrorCode::not_found:
+            return "not_found";
+        case ErrorCode::not_zarr:
+            return "not_zarr";
+        case ErrorCode::unsupported_transport:
+            return "unsupported_transport";
+        case ErrorCode::unsupported_zarr_version:
+            return "unsupported_zarr_version";
+        case ErrorCode::unsupported_schema:
+            return "unsupported_schema";
+        case ErrorCode::unsupported_schema_version:
+            return "unsupported_schema_version";
+        case ErrorCode::ambiguous_schema:
+            return "ambiguous_schema";
+        case ErrorCode::invalid_argument:
+            return "invalid_argument";
+        case ErrorCode::invalid_metadata:
+            return "invalid_metadata";
+        case ErrorCode::unsupported_data_type:
+            return "unsupported_data_type";
+        case ErrorCode::unsupported_codec:
+            return "unsupported_codec";
+        case ErrorCode::invalid_slice:
+            return "invalid_slice";
+        case ErrorCode::buffer_too_small:
+            return "buffer_too_small";
+        case ErrorCode::io_error:
+            return "io_error";
+        case ErrorCode::decode_error:
+            return "decode_error";
+        case ErrorCode::cancelled:
+            return "cancelled";
+        case ErrorCode::not_implemented:
+            return "not_implemented";
     }
     return "unknown";
 }
@@ -251,8 +268,7 @@ Result<ArrayMetadata> ParseArrayMetadata(const nlohmann::json& metadata, std::st
     ArrayMetadata result;
     for (const auto& dimension : metadata.at("shape")) {
         if (!IsNonNegativeInteger(dimension)) {
-            return Error{ErrorCode::invalid_metadata, "Zarr array shape must contain non-negative integers",
-                         node_path};
+            return Error{ErrorCode::invalid_metadata, "Zarr array shape must contain non-negative integers", node_path};
         }
         result.shape.push_back(dimension.get<std::uint64_t>());
     }
@@ -291,8 +307,7 @@ Result<ArrayMetadata> ParseArrayMetadata(const nlohmann::json& metadata, std::st
         result.data_type = data_type.at("name").get<std::string>();
         if (data_type.contains("configuration")) {
             if (!data_type.at("configuration").is_object()) {
-                return Error{ErrorCode::invalid_metadata, "Zarr data_type configuration must be an object",
-                             node_path};
+                return Error{ErrorCode::invalid_metadata, "Zarr data_type configuration must be an object", node_path};
             }
             result.data_type_configuration = data_type.at("configuration");
         }
@@ -333,8 +348,7 @@ Result<ArrayMetadata> ParseArrayMetadata(const nlohmann::json& metadata, std::st
     const auto& chunks = metadata.at("chunk_grid").at("configuration").at("chunk_shape");
     if (!chunks.is_array() || chunks.size() != result.shape.size() ||
         !std::all_of(chunks.begin(), chunks.end(), IsPositiveInteger)) {
-        return Error{ErrorCode::invalid_metadata, "Zarr chunk_shape must be positive and match shape rank",
-                     node_path};
+        return Error{ErrorCode::invalid_metadata, "Zarr chunk_shape must be positive and match shape rank", node_path};
     }
     for (const auto& chunk : chunks) {
         result.chunk_shape.push_back(chunk.get<std::uint64_t>());
@@ -353,17 +367,16 @@ Result<ArrayMetadata> ParseArrayMetadata(const nlohmann::json& metadata, std::st
     for (const auto& codec : result.codecs) {
         if (codec.is_object() && codec.contains("name") && codec.at("name") == "transpose" &&
             !TransposeOrder(codec, result.shape.size())) {
-            return Error{ErrorCode::invalid_metadata,
-                         "Transpose codec order must be a permutation of the array's axes", node_path};
+            return Error{ErrorCode::invalid_metadata, "Transpose codec order must be a permutation of the array's axes",
+                         node_path};
         }
     }
 
-    if (const nlohmann::json* const sharding = FindCodec(&result.codecs, "sharding_indexed");
-        sharding != nullptr) {
+    if (const nlohmann::json* const sharding = FindCodec(&result.codecs, "sharding_indexed"); sharding != nullptr) {
         const auto* inner = sharding->contains("configuration") && sharding->at("configuration").is_object() &&
                                     sharding->at("configuration").contains("chunk_shape")
-                                ? &sharding->at("configuration").at("chunk_shape")
-                                : nullptr;
+                              ? &sharding->at("configuration").at("chunk_shape")
+                              : nullptr;
         if (inner == nullptr || !inner->is_array() || inner->size() != result.shape.size() ||
             !std::all_of(inner->begin(), inner->end(), IsPositiveInteger)) {
             return Error{ErrorCode::invalid_metadata,
@@ -378,4 +391,4 @@ Result<ArrayMetadata> ParseArrayMetadata(const nlohmann::json& metadata, std::st
     return result;
 }
 
-} // namespace carta::zarr::internal::zarr
+}  // namespace carta::zarr::internal::zarr

@@ -17,14 +17,14 @@
 #include "probe_report.h"
 #include "qualification.h"
 
-#include <carta-zarr/descriptor.h>
-
 #include <algorithm>
 #include <array>
 #include <cstddef>
 #include <iterator>
 #include <optional>
 #include <utility>
+
+#include <carta-zarr/descriptor.h>
 
 namespace carta::zarr::internal::xradio {
 namespace {
@@ -267,10 +267,10 @@ Result<SchemaInspection> InspectImages(const Store& store) {
         // But only a store with something of an image about it. A malformed node alone is not that:
         // a visibility dataset with a weights array that will not parse is Zarr of something else,
         // and calling it a broken image sent CARTA's file browser to list it as one.
-        const bool image_dataset = found.value().image_evidence ||
-                                   AttributeString(root_attributes, "type") == "image_dataset";
+        const bool image_dataset =
+            found.value().image_evidence || AttributeString(root_attributes, "type") == "image_dataset";
         return finish(found.value().first_malformation && image_dataset ? SchemaMatchKind::invalid
-                                                                          : SchemaMatchKind::no_match);
+                                                                        : SchemaMatchKind::no_match);
     }
 
     // Once discovery found an openable image, validate the metadata needed by the image reader.

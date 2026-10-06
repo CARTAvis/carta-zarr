@@ -15,6 +15,8 @@
 #include "carta-zarr/error.h"
 #include "carta-zarr/result.h"
 
+#include "support/check.h"
+
 #include <atomic>
 #include <chrono>
 #include <exception>
@@ -22,8 +24,6 @@
 #include <string>
 #include <thread>
 #include <vector>
-
-#include "support/check.h"
 
 namespace {
 

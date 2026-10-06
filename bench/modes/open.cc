@@ -55,9 +55,7 @@ public:
     }
 
     // The lengths of the axes it opened.
-    std::uint64_t Fingerprint() const override {
-        return bench::Fingerprint(_lengths.data(), _lengths.size());
-    }
+    std::uint64_t Fingerprint() const override { return bench::Fingerprint(_lengths.data(), _lengths.size()); }
 
     // The image last opened, which an open that failed leaves as it was.
     void Record(Row& result) const override {

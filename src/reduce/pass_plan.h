@@ -73,9 +73,8 @@ using BlockChannel = ChannelIndex<struct BlockChannelTag>;
  */
 class PassPlan;
 
-PassPlan PlanPass(const ImageDescriptor& descriptor, const ChunkGeometry& geometry,
-                  const ChunkGeometry& flag_geometry, const AxisMap& map, const CheckedPlanes& planes,
-                  std::uint64_t sample, const ReadOptions& options);
+PassPlan PlanPass(const ImageDescriptor& descriptor, const ChunkGeometry& geometry, const ChunkGeometry& flag_geometry,
+                  const AxisMap& map, const CheckedPlanes& planes, std::uint64_t sample, const ReadOptions& options);
 
 class PassPlan {
 public:

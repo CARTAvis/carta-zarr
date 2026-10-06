@@ -21,8 +21,6 @@
 // Reported per entry point: the minimum over the repeats, which is the statistic that survives a
 // noisy machine, and the median beside it so that a suspiciously lonely minimum is visible.
 
-#include <carta-zarr/carta_zarr.h>
-
 #include <algorithm>
 #include <chrono>
 #include <cstdint>
@@ -32,6 +30,8 @@
 #include <iostream>
 #include <string>
 #include <vector>
+
+#include <carta-zarr/carta_zarr.h>
 
 namespace {
 
@@ -71,8 +71,8 @@ void Report(const std::string& label, const Timing& timing) {
         std::cout << "FAILED  " << timing.failure << '\n';
         return;
     }
-    std::cout << std::right << std::fixed << std::setprecision(3) << std::setw(10) << timing.best_ms
-              << " ms   median " << std::setw(10) << timing.median_ms << " ms\n";
+    std::cout << std::right << std::fixed << std::setprecision(3) << std::setw(10) << timing.best_ms << " ms   median "
+              << std::setw(10) << timing.median_ms << " ms\n";
 }
 
 std::uint64_t AxisLength(const carta::zarr::ImageDescriptor& descriptor, carta::zarr::AxisRole role) {
@@ -121,8 +121,8 @@ int main(int argc, char** argv) {
     const auto y = AxisLength(descriptor, carta::zarr::AxisRole::spatial_y);
     const auto channels = AxisLength(descriptor, carta::zarr::AxisRole::spectral);
 
-    std::cout << "dataset  " << fixture << "\nimage    " << image_id << "  " << x << " x " << y << " x "
-              << channels << " channels, " << threads << " threads, " << repeats << " repeats\n\n";
+    std::cout << "dataset  " << fixture << "\nimage    " << image_id << "  " << x << " x " << y << " x " << channels
+              << " channels, " << threads << " threads, " << repeats << " repeats\n\n";
 
     // A whole-cube read of one polarization.
     const auto read = TimeIt(repeats, [&]() -> std::string {
@@ -231,7 +231,6 @@ int main(int argc, char** argv) {
     Report("ComputeCubeHistogram", cube);
 
     const bool all_ok = read.ok && reduce.ok && reduce_whole.ok && reduce_boxes.ok && reduce_masked.ok && spread.ok &&
-                        spread_whole.ok && spread_boxes.ok && spread_masked.ok &&
-                        histogram.ok && cube.ok;
+                        spread_whole.ok && spread_boxes.ok && spread_masked.ok && histogram.ok && cube.ok;
     return all_ok ? 0 : 1;
 }

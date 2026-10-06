@@ -47,8 +47,7 @@ DeclaredFlags FlagsOfDataGroups(const nlohmann::json& root_attributes, std::stri
         }
         // Canonical on both sides: compared as written, another group's "./FLAG" was not the FLAG the
         // inventory lists, and the guess below took a flag another image owns.
-        (Canonical(AttributeString(group, "sky")) == image_id ? declared.own : declared.others)
-            .insert(Canonical(flag));
+        (Canonical(AttributeString(group, "sky")) == image_id ? declared.own : declared.others).insert(Canonical(flag));
     }
     return declared;
 }

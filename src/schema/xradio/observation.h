@@ -7,9 +7,9 @@
 #ifndef CARTA_ZARR_SRC_SCHEMA_XRADIO_OBSERVATION_H_
 #define CARTA_ZARR_SRC_SCHEMA_XRADIO_OBSERVATION_H_
 
-#include "../../zarr/array_metadata.h"
-
 #include "carta-zarr/descriptor.h"
+
+#include "../../zarr/array_metadata.h"
 
 namespace carta::zarr::internal::xradio {
 

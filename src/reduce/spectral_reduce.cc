@@ -6,14 +6,14 @@
 
 #include "spectral_reduce.h"
 
-#include "chunk_blocks.h"
 #include "axis_map.h"
+#include "chunk_blocks.h"
 #include "reduce/deviations.h"
-#include "reduce/tuning.h"
 #include "reduce/occupancy.h"
 #include "reduce/pass.h"
 #include "reduce/plane_selection.h"
 #include "reduce/statistic_slots.h"
+#include "reduce/tuning.h"
 #include "zarr/pixel_selection.h"
 
 #include <algorithm>
@@ -118,8 +118,8 @@ void AccumulateSpan(const float* pixels, std::uint64_t stride, std::uint64_t cou
 
 }  // namespace
 
-Result<void> ReduceSpectral(const ReducibleImage& image, const SpectralReduceRequest& request,
-                            const SpectralSink& sink, const ReadOptions& options) {
+Result<void> ReduceSpectral(const ReducibleImage& image, const SpectralReduceRequest& request, const SpectralSink& sink,
+                            const ReadOptions& options) {
     const auto& descriptor = image.descriptor();
     const auto& source = image.source();
     const auto& map = image.map();
@@ -148,9 +148,8 @@ Result<void> ReduceSpectral(const ReducibleImage& image, const SpectralReduceReq
     // Asked of the plan rather than of the geometry: the plan applied that rule when it picked
     // axis_u, and working it out again here would be a second place for it to be got wrong.
     const PlaneExtent plane{descriptor.axes.at(map.x).length, descriptor.axes.at(map.y).length};
-    auto occupancy_result =
-        Occupancy::Of(request.regions, plane, plan.chunk_u, plan.chunk_v,
-                      plan.SwapsSpatial() ? AxisRole::spatial_y : AxisRole::spatial_x, node);
+    auto occupancy_result = Occupancy::Of(request.regions, plane, plan.chunk_u, plan.chunk_v,
+                                          plan.SwapsSpatial() ? AxisRole::spatial_y : AxisRole::spatial_x, node);
     if (!occupancy_result) {
         return occupancy_result.error();
     }
@@ -267,15 +266,15 @@ Result<void> ReduceSpectral(const ReducibleImage& image, const SpectralReduceReq
                     // taken in is the order they always were.
                     RowTotals totals;
                     const float* row = plane + ((y - v_begin) * stride_v);
-                    region.ForEachSpan(
-                        y, cell_u0, cell_u1,
-                        [&](std::uint64_t first, std::uint64_t last, const std::uint8_t* selected,
-                            std::uint64_t mask_step) {
-                            // A span whose every pixel is selected -- a run, or a region
-                            // that is its whole box -- takes the loop with no test per pixel.
-                            const float* pixels = row + ((first - u_begin) * stride_u);
-                            AccumulateSpan<kDeviations>(pixels, stride_u, last - first, selected, mask_step, totals);
-                        });
+                    region.ForEachSpan(y, cell_u0, cell_u1,
+                                       [&](std::uint64_t first, std::uint64_t last, const std::uint8_t* selected,
+                                           std::uint64_t mask_step) {
+                                           // A span whose every pixel is selected -- a run, or a region
+                                           // that is its whole box -- takes the loop with no test per pixel.
+                                           const float* pixels = row + ((first - u_begin) * stride_u);
+                                           AccumulateSpan<kDeviations>(pixels, stride_u, last - first, selected,
+                                                                       mask_step, totals);
+                                       });
                     partial.Fold<kDeviations>(r, channel, totals);
                 }
             }

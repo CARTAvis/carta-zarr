@@ -478,7 +478,9 @@ void TestAWidePlaneSplitsAndStillCounts(const char* fixture) {
     const double upper = 8000000.0;
     const std::uint32_t bins = 64;
 
-    std::vector<std::uint64_t> oracle(bins, 0);
+    // Channel by channel: a slab split by channel writes each channel's counts itself, and one
+    // written into its neighbour's would leave totals over the cube unchanged.
+    std::vector<std::vector<std::uint64_t>> oracle(kFrequency, std::vector<std::uint64_t>(bins, 0));
     const double width = (upper - lower) / bins;
     for (std::uint64_t f = 0; f < kFrequency; ++f) {
         for (std::uint64_t l = 0; l < kL; ++l) {
@@ -488,18 +490,19 @@ void TestAWidePlaneSplitsAndStillCounts(const char* fixture) {
                 if (bin >= bins) {
                     bin = bins - 1;
                 }
-                ++oracle[bin];
+                ++oracle[f][bin];
             }
         }
     }
 
-    std::vector<std::vector<std::uint64_t>> answers;
-    for (const unsigned int threads : {1U, 4U, 16U}) {
+    // Two workers split a slab of two or more channels by channel; sixteen split each channel by
+    // rows; one does neither.
+    for (const unsigned int threads : {1U, 2U, 4U, 16U}) {
         carta::zarr::ContextOptions options;
         options.decode_threads = threads;
         const auto sky = OpenSky(fixture, options);
 
-        std::vector<std::uint64_t> totals(bins, 0);
+        std::vector<std::vector<std::uint64_t>> counts(kFrequency, std::vector<std::uint64_t>(bins, 0));
         carta::zarr::HistogramRequest request;
         request.planes.spectral = {0, kFrequency, 1};
         request.planes.polarization = 1;
@@ -512,19 +515,13 @@ void TestAWidePlaneSplitsAndStillCounts(const char* fixture) {
             }
             for (std::uint64_t channel = 0; channel < block.channel_count; ++channel) {
                 const std::uint64_t* row = block.Counts(channel);
-                for (std::size_t bin = 0; bin < block.bin_count; ++bin) {
-                    totals[bin] += row[bin];
-                }
+                counts.at(block.first_channel + channel).assign(row, row + block.bin_count);
             }
             return true;
         });
         Require(static_cast<bool>(walked), "the wide histogram failed");
-        answers.push_back(std::move(totals));
-    }
-
-    for (std::size_t index = 0; index < answers.size(); ++index) {
-        Require(answers[index] == oracle,
-                "the wide plane's counts should match the oracle however many workers split it");
+        Require(counts == oracle,
+                "each channel of the wide plane should match the oracle at " + std::to_string(threads) + " workers");
     }
 }
 

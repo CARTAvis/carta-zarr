@@ -130,73 +130,93 @@ Result<void> ComputeHistogram(const ReducibleImage& image, const HistogramReques
         const std::uint64_t stride_z = slab.stride_z;
         const std::uint64_t u_count = slab.u_count;
         const std::uint64_t v_count = slab.v_count;
-        for (std::uint64_t offset = 0; offset < slab.channel_count; ++offset) {
-            const float* plane = slab.pixels + (offset * stride_z);
-            std::uint64_t* into =
-                counts.data() + (static_cast<std::size_t>((slab.first_channel + offset).index) * bins);
+        const auto counts_of = [&](std::uint64_t offset) {
+            return counts.data() + (static_cast<std::size_t>((slab.first_channel + offset).index) * bins);
+        };
 
-            // One loop per way of binning, each its own instantiation, so that the common one is the
-            // loop it always was. The caller's own rule in both: a pixel outside the range is not
-            // counted, and NaN fails both comparisons.
-            const auto bin_rows_as = [&](auto finite, std::uint64_t v_first, std::uint64_t v_last,
-                                         std::uint64_t* destination) {
-                // Copied into locals whose addresses never escape. Reached through the captures, each
-                // was loaded again for every pixel -- the store into a bin may, as far as the compiler
-                // knows, have changed it -- and through two lambdas' captures, twice over.
-                const float* const pixels = plane;
-                const std::uint64_t row_stride = stride_v;
-                const std::uint64_t column_stride = stride_u;
-                const std::uint64_t columns = u_count;
-                const float low = lower;
-                const float high = upper;
-                const float step = width;
-                const std::size_t count = bins;
-                const double wide_low = wide_lower;
-                const double wide_step = wide_width;
-                const double last = wide_last;
-                for (std::uint64_t v = v_first; v < v_last; ++v) {
-                    const float* row = pixels + (v * row_stride);
-                    for (std::uint64_t u = 0; u < columns; ++u) {
-                        const float value = row[u * column_stride];
-                        if (low <= value && value <= high) {
-                            if constexpr (decltype(finite)::value) {
-                                auto bin = static_cast<std::size_t>((value - low) / step);
-                                if (bin >= count) {
-                                    bin = count - 1;
-                                }
-                                ++destination[bin];
-                            } else {
-                                const double offset =
-                                    wide_step > 0.0 ? (static_cast<double>(value) - wide_low) / wide_step : 0.0;
-                                ++destination[static_cast<std::size_t>(std::min(offset, last))];
+        // One loop per way of binning, each its own instantiation, so that the common one is the
+        // loop it always was. The caller's own rule in both: a pixel outside the range is not
+        // counted, and NaN fails both comparisons.
+        const auto bin_rows_as = [&](auto finite, const float* plane, std::uint64_t v_first, std::uint64_t v_last,
+                                     std::uint64_t* destination) {
+            // Copied into locals whose addresses never escape. Reached through the captures, each
+            // was loaded again for every pixel -- the store into a bin may, as far as the compiler
+            // knows, have changed it -- and through two lambdas' captures, twice over.
+            const float* const pixels = plane;
+            const std::uint64_t row_stride = stride_v;
+            const std::uint64_t column_stride = stride_u;
+            const std::uint64_t columns = u_count;
+            const float low = lower;
+            const float high = upper;
+            const float step = width;
+            const std::size_t count = bins;
+            const double wide_low = wide_lower;
+            const double wide_step = wide_width;
+            const double last = wide_last;
+            for (std::uint64_t v = v_first; v < v_last; ++v) {
+                const float* row = pixels + (v * row_stride);
+                for (std::uint64_t u = 0; u < columns; ++u) {
+                    const float value = row[u * column_stride];
+                    if (low <= value && value <= high) {
+                        if constexpr (decltype(finite)::value) {
+                            auto bin = static_cast<std::size_t>((value - low) / step);
+                            if (bin >= count) {
+                                bin = count - 1;
                             }
+                            ++destination[bin];
+                        } else {
+                            const double offset =
+                                wide_step > 0.0 ? (static_cast<double>(value) - wide_low) / wide_step : 0.0;
+                            ++destination[static_cast<std::size_t>(std::min(offset, last))];
                         }
                     }
                 }
-            };
-            const auto bin_rows = [&](std::uint64_t v_first, std::uint64_t v_last, std::uint64_t* destination) {
-                if (finite_offsets) {
-                    bin_rows_as(std::true_type{}, v_first, v_last, destination);
-                } else {
-                    bin_rows_as(std::false_type{}, v_first, v_last, destination);
+            }
+        };
+        const auto bin_rows = [&](const float* plane, std::uint64_t v_first, std::uint64_t v_last,
+                                  std::uint64_t* destination) {
+            if (finite_offsets) {
+                bin_rows_as(std::true_type{}, plane, v_first, v_last, destination);
+            } else {
+                bin_rows_as(std::false_type{}, plane, v_first, v_last, destination);
+            }
+        };
+
+        // Whole channels to a task when that keeps as many workers busy as splitting each channel
+        // by rows would. Each channel bins into its own counts, so a task that owns whole channels
+        // needs no partials and the slab is one wake of the pool rather than one per channel. A
+        // chunk deep and narrow is why: 64 x 64 x 256 on a 512 x 512 plane is read in bands of a
+        // few chunk rows, each channel of a band too little to split, and waking the pool for every
+        // channel of every band took twice as long as binning the pixels. #6.
+        const std::size_t row_tasks = split.Tasks(u_count, v_count);
+        const std::size_t channel_tasks = split.Tasks(u_count * v_count, slab.channel_count);
+        if (slab.channel_count > 1 && channel_tasks >= row_tasks) {
+            split.Run(channel_tasks, slab.channel_count, [&](std::size_t, std::uint64_t first, std::uint64_t last) {
+                for (std::uint64_t offset = first; offset < last; ++offset) {
+                    bin_rows(slab.pixels + (offset * stride_z), 0, v_count, counts_of(offset));
                 }
-            };
+            });
+            return;
+        }
+
+        for (std::uint64_t offset = 0; offset < slab.channel_count; ++offset) {
+            const float* plane = slab.pixels + (offset * stride_z);
+            std::uint64_t* into = counts_of(offset);
 
             // Rows, not planes: a read holding one plane is the common case for a large image,
             // so splitting by plane would leave the split with nothing to divide.
-            const std::size_t tasks = split.Tasks(u_count, v_count);
-            if (tasks <= 1) {
-                bin_rows(0, v_count, into);
+            if (row_tasks <= 1) {
+                bin_rows(plane, 0, v_count, into);
                 continue;
             }
 
-            std::fill(partials.begin(), partials.begin() + static_cast<std::ptrdiff_t>(tasks * bins), 0);
-            split.Run(tasks, v_count, [&](std::size_t task, std::uint64_t first, std::uint64_t last) {
-                bin_rows(first, last, partials.data() + (task * bins));
+            std::fill(partials.begin(), partials.begin() + static_cast<std::ptrdiff_t>(row_tasks * bins), 0);
+            split.Run(row_tasks, v_count, [&](std::size_t task, std::uint64_t first, std::uint64_t last) {
+                bin_rows(plane, first, last, partials.data() + (task * bins));
             });
             // Integer counts, so this sum is the serial loop's answer exactly -- which is what
             // lets histogram_test keep comparing against an oracle rather than a tolerance.
-            for (std::size_t task = 0; task < tasks; ++task) {
+            for (std::size_t task = 0; task < row_tasks; ++task) {
                 const std::uint64_t* from = partials.data() + (task * bins);
                 for (std::size_t bin = 0; bin < bins; ++bin) {
                     into[bin] += from[bin];

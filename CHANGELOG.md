@@ -5,6 +5,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html). Before 1.0 a
 minor release may change the ABI, and the soname says so ([ADR 0020](docs/adr/0020-before-1-0-the-minor-version-is-the-abi.md)).
 
+## [Unreleased]
+
+### Fixed
+* Plane histograms of a cube chunked deep and narrow no longer take twice as long: a read of many channels is split among the workers by channel rather than one channel at a time ([#6](https://github.com/CARTAvis/carta-zarr/issues/6)).
+
 ## [0.1.0]
 
 The first release.

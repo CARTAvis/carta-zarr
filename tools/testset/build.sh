@@ -34,6 +34,7 @@ layouts=(
     "pancake|512,512,4|-|no"
     "pancake|256,256,16|-|yes"
     "cigar|128,128,64|-|no"
+    "cigar|64,64,256|-|no"
 )
 
 say() { echo "== $(date '+%F %T') $*" >&2; }

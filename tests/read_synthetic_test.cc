@@ -13,6 +13,7 @@
 //
 // Links no Store and no TensorStore.
 
+#include "chunk_blocks.h"
 #include "read/pieces.h"
 #include "support/check.h"
 #include "support/synthetic_pixel_source.h"
@@ -101,12 +102,12 @@ constexpr float kUntouched = -98765.0F;
 
 // A ceiling that cuts this cube into three pieces of two channels each.
 //
-// Stated rather than left to the library, because the default budget has a 64 MiB floor and this
-// whole cube is 61 KiB: under it, a watched read is one piece and reports once, which is correct
-// and shows nothing. A ceiling is the other reason a read splits, and it is the one that fits in a
-// test. One chunk row of this cube is eight chunks of 2560 bytes, so a budget of exactly that
-// affords one row, and the split axis's chunk is two channels deep.
-constexpr std::size_t kThreePieces = 20480;
+// Stated rather than left to the library, because the default budget has a 256 MiB floor and this
+// whole cube is 61 KiB: under it, a watched read is one piece and reports once, which is correct and
+// shows nothing. One chunk row of this cube is eight chunks of 2560 bytes, each holding three times
+// what it decodes to, so a budget of exactly that affords one row, and the split axis's chunk is two
+// channels deep.
+constexpr std::size_t kThreePieces = 8 * 2560 * carta::zarr::internal::kHeldBytesPerDecodedByte;
 
 // The destination is dense in logical order with axis 0 fastest, so the value at (x, y, z) is the
 // formula's, at exactly this offset. A transposed read disagrees on the second pixel.
@@ -145,9 +146,11 @@ void TestAFailedFlagLeavesTheDestinationAlone() {
     }
 }
 
-// A ceiling no amount of splitting gets under is reported rather than allocated past. One plane is
-// the smallest piece this request can be cut into, and one byte is less than that.
-void TestACeilingTooLowToFitIsRefused() {
+// A ceiling no amount of splitting gets under is read a chunk at a time rather than refused. The
+// least piece is two channels of the whole plane, eight chunks; each is read in segments of one chunk,
+// gathered and put in place, so every pixel lands where the formula says, the flag is still read
+// before the pixels of each segment, and no chunk is read twice.
+void TestACeilingTooLowToFitIsReadAChunkAtATime() {
     const auto image = MakeImage(true);
     const auto geometry = MakeGeometry();
     SyntheticPixelSource source(image, geometry, Value);
@@ -155,13 +158,24 @@ void TestACeilingTooLowToFitIsRefused() {
     ReadOptions options;
     options.read_budget_bytes = 1;
     std::vector<float> destination(kElements, kUntouched);
-    const auto read =
-        ReadInPieces(source, image, geometry, geometry, WholeCube(),
-                     BufferView<float>{destination.data(), destination.size()}, options, ProgressCallback{});
+    std::vector<std::size_t> reports;
+    const auto read = ReadInPieces(source, image, geometry, geometry, WholeCube(),
+                                   BufferView<float>{destination.data(), destination.size()}, options,
+                                   [&](std::size_t done, std::size_t) {
+                                       reports.push_back(done);
+                                       return true;
+                                   });
 
-    Require(!read && read.error().code == ErrorCode::buffer_too_small,
-            "a flag buffer over the ceiling was allocated rather than refused");
-    Require(source.pixel_reads() == 0, "a refused read still read pixels");
+    Require(static_cast<bool>(read), "a read under a ceiling smaller than one chunk was refused" +
+                                         (read ? std::string{} : ": " + read.error().message));
+    RequireCubeMatchesTheFormula(destination, "a read a chunk at a time");
+    Require(source.pixel_reads() == 24 && source.mask_reads() == 24,
+            "four by two chunks across and three deep is 24 chunks, each read once with its flag, not " +
+                std::to_string(source.pixel_reads()) + " and " + std::to_string(source.mask_reads()));
+    // Reported when a whole piece is in, so the finished part is still a prefix: a piece is two
+    // channels of the plane.
+    Require(reports == std::vector<std::size_t>{kElements / 3, 2 * kElements / 3, kElements},
+            "progress should come once a piece, at the end of each two channels");
 }
 
 // Progress is counted in destination elements, not in chunks, and the finished part is a prefix --
@@ -452,7 +466,7 @@ void TestAPrefetchHoldsTheFlagChunksItDecodesToTheBudget() {
 int main() {
     try {
         TestAFailedFlagLeavesTheDestinationAlone();
-        TestACeilingTooLowToFitIsRefused();
+        TestACeilingTooLowToFitIsReadAChunkAtATime();
         TestProgressCountsElementsAndFinishesAtTheTotal();
         TestProgressCanStopTheRead();
         TestASplitReadAgreesWithAnUnsplitOne();

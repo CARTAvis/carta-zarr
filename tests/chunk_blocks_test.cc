@@ -23,8 +23,11 @@
 namespace {
 
 using carta::zarr::internal::DefaultReadBytes;
-using carta::zarr::internal::kMaxDecodedBytesPerRead;
+using carta::zarr::internal::kHeldBytesPerDecodedByte;
+using carta::zarr::internal::kLeastBytesPerRead;
 using carta::zarr::internal::kMinChunksPerRead;
+using carta::zarr::internal::kMostBytesPerRead;
+using carta::zarr::internal::PixelsHeld;
 
 constexpr std::uint64_t kMiB = 1u << 20;
 
@@ -44,8 +47,11 @@ carta::zarr::ImageDescriptor Image(carta::zarr::DataType type, const std::vector
     return image;
 }
 
+// The chunks a default read of a float32 chunk decoding to `chunk_bytes` affords, when the library
+// holds what they produce -- the dearer of the two ways a chunk is held.
 std::uint64_t ChunksPerRead(std::uint64_t chunk_bytes) {
-    return DefaultReadBytes(chunk_bytes) / chunk_bytes;
+    const std::uint64_t held = (kHeldBytesPerDecodedByte * chunk_bytes) + chunk_bytes;
+    return DefaultReadBytes(held) / held;
 }
 
 // The shapes these images are written with, as (x, y, spectral) times the polarizations the chunk
@@ -71,19 +77,56 @@ void TestRealChunkShapesGetEnoughChunks() {
 // A chunk large enough that eight of them would be past the ceiling gets as many as fit, and one
 // larger than the ceiling still gets the one it cannot avoid.
 void TestAnOversizedChunkIsCappedRatherThanMultiplied() {
-    Require(DefaultReadBytes(64 * kMiB) == kMaxDecodedBytesPerRead,
-            "a chunk of an eighth of the ceiling should stop at the ceiling, not multiply past it");
-    Require(DefaultReadBytes(480 * kMiB) == kMaxDecodedBytesPerRead,
+    Require(DefaultReadBytes(256 * kMiB) == kMostBytesPerRead,
+            "a chunk holding an eighth of the ceiling should stop at the ceiling, not multiply past it");
+    Require(DefaultReadBytes(3 * 480 * kMiB) == kMostBytesPerRead,
             "a chunk larger than the ceiling should not raise the budget above it; the walk's own "
             "floor of one chunk is what makes the request, and nothing can make it smaller");
 }
 
-// A small chunk does not shrink the budget: the bytes are the cap and the chunks are the floor.
+// A small chunk does not shrink the budget: the bytes are the floor as well as the chunks.
 void TestASmallChunkKeepsTheByteBudget() {
-    Require(DefaultReadBytes(128 * 1024) == carta::zarr::internal::kDecodedBytesPerRead,
-            "a small chunk should leave the byte budget alone");
-    Require(DefaultReadBytes(0) == carta::zarr::internal::kDecodedBytesPerRead,
+    Require(DefaultReadBytes(128 * 1024) == kLeastBytesPerRead, "a small chunk should leave the byte budget alone");
+    Require(DefaultReadBytes(0) == kLeastBytesPerRead,
             "an image reporting no chunk size should fall back to the byte budget");
+}
+
+// What a chunk holds is what it decodes to, three times over, and the buffers the library allocates
+// for it. Over a 7763 x 4742 x 128 cube in 512 x 512 x 64 float32 chunks -- 64 MiB each -- a read
+// holding the pixels itself affords four at the default, as the pass always read it, and one the
+// caller holds the pixels of affords five.
+void TestAChunkHoldsThreeTimesWhatItDecodesTo() {
+    using carta::zarr::internal::ReadCost;
+
+    carta::zarr::ChunkGeometry geometry;
+    geometry.chunk_shape = {512, 512, 64, 1, 1};
+    auto image = Image(carta::zarr::DataType::float32, {7763, 4742, 128, 1, 1});
+    image.has_pixel_mask = false;
+    const auto cost = ReadCost::Of(image, geometry, geometry, carta::zarr::ReadOptions{}, PixelsHeld::by_caller);
+    Require(cost.chunk_bytes == 64 * kMiB, "a 512 x 512 x 64 float32 chunk decodes to 64 MiB");
+    Require(cost.Held(PixelsHeld::by_caller) == 3 * 64 * kMiB, "a chunk holds three times what it decodes to");
+    Require(cost.Held(PixelsHeld::by_library) == 4 * 64 * kMiB,
+            "a chunk whose pixels the library holds holds them too, four bytes an element");
+    Require(cost.budget_bytes == kMostBytesPerRead,
+            "eight such chunks are past the ceiling, so the ceiling is the budget");
+    Require(cost.ChunksPerRead(PixelsHeld::by_library) == 4, "the ceiling affords four chunks held by the library");
+    Require(cost.ChunksPerRead(PixelsHeld::by_caller) == 5, "and five whose pixels the caller holds");
+
+    // A stated budget is the caller's, and smaller than one chunk it affords none; every walk floors
+    // that at one.
+    carta::zarr::ReadOptions tight;
+    tight.read_budget_bytes = 64 * kMiB;
+    Require(
+        ReadCost::Of(image, geometry, geometry, tight, PixelsHeld::by_library).ChunksPerRead(PixelsHeld::by_library) ==
+            0,
+        "a budget of what one chunk decodes to affords less than what it holds");
+
+    // The folded-in flag is a buffer of a byte an element, beside the flag chunk it decodes.
+    image.has_pixel_mask = true;
+    const auto masked = ReadCost::Of(image, geometry, geometry, carta::zarr::ReadOptions{}, PixelsHeld::by_caller);
+    const std::uint64_t elements = 512ULL * 512ULL * 64ULL;
+    Require(masked.Held(PixelsHeld::by_caller) == (3 * (masked.chunk_bytes)) + elements,
+            "a masked chunk holds its decoded flag three times over and the folded-in flag once");
 }
 
 // What a chunk costs when the read will apply the image's pixel mask.
@@ -107,7 +150,7 @@ void TestAMaskCostsOneByteAnElement() {
     carta::zarr::ReadOptions unmasked;
     unmasked.apply_pixel_mask = false;
     const auto chunk_bytes = [&](const carta::zarr::ImageDescriptor& of, const carta::zarr::ReadOptions& options) {
-        return ReadCost::Of(of, geometry, geometry, options).chunk_bytes;
+        return ReadCost::Of(of, geometry, geometry, options, PixelsHeld::by_caller).chunk_bytes;
     };
     Require(chunk_bytes(image, unmasked) == elements * 4, "float32 is four bytes an element");
     Require(chunk_bytes(image, masked) == elements * 5,
@@ -151,12 +194,14 @@ void TestAFlagIsCountedInItsOwnChunks() {
     const auto fixture = Image(carta::zarr::DataType::float32, {1, 2, 3, 4, 5});
     carta::zarr::ChunkGeometry fixture_pixels;
     fixture_pixels.chunk_shape = {1, 1, 1, 2, 5};
-    const auto cost = ReadCost::Of(fixture, fixture_pixels, flag({1, 2, 3, 4, 5}), carta::zarr::ReadOptions{});
+    const auto cost =
+        ReadCost::Of(fixture, fixture_pixels, flag({1, 2, 3, 4, 5}), carta::zarr::ReadOptions{}, PixelsHeld::by_caller);
     Require(cost.chunk_bytes == 40 + 120, "a pixel chunk of the coarse-flag fixture decodes the whole flag");
     carta::zarr::ReadOptions unmasked;
     unmasked.apply_pixel_mask = false;
-    Require(ReadCost::Of(fixture, fixture_pixels, flag({1, 2, 3, 4, 5}), unmasked).chunk_bytes == 40,
-            "a read that does not apply the flag does not decode it");
+    Require(
+        ReadCost::Of(fixture, fixture_pixels, flag({1, 2, 3, 4, 5}), unmasked, PixelsHeld::by_caller).chunk_bytes == 40,
+        "a read that does not apply the flag does not decode it");
 }
 
 // What a walk decodes along the spectrum, which is what its progress is counted in. The chunks a
@@ -208,6 +253,7 @@ int main() {
         TestRealChunkShapesGetEnoughChunks();
         TestAnOversizedChunkIsCappedRatherThanMultiplied();
         TestASmallChunkKeepsTheByteBudget();
+        TestAChunkHoldsThreeTimesWhatItDecodesTo();
         TestAMaskCostsOneByteAnElement();
         TestAFlagIsCountedInItsOwnChunks();
         TestASampleNamesTheChunksItTouches();

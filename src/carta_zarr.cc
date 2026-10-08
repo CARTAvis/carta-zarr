@@ -211,7 +211,9 @@ Result<std::size_t> Image::Read(const ReadRequest& request, BufferView<float> de
 
 std::uint64_t Image::DecodedChunkBytes(const ReadOptions& options) const {
     // What every read and reduction sizes itself against, so that a caller's cache agrees with them.
-    return internal::ReadCost::Of(_impl->descriptor, _impl->geometry, _impl->flag_geometry, options).chunk_bytes;
+    return internal::ReadCost::Of(_impl->descriptor, _impl->geometry, _impl->flag_geometry, options,
+                                  internal::PixelsHeld::by_caller)
+        .chunk_bytes;
 }
 
 Result<std::uint64_t> Image::Prefetch(const ReadRequest& request, const ReadOptions& options) const {

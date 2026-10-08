@@ -7,6 +7,9 @@ minor release may change the ABI, and the soname says so ([ADR 0020](docs/adr/00
 
 ## [Unreleased]
 
+### Added
+* `tools/testset`: builds the standard read-path test set -- a pancake (7763 x 4742 x 256) and a cigar (512 x 512 x 30000), each a FITS cube and the Zarr layouts the site's xradio converter makes from it -- and checks that each Zarr holds its FITS cube's pixels.
+
 ### Changed
 * `tools/zarr-bench/generate.py --synthetic` makes a continuum-subtracted HI cube calibrated against ASKAP's, on ASKAP's frequency axis, instead of continuum point sources inside a circle. `--sources` and `--nan-radius` are replaced by `--line-sources`, `--point-sources`, `--extended-sources`, `--footprint-fill` and `--flagged-channels`; synthetic datasets written before are not reused.
 

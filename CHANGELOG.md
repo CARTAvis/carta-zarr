@@ -5,6 +5,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html). Before 1.0 a
 minor release may change the ABI, and the soname says so ([ADR 0020](docs/adr/0020-before-1-0-the-minor-version-is-the-abi.md)).
 
+## [Unreleased]
+
+### Changed
+* `tools/zarr-bench/generate.py --synthetic` makes a continuum-subtracted HI cube calibrated against ASKAP's, on ASKAP's frequency axis, instead of continuum point sources inside a circle. `--sources` and `--nan-radius` are replaced by `--line-sources`, `--point-sources`, `--extended-sources`, `--footprint-fill` and `--flagged-channels`; synthetic datasets written before are not reused.
+
 ## [0.1.0]
 
 The first release.

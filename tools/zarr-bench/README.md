@@ -31,8 +31,14 @@ Or synthesize one, when there is no real cube to hand:
 - **Codecs:** `none`, `zstd[:level]`, `gzip[:level]`, `blosc[:cname[:level[:shuffle]]]`.
   `--keep-bits N` rounds pixels to N mantissa bits before compressing them.
 - **Real pixels are the better source.** What a layout costs depends on how well the pixels
-  compress, and synthetic noise does not compress like a real image. The synthetic cube is
-  deterministic: two layouts of the same `--seed` and `--shape` hold the same pixels.
+  compress. The synthetic cube is a continuum-subtracted HI cube from a mosaic, calibrated against
+  ASKAP's: noise varying by channel and rising towards the footprint's edge, faint line sources
+  (`--line-sources`), NaN outside an irregular footprint (`--footprint-fill`), runs of flagged
+  channels (`--flagged-channels`), on ASKAP's frequency axis (`--frequency-start`,
+  `--channel-width`, `--rest-frequency`); `--point-sources` and `--extended-sources` add continuum.
+  It compresses within a few per cent of the real cube, but it is still not a real image. It is
+  deterministic: two layouts of the same options hold the same pixels. `tools/testset/README.md`
+  has the calibration.
 - **`--stripe`** sets Lustre (`lfs setstripe`) or BeeGFS (`beegfs-ctl --setpattern`, or
   `beegfs entry set` on BeeGFS 8) striping on the output directory before anything is written,
   since striping applies only to files created after it. BeeGFS normally reserves this for root;

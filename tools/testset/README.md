@@ -13,8 +13,8 @@ XRADIO_CONVERTER=/path/to/fits_to_zarr_xradio_v1.2.2_v1.py tools/testset/build.s
 file or a Zarr appears under its own name only once it is complete, and a Zarr only once `verify.py`
 has found every one of its pixels, its flag (or the absence of one) and its coordinates to match
 the FITS file's (the report is left beside it as `NAME.verify.txt`).
-It needs `uv`, the converter, and about 155 GB (190 GB while a cube is being synthesized); on a
-28-thread machine with local NVMe it takes about 15 minutes, a third of it verifying.
+It needs `uv`, the converter, and about 115 GB (150 GB while a cube is being synthesized); on a
+28-thread machine with local NVMe it takes about 10 minutes, a third of it verifying.
 
 ## Cubes and layouts
 
@@ -29,14 +29,12 @@ Shapes are written l x m x frequency; every other axis is 1.
 |---|---|---|---|
 | `pancake_c256x256x16.zarr` | 256 x 256 x 16 (4 MiB) | - | - |
 | `pancake_c256x256x16_flag.zarr` | 256 x 256 x 16 (4 MiB) | - | yes |
-| `pancake_c512x512x64.zarr` | 512 x 512 x 64 (64 MiB) | - | - |
-| `pancake_c512x512x64_flag.zarr` | 512 x 512 x 64 (64 MiB) | - | yes |
 | `cigar_c128x128x64.zarr` | 128 x 128 x 64 (4 MiB) | - | - |
 
 Each Zarr is about 21 GB.
 
-- A pancake has large planes and few channels; a cigar small planes and many. 4 MiB chunks are what
-  sites have used; 512 x 512 x 64 is the large-chunk layout that CARTAvis/carta-zarr#1 is about.
+- A pancake has large planes and few channels; a cigar small planes and many. Both are chunked at
+  4 MiB, as sites have chunked their cubes.
 - A layout is a chunk, an optional shard (a whole number of chunks) and whether it carries a flag.
   With a flag the converter writes `FLAG_SKY`, true where the pixel is NaN (`--compute_mask`); the
   pixels are the same, so the two differ only in what reading the flag costs. Add a layout by adding
@@ -65,7 +63,7 @@ HI cube from an ASKAP mosaic:
 - Runs of flagged channels, flagged whole or on one side of a line across the plane, 2 % of the
   channels; the cigar's happen to include a run covering 64 whole channels. The pancake's runs are
   too short for that, so channels 128 to 192 are flagged whole as well (`--flagged-range`), covering
-  whole chunks at both 16 and 64 deep.
+  whole chunks.
 
 `zarr-to-fits.py` writes the FITS file, with the axes ASKAPsoft writes (RA, Dec, Stokes, frequency)
 and the header keywords xradio's FITS reader requires.

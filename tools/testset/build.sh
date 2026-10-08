@@ -32,8 +32,6 @@ cubes=(
 layouts=(
     "pancake|256,256,16|-|no"
     "pancake|256,256,16|-|yes"
-    "pancake|512,512,64|-|no"
-    "pancake|512,512,64|-|yes"
     "cigar|128,128,64|-|no"
 )
 

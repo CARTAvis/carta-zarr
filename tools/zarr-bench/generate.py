@@ -1303,7 +1303,7 @@ def parse_arguments(argv: list[str] | None) -> argparse.Namespace:
     synthetic.add_argument("--flagged-channels", type=float, default=0.02,
                            help="the fraction of channels in flagged runs, flagged whole or in part")
     synthetic.add_argument("--flagged-range", metavar="START:STOP",
-                           help="channels to flag whole besides those runs, e.g. 128:192 to cover chunks 64 deep")
+                           help="channels to flag whole besides those runs, e.g. 128:192 to cover whole chunks")
     synthetic.add_argument("--flag", action="store_true",
                            help="flag what is not data in a flag variable instead of writing NaN there")
 

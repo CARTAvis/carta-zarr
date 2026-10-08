@@ -150,6 +150,30 @@ prefetch the animation caught up with, an earlier rule, was worse still: 541 lat
 So a backend that prefetches should do it only while the cache holds two runs for each cube being
 animated, and the sweep's trade-off table gives the run size of each layout.
 
+### Through carta-backend, the rule holds for a pancake
+
+The read-path test set (`tools/testset`) holds a synthetic pancake, 7763 x 4742 x 256, made from one
+FITS file in 4 MiB chunks of two shapes: 256 x 256 x 16, which sites have used, and 512 x 512 x 4, which
+the rule of thumb above points to (about 2.7 channels deep). Measured through carta-backend's own read
+paths on a 28-core machine with local NVMe and a warm page cache, the shallow chunk was the better one
+for everything shown on screen:
+
+| operation | 256 x 256 x 16 | 512 x 512 x 4 |
+|---|---|---|
+| animation, no cache (a frame) | 190 ms | 60 ms (the FITS file: 60 ms) |
+| animation, 1 GiB cache (a frame) | 104 ms | 26 ms |
+| eight channel changes, 1 GiB cache | 0.75 s | 0.18 s |
+| cursor spectrum | 8 ms | 30 ms |
+| cube histogram, exact | 17.4 s | 12.7 s |
+| moment | 27 s, peak 446 MiB | 24 s, peak 1355 MiB |
+
+A plane in 16-deep chunks decodes 16 channels to show one; in 4-deep chunks, 4. A spectrum pays the
+other way, reading four times as many chunks, and still takes tens of milliseconds. A moment's peak
+grows with the chunk's area rather than its depth: carta-backend reads it in slabs a whole column of
+chunks deep, here 512 x 512 x 256 against 256 x 256 x 256. Neither layout let the backend read ahead
+with the default 1 GiB cache, since two runs of chunks come to 4.7 GiB and 1.25 GiB; the shallow
+chunk did not need it.
+
 ### Use more file-reading threads on Lustre
 
 `--zarr_file_io_threads 8` was better than the default of 2 on Lustre in every sweep: a plane of the
@@ -270,3 +294,8 @@ The sweeps behind this page ran on 2026-10-01 and 2026-10-02 with carta-zarr at 
 added each tool, eight users, two or three trials, and every cache emptied as described above. Their
 configurations and full reports were kept on the machines they ran on rather than in this
 repository, since they describe those machines; rerun the sweep on yours rather than reuse them.
+
+The comparison through carta-backend ran on 2026-10-09, on the read-path test set built by
+`tools/testset/build.sh`, with carta-zarr at 21f18a2 and carta-backend's `test_zarr` branch at 6e406c80
+(its `MeasureReadPaths` test, one operation per process), on a single machine with local NVMe rather
+than a parallel file system.

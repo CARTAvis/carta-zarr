@@ -31,6 +31,7 @@ cubes=(
 # cube | chunk (l, m, frequency) | shard (l, m, frequency), or - | flag: yes or no
 layouts=(
     "pancake|256,256,16|-|no"
+    "pancake|512,512,4|-|no"
     "pancake|256,256,16|-|yes"
     "cigar|128,128,64|-|no"
 )

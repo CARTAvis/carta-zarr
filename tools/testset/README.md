@@ -13,8 +13,8 @@ XRADIO_CONVERTER=/path/to/fits_to_zarr_xradio_v1.2.2_v1.py tools/testset/build.s
 file or a Zarr appears under its own name only once it is complete, and a Zarr only once `verify.py`
 has found every one of its pixels, its flag (or the absence of one) and its coordinates to match
 the FITS file's (the report is left beside it as `NAME.verify.txt`).
-It needs `uv`, the converter, and about 115 GB (150 GB while a cube is being synthesized); on a
-28-thread machine with local NVMe it takes about 10 minutes, a third of it verifying.
+It needs `uv`, the converter, and about 135 GB (170 GB while a cube is being synthesized); on a
+28-thread machine with local NVMe it takes about 12 minutes, a third of it verifying.
 
 ## Cubes and layouts
 
@@ -29,12 +29,16 @@ Shapes are written l x m x frequency; every other axis is 1.
 |---|---|---|---|
 | `pancake_c256x256x16.zarr` | 256 x 256 x 16 (4 MiB) | - | - |
 | `pancake_c256x256x16_flag.zarr` | 256 x 256 x 16 (4 MiB) | - | yes |
+| `pancake_c512x512x4.zarr` | 512 x 512 x 4 (4 MiB) | - | - |
 | `cigar_c128x128x64.zarr` | 128 x 128 x 64 (4 MiB) | - | - |
 
 Each Zarr is about 21 GB.
 
 - A pancake has large planes and few channels; a cigar small planes and many. Both are chunked at
   4 MiB, as sites have chunked their cubes.
+- The pancake is chunked two ways at that size. 256 x 256 x 16 is what sites have used; 512 x 512 x 4
+  is a shallower chunk, which decodes 4 channels to read one where the other decodes 16, at the cost
+  of four times as many chunks along a spectrum.
 - A layout is a chunk, an optional shard (a whole number of chunks) and whether it carries a flag.
   With a flag the converter writes `FLAG_SKY`, true where the pixel is NaN (`--compute_mask`); the
   pixels are the same, so the two differ only in what reading the flag costs. Add a layout by adding

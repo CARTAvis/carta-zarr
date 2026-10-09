@@ -26,6 +26,9 @@
 
 namespace {
 
+// What a context gives every read here to aim its default budget at.
+constexpr std::size_t kDecodeThreads = 4;
+
 using carta::zarr::AxisRole;
 using carta::zarr::BufferView;
 using carta::zarr::ChunkGeometry;
@@ -134,9 +137,9 @@ void TestAFailedFlagLeavesTheDestinationAlone() {
     source.fail_mask_read(1, ErrorCode::io_error);
 
     std::vector<float> destination(kElements, kUntouched);
-    const auto read =
-        ReadInPieces(source, image, geometry, geometry, WholeCube(),
-                     BufferView<float>{destination.data(), destination.size()}, ReadOptions{}, ProgressCallback{});
+    const auto read = ReadInPieces(source, image, geometry, geometry, WholeCube(),
+                                   BufferView<float>{destination.data(), destination.size()}, ReadOptions{},
+                                   kDecodeThreads, ProgressCallback{});
 
     Require(!read && read.error().code == ErrorCode::io_error, "a failed flag read was not reported");
     Require(source.pixel_reads() == 0, "the pixels were read although the flag could not be");
@@ -160,7 +163,7 @@ void TestACeilingTooLowToFitIsReadAChunkAtATime() {
     std::vector<float> destination(kElements, kUntouched);
     std::vector<std::size_t> reports;
     const auto read = ReadInPieces(source, image, geometry, geometry, WholeCube(),
-                                   BufferView<float>{destination.data(), destination.size()}, options,
+                                   BufferView<float>{destination.data(), destination.size()}, options, kDecodeThreads,
                                    [&](std::size_t done, std::size_t) {
                                        reports.push_back(done);
                                        return true;
@@ -196,8 +199,9 @@ void TestProgressCountsElementsAndFinishesAtTheTotal() {
     };
 
     std::vector<float> destination(kElements, kUntouched);
-    const auto read = ReadInPieces(source, image, geometry, geometry, WholeCube(),
-                                   BufferView<float>{destination.data(), destination.size()}, options, progress);
+    const auto read =
+        ReadInPieces(source, image, geometry, geometry, WholeCube(),
+                     BufferView<float>{destination.data(), destination.size()}, options, kDecodeThreads, progress);
     Require(static_cast<bool>(read) && read.value() == kElements, "a watched read did not produce the whole cube");
 
     Require(reported_total == kElements, "progress reported a total that is not the destination's size");
@@ -220,8 +224,9 @@ void TestProgressCanStopTheRead() {
     const ProgressCallback progress = [](std::size_t, std::size_t) { return false; };
 
     std::vector<float> destination(kElements, kUntouched);
-    const auto read = ReadInPieces(source, image, geometry, geometry, WholeCube(),
-                                   BufferView<float>{destination.data(), destination.size()}, options, progress);
+    const auto read =
+        ReadInPieces(source, image, geometry, geometry, WholeCube(),
+                     BufferView<float>{destination.data(), destination.size()}, options, kDecodeThreads, progress);
     Require(!read && read.error().code == ErrorCode::cancelled, "a progress callback returning false did not cancel");
     Require(source.pixel_reads() == 1, "the read carried on past the piece its caller stopped it at");
 }
@@ -234,8 +239,9 @@ void TestASplitReadAgreesWithAnUnsplitOne() {
 
     SyntheticPixelSource whole_source(image, geometry, Value);
     std::vector<float> whole(kElements, kUntouched);
-    const auto unsplit = ReadInPieces(whole_source, image, geometry, geometry, WholeCube(),
-                                      BufferView<float>{whole.data(), whole.size()}, ReadOptions{}, ProgressCallback{});
+    const auto unsplit =
+        ReadInPieces(whole_source, image, geometry, geometry, WholeCube(),
+                     BufferView<float>{whole.data(), whole.size()}, ReadOptions{}, kDecodeThreads, ProgressCallback{});
     Require(static_cast<bool>(unsplit), "the unsplit read failed");
     Require(whole_source.pixel_reads() == 1, "a read with no reason to split was issued in pieces");
     RequireCubeMatchesTheFormula(whole, "an unsplit read");
@@ -244,8 +250,9 @@ void TestASplitReadAgreesWithAnUnsplitOne() {
     ReadOptions options;
     options.read_budget_bytes = kThreePieces;
     std::vector<float> split(kElements, kUntouched);
-    const auto in_pieces = ReadInPieces(split_source, image, geometry, geometry, WholeCube(),
-                                        BufferView<float>{split.data(), split.size()}, options, ProgressCallback{});
+    const auto in_pieces =
+        ReadInPieces(split_source, image, geometry, geometry, WholeCube(),
+                     BufferView<float>{split.data(), split.size()}, options, kDecodeThreads, ProgressCallback{});
     Require(static_cast<bool>(in_pieces), "the split read failed");
     Require(split_source.pixel_reads() == 3, "the split read was issued in one piece after all");
     Require(split == whole, "a split read and an unsplit one disagreed about the same cube");
@@ -267,9 +274,9 @@ void TestEachPieceIsHandedTheRestOfTheBuffer() {
     ReadOptions options;
     options.read_budget_bytes = kThreePieces;
     std::vector<float> destination(kElements + kSpare, kUntouched);
-    const auto read =
-        ReadInPieces(source, image, geometry, geometry, WholeCube(),
-                     BufferView<float>{destination.data(), destination.size()}, options, ProgressCallback{});
+    const auto read = ReadInPieces(source, image, geometry, geometry, WholeCube(),
+                                   BufferView<float>{destination.data(), destination.size()}, options, kDecodeThreads,
+                                   ProgressCallback{});
     Require(static_cast<bool>(read) && read.value() == kElements, "a read into a roomier buffer failed");
 
     const std::vector<std::size_t> handed{kElements + kSpare, kElements + kSpare - kPiece,
@@ -292,9 +299,9 @@ void TestAFlaggedPixelArrivesAsNaN() {
     source.set_flags([](const std::vector<std::uint64_t>& logical) { return logical.at(0) % 2 == 0; });
 
     std::vector<float> destination(kElements, kUntouched);
-    const auto read =
-        ReadInPieces(source, image, geometry, geometry, WholeCube(),
-                     BufferView<float>{destination.data(), destination.size()}, ReadOptions{}, ProgressCallback{});
+    const auto read = ReadInPieces(source, image, geometry, geometry, WholeCube(),
+                                   BufferView<float>{destination.data(), destination.size()}, ReadOptions{},
+                                   kDecodeThreads, ProgressCallback{});
     Require(static_cast<bool>(read), "a masked read failed");
     Require(source.mask_reads() > 0, "the flag was never read");
 
@@ -323,9 +330,9 @@ void TestDecliningTheMaskReadsNoFlag() {
     ReadOptions options;
     options.apply_pixel_mask = false;
     std::vector<float> destination(kElements, kUntouched);
-    const auto read =
-        ReadInPieces(source, image, geometry, geometry, WholeCube(),
-                     BufferView<float>{destination.data(), destination.size()}, options, ProgressCallback{});
+    const auto read = ReadInPieces(source, image, geometry, geometry, WholeCube(),
+                                   BufferView<float>{destination.data(), destination.size()}, options, kDecodeThreads,
+                                   ProgressCallback{});
     Require(static_cast<bool>(read), "declining the mask still failed on a flag that cannot be read");
     Require(source.mask_reads() == 0, "declining the mask still read the flag");
     RequireCubeMatchesTheFormula(destination, "a read that declined the mask");
@@ -366,13 +373,14 @@ void TestAPrefetchDecodesWhatAReadWould() {
     const auto geometry = MakeGeometry();
     SyntheticPixelSource read_source(image, geometry, Value);
     std::vector<float> box(25 * 10 * 3, kUntouched);
-    Require(
-        static_cast<bool>(ReadInPieces(read_source, image, geometry, geometry, UnalignedBox(),
-                                       BufferView<float>{box.data(), box.size()}, ReadOptions{}, ProgressCallback{})),
-        "the box could not be read");
+    Require(static_cast<bool>(ReadInPieces(read_source, image, geometry, geometry, UnalignedBox(),
+                                           BufferView<float>{box.data(), box.size()}, ReadOptions{}, kDecodeThreads,
+                                           ProgressCallback{})),
+            "the box could not be read");
 
     SyntheticPixelSource source(image, geometry, Value);
-    const auto chunks = PrefetchChunks(source, image, geometry, geometry, UnalignedBox(), ReadOptions{});
+    const auto chunks =
+        PrefetchChunks(source, image, geometry, geometry, UnalignedBox(), ReadOptions{}, kDecodeThreads);
     Require(chunks && *chunks == 4, "a prefetch of the box did not say it decoded its four chunks");
     Require(source.chunks_touched() == read_source.chunks_touched(),
             "a prefetch touched " + std::to_string(source.chunks_touched()) + " chunks where a read touches " +
@@ -387,21 +395,23 @@ void TestAPrefetchIsMaskedAndCheckedAsAReadIs() {
     const auto image = MakeImage(true);
     const auto geometry = MakeGeometry();
     SyntheticPixelSource source(image, geometry, Value);
-    Require(static_cast<bool>(PrefetchChunks(source, image, geometry, geometry, UnalignedBox(), ReadOptions{})),
+    Require(static_cast<bool>(
+                PrefetchChunks(source, image, geometry, geometry, UnalignedBox(), ReadOptions{}, kDecodeThreads)),
             "a prefetch of a masked image failed");
     Require(source.mask_reads() == 1, "a prefetch of a masked image did not decode the flag's chunks");
 
     ReadOptions unmasked;
     unmasked.apply_pixel_mask = false;
     SyntheticPixelSource declined(image, geometry, Value);
-    Require(static_cast<bool>(PrefetchChunks(declined, image, geometry, geometry, UnalignedBox(), unmasked)) &&
+    Require(static_cast<bool>(
+                PrefetchChunks(declined, image, geometry, geometry, UnalignedBox(), unmasked, kDecodeThreads)) &&
                 declined.mask_reads() == 0,
             "a prefetch that declined the mask decoded the flag's chunks");
 
     ReadRequest beyond = UnalignedBox();
     beyond.axes.at(2) = Range{4, 3, 1};
     SyntheticPixelSource refused(image, geometry, Value);
-    const auto past = PrefetchChunks(refused, image, geometry, geometry, beyond, ReadOptions{});
+    const auto past = PrefetchChunks(refused, image, geometry, geometry, beyond, ReadOptions{}, kDecodeThreads);
     Require(!past && past.error().code == ErrorCode::invalid_argument,
             "a prefetch past the end of an axis was not refused");
     Require(refused.pixel_reads() == 0 && refused.mask_reads() == 0, "a refused prefetch read something");
@@ -419,7 +429,7 @@ void TestAPrefetchHoldsItsSampleToTheBudget() {
     SyntheticPixelSource source(image, geometry, Value);
     ReadOptions options;
     options.read_budget_bytes = 1024;
-    const auto chunks = PrefetchChunks(source, image, geometry, geometry, WholeCube(), options);
+    const auto chunks = PrefetchChunks(source, image, geometry, geometry, WholeCube(), options, kDecodeThreads);
     Require(chunks && *chunks == 2 * kElements,
             "a prefetch in pieces did not count every chunk of the pixels and the flag" +
                 (chunks ? std::string{} : ": " + chunks.error().message));
@@ -447,7 +457,7 @@ void TestAPrefetchHoldsTheFlagChunksItDecodesToTheBudget() {
     SyntheticPixelSource source(image, geometry, Value);
     ReadOptions options;
     options.read_budget_bytes = 64;
-    const auto chunks = PrefetchChunks(source, image, geometry, flag, WholeCube(), options);
+    const auto chunks = PrefetchChunks(source, image, geometry, flag, WholeCube(), options, kDecodeThreads);
     Require(static_cast<bool>(chunks), "a prefetch with a fine flag failed");
     std::uint64_t flag_chunks = 0;
     for (const auto selected : source.mask_selections()) {
@@ -459,7 +469,7 @@ void TestAPrefetchHoldsTheFlagChunksItDecodesToTheBudget() {
     // A budget below one chunk still reads one a time, as a read does, rather than none.
     options.read_budget_bytes = 1;
     SyntheticPixelSource tight(image, geometry, Value);
-    Require(static_cast<bool>(PrefetchChunks(tight, image, geometry, flag, WholeCube(), options)),
+    Require(static_cast<bool>(PrefetchChunks(tight, image, geometry, flag, WholeCube(), options, kDecodeThreads)),
             "a budget below one flag chunk refused the prefetch");
 }
 

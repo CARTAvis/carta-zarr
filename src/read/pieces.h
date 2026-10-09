@@ -59,7 +59,7 @@ struct Piece {
  */
 std::vector<Piece> PlanPieces(const ImageDescriptor& descriptor, const ChunkGeometry& geometry,
                               const ChunkGeometry& flag_geometry, const ReadRequest& request,
-                              const ReadOptions& options);
+                              const ReadOptions& options, std::size_t decode_threads);
 
 /**
  * Read a densely packed float32 result, one piece at a time.
@@ -83,7 +83,7 @@ std::vector<Piece> PlanPieces(const ImageDescriptor& descriptor, const ChunkGeom
 Result<std::size_t> ReadInPieces(const PixelSource& source, const ImageDescriptor& descriptor,
                                  const ChunkGeometry& geometry, const ChunkGeometry& flag_geometry,
                                  const ReadRequest& request, BufferView<float> destination, const ReadOptions& options,
-                                 const ProgressCallback& progress);
+                                 std::size_t decode_threads, const ProgressCallback& progress);
 
 /**
  * One selected element in every chunk that `request` touches, and no more.
@@ -115,7 +115,8 @@ ReadRequest OneElementPerChunk(const ChunkGeometry& geometry, const ReadRequest&
  */
 Result<std::uint64_t> PrefetchChunks(const PixelSource& source, const ImageDescriptor& descriptor,
                                      const ChunkGeometry& geometry, const ChunkGeometry& flag_geometry,
-                                     const ReadRequest& request, const ReadOptions& options);
+                                     const ReadRequest& request, const ReadOptions& options,
+                                     std::size_t decode_threads);
 
 }  // namespace carta::zarr::internal
 

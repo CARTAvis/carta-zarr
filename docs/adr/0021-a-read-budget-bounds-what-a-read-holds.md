@@ -51,10 +51,13 @@ can be.
   rather than the caller holds them. `ReadCost` answers both ways (`PixelsHeld`).
 - **The caller's destination is not charged.** It exists before the call, at a size the caller chose,
   and no cutting makes it smaller; charging it would buy fewer chunks and save nothing.
-- **The default budget aims at eight chunks a read, held between 256 MiB and 1 GiB.** Eight keeps the
-  decode pool busy; 256 MiB keeps small chunks to sixty-four a read, as before; 1 GiB keeps the
-  64 MiB chunks above to four, which is what a cube histogram read before and took 8.2 s against
-  7.1 s at eight and 19.8 s at one. Every pass reads the same chunks at the default as it did.
+- **The default budget aims at two chunks for every decode thread of the image's context, held
+  between 256 MiB and 2 GiB.** Two a thread keeps every thread a chunk ahead of the one it is
+  decoding. A count fixed for every machine does not: eight a read, the first aim, was measured on a
+  five-core machine, and on twenty-eight threads it left most of them idle and plane reads of the
+  64 MiB chunks above ran 2.4 times slower. 256 MiB keeps small chunks to at least sixty-four a read,
+  as before; 2 GiB holds the 64 MiB chunks above to about ten on twenty-eight threads, which trades
+  some of their speed for the bound.
 - **Every read is cut to fit**, the caller's budget or the library's, whether or not it is watched.
 - **A piece too large at one chunk deep is read in segments**, cut along the axes below the piece's
   down to a single chunk, each gathered in a buffer of the library's and put in place. Progress is

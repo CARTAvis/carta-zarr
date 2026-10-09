@@ -28,6 +28,9 @@
 
 namespace {
 
+// What a context gives every read here to aim its default budget at.
+constexpr std::size_t kDecodeThreads = 4;
+
 using carta::zarr::AxisRole;
 using carta::zarr::ChunkGeometry;
 using carta::zarr::ImageDescriptor;
@@ -88,7 +91,7 @@ PassPlan Plan(const ImageDescriptor& descriptor, const ChunkGeometry& geometry, 
     Require(static_cast<bool>(map), "MapAxes failed on a well-formed image");
     const auto planes = CheckedPlanes::Of(descriptor, map.value(), {spectral, 0, 0});
     Require(static_cast<bool>(planes), "the spectral range does not fit this image");
-    return PlanPass(descriptor, geometry, flag_geometry, map.value(), planes.value(), sample, options);
+    return PlanPass(descriptor, geometry, flag_geometry, map.value(), planes.value(), sample, options, kDecodeThreads);
 }
 
 // A flag chunked as its pixels are, which is every image here but one.
@@ -202,7 +205,7 @@ void TestTheCallersCeilingWins() {
     Require(small.slab_budget_bytes == (1u << 20), "a stated limit is the budget");
 
     const auto def = Plan(image, geometry, spectral, ReadOptions{});
-    Require(def.slab_budget_bytes == carta::zarr::internal::DefaultReadBytes(def.held_bytes),
+    Require(def.slab_budget_bytes == carta::zarr::internal::DefaultReadBytes(def.held_bytes, kDecodeThreads),
             "without a limit the budget is the one chunk_blocks measured, for what a chunk holds");
 }
 

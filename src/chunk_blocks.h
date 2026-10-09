@@ -33,28 +33,32 @@ namespace carta::zarr::internal {
 // change. It is a statement of what the budget means, not a tuning, so nothing overrides it.
 inline constexpr std::uint64_t kHeldBytesPerDecodedByte = 3;
 
-// The chunks one read should decode at once, below which the decode pool runs short of work.
+// The chunks one read should decode at once for each thread decoding them, below which the decode
+// pool runs short of work.
 //
 // On a 1 MiB chunk image a whole-plane profile took 98 ms at 64 chunks per request and 462 ms at
 // one, which is what it took with the pool limited to one thread: a request holding one chunk has
-// nothing to spread over the pool. Eight is where the curve is within a quarter of flat on a
-// five-core machine. A machine with more decode threads wants more, so this is what the default aims
-// for, not a ceiling.
-inline constexpr std::uint64_t kMinChunksPerRead = 8;
+// nothing to spread over the pool. A count fixed for every machine does not hold: eight a read was
+// within a quarter of flat on a five-core machine, and on twenty-eight threads it left most of them
+// idle and plane reads of 64 MiB chunks ran 2.4 times slower. Two a thread keeps every thread one
+// chunk ahead of the one it is decoding.
+inline constexpr std::uint64_t kChunksPerDecodeThread = 2;
 
-// The least a read holds by default, whatever its chunks. On small chunks this, not the eight above,
-// sets the read: 256 MiB is sixty-four 1 MiB chunks, which keeps every decode thread busy and a piece
-// short enough to report progress on.
+// The least a read holds by default, whatever its chunks and threads. On small chunks this, not the
+// thread count, sets the read: 256 MiB is sixty-four 1 MiB chunks, which keeps every decode thread
+// busy and a piece short enough to report progress on.
 inline constexpr std::uint64_t kLeastBytesPerRead = 256u << 20;
 
-// The most a read holds by default. Eight chunks of 64 MiB would hold two GiB; this keeps them to
-// four, which over that cube took a cube histogram 8.2 s against 7.1 s at eight and 19.8 s at one.
-// What a deployment short of memory wants instead it sets as ReadOptions::read_budget_bytes.
-inline constexpr std::uint64_t kMostBytesPerRead = 1u << 30;
+// The most a read holds by default. Two chunks a thread of 64 MiB ones would hold over 10 GiB on
+// twenty-eight threads; this keeps them to ten. What a deployment short of memory wants instead it
+// sets as ReadOptions::read_budget_bytes.
+inline constexpr std::uint64_t kMostBytesPerRead = 2u << 30;
 
-// What one read may hold when the caller has not said otherwise, given what one chunk of it holds.
-inline std::uint64_t DefaultReadBytes(std::uint64_t held_per_chunk) {
-    const std::uint64_t wanted = std::max<std::uint64_t>(1, held_per_chunk) * kMinChunksPerRead;
+// What one read may hold when the caller has not said otherwise, given what one chunk of it holds
+// and how many threads decode its chunks. No thread count is taken as one.
+inline std::uint64_t DefaultReadBytes(std::uint64_t held_per_chunk, std::size_t decode_threads) {
+    const std::uint64_t wanted = std::max<std::uint64_t>(1, held_per_chunk) * kChunksPerDecodeThread *
+                                 std::max<std::uint64_t>(1, decode_threads);
     return std::min<std::uint64_t>(kMostBytesPerRead, std::max<std::uint64_t>(kLeastBytesPerRead, wanted));
 }
 
@@ -153,7 +157,8 @@ enum class PixelsHeld { by_caller, by_library };
 // A chunk here is a pixel chunk. What it decodes to counts the flag it brings, in the flag's own
 // chunks (see DecodedFlagBytes); what it holds is that, kHeldBytesPerDecodedByte over, plus the
 // buffers the library allocates for its share of the read -- the folded-in flag a byte an element,
-// and the pixels when the library rather than the caller holds them.
+// and the pixels when the library rather than the caller holds them. The default budget aims at
+// `decode_threads`, the threads of the context the read goes through.
 struct ReadCost {
     bool apply_mask = false;
     std::uint64_t chunk_bytes = 1;
@@ -161,15 +166,16 @@ struct ReadCost {
     std::size_t budget_bytes = 0;
 
     static ReadCost Of(const ImageDescriptor& descriptor, const ChunkGeometry& geometry,
-                       const ChunkGeometry& flag_geometry, const ReadOptions& options, PixelsHeld pixels) {
+                       const ChunkGeometry& flag_geometry, const ReadOptions& options, PixelsHeld pixels,
+                       std::size_t decode_threads) {
         ReadCost cost;
         cost.apply_mask = AppliesPixelMask(options, descriptor);
         cost.chunk_bytes = DecodedChunkBytes(descriptor, geometry) +
                            (cost.apply_mask ? DecodedFlagBytes(descriptor, geometry, flag_geometry) : 0);
         cost._chunk_elements = ChunkElements(geometry);
         cost.held_bytes = cost.Held(pixels);
-        cost.budget_bytes =
-            options.read_budget_bytes != 0 ? options.read_budget_bytes : DefaultReadBytes(cost.held_bytes);
+        cost.budget_bytes = options.read_budget_bytes != 0 ? options.read_budget_bytes
+                                                           : DefaultReadBytes(cost.held_bytes, decode_threads);
         return cost;
     }
 

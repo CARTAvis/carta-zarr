@@ -23,6 +23,9 @@
 
 namespace {
 
+// What a context gives every read here to aim its default budget at.
+constexpr std::size_t kDecodeThreads = 4;
+
 using carta::zarr::AxisRole;
 using carta::zarr::ChunkGeometry;
 using carta::zarr::ImageDescriptor;
@@ -86,7 +89,7 @@ std::uint64_t ElementCount(const ReadRequest& request) {
 
 std::vector<Piece> Pieces(const ImageDescriptor& descriptor, const ChunkGeometry& geometry,
                           const ChunkGeometry& flag_geometry, const ReadRequest& request, const ReadOptions& options) {
-    return PlanPieces(descriptor, geometry, flag_geometry, request, options);
+    return PlanPieces(descriptor, geometry, flag_geometry, request, options, kDecodeThreads);
 }
 
 // A flag chunked as its pixels are, which is every image here but one.

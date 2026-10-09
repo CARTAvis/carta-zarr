@@ -114,7 +114,7 @@ void Segment(const ChunkGeometry& geometry, const ReadRequest& request, std::uin
 
 std::vector<Piece> PlanPieces(const ImageDescriptor& descriptor, const ChunkGeometry& geometry,
                               const ChunkGeometry& flag_geometry, const ReadRequest& request,
-                              const ReadOptions& options) {
+                              const ReadOptions& options, std::size_t decode_threads) {
     const auto axis = SlowestSelectedAxis(request);
     if (!axis) {
         return {Piece{request, 0, {}}};
@@ -124,7 +124,7 @@ std::vector<Piece> PlanPieces(const ImageDescriptor& descriptor, const ChunkGeom
     // it, in the flag's own chunks, which a piece decodes whole. The pixels go to the caller's
     // destination, which the budget does not pay for -- unless a piece has to be gathered in parts,
     // when the library holds each part's pixels itself.
-    const auto cost = ReadCost::Of(descriptor, geometry, flag_geometry, options, PixelsHeld::by_caller);
+    const auto cost = ReadCost::Of(descriptor, geometry, flag_geometry, options, PixelsHeld::by_caller, decode_threads);
     const auto affordable = std::max<std::uint64_t>(1, cost.ChunksPerRead(PixelsHeld::by_caller));
     const auto gathered = std::max<std::uint64_t>(1, cost.ChunksPerRead(PixelsHeld::by_library));
 

@@ -136,7 +136,8 @@ struct ReadOptions {
     // while a caller doing it afterwards pays for a second traversal.
     bool apply_pixel_mask = true;
     /// How much memory one read may hold at once beyond the caller's own destination, in bytes. Zero
-    /// means the library's own budget: enough for eight chunks, between 256 MiB and 1 GiB.
+    /// means the library's own budget: two chunks for every decode thread of the image's context,
+    /// between 256 MiB and 2 GiB.
     ///
     /// What a read holds is the chunks it is decoding -- each about three times what it decodes to,
     /// for its compressed bytes and the codec's buffer beside the decoded copy -- and the buffers the

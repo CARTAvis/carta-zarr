@@ -90,7 +90,7 @@ void Place(const ReadRequest& piece, const ReadRequest& segment, const float* fr
 Result<std::size_t> ReadInPieces(const PixelSource& source, const ImageDescriptor& descriptor,
                                  const ChunkGeometry& geometry, const ChunkGeometry& flag_geometry,
                                  const ReadRequest& request, BufferView<float> destination, const ReadOptions& options,
-                                 const ProgressCallback& progress) {
+                                 std::size_t decode_threads, const ProgressCallback& progress) {
     const auto checked = CheckRead(descriptor, request, destination.size, options.control);
     if (!checked) {
         return checked.error();
@@ -100,7 +100,7 @@ Result<std::size_t> ReadInPieces(const PixelSource& source, const ImageDescripto
     const auto elements = checked.value().elements();
 
     const bool apply_mask = AppliesPixelMask(options, descriptor);
-    const auto pieces = PlanPieces(descriptor, geometry, flag_geometry, request, options);
+    const auto pieces = PlanPieces(descriptor, geometry, flag_geometry, request, options, decode_threads);
 
     std::vector<std::uint8_t> mask;
     std::vector<float> gathered;
@@ -246,7 +246,8 @@ Result<void> ForEachPiece(const ReadRequest& request, std::uint64_t most, Read&&
 
 Result<std::uint64_t> PrefetchChunks(const PixelSource& source, const ImageDescriptor& descriptor,
                                      const ChunkGeometry& geometry, const ChunkGeometry& flag_geometry,
-                                     const ReadRequest& request, const ReadOptions& options) {
+                                     const ReadRequest& request, const ReadOptions& options,
+                                     std::size_t decode_threads) {
     // Checked as the request the caller made, so that a mistake in it is reported in its own terms
     // rather than in those of the sample made from it.
     if (auto checked = zarr::BuildSelection(descriptor, request, zarr::DestinationOrder::logical); !checked) {
@@ -268,7 +269,7 @@ Result<std::uint64_t> PrefetchChunks(const PixelSource& source, const ImageDescr
     std::vector<float> discarded(static_cast<std::size_t>(std::min(chunks, SampleElements(options, sizeof(float)))));
     auto read = ForEachPiece(sample, discarded.size(), [&](const ReadRequest& piece) -> Result<void> {
         auto piece_read = ReadInPieces(source, descriptor, geometry, flag_geometry, piece,
-                                       {discarded.data(), discarded.size()}, pixels_only, {});
+                                       {discarded.data(), discarded.size()}, pixels_only, decode_threads, {});
         if (!piece_read) {
             return piece_read.error();
         }
@@ -294,7 +295,7 @@ Result<std::uint64_t> PrefetchChunks(const PixelSource& source, const ImageDescr
     const std::uint64_t flag_chunk_held =
         kHeldBytesPerDecodedByte * ChunkElements(flag_geometry.chunk_shape.empty() ? geometry : flag_geometry);
     const std::uint64_t flag_budget =
-        options.read_budget_bytes != 0 ? options.read_budget_bytes : DefaultReadBytes(flag_chunk_held);
+        options.read_budget_bytes != 0 ? options.read_budget_bytes : DefaultReadBytes(flag_chunk_held, decode_threads);
     const std::uint64_t flag_piece =
         std::min<std::uint64_t>(discarded_flags.size(), std::max<std::uint64_t>(1, flag_budget / flag_chunk_held));
     auto flags = ForEachPiece(flag_sample, flag_piece, [&](const ReadRequest& piece) -> Result<void> {

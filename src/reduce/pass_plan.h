@@ -74,7 +74,8 @@ using BlockChannel = ChannelIndex<struct BlockChannelTag>;
 class PassPlan;
 
 PassPlan PlanPass(const ImageDescriptor& descriptor, const ChunkGeometry& geometry, const ChunkGeometry& flag_geometry,
-                  const AxisMap& map, const CheckedPlanes& planes, std::uint64_t sample, const ReadOptions& options);
+                  const AxisMap& map, const CheckedPlanes& planes, std::uint64_t sample, const ReadOptions& options,
+                  std::size_t decode_threads);
 
 class PassPlan {
 public:
@@ -185,7 +186,7 @@ public:
 private:
     friend PassPlan PlanPass(const ImageDescriptor& descriptor, const ChunkGeometry& geometry,
                              const ChunkGeometry& flag_geometry, const AxisMap& map, const CheckedPlanes& planes,
-                             std::uint64_t sample, const ReadOptions& options);
+                             std::uint64_t sample, const ReadOptions& options, std::size_t decode_threads);
 
     // Steps towards the answers above rather than answers themselves, kept here so that no caller
     // divides them out for itself. Nothing asserts either directly -- what a test has to say about them it says through

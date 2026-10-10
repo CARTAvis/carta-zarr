@@ -84,7 +84,7 @@ meta['attributes']['coordinate_system_info']['reference_direction']['attrs']['eq
 json.dump(meta, open(root + '/zarr.json', 'w'))")
 refused("a Zarr in another equinox" "${OUTPUT_DIR}/cube.fits" "${OUTPUT_DIR}/equinox.zarr" --flag no --chunks 32,32,8)
 # The same equinox in every form carta-zarr reads.
-foreach(form 2000.0 "'2000.0'" "'J2000'" "'b2000'")
+foreach(form 2000.0 "'2000.0'" "'J2000'" "'b2000'" "'J2e3'" "'+2000'")
     string(MAKE_C_IDENTIFIER "equinox_${form}" name)
     changed(${name} "meta = json.load(open(root + '/zarr.json'))
 meta['attributes']['coordinate_system_info']['reference_direction']['attrs']['equinox'] = ${form}

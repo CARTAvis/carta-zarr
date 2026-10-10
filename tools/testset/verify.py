@@ -205,11 +205,16 @@ def main() -> int:
     system = root["coordinate_system_info"]
     frame = system["reference_direction"]["attrs"].get("frame", "")
     wcs.wcs.set()
-    # The equinox as carta-zarr reads it: a number, or a string of one with an optional J or B before it
-    # (direction.cc); one it cannot read is none, which only the FITS file's none matches.
+    # The equinox as carta-zarr reads it (direction.cc): a number, or a string whose one leading J or B
+    # is dropped and whose start is read as std::stod reads it; one it cannot read is none, which only
+    # the FITS file's none matches.
     written = system["reference_direction"]["attrs"].get("equinox")
-    parsed = re.fullmatch(r"[jb]?(\d+(?:\.\d*)?)", str(written).strip().lower()) if written is not None else None
-    equinox = float(written) if isinstance(written, (int, float)) else float(parsed.group(1)) if parsed else math.nan
+    if isinstance(written, str):
+        text = written[1:] if len(written) > 1 and written[0] in "JBjb" else written
+        parsed = re.match(r"\s*([+-]?(?:\d+\.?\d*|\.\d+)(?:[eE][+-]?\d+)?|[+-]?(?:inf(?:inity)?|nan))", text, re.I)
+        equinox = float(parsed.group(1)) if parsed else math.nan
+    else:
+        equinox = float(written) if isinstance(written, (int, float)) else math.nan
     same_equinox = equinox == wcs.wcs.equinox or (math.isnan(equinox) and math.isnan(wcs.wcs.equinox))
     pole = [math.degrees(angle) for angle in system.get("native_pole_direction", {}).get("data", [math.nan, math.nan])]
     check("unrotated SIN projection in the FITS frame and equinox, about the FITS file's native pole",

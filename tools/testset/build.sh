@@ -60,6 +60,7 @@ for entry in "${layouts[@]}"; do
     IFS=',' read -r cl cm cf <<< "$chunk"
     name="${cube}_c${cl}x${cm}x${cf}"
     arguments=(--chunks "0,$cf,0,$cl,$cm")
+    expected=(--chunks "$chunk")
     if [ "$shard" != - ]; then
         IFS=',' read -r sl sm sf <<< "$shard"
         if (( sl % cl || sm % cm || sf % cf )); then
@@ -68,6 +69,7 @@ for entry in "${layouts[@]}"; do
         fi
         name+="_s${sl}x${sm}x${sf}"
         arguments+=(--shards "0,$sf,0,$sl,$sm")
+        expected+=(--shards "$shard")
     fi
     if [ "$flag" = yes ]; then
         name+="_flag"
@@ -81,7 +83,7 @@ for entry in "${layouts[@]}"; do
     uv run --quiet --python-preference only-managed "$converter" "$output/$cube.fits" "${arguments[@]}" \
         --output "$partial" 2> >(grep -v Warning >&2)
     say "$name: verifying"
-    uv run --quiet "$here/verify.py" "$output/$cube.fits" "$partial" --flag "$flag" > "$output/$name.verify.txt" || {
+    uv run --quiet "$here/verify.py" "$output/$cube.fits" "$partial" --flag "$flag" "${expected[@]}" > "$output/$name.verify.txt" || {
         cat "$output/$name.verify.txt" >&2
         exit 1
     }

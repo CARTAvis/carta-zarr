@@ -19,13 +19,16 @@
 """Check that a FITS cube and a Zarr made from it hold the same pixels at the same coordinates.
 
 A comparison between FITS and Zarr is only a comparison of the formats if both hold the same
-pixels. This compares every pixel, bit for bit, a block of channels at a time; the frequency of the
-first and last channel; and the sky position of the corners and the centre. --flag says whether the
-Zarr must carry a flag: one that must is refused without one carta-zarr would apply -- typed "flag",
-boolean, shaped as the image, and declared for it or the only such variable -- and its flag must be
-true exactly where the FITS cube is NaN; one that must not is refused with one.
+pixels. This checks that the image is float32 over time, frequency, polarization, l and m, in the
+chunks (and shards) asked for; compares every pixel, bit for bit, a block of channels at a time; the
+frequency of every channel; and the sky position of the corners and the centre, from an unrotated
+SIN projection, which is checked to be what the Zarr declares. --flag says whether the Zarr must carry
+a flag: one that must is refused without one carta-zarr would apply -- typed "flag", boolean, shaped
+as the image, and declared for it or the only such variable not declared for another -- and its flag
+must be true exactly where the FITS cube is NaN; one that must not is refused with one, and with a
+declaration carta-zarr would refuse to open the image over.
 
-    verify.py CUBE.fits CUBE.zarr --flag {yes,no} [--block-mib 1024]
+    verify.py CUBE.fits CUBE.zarr --flag {yes,no} --chunks L,M,F [--shards L,M,F] [--block-mib 1024]
 
 Prints what it compared, and exits nonzero if anything differs.
 """
@@ -45,9 +48,13 @@ from astropy.io import fits
 from astropy.wcs import WCS
 
 
-def usable_flag(root: Path, image: str) -> tuple[str | None, str]:
-    """The flag carta-zarr would apply to `image`, by its rules (src/schema/xradio/flag.h), and why
-    there is none when there is none."""
+AXES = ["time", "frequency", "polarization", "l", "m"]
+
+
+def usable_flag(root: Path, image: str) -> tuple[str | None, str, bool]:
+    """The flag carta-zarr would apply to `image`, by its rules (src/schema/xradio/flag.h, DeclaredFlag
+    and DetermineFlag); why there is none when there is none; and whether that is a declaration
+    carta-zarr refuses to open the image over rather than an image it opens unmasked."""
     sky = json.loads((root / image / "zarr.json").read_text())
 
     def usable(name: str) -> bool:
@@ -62,14 +69,40 @@ def usable_flag(root: Path, image: str) -> tuple[str | None, str]:
                 and metadata.get("dimension_names") == sky.get("dimension_names") and metadata.get("shape") == sky.get("shape"))
 
     groups = json.loads((root / "zarr.json").read_text()).get("attributes", {}).get("data_groups") or {}
-    declared = sky.get("attributes", {}).get("flag") or next(
-        (group.get("flag") for group in groups.values() if isinstance(group, dict) and group.get("sky") == image), None)
+    groups = [group for group in groups.values() if isinstance(group, dict) and group.get("flag")]
+    # The image's own attribute outranks a group; groups naming different flags for it are refused.
+    declared = sky.get("attributes", {}).get("flag")
+    if not declared:
+        named = {group["flag"] for group in groups if group.get("sky") == image}
+        if len(named) > 1:
+            return None, f"data groups declare different flags {sorted(named)}", True
+        declared = next(iter(named), None)
     if declared:
-        return (declared, "") if usable(declared) else (None, f"{declared} is declared but is not a usable flag")
-    candidates = [entry.name for entry in root.iterdir() if entry.is_dir() and entry.name != image and usable(entry.name)]
+        if usable(declared):
+            return declared, "", False
+        return None, f"{declared} is declared but is not a usable flag", True
+    # With nothing declared, the one usable variable no group declares for another image.
+    others = {group["flag"] for group in groups if group.get("sky") != image}
+    candidates = [entry.name for entry in root.iterdir()
+                  if entry.is_dir() and entry.name != image and entry.name not in others and usable(entry.name)]
     if len(candidates) == 1:
-        return candidates[0], ""
-    return None, "no flag is declared, and no single variable is typed flag and shaped as the image"
+        return candidates[0], "", False
+    return None, "no flag is declared, and no single variable is typed flag and shaped as the image", False
+
+
+def layout(metadata: dict) -> tuple[list[int], list[int] | None]:
+    """An array's inner chunk and, when it is sharded, its shard, as stored."""
+    grid = metadata["chunk_grid"]["configuration"]["chunk_shape"]
+    for codec in metadata.get("codecs", []):
+        if codec.get("name") == "sharding_indexed":
+            return codec["configuration"]["chunk_shape"], grid
+    return grid, None
+
+
+def extents(text: str) -> list[int]:
+    """L,M,F as the image's own axis order."""
+    l, m, f = (int(part) for part in text.split(","))
+    return [1, f, 1, l, m]
 
 
 def first_difference(a: np.ndarray, b: np.ndarray) -> tuple[int, ...] | None:
@@ -85,6 +118,8 @@ def main() -> int:
     parser.add_argument("fits")
     parser.add_argument("zarr")
     parser.add_argument("--flag", choices=("yes", "no"), required=True, help="whether the Zarr must carry a flag")
+    parser.add_argument("--chunks", required=True, help="the chunk asked for, as l,m,frequency")
+    parser.add_argument("--shards", help="the shard asked for, as l,m,frequency; none means unsharded")
     parser.add_argument("--block-mib", type=int, default=1024, help="how much of each to compare at a time")
     args = parser.parse_args()
 
@@ -97,12 +132,21 @@ def main() -> int:
         if not ok:
             failures.append(what)
 
-    flag_name, why = usable_flag(Path(args.zarr), "SKY")
+    # The pixels are compared as bits in this axis order, which carta-zarr takes from the names.
+    metadata = json.loads(Path(args.zarr, "SKY", "zarr.json").read_text())
+    check("float32", metadata.get("data_type") == "float32")
+    check(f"axes {' '.join(AXES)}", metadata.get("dimension_names") == AXES)
+    # A converter that ignored the layout asked of it would be published under the wrong name.
+    inner, shard = layout(metadata)
+    check(f"chunk {args.chunks}" + (f", shard {args.shards}" if args.shards else ", unsharded"),
+          inner == extents(args.chunks) and shard == (extents(args.shards) if args.shards else None))
+
+    flag_name, why, refused = usable_flag(Path(args.zarr), "SKY")
     flag = zarr.open_array(f"{args.zarr}/{flag_name}", mode="r") if flag_name else None
     if args.flag == "yes":
         check(f"a flag carta-zarr applies{'' if flag_name else f' ({why})'}", flag is not None)
     else:
-        check("no flag", flag is None)
+        check("no flag" + (f" ({why}, so carta-zarr refuses the image)" if refused else ""), flag is None and not refused)
 
     with fits.open(args.fits, memmap=True) as hdul:
         data = hdul[0].data  # frequency, stokes, y = m, x = l
@@ -131,13 +175,22 @@ def main() -> int:
             check("flag where NaN" + (f" (first differs at {first_flag})" if first_flag else ""), first_flag is None)
 
     frequency = zarr.open_array(f"{args.zarr}/frequency", mode="r")[...]
-    for f in sorted({0, n_freq - 1}):
-        world = wcs.pixel_to_world_values(0, 0, 0, f)[3]
-        check(f"frequency of channel {f}", abs(world - frequency[f]) <= 1e-9 * abs(frequency[f]))
+    channels = np.arange(n_freq)
+    world = wcs.pixel_to_world_values(np.zeros(n_freq), np.zeros(n_freq), np.zeros(n_freq), channels)[3]
+    wrong = np.flatnonzero(np.abs(world - frequency) > 1e-9 * np.abs(frequency))
+    check("frequency of every channel" + (f" (first differs at channel {wrong[0]})" if wrong.size else ""), wrong.size == 0)
     # xradio's converter writes l and m but not the sky position of every pixel, so the position is
-    # the SIN projection of l and m from the reference direction, inverted as XRADIO's would be.
+    # the SIN projection of l and m from the reference direction, inverted as XRADIO's would be. That
+    # holds only for the projection the Zarr declares being an unrotated SIN with no parameters, in the
+    # FITS file's frame, so that is checked first.
     root = json.loads(Path(args.zarr, "zarr.json").read_text())["attributes"]
-    ra0, dec0 = root["coordinate_system_info"]["reference_direction"]["data"]
+    system = root["coordinate_system_info"]
+    frame = system["reference_direction"]["attrs"].get("frame", "")
+    check("unrotated SIN projection in the FITS frame",
+          system.get("projection") == "SIN" and system.get("pixel_coordinate_transformation_matrix") == [[1.0, 0.0], [0.0, 1.0]]
+          and not any(system.get("projection_parameters", [])) and frame.lower() == wcs.wcs.radesys.lower()
+          and all(t.endswith("-SIN") for t in list(wcs.wcs.ctype)[:2]))
+    ra0, dec0 = system["reference_direction"]["data"]
     l_axis = zarr.open_array(f"{args.zarr}/l", mode="r")[...]
     m_axis = zarr.open_array(f"{args.zarr}/m", mode="r")[...]
     for x, y in [(0, 0), (n_l - 1, n_m - 1), (n_l // 2, n_m // 2)]:

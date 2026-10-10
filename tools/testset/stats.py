@@ -17,7 +17,7 @@
 
 """The statistics a synthetic cube is calibrated against a real one with, as one JSON line.
 
-  compression    decoded bytes over bytes on disk, of the chunks on disk
+  compression    decoded bytes over bytes on disk, of the chunks on disk, each counted whole
   nan            the median, over channels, of a plane's NaN fraction
   rms            the median, over channels, of a plane's robust rms (1.4826 x MAD)
   above, below   the median fraction of a plane's finite pixels beyond +5 and -5 robust rms
@@ -43,22 +43,35 @@ import zarr
 
 
 def compression(array: Path) -> float:
-    """Decoded bytes over bytes on disk, over the chunks (or shards) that are on disk. A writer leaves
-    out a chunk that is all fill, and counting one as decoded bytes would credit the codec with what
-    the writer saved."""
+    """Decoded bytes over bytes on disk, over the chunks that are on disk. A writer leaves out a chunk
+    that is all fill, and counting one as decoded bytes would credit the codec with what the writer
+    saved. A chunk is counted whole, the padding of one at the image's edge included, because that is
+    what the codec compressed and what a read decodes; in a shard, only the chunks its index lists."""
     metadata = json.loads((array / "zarr.json").read_text())
-    shape = metadata["shape"]
-    outer = metadata["chunk_grid"]["configuration"]["chunk_shape"]
     itemsize = {"float32": 4, "float64": 8}[metadata["data_type"]]
-    separator = metadata.get("chunk_key_encoding", {}).get("configuration", {}).get("separator", "/")
+    chunk = metadata["chunk_grid"]["configuration"]["chunk_shape"]
+    sharding = next((codec["configuration"] for codec in metadata.get("codecs", [])
+                     if codec.get("name") == "sharding_indexed"), None)
     decoded = stored = 0
     for entry in (array / "c").rglob("*"):
         if not entry.is_file():
             continue
-        relative = entry.relative_to(array / "c")
-        index = [int(part) for part in (relative.parts if separator == "/" else relative.name.split(separator))]
-        decoded += itemsize * math.prod(min(extent, length - i * extent) for i, extent, length in zip(index, outer, shape))
         stored += entry.stat().st_size
+        if sharding is None:
+            decoded += itemsize * math.prod(chunk)
+            continue
+        inner = sharding["chunk_shape"]
+        count = math.prod(outer // extent for outer, extent in zip(chunk, inner))
+        # The index is an (offset, length) pair of little-endian uint64 a chunk, then a crc32c when
+        # its codecs say so; an absent chunk is all ones.
+        checksum = any(codec.get("name") == "crc32c" for codec in sharding.get("index_codecs", []))
+        size = 16 * count + (4 if checksum else 0)
+        with entry.open("rb") as shard:
+            if sharding.get("index_location", "end") == "end":
+                shard.seek(-size, 2)
+            index = np.frombuffer(shard.read(16 * count), dtype="<u8").reshape(count, 2)
+        present = int((index[:, 0] != np.iinfo(np.uint64).max).sum())
+        decoded += present * itemsize * math.prod(inner)
     return decoded / stored
 
 

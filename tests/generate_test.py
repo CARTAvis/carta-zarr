@@ -371,10 +371,16 @@ class SyntheticPixelsTest(unittest.TestCase):
         for f0, f1 in ((13, 29), (39, 40)):
             part = cube.pixels((0, f0, 0, 0, 0), (1, f1, 1, 150, 130))
             self.assertTrue(np.array_equal(whole[:, f0:f1].view(np.uint32), part.view(np.uint32)), f"channels {f0}:{f1}")
-        # Without noise the sources alone fill the cube, and a -0 must stay -0 in every block.
-        quiet = self.cube((1, 300, 1, 40, 40), noise=0.0, line_sources=1, point_sources=0, extended_sources=0,
-                          footprint_fill=None, flagged_channels=0.0)
-        whole = quiet.pixels((0, 0, 0, 0, 0), (1, 300, 1, 40, 40))
+        # Without noise the background is signed zeros, and a -0 must stay -0 in every block, the ones a
+        # source adds to and the ones it does not. A line's peak is a multiple of the noise, so the
+        # source is taken from the same cube with noise; the table is drawn from the seed alone.
+        shape = (1, 300, 1, 40, 40)
+        options = dict(line_sources=1, point_sources=0, extended_sources=0, footprint_fill=None, flagged_channels=0.0)
+        quiet = self.cube(shape, noise=0.0, **options)
+        quiet.__dict__["lines"] = self.cube(shape, noise=1.0, **options).lines
+        whole = quiet.pixels((0, 0, 0, 0, 0), shape)
+        self.assertTrue(np.any(whole > 0), "the source added nothing, so this tests nothing")
+        self.assertTrue(np.any(np.signbit(whole) & (whole == 0)), "no -0 in the background to keep")
         for f0 in range(0, 300, 7):
             part = quiet.pixels((0, f0, 0, 0, 0), (1, f0 + 1, 1, 40, 40))
             self.assertTrue(np.array_equal(whole[:, f0 : f0 + 1].view(np.uint32), part.view(np.uint32)), f"channel {f0}")

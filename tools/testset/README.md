@@ -11,8 +11,9 @@ XRADIO_CONVERTER=/path/to/fits_to_zarr_xradio_v1.2.2_v1.py tools/testset/build.s
 
 `build.sh` skips what already exists, so a run that stopped is finished by running it again. A FITS
 file or a Zarr appears under its own name only once it is complete, and a Zarr only once `verify.py`
-has found every one of its pixels, its flag (or the absence of one) and its coordinates to match
-the FITS file's (the report is left beside it as `NAME.verify.txt`).
+has found it float32 over the expected axes in the chunks (and shards) asked for, and every one of its
+pixels, its flag (or the absence of one) and its coordinates to match the FITS file's (the report is
+left beside it as `NAME.verify.txt`).
 It needs `uv`, the converter, and about 155 GB (190 GB while a cube is being synthesized); on a
 28-thread machine with local NVMe it takes about 13 minutes, a third of it verifying.
 

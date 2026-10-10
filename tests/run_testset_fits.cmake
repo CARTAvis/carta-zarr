@@ -223,6 +223,12 @@ sky[...] = values.transpose(0, 1, 2, 4, 3)
 sky.attrs.update(attributes)")
 run("verify.py with m stored before l" "${SOURCE_DIR}/tools/testset/verify.py" "${OUTPUT_DIR}/cube.fits"
     "${OUTPUT_DIR}/reordered.zarr" --flag no --chunks 32,32,8)
+# SKY's dimension names kept in its attributes, where some XRADIO writers put them and carta-zarr looks.
+changed(attributed "meta = json.load(open(root + '/SKY/zarr.json'))
+meta['attributes']['dimension_names'] = meta.pop('dimension_names')
+json.dump(meta, open(root + '/SKY/zarr.json', 'w'))")
+run("verify.py with SKY's dimension names in its attributes" "${SOURCE_DIR}/tools/testset/verify.py" "${OUTPUT_DIR}/cube.fits"
+    "${OUTPUT_DIR}/attributed.zarr" --flag no --chunks 32,32,8)
 # A beam on as many planes as the image has, but not on its planes: half the channels, twice the
 # polarizations.
 changed(halfbeam "import shutil
@@ -320,37 +326,50 @@ if(result)
 endif()
 refused("a flag in chunks other than the image's" "${OUTPUT_DIR}/cube.fits" "${rechunked}" --flag yes --chunks 32,32,8)
 
-# A flag beside SKY's transposed shards: in the same layout it verifies; in the same outer chunk and
-# shard but without the transpose, it decodes other chunks than SKY's and is refused.
-function(transposed_flag name transposed)
+# A flag beside SKY's shards, SKY's and the flag's each given as (transpose, inner l, inner m): a
+# transpose "inner" reorders bytes within a chunk and changes no footprint, so a flag without one holds
+# the same pixels in each chunk and verifies; one "outer", ahead of the shards, swaps the axes their
+# chunk_shape is given in. zarr-python then reads both arrays as unsharded 64 x 64 chunks, whatever
+# their inner chunks, so a flag cut 16 x 32 beside a SKY cut 32 x 16 must be told apart by the codecs.
+function(sharded_flag name sky flag)
     set(copy "${OUTPUT_DIR}/${name}.zarr")
     file(COPY "${OUTPUT_DIR}/flagged.zarr/" DESTINATION "${copy}")
     execute_process(
         COMMAND "${UV}" run --quiet --no-project --python-preference only-managed --with zarr==3.2.1 --with numpy==2.3.1
-                python -c "import numpy as np, shutil, zarr
+                python -W ignore -c "import json, numpy as np, shutil, zarr
 from zarr.codecs import TransposeCodec
 root = '${copy}'
-for node, fill, filters in (('SKY', np.nan, True), ('FLAG_SKY', False, ${transposed})):
+swap = (0, 1, 2, 4, 3)
+for node, fill, (transpose, l, m) in (('SKY', np.nan, ${sky}), ('FLAG_SKY', False, ${flag})):
     old = zarr.open_array(root + '/' + node, mode='r')
     values, attributes, names = old[...], old.attrs.asdict(), list(old.metadata.dimension_names)
     shutil.rmtree(root + '/' + node)
-    new = zarr.create_array(root + '/' + node, shape=values.shape, chunks=(1, 8, 1, 32, 16), shards=(1, 8, 1, 64, 64),
-                            dtype=values.dtype, filters=[TransposeCodec(order=(0, 1, 2, 4, 3))] if filters else None,
+    inner = (1, 8, 1, m, l) if transpose == 'outer' else (1, 8, 1, l, m)
+    new = zarr.create_array(root + '/' + node, shape=values.shape, chunks=inner, shards=(1, 8, 1, 64, 64),
+                            dtype=values.dtype, filters=[TransposeCodec(order=swap)] if transpose == 'inner' else None,
                             dimension_names=names, fill_value=fill)
-    new[...] = values
     new.attrs.update(attributes)
+    if transpose == 'outer':
+        path = root + '/' + node + '/zarr.json'
+        meta = json.load(open(path))
+        meta['codecs'] = [{'name': 'transpose', 'configuration': {'order': list(swap)}}] + meta['codecs']
+        json.dump(meta, open(path, 'w'))
+    zarr.open_array(root + '/' + node, mode='r+')[...] = values
 zarr.consolidate_metadata(root)"
         RESULT_VARIABLE result)
     if(result)
         message(FATAL_ERROR "sharding ${name} failed: ${result}")
     endif()
 endfunction()
-transposed_flag(flagged_transposed True)
-run("verify.py with a flag in SKY's transposed shards" "${SOURCE_DIR}/tools/testset/verify.py" "${OUTPUT_DIR}/cube.fits"
-    "${OUTPUT_DIR}/flagged_transposed.zarr" --flag yes --chunks 32,16,8 --shards 64,64,8)
-transposed_flag(flag_untransposed False)
-refused("a flag in SKY's outer chunks but not its transpose" "${OUTPUT_DIR}/cube.fits" "${OUTPUT_DIR}/flag_untransposed.zarr"
-        --flag yes --chunks 32,16,8 --shards 64,64,8)
+sharded_flag(flag_inner "('inner', 32, 16)" "('none', 32, 16)")
+run("verify.py with a flag in SKY's shards, transposed only within SKY's chunks" "${SOURCE_DIR}/tools/testset/verify.py"
+    "${OUTPUT_DIR}/cube.fits" "${OUTPUT_DIR}/flag_inner.zarr" --flag yes --chunks 32,16,8 --shards 64,64,8)
+sharded_flag(flag_outer "('outer', 32, 16)" "('outer', 32, 16)")
+run("verify.py with SKY and its flag sharded after a transpose" "${SOURCE_DIR}/tools/testset/verify.py"
+    "${OUTPUT_DIR}/cube.fits" "${OUTPUT_DIR}/flag_outer.zarr" --flag yes --chunks 32,16,8 --shards 64,64,8)
+sharded_flag(flag_across "('outer', 32, 16)" "('outer', 16, 32)")
+refused("a flag sharded after a transpose in other chunks than SKY's" "${OUTPUT_DIR}/cube.fits"
+        "${OUTPUT_DIR}/flag_across.zarr" --flag yes --chunks 32,16,8 --shards 64,64,8)
 
 with_flag(untyped False False)
 refused("a flag carta-zarr would not apply" "${OUTPUT_DIR}/cube.fits" "${OUTPUT_DIR}/untyped.zarr" --flag yes --chunks 32,32,8)

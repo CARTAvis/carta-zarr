@@ -64,30 +64,40 @@ def first_difference(a: np.ndarray, b: np.ndarray) -> tuple[int, ...] | None:
     return tuple(int(i) for i in np.unravel_index(int(np.argmax(differ)), differ.shape))
 
 
-def layout(array: zarr.Array) -> tuple:
-    """Everything that decides which pixels a chunk holds: the dimension order, the outer grid, and every
-    transpose and inner chunk in the codecs, nested ones included. Two arrays alike in it decode alike
-    chunks, which zarr-python's .chunks and .shards, read past a transpose, do not say."""
-    def codecs(chain) -> list:
-        kept = []
+def dimension_names(array: zarr.Array) -> list[str]:
+    """The array's dimension names where carta-zarr finds them: the field, or failing that the attribute
+    some XRADIO writers keep them in."""
+    return list(array.metadata.dimension_names or array.attrs["dimension_names"])
+
+
+def layout(array: zarr.Array) -> dict[str, list[int]]:
+    """Each axis's extent in the outer chunk and in every chunk nested inside it, by name: what decides
+    which pixels a chunk holds. A transpose ahead of a sharding codec reorders the shape that codec's
+    chunk_shape is given in, so zarr-python's .chunks and .shards can read alike for two different
+    footprints; one inside it reorders bytes within a chunk and changes no footprint."""
+    names = dimension_names(array)
+    metadata = array.metadata.to_dict()
+    extents = {name: [extent] for name, extent in zip(names, metadata["chunk_grid"]["configuration"]["chunk_shape"])}
+
+    def descend(chain, order: list[int]) -> None:
         for codec in chain:
             name, configuration = codec.get("name"), codec.get("configuration") or {}
             if name == "transpose":
-                kept.append((name, tuple(configuration.get("order", ()))))
+                order = [order[axis] for axis in configuration["order"]]
             elif name == "sharding_indexed":
-                kept.append((name, tuple(configuration.get("chunk_shape", ())), codecs(configuration.get("codecs", []))))
-        return kept
+                for axis, extent in zip(order, configuration["chunk_shape"]):
+                    extents[names[axis]].append(extent)
+                descend(configuration.get("codecs", []), order)
 
-    metadata = array.metadata.to_dict()
-    return (tuple(metadata.get("dimension_names") or ()), json.dumps(metadata.get("chunk_grid"), sort_keys=True),
-            codecs(metadata.get("codecs", [])))
+    descend(metadata.get("codecs", []), list(range(len(names))))
+    return extents
 
 
 def logical(array: zarr.Array, start: int, stop: int) -> np.ndarray:
     """Channels start to stop of a sky-plane array, as frequency, polarization, l, m whatever order its
     dimensions are stored in -- which carta-zarr reads by name, so a check that indexed by position would
     compare a square cube with l and m swapped against the wrong pixels and pass it."""
-    names = list(array.metadata.dimension_names)
+    names = dimension_names(array)
     selection = tuple(0 if name == "time" else slice(start, stop) if name == "frequency" else slice(None)
                       for name in names)
     kept = [name for name in names if name != "time"]

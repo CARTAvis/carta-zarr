@@ -634,6 +634,12 @@ a = zarr.open_array(root + '/SKY', mode='r+')
 date = dict(a.attrs['obsdate'])
 date['attrs'] = dict(date['attrs'], scale='tai')
 a.attrs['obsdate'] = date")
+# One channel, which carta-zarr gives no linear axis for.
+run("generate.py single" "${SOURCE_DIR}/tools/zarr-bench/generate.py" --synthetic --shape frequency=1,polarization=1,l=16,m=16
+    --chunk l=16,m=16,frequency=1 --workers 1 --output "${OUTPUT_DIR}/single.zarr")
+run("zarr-to-fits.py single" "${SOURCE_DIR}/tools/testset/zarr-to-fits.py" "${OUTPUT_DIR}/single.zarr" "${OUTPUT_DIR}/single.fits")
+run("verify.py single" "${SOURCE_DIR}/tools/testset/verify.py" "${OUTPUT_DIR}/single.fits" "${OUTPUT_DIR}/single.zarr" --flag no
+    --chunks 16,16,1)
 foreach(case "middle|evenly spaced" "widebeam|plane to plane" "tai|wrong instant" "halfbeam|one on each")
     string(REPLACE "|" ";" case "${case}")
     list(GET case 0 name)

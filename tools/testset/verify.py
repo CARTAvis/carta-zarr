@@ -219,12 +219,14 @@ def main() -> int:
             hertz = math.nan
         check("frequency of every channel", close(np.asarray(spectral.get("channel_frequencies"), dtype=float) * hertz, world))
         # The linear axis carta-backend builds when carta-zarr gives one, rather than the table. A FITS
-        # frequency axis is linear, so carta-zarr must give one.
+        # frequency axis is linear, so carta-zarr must give one -- unless there is one channel, which has
+        # no spacing to fit and is read from the table.
         try:
             fitted = spectral["reference_value"] + (np.arange(n_freq) + 1 - spectral["reference_pixel"]) * spectral["increment"]
         except (KeyError, TypeError):
             fitted = None
-        check("frequency axis as carta-backend builds it", fitted is not None and close(fitted * hertz, world))
+        if fitted is not None or n_freq > 1:
+            check("frequency axis as carta-backend builds it", fitted is not None and close(fitted * hertz, world))
         check("frequency frame and rest frequency",
               math.isfinite(hertz) and spectral.get("system", "").upper() == str(header.get("SPECSYS", "")).upper()
               and "RESTFRQ" in header and spectral.get("rest_frequency") is not None

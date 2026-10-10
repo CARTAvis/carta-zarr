@@ -201,7 +201,8 @@ nothing. The cost is on the plane: one channel decodes 64 chunks of 256 channels
 The exact cube histogram took 27 s against 14 s. Its plane histograms woke the worker pool once per
 channel of each band a read was cut into, which narrow chunks made small; carta-zarr since #6 splits a
 read of many channels by channel instead, and those plane histograms take 5.7 s rather than 10.7 s, as
-long as at 128 x 128 x 64.
+long as at 128 x 128 x 64. Through carta-backend the whole exact cube histogram then takes 16.5 s
+against 13.5 s at 128 x 128 x 64.
 
 ### Use more file-reading threads on Lustre
 
@@ -328,4 +329,5 @@ The comparison through carta-backend ran on 2026-10-09, on the read-path test se
 `tools/testset/build.sh`, with carta-zarr at 21f18a2 and carta-backend's `test_zarr` branch at 6e406c80
 (its `MeasureReadPaths` test, one operation per process), on a single machine with local NVMe rather
 than a parallel file system. The cigar's plane histograms before and after #6 were
-timed by calling carta-zarr directly, at 21f18a2 and at 59789f8, on the same machine.
+timed by calling carta-zarr directly, at 21f18a2 and at 59789f8, on the same machine, and the exact cube
+histogram again through carta-backend on 2026-10-10 with the fix swapped in, the mean of two runs.

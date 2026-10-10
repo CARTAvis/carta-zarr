@@ -153,6 +153,12 @@ changed(gigahertz "f = zarr.open_array(root + '/frequency', mode='r+')
 f.attrs['units'] = 'GHz'")
 refused("a Zarr whose frequencies are said to be in GHz" "${OUTPUT_DIR}/cube.fits" "${OUTPUT_DIR}/gigahertz.zarr"
         --flag no --chunks 32,32,8)
+changed(typed "a = zarr.open_array(root + '/SKY', mode='r+')
+a.attrs['type'] = 'flag'")
+refused("a Zarr whose SKY is typed flag" "${OUTPUT_DIR}/cube.fits" "${OUTPUT_DIR}/typed.zarr" --flag no --chunks 32,32,8)
+changed(kelvin "a = zarr.open_array(root + '/SKY', mode='r+')
+a.attrs['units'] = 'K'")
+refused("a Zarr in another brightness unit" "${OUTPUT_DIR}/cube.fits" "${OUTPUT_DIR}/kelvin.zarr" --flag no --chunks 32,32,8)
 refused("a Zarr rotated on the sky" "${OUTPUT_DIR}/cube.fits" "${OUTPUT_DIR}/rotated.zarr" --flag no --chunks 32,32,8)
 changed(nonfinite "f = zarr.open_array(root + '/frequency', mode='r+')
 f[0] = np.nan")
@@ -200,6 +206,27 @@ run("verify.py with a flag" "${SOURCE_DIR}/tools/testset/verify.py" "${OUTPUT_DI
     --chunks 32,32,8)
 refused("a Zarr whose flag it was not meant to carry" "${OUTPUT_DIR}/cube.fits" "${OUTPUT_DIR}/flagged.zarr" --flag no
         --chunks 32,32,8)
+# The right flag in chunks other than the image's.
+set(rechunked "${OUTPUT_DIR}/rechunked.zarr")
+file(COPY "${OUTPUT_DIR}/flagged.zarr/" DESTINATION "${rechunked}")
+execute_process(
+    COMMAND "${UV}" run --quiet --no-project --python-preference only-managed --with zarr==3.2.1 --with numpy==2.3.1
+            python -c "import numpy as np, shutil, zarr
+root = '${rechunked}'
+old = zarr.open_array(root + '/FLAG_SKY', mode='r')
+values, attributes, names = old[...], old.attrs.asdict(), list(old.metadata.dimension_names)
+shutil.rmtree(root + '/FLAG_SKY')
+flag = zarr.create_array(root + '/FLAG_SKY', shape=values.shape, chunks=(1, 8, 1, 16, 16), dtype=bool, dimension_names=names,
+                         fill_value=False)
+flag[...] = values
+flag.attrs.update(attributes)
+zarr.consolidate_metadata(root)"
+    RESULT_VARIABLE result)
+if(result)
+    message(FATAL_ERROR "rechunking the flag failed: ${result}")
+endif()
+refused("a flag in chunks other than the image's" "${OUTPUT_DIR}/cube.fits" "${rechunked}" --flag yes --chunks 32,32,8)
+
 with_flag(untyped False False)
 refused("a flag carta-zarr would not apply" "${OUTPUT_DIR}/cube.fits" "${OUTPUT_DIR}/untyped.zarr" --flag yes --chunks 32,32,8)
 run("verify.py beside a flag carta-zarr ignores" "${SOURCE_DIR}/tools/testset/verify.py" "${OUTPUT_DIR}/cube.fits"
@@ -278,4 +305,15 @@ assert stats.compression(root / 'sparse') == 16 / 52, stats.compression(root / '
     RESULT_VARIABLE result OUTPUT_VARIABLE out ERROR_VARIABLE err)
 if(result)
     message(FATAL_ERROR "stats.py compression failed: ${result}\n${out}\n${err}")
+endif()
+
+# zarr-to-fits.py refuses a dataset with a flag: FITS has only NaN to mark a pixel with, and a flagged
+# dataset may hold finite values under its flag.
+run("generate.py --flag" "${SOURCE_DIR}/tools/zarr-bench/generate.py" --synthetic --flag --shape frequency=8,polarization=1,l=20,m=20
+    --chunk l=10,m=10,frequency=4 --workers 1 --output "${OUTPUT_DIR}/masked.zarr")
+execute_process(COMMAND "${UV}" run --quiet --script "${SOURCE_DIR}/tools/testset/zarr-to-fits.py" "${OUTPUT_DIR}/masked.zarr"
+                        "${OUTPUT_DIR}/masked.fits"
+    RESULT_VARIABLE result OUTPUT_QUIET ERROR_VARIABLE err)
+if(NOT result OR NOT err MATCHES "carries a flag")
+    message(FATAL_ERROR "zarr-to-fits.py wrote a flagged dataset: ${result}\n${err}")
 endif()

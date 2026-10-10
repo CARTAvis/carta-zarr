@@ -142,6 +142,14 @@ def main() -> int:
         raise SystemExit(f"{image} is stored as {sky.metadata.dimension_names}; expected {SKY_AXES}")
     if sky.shape[0] != 1:
         raise SystemExit(f"{image} has {sky.shape[0]} times; a FITS cube holds one")
+    # A FITS cube marks a flagged pixel by NaN alone, and a flagged dataset may hold finite values under
+    # its flag (generate.py --flag does), which would be written as valid pixels. The test set's cubes
+    # carry their NaN in the pixels and get a flag only from the converter, so a flag here is refused.
+    flags = [entry.parent.name for entry in root.glob("*/zarr.json")
+             if json.loads(entry.read_text()).get("attributes", {}).get("type") == "flag"]
+    if sky.attrs.get("flag") or metadata(root)["attributes"]["data_groups"]["base"].get("flag") or flags:
+        raise SystemExit(f"{args.dataset} carries a flag ({', '.join(flags) or 'declared'}); FITS would show what it "
+                         "hides, so write the cube without one")
     _, n_freq, n_pol, n_l, n_m = sky.shape
     channels = max(1, (args.block_mib << 20) // (n_pol * n_l * n_m * 4))
 

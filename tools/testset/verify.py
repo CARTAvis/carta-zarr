@@ -20,8 +20,8 @@
 
 A comparison between FITS and Zarr is only a comparison of the formats if both hold the same
 pixels. It reads the Zarr as carta-zarr does, its consolidated metadata included, and checks that
-the image is float32 over time, frequency, polarization, l and m, in the chunks (and shards) asked
-for; compares every pixel, bit for bit, a block of channels at a time; the Stokes parameters, the
+the image is an image (not typed flag), float32 over time, frequency, polarization, l and m, in the
+unit the FITS file states, and that it and its flag are in the chunks (and shards) asked for; compares every pixel, bit for bit, a block of channels at a time; the Stokes parameters, the
 time, every channel's frequency with its unit, frame and rest frequency, every l and m, and the sky
 position of the corners and the centre, from an unrotated SIN projection, which is checked to be
 what the Zarr declares. --flag says whether the Zarr must carry
@@ -208,6 +208,8 @@ def main() -> int:
     # The pixels are compared as bits in this axis order, which carta-zarr takes from the names.
     metadata = documents["SKY"]
     check("float32", metadata.get("data_type") == "float32")
+    # carta-zarr passes over a node typed flag when it lists images, so such a SKY is no image at all.
+    check("an image, not typed flag", metadata.get("attributes", {}).get("type") != "flag")
     check(f"axes {' '.join(AXES)}", metadata.get("dimension_names") == AXES)
     # A converter that ignored the layout asked of it would be published under the wrong name.
     inner, shard = layout(metadata)
@@ -215,6 +217,10 @@ def main() -> int:
           inner == extents(args.chunks) and shard == (extents(args.shards) if args.shards else None))
 
     flag_name, why, refused = usable_flag(documents, root_attributes, "SKY")
+    # The flag is read beside the pixels, so its layout is part of what a layout name promises.
+    if flag_name:
+        check(f"{flag_name} in the same chunk" + (" and shard" if args.shards else ""),
+              layout(documents[flag_name]) == (inner, shard))
     flag = zarr.open_array(f"{args.zarr}/{flag_name}", mode="r") if flag_name else None
     if args.flag == "yes":
         check(f"a flag carta-zarr applies{'' if flag_name else f' ({why})'}", flag is not None)
@@ -227,6 +233,7 @@ def main() -> int:
             warnings.simplefilter("ignore")
             wcs = WCS(hdul[0].header)
         header = hdul[0].header.copy()
+        check("brightness unit", metadata.get("attributes", {}).get("units") == header.get("BUNIT"))
         check("shape", n_time == 1 and data.shape == (n_freq, n_pol, n_m, n_l))
         if failures:
             print(f"MISMATCH: {', '.join(failures)}")

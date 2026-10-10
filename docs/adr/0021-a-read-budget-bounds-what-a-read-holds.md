@@ -69,13 +69,18 @@ can be.
   with a flag, whose folded-in mask is a byte an element of the whole read. With the I/O threads left
   to TensorStore's default the queue grows on twenty-eight threads too (3.0 GiB).
 - **A read nobody watches is cut into layers of its chunks**, a chunk deep along the spectral,
-  polarization and time axes and the whole of its sky plane, when its budget affords a chunk for
-  every decode thread and fewer than a layer. That is the exception: a layer of the test cube is 589
-  chunks, more than any default budget affords, and cut finer each piece spans the plane's chunks only
+  polarization and time axes and the whole of its sky plane, or into what its budget affords when
+  that is more, once its budget affords a chunk for every decode thread. That is the exception: a
+  layer of the test cube is 589 chunks, more than any default budget affords, and cut finer each piece
+  spans the plane's chunks only
   in part and is gathered in segments (below), which ran the 128-plane read 25-65 % slower (9.0 s
   against 7.0 s on twenty-eight threads, 12.4 s against 7.5 s on four). In layers it ran as fast as
   issued whole and held 277 MiB on twenty-eight threads and 960 MiB on four -- 0.8 and 2.0 GiB with
-  the flag -- bounded by the plane and the chunk depth rather than by the read's extent. A plane is
+  the flag -- bounded by the plane and the chunk depth rather than by the read's extent. The cut goes
+  on the slowest axis the read selects more than one of, so this holds for a read of one Stokes
+  parameter, as carta-backend's are; one across several Stokes parameters and many channels is cut
+  along polarization and, a polarization chunk deep being more than a layer, falls to segments as it
+  did before. A plane is
   one layer and is read whole, as before, at the same speed. A watched read is always cut to its
   budget, so that it has pieces to report. Reading segments straight into the destination rather
   than gathering them would let a layer be cut to the budget at no cost, and is left to a later

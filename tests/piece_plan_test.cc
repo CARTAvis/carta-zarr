@@ -87,9 +87,11 @@ std::uint64_t ElementCount(const ReadRequest& request) {
     return elements;
 }
 
+// A read somebody watches, which is cut to the chunks its budget affords; most of what is pinned here is
+// how. See TestAnUnwatchedReadIsCutOnlyPastWhatIsInFlight for the read nobody watches.
 std::vector<Piece> Pieces(const ImageDescriptor& descriptor, const ChunkGeometry& geometry,
                           const ChunkGeometry& flag_geometry, const ReadRequest& request, const ReadOptions& options) {
-    return PlanPieces(descriptor, geometry, flag_geometry, request, options, kDecodeThreads);
+    return PlanPieces(descriptor, geometry, flag_geometry, request, options, kDecodeThreads, true);
 }
 
 // A flag chunked as its pixels are, which is every image here but one.
@@ -147,11 +149,10 @@ void TestAReadThatFitsIsOnePiece() {
             "an uncut read should be one piece covering everything");
 }
 
-// Every read is cut to its budget, whether anybody watches it or not: what a read holds is bounded
-// either way. Without a stated budget it is the library's own, so it takes a read larger than that to
-// show: 8192 planes of 64 x 64 float32 decode to 128 MiB and hold three times that. Planning allocates
-// nothing, so the size costs nothing here.
-void TestEveryReadIsCutToItsBudget() {
+// A watched read is cut to its budget. Without a stated budget it is the library's own, so it takes a
+// read larger than that to show: 8192 planes of 64 x 64 float32 decode to 128 MiB and hold three times
+// that. Planning allocates nothing, so the size costs nothing here.
+void TestAWatchedReadIsCutToItsBudget() {
     const auto large = MakeImage(64, 64, 8192);
     const auto large_geometry = MakeGeometry(32, 64, 1);
     const auto large_request = WholeImage(large);
@@ -164,6 +165,31 @@ void TestEveryReadIsCutToItsBudget() {
     bounded.read_budget_bytes = 4096;
     Require(Pieces(image, MakeGeometry(32, 64, 1), WholeImage(image), bounded).size() > 1,
             "a read with a memory ceiling was not cut");
+}
+
+// A read nobody watches holds the chunks TensorStore decodes at once, no more than one a decode
+// thread, so it is cut only when the budget affords fewer chunks than that.
+void TestAnUnwatchedReadIsCutOnlyPastWhatIsInFlight() {
+    const auto unwatched = [](const ImageDescriptor& image, const ChunkGeometry& geometry, const ReadOptions& options) {
+        return PlanPieces(image, geometry, geometry, WholeImage(image), options, kDecodeThreads, false);
+    };
+    // Chunks of 32 x 64 float32 decode to 8 KiB and hold 24 KiB.
+    const auto geometry = MakeGeometry(32, 64, 1);
+    const auto large = MakeImage(64, 64, 8192);
+    Require(unwatched(large, geometry, ReadOptions{}).size() == 1,
+            "an unwatched read whose budget affords a chunk a decode thread was cut");
+
+    const auto image = MakeImage(64, 64, 8);
+    ReadOptions enough;
+    enough.read_budget_bytes = kDecodeThreads * 24 * 1024;
+    Require(unwatched(image, geometry, enough).size() == 1,
+            "a budget of exactly a chunk a decode thread holds every chunk in flight, and was cut");
+
+    ReadOptions short_of_it;
+    short_of_it.read_budget_bytes = enough.read_budget_bytes - 1;
+    const auto cut = unwatched(image, geometry, short_of_it);
+    Require(cut.size() > 1, "an unwatched read whose budget affords fewer chunks than decode threads was not cut");
+    RequireTheyFillTheDestination(cut, WholeImage(image), "an unwatched read cut short of its decode threads");
 }
 
 // The cut goes on the slowest-varying axis that selects more than one element, because the
@@ -427,7 +453,8 @@ void TestSegmentsGoDownToOneChunk() {
 int main() {
     try {
         TestAReadThatFitsIsOnePiece();
-        TestEveryReadIsCutToItsBudget();
+        TestAWatchedReadIsCutToItsBudget();
+        TestAnUnwatchedReadIsCutOnlyPastWhatIsInFlight();
         TestTheCutGoesOnTheSlowestSelectedAxis();
         TestAReadWithNowhereToCutIsOnePiece();
         TestATighterCeilingBuysFewerChunks();

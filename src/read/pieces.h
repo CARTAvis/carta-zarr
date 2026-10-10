@@ -46,9 +46,12 @@ struct Piece {
  * the strategy is checkable without a store, a transport or a directory tree.
  *
  * Every read is cut to fit its budget -- the caller's, or the library's own when it states none -- so
- * that what a read holds is bounded whether or not anybody watches it. A read that fits, or that has
- * no axis selecting more than one element, is one piece covering everything, so that the loop reading
- * it is the same loop either way.
+ * that what a read holds is bounded whether or not anybody watches it. What it holds is the chunks
+ * TensorStore decodes at once, which is no more than `decode_threads` of them: a read nobody watches
+ * (`reports_progress` false) whose budget affords that many is not cut at all, while one that is
+ * watched is cut to the chunks the budget affords, so that it has pieces to report. A read that fits,
+ * or that has no axis selecting more than one element, is one piece covering everything, so that the
+ * loop reading it is the same loop either way.
  *
  * Where to cut, how much one piece may cover, where its end is rounded out to a chunk boundary, and
  * the segments of a piece too large to read whole all happen here. Whether the flag is decoded beside
@@ -59,7 +62,7 @@ struct Piece {
  */
 std::vector<Piece> PlanPieces(const ImageDescriptor& descriptor, const ChunkGeometry& geometry,
                               const ChunkGeometry& flag_geometry, const ReadRequest& request,
-                              const ReadOptions& options, std::size_t decode_threads);
+                              const ReadOptions& options, std::size_t decode_threads, bool reports_progress);
 
 /**
  * Read a densely packed float32 result, one piece at a time.

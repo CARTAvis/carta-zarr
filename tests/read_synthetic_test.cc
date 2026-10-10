@@ -26,8 +26,10 @@
 
 namespace {
 
-// What a context gives every read here to aim its default budget at.
-constexpr std::size_t kDecodeThreads = 4;
+// What a context gives every read here to aim its default budget at. More than the chunks the budgets
+// stated below afford, so that a read nobody watches is cut by them as a watched one is: with a chunk
+// a thread in flight already, a read is not cut below that.
+constexpr std::size_t kDecodeThreads = 16;
 
 using carta::zarr::AxisRole;
 using carta::zarr::BufferView;

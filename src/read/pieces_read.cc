@@ -100,7 +100,8 @@ Result<std::size_t> ReadInPieces(const PixelSource& source, const ImageDescripto
     const auto elements = checked.value().elements();
 
     const bool apply_mask = AppliesPixelMask(options, descriptor);
-    const auto pieces = PlanPieces(descriptor, geometry, flag_geometry, request, options, decode_threads);
+    const auto pieces =
+        PlanPieces(descriptor, geometry, flag_geometry, request, options, decode_threads, static_cast<bool>(progress));
 
     std::vector<std::uint8_t> mask;
     std::vector<float> gathered;

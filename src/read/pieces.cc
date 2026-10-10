@@ -16,6 +16,7 @@
 #include "chunk_blocks.h"
 
 #include <algorithm>
+#include <limits>
 #include <optional>
 #include <utility>
 
@@ -114,7 +115,7 @@ void Segment(const ChunkGeometry& geometry, const ReadRequest& request, std::uin
 
 std::vector<Piece> PlanPieces(const ImageDescriptor& descriptor, const ChunkGeometry& geometry,
                               const ChunkGeometry& flag_geometry, const ReadRequest& request,
-                              const ReadOptions& options, std::size_t decode_threads) {
+                              const ReadOptions& options, std::size_t decode_threads, bool reports_progress) {
     const auto axis = SlowestSelectedAxis(request);
     if (!axis) {
         return {Piece{request, 0, {}}};
@@ -125,7 +126,15 @@ std::vector<Piece> PlanPieces(const ImageDescriptor& descriptor, const ChunkGeom
     // destination, which the budget does not pay for -- unless a piece has to be gathered in parts,
     // when the library holds each part's pixels itself.
     const auto cost = ReadCost::Of(descriptor, geometry, flag_geometry, options, PixelsHeld::by_caller, decode_threads);
-    const auto affordable = std::max<std::uint64_t>(1, cost.ChunksPerRead(PixelsHeld::by_caller));
+    auto affordable = std::max<std::uint64_t>(1, cost.ChunksPerRead(PixelsHeld::by_caller));
+    // TensorStore decodes no more chunks at once than the context has decode threads, so a read holds
+    // what that many chunks hold however many it asks for. One the budget affords that many of has
+    // nothing to gain from being cut -- a plane of 4 MiB chunks read whole held 80 MiB beside its
+    // destination, and cut into pieces it ran half as fast again -- unless a caller is watching it,
+    // and then it is cut so that there is a piece to report.
+    if (!reports_progress && affordable >= std::max<std::size_t>(1, decode_threads)) {
+        affordable = std::numeric_limits<std::uint64_t>::max();
+    }
     const auto gathered = std::max<std::uint64_t>(1, cost.ChunksPerRead(PixelsHeld::by_library));
 
     // Every axis faster than the cut is whole in every piece, so one index of the cut axis is worth

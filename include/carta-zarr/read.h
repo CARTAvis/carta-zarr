@@ -81,7 +81,7 @@ private:
 /// Called as a read advances, with the number of destination elements that are final and the number
 /// the request will produce in total. Returning false cancels the read, which then reports cancelled.
 ///
-/// Every read is cut into chunk-aligned pieces along the slowest-varying selected axis, as many as
+/// A watched read is cut into chunk-aligned pieces along the slowest-varying selected axis, as many as
 /// ReadOptions::read_budget_bytes needs, and this is called as each piece is finished. The
 /// destination is dense in logical order with axis 0 fastest, which is what makes the finished part
 /// a prefix rather than a scatter -- a caller can render or forward it as it arrives. A piece too
@@ -92,7 +92,10 @@ private:
 /// cube histogram through a CubeHistogramProgressCallback of its own. As a field it would be one the
 /// other entry points silently ignored; as an argument it is simply not part of what they take.
 ///
-/// Supplying one changes nothing about how a read is cut, so it costs nothing beyond the calls.
+/// Supplying one can cut a read that would otherwise be issued whole: a read nobody watches is not
+/// cut while the chunks decoded at once, no more than one a decode thread, fit its budget, and one that
+/// is watched is cut to the chunks the budget affords so that there is a piece to report. On large
+/// chunks the two are cut alike; on small ones the watched read is somewhat slower.
 using ProgressCallback = std::function<bool(std::size_t elements_written, std::size_t elements_total)>;
 
 // What a read is allowed to do while it runs, whatever it is reading for.
@@ -145,8 +148,9 @@ struct ReadOptions {
     /// themselves wherever the library rather than the caller holds them. Every operation that takes
     /// these options spends it the same way, and every one keeps to it whether or not anybody watches:
     /// Image::Read and Image::Prefetch cut their request into pieces that fit, and ReduceSpectral,
-    /// ComputeHistogram and ComputeCubeHistogram size each read of their walk by it. The thread count
-    /// does not change what a read holds, only how fast it gets through it.
+    /// ComputeHistogram and ComputeCubeHistogram size each read of their walk by it. A read holds no
+    /// more chunks than are decoded at once, at most one a decode thread, so one whose budget affords
+    /// that many is held to it without being cut; see ProgressCallback.
     ///
     /// A chunk is the smallest thing that can be decoded: asking for part of one decodes all of it.
     /// So a read holds at least one chunk, and under a budget smaller than that it reads one chunk at

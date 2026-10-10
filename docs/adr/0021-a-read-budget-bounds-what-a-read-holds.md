@@ -58,7 +58,12 @@ can be.
   64 MiB chunks above ran 2.4 times slower. 256 MiB keeps small chunks to at least sixty-four a read,
   as before; 2 GiB holds the 64 MiB chunks above to about ten on twenty-eight threads, which trades
   some of their speed for the bound.
-- **Every read is cut to fit**, the caller's budget or the library's, whether or not it is watched.
+- **Every read is held to its budget**, the caller's or the library's, whether or not it is watched.
+  TensorStore decodes no more chunks at once than the context has decode threads, so a read holds at
+  most one chunk a thread however many it asks for. A read nobody watches whose budget affords that
+  many is issued whole: cut into pieces, a plane of 4 MiB chunks held no less and ran 40 % slower,
+  each piece waiting on its slowest chunk. One the budget affords fewer is cut to them, and a watched
+  read is always cut to the chunks its budget affords, so that it has pieces to report.
 - **A piece too large at one chunk deep is read in segments**, cut along the axes below the piece's
   down to a single chunk, each gathered in a buffer of the library's and put in place. Progress is
   still reported a piece at a time, so the finished part stays a prefix, which carta-backend's cursor

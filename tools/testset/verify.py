@@ -53,6 +53,7 @@ from astropy.wcs import WCS
 
 
 AXES = ["time", "frequency", "polarization", "l", "m"]
+REAL_TYPES = {"int8", "uint8", "int16", "uint16", "int32", "uint32", "int64", "uint64", "float16", "float32", "float64"}
 
 
 def canonical(name: str) -> str | None:
@@ -79,8 +80,13 @@ def nodes(root: Path) -> tuple[dict[str, dict], list[str]]:
                 for entry in root.iterdir() if (entry / "zarr.json").is_file()}, []
     documents, stale = {}, []
     for key, document in block.get("metadata", {}).items():
-        name = canonical(key.strip("/").removesuffix("zarr.json").rstrip("/"))
-        if name is None:
+        spelled = key.lstrip("/").removesuffix("zarr.json").rstrip("/")
+        if not spelled and isinstance(document, dict) and document.get("node_type"):
+            continue  # the root's own document
+        name = canonical(spelled)
+        # A key that names no node, or a node twice, is a store carta-zarr refuses (CollectConsolidatedMetadata).
+        if name is None or name in documents:
+            stale.append(key)
             continue
         documents[name] = document
         if document.get("node_type") != "array":
@@ -184,9 +190,17 @@ def main() -> int:
     root_attributes = json.loads(Path(args.zarr, "zarr.json").read_text()).get("attributes", {})
     # carta-zarr describes a node by the root's consolidated copy and refuses one that disagrees with the
     # node's own zarr.json; checking either alone would pass a Zarr patched after consolidating.
-    check("consolidated metadata as each node's own" + (f" (not {', '.join(stale)})" if stale else ""), not stale)
-    # The coordinates every image needs, one sample along each of its axes.
-    missing = [axis for axis, length in zip(AXES, sky.shape) if documents.get(axis, {}).get("shape") != [length]]
+    check("consolidated metadata naming each node once, as its own zarr.json" + (f" (not {', '.join(stale)})" if stale else ""),
+          not stale)
+    # The coordinates every image needs, one sample along each of its axes, named for it and of the type
+    # carta-zarr reads it as (CheckCoordinate): labels for the polarization, real numbers otherwise.
+    def coordinate(axis: str, length: int) -> bool:
+        document = documents.get(axis, {})
+        data_type = document.get("data_type")
+        typed = (isinstance(data_type, dict) and data_type.get("name") == "fixed_length_utf32") if axis == "polarization" \
+            else data_type in REAL_TYPES
+        return document.get("shape") == [length] and document.get("dimension_names") == [axis] and typed
+    missing = [axis for axis, length in zip(AXES, sky.shape) if not coordinate(axis, length)]
     check("a coordinate along every axis" + (f" (not {', '.join(missing)})" if missing else ""), not missing)
     if "SKY" not in documents or missing:
         print(f"MISMATCH: {', '.join(failures)}")
@@ -249,8 +263,10 @@ def main() -> int:
     spectral = documents["frequency"].get("attributes", {})
     reference = spectral.get("reference_frequency", {}).get("attrs", {})
     rest = spectral.get("rest_frequency", {})
+    # The coordinate's own unit first, then its reference frequency's, as carta-zarr's CoordinateUnit.
+    unit = spectral.get("units") or reference.get("units")
     check("frequency unit, frame and rest frequency",
-          reference.get("units") == header.get("CUNIT4") and str(reference.get("observer", "")).lower() == str(header.get("SPECSYS", "")).lower()
+          unit == header.get("CUNIT4") and str(reference.get("observer", "")).lower() == str(header.get("SPECSYS", "")).lower()
           and rest.get("attrs", {}).get("units") == "Hz" and "RESTFRQ" in header
           and math.isclose(float(rest.get("data", math.nan)), float(header["RESTFRQ"]), rel_tol=1e-12))
 

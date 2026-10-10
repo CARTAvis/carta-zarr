@@ -129,6 +129,30 @@ if(result)
     message(FATAL_ERROR "patching stale failed: ${result}")
 endif()
 refused("a Zarr patched after it was consolidated" "${OUTPUT_DIR}/cube.fits" "${stale}" --flag no --chunks 32,32,8)
+set(twice "${OUTPUT_DIR}/twice.zarr")
+file(COPY "${cube}/" DESTINATION "${twice}")
+execute_process(
+    COMMAND "${UV}" run --quiet --no-project --python-preference only-managed python -c "import json
+path = '${twice}/zarr.json'
+meta = json.load(open(path))
+block = meta['consolidated_metadata']['metadata']
+block['./SKY'] = block['SKY']
+json.dump(meta, open(path, 'w'))"
+    RESULT_VARIABLE result)
+if(result)
+    message(FATAL_ERROR "listing a node twice failed: ${result}")
+endif()
+refused("a Zarr whose consolidated metadata lists a node twice" "${OUTPUT_DIR}/cube.fits" "${twice}" --flag no
+        --chunks 32,32,8)
+changed(misnamed "meta = json.load(open(root + '/frequency/zarr.json'))
+meta['dimension_names'] = ['m']
+json.dump(meta, open(root + '/frequency/zarr.json', 'w'))")
+refused("a Zarr whose frequency coordinate is named along m" "${OUTPUT_DIR}/cube.fits" "${OUTPUT_DIR}/misnamed.zarr"
+        --flag no --chunks 32,32,8)
+changed(gigahertz "f = zarr.open_array(root + '/frequency', mode='r+')
+f.attrs['units'] = 'GHz'")
+refused("a Zarr whose frequencies are said to be in GHz" "${OUTPUT_DIR}/cube.fits" "${OUTPUT_DIR}/gigahertz.zarr"
+        --flag no --chunks 32,32,8)
 refused("a Zarr rotated on the sky" "${OUTPUT_DIR}/cube.fits" "${OUTPUT_DIR}/rotated.zarr" --flag no --chunks 32,32,8)
 changed(nonfinite "f = zarr.open_array(root + '/frequency', mode='r+')
 f[0] = np.nan")

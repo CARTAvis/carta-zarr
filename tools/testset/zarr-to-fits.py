@@ -38,6 +38,7 @@ from __future__ import annotations
 import argparse
 import json
 import math
+import os
 import sys
 import time
 from pathlib import Path
@@ -54,6 +55,21 @@ SKY_AXES = ["time", "frequency", "polarization", "l", "m"]
 
 def metadata(path: Path) -> dict[str, Any]:
     return json.loads((path / "zarr.json").read_text())
+
+
+def nodes_under(root: Path) -> list[tuple[str, dict[str, Any]]]:
+    """Every node below the root and its zarr.json, following directory links as a store's reader
+    does, each directory once however many ways it is reached."""
+    found, seen = [], set()
+    for directory, subdirectories, files in os.walk(root, followlinks=True):
+        real = os.path.realpath(directory)
+        if real in seen:
+            subdirectories.clear()
+            continue
+        seen.add(real)
+        if "zarr.json" in files and Path(directory) != root:
+            found.append((str(Path(directory).relative_to(root)), json.loads((Path(directory) / "zarr.json").read_text())))
+    return found
 
 
 def header_of(root: Path, image: str, sky: Any) -> fits.Header:
@@ -145,8 +161,7 @@ def main() -> int:
     # A FITS cube marks a flagged pixel by NaN alone, and a flagged dataset may hold finite values under
     # its flag (generate.py --flag does), which would be written as valid pixels. The test set's cubes
     # carry their NaN in the pixels and get a flag only from the converter, so a flag here is refused.
-    flags = [str(entry.parent.relative_to(root)) for entry in root.glob("**/zarr.json")
-             if entry.parent != root and json.loads(entry.read_text()).get("attributes", {}).get("type") == "flag"]
+    flags = [node for node, document in nodes_under(root) if document.get("attributes", {}).get("type") == "flag"]
     groups = metadata(root)["attributes"].get("data_groups", {}).values()
     if sky.attrs.get("flag") or any(isinstance(group, dict) and group.get("flag") for group in groups) or flags:
         raise SystemExit(f"{args.dataset} carries a flag ({', '.join(flags) or 'declared'}); FITS would show what it "

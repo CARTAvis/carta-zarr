@@ -327,6 +327,12 @@ root = '${nested}'
 sky = zarr.open_array(root + '/SKY', mode='r')
 zarr.create_array(root + '/masks/FLAG_SKY', shape=sky.shape, chunks=sky.chunks, dtype=bool,
                   dimension_names=list(sky.metadata.dimension_names), fill_value=False)
+# Undeclared and typed, through a link: found by its type, wherever the directory really is.
+linked = zarr.create_array(root + '/../linked_flag', shape=sky.shape, chunks=sky.chunks, dtype=bool,
+                           dimension_names=list(sky.metadata.dimension_names), fill_value=False)
+linked.attrs['type'] = 'flag'
+import os
+os.symlink(os.path.abspath(root + '/../linked_flag'), root + '/LINKED')
 meta = json.load(open(root + '/zarr.json'))
 meta['attributes']['data_groups']['other'] = {'sky': 'SKY', 'flag': 'masks/FLAG_SKY'}
 json.dump(meta, open(root + '/zarr.json', 'w'))"
@@ -338,4 +344,15 @@ execute_process(COMMAND "${UV}" run --quiet --script "${SOURCE_DIR}/tools/testse
     RESULT_VARIABLE result OUTPUT_QUIET ERROR_VARIABLE err)
 if(NOT result OR NOT err MATCHES "carries a flag")
     message(FATAL_ERROR "zarr-to-fits.py wrote a dataset whose flag another group declares: ${result}\n${err}")
+endif()
+# The linked, typed flag alone, with nothing declaring it.
+file(REMOVE_RECURSE "${OUTPUT_DIR}/linked.zarr")
+file(MAKE_DIRECTORY "${OUTPUT_DIR}/linked.zarr")
+file(COPY "${cube}/" DESTINATION "${OUTPUT_DIR}/linked.zarr")
+file(CREATE_LINK "${OUTPUT_DIR}/linked_flag" "${OUTPUT_DIR}/linked.zarr/LINKED" SYMBOLIC)
+execute_process(COMMAND "${UV}" run --quiet --script "${SOURCE_DIR}/tools/testset/zarr-to-fits.py" "${OUTPUT_DIR}/linked.zarr"
+                        "${OUTPUT_DIR}/linked.fits"
+    RESULT_VARIABLE result OUTPUT_QUIET ERROR_VARIABLE err)
+if(NOT result OR NOT err MATCHES "carries a flag")
+    message(FATAL_ERROR "zarr-to-fits.py wrote a dataset with an undeclared flag behind a link: ${result}\n${err}")
 endif()

@@ -64,6 +64,36 @@ def first_difference(a: np.ndarray, b: np.ndarray) -> tuple[int, ...] | None:
     return tuple(int(i) for i in np.unravel_index(int(np.argmax(differ)), differ.shape))
 
 
+def layout(array: zarr.Array) -> tuple:
+    """Everything that decides which pixels a chunk holds: the dimension order, the outer grid, and every
+    transpose and inner chunk in the codecs, nested ones included. Two arrays alike in it decode alike
+    chunks, which zarr-python's .chunks and .shards, read past a transpose, do not say."""
+    def codecs(chain) -> list:
+        kept = []
+        for codec in chain:
+            name, configuration = codec.get("name"), codec.get("configuration") or {}
+            if name == "transpose":
+                kept.append((name, tuple(configuration.get("order", ()))))
+            elif name == "sharding_indexed":
+                kept.append((name, tuple(configuration.get("chunk_shape", ())), codecs(configuration.get("codecs", []))))
+        return kept
+
+    metadata = array.metadata.to_dict()
+    return (tuple(metadata.get("dimension_names") or ()), json.dumps(metadata.get("chunk_grid"), sort_keys=True),
+            codecs(metadata.get("codecs", [])))
+
+
+def logical(array: zarr.Array, start: int, stop: int) -> np.ndarray:
+    """Channels start to stop of a sky-plane array, as frequency, polarization, l, m whatever order its
+    dimensions are stored in -- which carta-zarr reads by name, so a check that indexed by position would
+    compare a square cube with l and m swapped against the wrong pixels and pass it."""
+    names = list(array.metadata.dimension_names)
+    selection = tuple(0 if name == "time" else slice(start, stop) if name == "frequency" else slice(None)
+                      for name in names)
+    kept = [name for name in names if name != "time"]
+    return np.asarray(array[selection]).transpose([kept.index(name) for name in ("frequency", "polarization", "l", "m")])
+
+
 def close(a, b, tolerance: float = 1e-9) -> bool:
     """Equal to a part in 10^9, or within 10^-9 of zero; a NaN or a missing value is never close."""
     try:
@@ -184,8 +214,10 @@ def main() -> int:
         beams = described.get("beams", [])
         if "BMAJ" in header:
             expected = [math.radians(header["BMAJ"]), math.radians(header["BMIN"]), math.radians(header.get("BPA", 0.0))]
+            planes = sorted((beam["time"], beam["channel"], beam["polarization"]) for beam in beams)
             check("restoring beam of every plane",
-                  len(beams) == n_freq * n_pol and all(beam["unit"] == "rad" for beam in beams)
+                  planes == [(0, c, p) for c in range(n_freq) for p in range(n_pol)]
+                  and all(beam["unit"] == "rad" for beam in beams)
                   and close([[beam["major"], beam["minor"], beam["position_angle"]] for beam in beams], [expected] * len(beams)))
         else:
             check("no restoring beam, as the FITS file has none", not beams)
@@ -195,19 +227,18 @@ def main() -> int:
         sky = zarr.open_array(f"{args.zarr}/SKY", mode="r")
         flag = zarr.open_array(f"{args.zarr}/{mask}", mode="r") if image["has_pixel_mask"] and mask else None
         if flag is not None:
-            check(f"{mask} in the same chunk" + (" and shard" if args.shards else ""),
-                  flag.chunks == sky.chunks and flag.shards == sky.shards)
+            check(f"{mask} in the same chunk" + (" and shard" if args.shards else ""), layout(flag) == layout(sky))
         channels = max(1, (args.block_mib << 20) // (n_pol * n_l * n_m * 4))
         first_pixels = first_flag = None
         for start in range(0, n_freq, channels):
             stop = min(n_freq, start + channels)
             expected_pixels = np.ascontiguousarray(np.asarray(data[start:stop]).transpose(0, 1, 3, 2), dtype=np.float32)
-            stored = np.asarray(sky[0, start:stop])  # frequency, polarization, l, m
+            stored = np.ascontiguousarray(logical(sky, start, stop))
             if first_pixels is None:
                 where = first_difference(expected_pixels.view(np.uint32), stored.view(np.uint32))
                 first_pixels = None if where is None else (start + where[0], *where[1:])
             if flag is not None and first_flag is None:
-                where = first_difference(np.asarray(flag[0, start:stop], dtype=bool), np.isnan(expected_pixels))
+                where = first_difference(logical(flag, start, stop).astype(bool), np.isnan(expected_pixels))
                 first_flag = None if where is None else (start + where[0], *where[1:])
         check("every pixel" + (f" (first differs at channel, stokes, x, y {first_pixels})" if first_pixels else ""),
               first_pixels is None)

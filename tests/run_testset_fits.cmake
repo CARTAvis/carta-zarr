@@ -66,6 +66,26 @@ meta['dimension_names'] = ['time', 'frequency', 'polarization', 'm', 'l']
 json.dump(meta, open(root + '/SKY/zarr.json', 'w'))")
 refused("a Zarr whose l and m are named the other way round" "${OUTPUT_DIR}/cube.fits" "${OUTPUT_DIR}/swapped.zarr"
         --flag no --chunks 32,32,8)
+# The same on a square cube, where the swap changes no length and only the pixels can tell.
+set(square "${OUTPUT_DIR}/square.zarr")
+run("generate.py square" "${SOURCE_DIR}/tools/zarr-bench/generate.py" --synthetic --shape frequency=8,polarization=1,l=48,m=48
+    --chunk l=16,m=16,frequency=8 --workers 1 --output "${square}")
+run("zarr-to-fits.py square" "${SOURCE_DIR}/tools/testset/zarr-to-fits.py" "${square}" "${OUTPUT_DIR}/square.fits" --block-mib 1)
+file(COPY "${square}/" DESTINATION "${OUTPUT_DIR}/square_swapped.zarr")
+execute_process(
+    COMMAND "${UV}" run --quiet --no-project --python-preference only-managed --with zarr==3.2.1 python -c "import json, zarr
+root = '${OUTPUT_DIR}/square_swapped.zarr'
+meta = json.load(open(root + '/SKY/zarr.json'))
+meta['dimension_names'] = ['time', 'frequency', 'polarization', 'm', 'l']
+json.dump(meta, open(root + '/SKY/zarr.json', 'w'))
+zarr.consolidate_metadata(root)"
+    RESULT_VARIABLE result)
+if(result)
+    message(FATAL_ERROR "swapping the square cube's names failed: ${result}")
+endif()
+run("verify.py square" "${SOURCE_DIR}/tools/testset/verify.py" "${OUTPUT_DIR}/square.fits" "${square}" --flag no --chunks 16,16,8)
+refused("a square Zarr whose l and m are named the other way round" "${OUTPUT_DIR}/square.fits"
+        "${OUTPUT_DIR}/square_swapped.zarr" --flag no --chunks 16,16,8)
 changed(middle "f = zarr.open_array(root + '/frequency', mode='r+')
 f[20] = f[20] + 1e8")
 refused("a Zarr with one channel's frequency wrong" "${OUTPUT_DIR}/cube.fits" "${OUTPUT_DIR}/middle.zarr"
@@ -192,6 +212,32 @@ run("verify.py with transposed chunks in shards" "${SOURCE_DIR}/tools/testset/ve
     "${OUTPUT_DIR}/transposed.zarr" --flag no --chunks 32,16,8 --shards 64,64,8)
 refused("a sharded Zarr verified as another layout" "${OUTPUT_DIR}/cube.fits" "${OUTPUT_DIR}/transposed.zarr" --flag no
         --chunks 16,32,8 --shards 64,64,8)
+# The same pixels stored m before l: carta-zarr takes the axes by name, so this is the same image.
+changed(reordered "import shutil
+old = zarr.open_array(root + '/SKY', mode='r')
+values, attributes = old[...], old.attrs.asdict()
+shutil.rmtree(root + '/SKY')
+sky = zarr.create_array(root + '/SKY', shape=values.shape[:3] + values.shape[:2:-1], chunks=(1, 8, 1, 32, 32), dtype='float32',
+                        dimension_names=['time', 'frequency', 'polarization', 'm', 'l'], fill_value=np.nan)
+sky[...] = values.transpose(0, 1, 2, 4, 3)
+sky.attrs.update(attributes)")
+run("verify.py with m stored before l" "${SOURCE_DIR}/tools/testset/verify.py" "${OUTPUT_DIR}/cube.fits"
+    "${OUTPUT_DIR}/reordered.zarr" --flag no --chunks 32,32,8)
+# A beam on as many planes as the image has, but not on its planes: half the channels, twice the
+# polarizations.
+changed(halfbeam "import shutil
+old = zarr.open_array(root + '/BEAM_FIT_PARAMS_SKY', mode='r')
+values, attributes, names = old[...], old.attrs.asdict(), list(old.metadata.dimension_names)
+shutil.rmtree(root + '/BEAM_FIT_PARAMS_SKY')
+shape = list(values.shape)
+shape[names.index('frequency')] //= 2
+shape[names.index('polarization')] *= 2
+beam = zarr.create_array(root + '/BEAM_FIT_PARAMS_SKY', shape=shape, dtype=values.dtype, dimension_names=names)
+beam[...] = values.reshape(shape)
+beam.attrs.update(attributes)")
+refused("a Zarr whose beams cover as many planes as it has, but other ones" "${OUTPUT_DIR}/cube.fits"
+        "${OUTPUT_DIR}/halfbeam.zarr" --flag no --chunks 32,32,8)
+
 # obsdate as an ISO date, which carta-zarr reads, and as a numeric string, which it does not.
 changed(isodate "a = zarr.open_array(root + '/SKY', mode='r+')
 from astropy.time import Time
@@ -273,6 +319,38 @@ if(result)
     message(FATAL_ERROR "rechunking the flag failed: ${result}")
 endif()
 refused("a flag in chunks other than the image's" "${OUTPUT_DIR}/cube.fits" "${rechunked}" --flag yes --chunks 32,32,8)
+
+# A flag beside SKY's transposed shards: in the same layout it verifies; in the same outer chunk and
+# shard but without the transpose, it decodes other chunks than SKY's and is refused.
+function(transposed_flag name transposed)
+    set(copy "${OUTPUT_DIR}/${name}.zarr")
+    file(COPY "${OUTPUT_DIR}/flagged.zarr/" DESTINATION "${copy}")
+    execute_process(
+        COMMAND "${UV}" run --quiet --no-project --python-preference only-managed --with zarr==3.2.1 --with numpy==2.3.1
+                python -c "import numpy as np, shutil, zarr
+from zarr.codecs import TransposeCodec
+root = '${copy}'
+for node, fill, filters in (('SKY', np.nan, True), ('FLAG_SKY', False, ${transposed})):
+    old = zarr.open_array(root + '/' + node, mode='r')
+    values, attributes, names = old[...], old.attrs.asdict(), list(old.metadata.dimension_names)
+    shutil.rmtree(root + '/' + node)
+    new = zarr.create_array(root + '/' + node, shape=values.shape, chunks=(1, 8, 1, 32, 16), shards=(1, 8, 1, 64, 64),
+                            dtype=values.dtype, filters=[TransposeCodec(order=(0, 1, 2, 4, 3))] if filters else None,
+                            dimension_names=names, fill_value=fill)
+    new[...] = values
+    new.attrs.update(attributes)
+zarr.consolidate_metadata(root)"
+        RESULT_VARIABLE result)
+    if(result)
+        message(FATAL_ERROR "sharding ${name} failed: ${result}")
+    endif()
+endfunction()
+transposed_flag(flagged_transposed True)
+run("verify.py with a flag in SKY's transposed shards" "${SOURCE_DIR}/tools/testset/verify.py" "${OUTPUT_DIR}/cube.fits"
+    "${OUTPUT_DIR}/flagged_transposed.zarr" --flag yes --chunks 32,16,8 --shards 64,64,8)
+transposed_flag(flag_untransposed False)
+refused("a flag in SKY's outer chunks but not its transpose" "${OUTPUT_DIR}/cube.fits" "${OUTPUT_DIR}/flag_untransposed.zarr"
+        --flag yes --chunks 32,16,8 --shards 64,64,8)
 
 with_flag(untyped False False)
 refused("a flag carta-zarr would not apply" "${OUTPUT_DIR}/cube.fits" "${OUTPUT_DIR}/untyped.zarr" --flag yes --chunks 32,32,8)

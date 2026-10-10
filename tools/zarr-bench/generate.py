@@ -33,9 +33,12 @@ Two sources of pixels:
                    the pixels compress, and real pixels are the only ones that compress like real
                    pixels.
 
-  --synthetic      Noise, point sources with a spectral index, and NaN outside a circle -- a
-                   primary-beam-corrected cube, roughly. The coordinates are built from a template
-                   XRADIO wrote (the conformance fixture by default) and stretched to --shape.
+  --synthetic      A continuum-subtracted HI cube from a mosaic, like ASKAP's, by default: noise
+                   that varies by channel and rises towards the footprint's edge, faint line
+                   sources, NaN outside the footprint and runs of flagged channels; continuum
+                   sources on request. The coordinates are built from a template XRADIO wrote (the
+                   conformance fixture by default), stretched to --shape, on ASKAP's frequency axis
+                   unless --frequency-start and --channel-width say otherwise.
                    Every pixel is a function of its position and --seed alone, so two layouts of
                    the same synthetic cube hold the same pixels, and only the layout differs
                    between them.
@@ -60,6 +63,7 @@ import concurrent.futures
 import contextlib
 import dataclasses
 import datetime
+import functools
 import hashlib
 import json
 import math
@@ -82,7 +86,7 @@ from fingerprint import reached, source_content
 MANIFEST_NAME = "bench-manifest.json"
 # Bumped whenever the same arguments would produce different bytes, so that a dataset written by an
 # older generator is not mistaken for one this one would write.
-FORMAT_VERSION = 3
+FORMAT_VERSION = 5
 
 AXES = ("time", "frequency", "polarization", "l", "m")
 STOKES = ("I", "Q", "U", "V")
@@ -94,6 +98,47 @@ DEFAULT_TEMPLATE = REPO_ROOT / "tests" / "data" / "images" / "zarr" / "xradio" /
 # The square of noise one seed draws at a time. Fixed, and independent of any layout, because it is
 # what makes a synthetic pixel depend on where it is rather than on which block wrote it.
 NOISE_TILE = 128
+
+# A synthetic cube's defaults are an ASKAP HI cube's: its first channel, its channel width, HI's rest
+# frequency, and the noise, in Jy/beam, that with the rise towards the footprint's edge comes to
+# ASKAP Hydra's median plane rms of 2.1 mJy/beam.
+# Where ASKAP is, as the site's converter writes it from a FITS file's OBSGEO-X, Y and Z: a spectral
+# frame is placed by it.
+ASKAP_TELESCOPE = {
+    "name": "ASKAP",
+    "direction": {"attrs": {"coordinate_system": "geocentric", "frame": "ITRF", "origin_object_name": "earth",
+                            "type": "location", "units": "rad"},
+                  "data": [2.0360801614255952, -0.46338342174681973], "dims": ["ellipsoid_dir_label"],
+                  "coords": {"ellipsoid_dir_label": {"dims": ["ellipsoid_dir_label"], "data": ["lon", "lat"]}}},
+    "distance": {"attrs": {"coordinate_system": "geocentric", "frame": "ITRF", "origin_object_name": "earth",
+                           "type": "location", "units": "m"},
+                 "data": [6373972.330145822], "dims": ["ellipsoid_dis_label"],
+                 "coords": {"ellipsoid_dis_label": {"dims": ["ellipsoid_dis_label"], "data": ["dist"]}}},
+}
+ASKAP_FREQUENCY_START = 1.2955e9
+ASKAP_CHANNEL_WIDTH = 18518.518518518518
+HI_REST_FREQUENCY = 1.420405751786e9
+ASKAP_NOISE = 1.7e-3
+# One line source for every this many pixels, when --line-sources does not say.
+PIXELS_PER_LINE_SOURCE = 10**8
+
+# The shape of a synthetic cube, chosen so that its statistics match ASKAP Hydra's (see
+# tools/testset/README.md): the footprint's corners (a superellipse of this power), how much the noise
+# rises at its edge, how many periods of ripple the channel rms has across the band, and the fraction
+# and width of the noise drawn from a wider Gaussian.
+FOOTPRINT_POWER = 6
+EDGE_GAIN = 1.0
+RIPPLE_PERIODS = 3
+TAIL_FRACTION = 0.044
+TAIL_SCALE = 6.0
+
+# Seeds of the tables a synthetic cube consults, kept apart from the noise's, which is seeded by
+# position.
+STREAM_CHANNELS = 0xC4A1
+STREAM_FOOTPRINT = 0xF007
+STREAM_FLAGGED = 0xF1A6
+STREAM_LINES = 0x11E5
+STREAM_CONTINUUM = 0x5EED
 
 
 def log(message: str) -> None:
@@ -335,40 +380,158 @@ def round_mantissa(values: np.ndarray, keep_bits: int) -> np.ndarray:
 class Synthetic:
     """A cube whose every pixel is a function of its position and the seed.
 
+    By default it looks like a continuum-subtracted HI cube from a mosaic, such as ASKAP's: noise
+    whose rms varies from channel to channel and rises towards the edge of the footprint, with heavy
+    tails; faint line sources, each present in a few hundred km/s of the band; NaN outside an
+    irregular footprint; and runs of channels flagged in part or in whole. Continuum sources, point
+    and extended, can be added.
+
     The noise is drawn a NOISE_TILE square at a time from a generator seeded by that tile's position,
-    and the sources are a fixed table each block consults, so the value of a pixel does not depend on
-    the block that wrote it. That is what makes two layouts of one synthetic cube comparable.
+    and everything else is a fixed table each block consults, so the value of a pixel does not depend
+    on the block that wrote it. That is what makes two layouts of one synthetic cube comparable.
     """
 
     shape: tuple[int, int, int, int, int]  # time, frequency, polarization, l, m
     frequencies: tuple[float, ...]
     seed: int
     noise: float
-    sources: int
-    nan_radius: float | None
+    line_sources: int
+    point_sources: int
+    extended_sources: int
+    footprint_fill: float | None  # the fraction of a plane inside the footprint; None for no footprint
+    flagged_channels: float  # the fraction of channels in flagged runs
     flag: bool
+    flagged_range: tuple[int, int] | None = None  # channels flagged whole besides the runs, start and stop
 
-    def table(self) -> dict[str, np.ndarray]:
-        rng = np.random.default_rng([self.seed, 0x5EED])
-        _, _, _, length_l, length_m = self.shape
-        return {
-            "l": rng.uniform(0, length_l, self.sources),
-            "m": rng.uniform(0, length_m, self.sources),
-            "flux": 10 ** rng.uniform(-3, 0, self.sources),
-            "sigma": rng.uniform(1.5, 4.0, self.sources),
-            "index": rng.normal(-0.7, 0.3, self.sources),
-        }
+    @functools.cached_property
+    def channel_rms(self) -> np.ndarray:
+        """Each channel's noise rms: a slow ripple across the band and a jitter from channel to channel,
+        together about 15 % either way."""
+        rng = np.random.default_rng([self.seed, STREAM_CHANNELS])
+        count = self.shape[1]
+        position = np.arange(count) / max(count, 1)
+        ripple = 0.08 * np.sin(2 * math.pi * (RIPPLE_PERIODS * position + rng.uniform()))
+        jitter = rng.normal(0.0, 0.08, count)
+        return (self.noise * np.exp(ripple + jitter)).astype(np.float32)
 
-    def outside(self, l_range: range, m_range: range) -> np.ndarray | None:
-        if self.nan_radius is None:
+    @functools.cached_property
+    def footprint(self) -> dict[str, Any]:
+        """A rounded rectangle whose radius wanders with angle -- a mosaic of beams, roughly -- scaled
+        so that `footprint_fill` of the plane is inside it."""
+        rng = np.random.default_rng([self.seed, STREAM_FOOTPRINT])
+        orders = np.arange(3, 9)
+        amplitudes = rng.uniform(0.0, 0.02, orders.size)
+        phases = rng.uniform(0.0, 2 * math.pi, orders.size)
+        # Inside |u|^p + |v|^p <= R^p is 4 R^2 G(1 + 1/p)^2 / G(1 + 2/p) of the plane's 4.
+        p = FOOTPRINT_POWER
+        radius = math.sqrt((self.footprint_fill or 1.0) * math.gamma(1 + 2 / p) / math.gamma(1 + 1 / p) ** 2)
+        return {"orders": orders, "amplitudes": amplitudes, "phases": phases, "radius": radius}
+
+    def within(self, l_range: range, m_range: range) -> np.ndarray | None:
+        """How far into the footprint each pixel is: 0 at its centre, 1 at its edge, over 1 outside.
+        None when there is no footprint."""
+        if self.footprint_fill is None:
             return None
         _, _, _, length_l, length_m = self.shape
-        radius = self.nan_radius * min(length_l, length_m) / 2
-        l = np.asarray(l_range, dtype=np.float64)[:, None] - (length_l - 1) / 2
-        m = np.asarray(m_range, dtype=np.float64)[None, :] - (length_m - 1) / 2
-        return l * l + m * m > radius * radius
+        u = (np.asarray(l_range, dtype=np.float64)[:, None] - (length_l - 1) / 2) / (length_l / 2)
+        v = (np.asarray(m_range, dtype=np.float64)[None, :] - (length_m - 1) / 2) / (length_m / 2)
+        shape = self.footprint
+        angle = np.arctan2(v, u)
+        wander = sum(a * np.cos(k * angle + phase)
+                     for k, a, phase in zip(shape["orders"], shape["amplitudes"], shape["phases"]))
+        p = FOOTPRINT_POWER
+        return (np.abs(u) ** p + np.abs(v) ** p) ** (1 / p) / (shape["radius"] * (1 + wander))
 
-    def pixels(self, start: tuple[int, ...], stop: tuple[int, ...]) -> np.ndarray:
+    @functools.cached_property
+    def flagged(self) -> dict[str, np.ndarray]:
+        """Runs of flagged channels, of lengths spread evenly in log from 1 to 128 (or to the number of
+        channels to flag, when that is fewer): half flagged whole, half on one side of a line across
+        the plane. `flagged_range`, when there is one, is flagged whole on top of them: a run placed
+        to cover whole chunks, which random runs of a few per cent of a short cube never do."""
+        rng = np.random.default_rng([self.seed, STREAM_FLAGGED])
+        count = self.shape[1]
+        whole = np.zeros(count, dtype=bool)
+        angle = np.full(count, np.nan)
+        offset = np.zeros(count)
+        target = round(self.flagged_channels * count)
+        longest = max(1, min(128, target))
+        while (whole | np.isfinite(angle)).sum() < target:
+            length = min(int(math.exp(rng.uniform(0.0, math.log(longest + 1)))), longest)
+            start = int(rng.integers(0, count - length + 1))
+            if rng.uniform() < 0.5:
+                whole[start : start + length] = True
+            else:
+                angle[start : start + length] = rng.uniform(0.0, 2 * math.pi)
+                offset[start : start + length] = rng.uniform(-0.3, 0.3)
+        if self.flagged_range is not None:
+            whole[self.flagged_range[0] : self.flagged_range[1]] = True
+        return {"whole": whole, "angle": angle, "offset": offset}
+
+    def dropped(self, start: tuple[int, ...], stop: tuple[int, ...]) -> np.ndarray:
+        """Which pixels of a block are not data: outside the footprint, or in a flagged channel."""
+        _, f0, _, l0, m0 = start
+        _, f1, _, l1, m1 = stop
+        dropped = np.zeros([b - a for a, b in zip(start, stop)], dtype=bool)
+        within = self.within(range(l0, l1), range(m0, m1))
+        if within is not None:
+            dropped[..., within > 1] = True
+        flagged = self.flagged
+        _, _, _, length_l, length_m = self.shape
+        u = (np.arange(l0, l1, dtype=np.float64)[:, None] - (length_l - 1) / 2) / (length_l / 2)
+        v = (np.arange(m0, m1, dtype=np.float64)[None, :] - (length_m - 1) / 2) / (length_m / 2)
+        for f in range(f0, f1):
+            if flagged["whole"][f]:
+                dropped[:, f - f0] = True
+            elif math.isfinite(flagged["angle"][f]):
+                side = u * math.cos(flagged["angle"][f]) + v * math.sin(flagged["angle"][f]) > flagged["offset"][f]
+                dropped[:, f - f0][..., side] = True
+        return dropped
+
+    @functools.cached_property
+    def lines(self) -> dict[str, np.ndarray]:
+        """The line sources: an elliptical Gaussian on the sky with a Gaussian or double-horned profile
+        50 to 500 km/s wide, its peak 1 to 20 times the noise."""
+        rng = np.random.default_rng([self.seed, STREAM_LINES])
+        n = self.line_sources
+        _, count, _, length_l, length_m = self.shape
+        centre = rng.uniform(-0.05 * count, 1.05 * count, n)
+        width_kms = rng.uniform(50.0, 500.0, n)
+        frequencies = np.asarray(self.frequencies)
+        step = abs(frequencies[1] - frequencies[0]) if count > 1 else 1.0
+        at = frequencies[np.clip(centre.astype(int), 0, count - 1)]
+        width = width_kms * 1e3 / SPEED_OF_LIGHT * at / step  # in channels
+        return {
+            "l": rng.uniform(0, length_l, n),
+            "m": rng.uniform(0, length_m, n),
+            "major": np.exp(rng.uniform(math.log(1.5), math.log(12.0), n)),
+            "ratio": rng.uniform(0.3, 1.0, n),
+            "angle": rng.uniform(0.0, math.pi, n),
+            "peak": self.noise * 10 ** rng.uniform(0.0, 1.3, n),
+            "centre": centre,
+            "width": width,
+            "horn": np.where(rng.uniform(size=n) < 0.5, 0.0, rng.uniform(0.2, 0.5, n)),
+        }
+
+    @functools.cached_property
+    def continuum(self) -> dict[str, np.ndarray]:
+        """Point and extended continuum sources, each with a spectral index: elliptical Gaussians, the
+        point ones a beam or two across, the extended ones tens of pixels."""
+        rng = np.random.default_rng([self.seed, STREAM_CONTINUUM])
+        _, _, _, length_l, length_m = self.shape
+        points, extended = self.point_sources, self.extended_sources
+        n = points + extended
+        major = np.concatenate([rng.uniform(1.5, 4.0, points), np.exp(rng.uniform(math.log(20), math.log(100), extended))])
+        return {
+            "l": rng.uniform(0, length_l, n),
+            "m": rng.uniform(0, length_m, n),
+            "major": major,
+            "ratio": np.concatenate([np.ones(points), rng.uniform(0.3, 1.0, extended)]),
+            "angle": rng.uniform(0.0, math.pi, n),
+            "peak": np.concatenate([10 ** rng.uniform(-3, 0, points), 10 ** rng.uniform(-3, -1.5, extended)]),
+            "index": rng.normal(-0.7, 0.3, n),
+        }
+
+    def noise_block(self, start: tuple[int, ...], stop: tuple[int, ...]) -> np.ndarray:
         block = np.empty([b - a for a, b in zip(start, stop)], dtype=np.float32)
         t0, f0, p0, l0, m0 = start
         t1, f1, p1, l1, m1 = stop
@@ -381,46 +544,102 @@ class Synthetic:
                         for tm in range(m0 // tile, (m1 - 1) // tile + 1):
                             rng = np.random.default_rng([self.seed, t, f, p, tl, tm])
                             noise = rng.standard_normal((tile, tile), dtype=np.float32)
-                            noise *= np.float32(self.noise)
+                            # A few pixels from a wider distribution: the symmetric excess beyond
+                            # five sigma that sidelobes and calibration errors leave in real cubes.
+                            wide = rng.random((tile, tile), dtype=np.float32) < TAIL_FRACTION
+                            noise[wide] *= np.float32(TAIL_SCALE)
                             la, lb = max(l0, tl * tile), min(l1, (tl + 1) * tile)
                             ma, mb = max(m0, tm * tile), min(m1, (tm + 1) * tile)
                             plane[la - l0 : lb - l0, ma - m0 : mb - m0] = noise[
                                 la - tl * tile : lb - tl * tile, ma - tm * tile : mb - tm * tile
                             ]
+        block *= self.channel_rms[f0:f1][None, :, None, None, None]
+        # Primary-beam correction raises the noise towards the edge of the footprint.
+        within = self.within(range(l0, l1), range(m0, m1))
+        if within is not None:
+            block *= (1 + EDGE_GAIN * np.minimum(within, 1.0) ** 8).astype(np.float32)
+        return block
 
-        # Sources are in Stokes I alone, and every source reaches the same pixels whatever the block,
-        # because its extent is clipped to five sigma before it is clipped to the block.
-        if p0 == 0 and self.sources:
-            table = self.table()
-            spectrum_base = np.asarray(self.frequencies[f0:f1], dtype=np.float64) / self.frequencies[0]
-            for index in range(self.sources):
-                sigma = table["sigma"][index]
-                centre_l, centre_m = table["l"][index], table["m"][index]
-                la = max(l0, math.floor(centre_l - 5 * sigma))
-                lb = min(l1, math.ceil(centre_l + 5 * sigma) + 1)
-                ma = max(m0, math.floor(centre_m - 5 * sigma))
-                mb = min(m1, math.ceil(centre_m + 5 * sigma) + 1)
-                if la >= lb or ma >= mb:
-                    continue
-                profile_l = np.exp(-0.5 * ((np.arange(la, lb) - centre_l) / sigma) ** 2)
-                profile_m = np.exp(-0.5 * ((np.arange(ma, mb) - centre_m) / sigma) ** 2)
-                spectrum = table["flux"][index] * spectrum_base ** table["index"][index]
-                blob = spectrum[:, None, None] * np.outer(profile_l, profile_m)[None, :, :]
-                block[:, :, 0, la - l0 : lb - l0, ma - m0 : mb - m0] += blob.astype(np.float32)[None]
+    def add_gaussians(self, block: np.ndarray, start: tuple[int, ...], stop: tuple[int, ...],
+                      table: dict[str, np.ndarray], spectra) -> None:
+        """Add elliptical Gaussians, each clipped to five of its sigma before it is clipped to the
+        block, so that a source reaches the same pixels whatever the block. `spectra(index, f0, f1)`
+        is the source's value in channels f0 to f1, or None where it has none."""
+        _, f0, _, l0, m0 = start
+        _, f1, _, l1, m1 = stop
+        # Each source's own pixels, in whole pixels, decided before the block is looked at: a source
+        # is in a block exactly when these meet it, so no block can leave out a pixel another adds.
+        reach = 5 * table["major"]
+        first_l, last_l = np.floor(table["l"] - reach), np.ceil(table["l"] + reach)
+        first_m, last_m = np.floor(table["m"] - reach), np.ceil(table["m"] + reach)
+        near = np.flatnonzero((last_l >= l0) & (first_l < l1) & (last_m >= m0) & (first_m < m1))
+        for index in near:
+            spectrum = spectra(index, f0, f1)
+            if spectrum is None:
+                continue
+            centre_l, centre_m = table["l"][index], table["m"][index]
+            la, lb = max(l0, int(first_l[index])), min(l1, int(last_l[index]) + 1)
+            ma, mb = max(m0, int(first_m[index])), min(m1, int(last_m[index]) + 1)
+            dl = np.arange(la, lb)[:, None] - centre_l
+            dm = np.arange(ma, mb)[None, :] - centre_m
+            cos, sin = math.cos(table["angle"][index]), math.sin(table["angle"][index])
+            major = table["major"][index]
+            minor = major * table["ratio"][index]
+            x, y = dl * cos + dm * sin, -dl * sin + dm * cos
+            sky = np.exp(-0.5 * ((x / major) ** 2 + (y / minor) ** 2))
+            # Only the channels the source has: adding its zeros elsewhere would turn a -0 of the
+            # noise into +0 in a block that holds some of its band and not in one that holds none.
+            band = np.flatnonzero(spectrum)
+            if band.size == 0:
+                continue
+            fa, fb = int(band[0]), int(band[-1]) + 1
+            blob = spectrum[fa:fb, None, None] * sky[None, :, :]
+            block[:, fa:fb, 0, la - l0 : lb - l0, ma - m0 : mb - m0] += blob.astype(np.float32)[None]
 
+    def line_spectrum(self, index: int, f0: int, f1: int) -> np.ndarray | None:
+        lines = self.lines
+        centre, width, horn = lines["centre"][index], lines["width"][index], lines["horn"][index]
+        if horn == 0:
+            sigma = width / 2.355
+            half = 5 * sigma
+        else:
+            edge = max(width / 10, 0.5)
+            half = width / 2 + 5 * edge
+        a, b = max(f0, math.floor(centre - half)), min(f1, math.ceil(centre + half) + 1)
+        if a >= b:
+            return None
+        spectrum = np.zeros(f1 - f0)
+        x = np.arange(a, b) - centre
+        if horn == 0:
+            profile = np.exp(-0.5 * (x / sigma) ** 2)
+        else:
+            # A boxcar with soft edges, dipped in the middle: the two horns of a rotating disc.
+            erf = np.vectorize(math.erf)
+            box = 0.5 * (erf((x + width / 2) / (math.sqrt(2) * edge)) - erf((x - width / 2) / (math.sqrt(2) * edge)))
+            profile = box * (1 - horn + horn * np.minimum(1.0, (2 * x / width) ** 2))
+        spectrum[a - f0 : b - f0] = lines["peak"][index] * profile
+        return spectrum
+
+    def continuum_spectrum(self, index: int, f0: int, f1: int) -> np.ndarray:
+        base = np.asarray(self.frequencies[f0:f1], dtype=np.float64) / self.frequencies[0]
+        continuum = self.continuum
+        return continuum["peak"][index] * base ** continuum["index"][index]
+
+    def pixels(self, start: tuple[int, ...], stop: tuple[int, ...]) -> np.ndarray:
+        block = self.noise_block(start, stop)
+        # Sources are in Stokes I alone.
+        if start[2] == 0:
+            if self.line_sources:
+                self.add_gaussians(block, start, stop, self.lines, self.line_spectrum)
+            if self.point_sources or self.extended_sources:
+                self.add_gaussians(block, start, stop, self.continuum, self.continuum_spectrum)
         if not self.flag:
-            outside = self.outside(range(l0, l1), range(m0, m1))
-            if outside is not None:
-                block[..., outside] = np.nan
+            block[self.dropped(start, stop)] = np.nan
         return block
 
     def flags(self, start: tuple[int, ...], stop: tuple[int, ...]) -> np.ndarray:
         # True is a flagged pixel: XRADIO's flag says which pixels to drop. See src/pixel_mask.h.
-        block = np.zeros([b - a for a, b in zip(start, stop)], dtype=bool)
-        outside = self.outside(range(start[3], stop[3]), range(start[4], stop[4]))
-        if outside is not None:
-            block[..., outside] = True
-        return block
+        return self.dropped(start, stop)
 
 
 # -- Writing --------------------------------------------------------------------------------------
@@ -691,6 +910,25 @@ def rewrite_source(args: argparse.Namespace, out: Path) -> dict[str, Any]:
     }
 
 
+def parse_range(text: str | None, length: int) -> tuple[int, int] | None:
+    if not text:
+        return None
+    start, sep, stop = text.partition(":")
+    try:
+        bounds = (int(start), int(stop))
+    except ValueError:
+        raise SystemExit(f"--flagged-range: {text!r} is not START:STOP") from None
+    if not sep or not 0 <= bounds[0] < bounds[1] <= length:
+        raise SystemExit(f"--flagged-range: {text!r} is not a range of the {length} channels")
+    return bounds
+
+
+def line_sources(args: argparse.Namespace, shape: list[int]) -> int:
+    if args.line_sources is not None:
+        return args.line_sources
+    return round(math.prod(shape) / PIXELS_PER_LINE_SOURCE)
+
+
 def synthesize(args: argparse.Namespace, out: Path) -> dict[str, Any]:
     template = Path(args.template).resolve()
     root_metadata = read_metadata(template)
@@ -715,15 +953,12 @@ def synthesize(args: argparse.Namespace, out: Path) -> dict[str, Any]:
             return np.asarray(zarr.open_array(str(template / name), mode="r")[...])
 
     _, length_f, length_p, length_l, length_m = shape
-    frequency = values("frequency")
-    increment = frequency[1] - frequency[0] if frequency.size > 1 else 1.0e6
-    frequencies = frequency[0] + increment * np.arange(length_f)
+    frequencies = args.frequency_start + args.channel_width * np.arange(length_f)
     l_values, m_values = values("l"), values("m")
     l_axis = (np.arange(length_l) - length_l // 2) * (l_values[1] - l_values[0])
     m_axis = (np.arange(length_m) - length_m // 2) * (m_values[1] - m_values[0])
 
-    frequency_attributes = read_metadata(template / "frequency").get("attributes", {})
-    rest = frequency_attributes.get("rest_frequency", {}).get("data", frequencies[0])
+    rest = args.rest_frequency
     reference = root_metadata["attributes"]["coordinate_system_info"]["reference_direction"]["data"]
 
     direction = SkyDirection((float(reference[0]), float(reference[1])), (length_l, length_m),
@@ -750,9 +985,13 @@ def synthesize(args: argparse.Namespace, out: Path) -> dict[str, Any]:
         frequencies=tuple(float(value) for value in frequencies),
         seed=args.seed,
         noise=args.noise,
-        sources=args.sources,
-        nan_radius=None if args.nan_radius <= 0 else args.nan_radius,
+        line_sources=line_sources(args, shape),
+        point_sources=args.point_sources,
+        extended_sources=args.extended_sources,
+        footprint_fill=None if args.footprint_fill >= 1 else args.footprint_fill,
+        flagged_channels=args.flagged_channels,
         flag=args.flag,
+        flagged_range=parse_range(args.flagged_range, shape[1]),
     )
 
     attributes = json.loads(json.dumps(root_metadata.get("attributes", {})))
@@ -773,6 +1012,12 @@ def synthesize(args: argparse.Namespace, out: Path) -> dict[str, Any]:
         else:
             data_shape = list(coordinates[name].shape)
         metadata["shape"] = data_shape
+        if name == "frequency":
+            attributes = metadata.setdefault("attributes", {})
+            if "rest_frequency" in attributes:
+                attributes["rest_frequency"]["data"] = rest
+            if "reference_frequency" in attributes:
+                attributes["reference_frequency"]["data"] = float(frequencies[0])
         # Coordinates over l and m are as large as a plane, so they are chunked like the image's
         # planes; the rest are small enough to be one chunk, which is what XRADIO writes.
         chunk = [layout.chunk[AXES.index(d)] if d in ("l", "m") else n for d, n in zip(array_dims, data_shape)]
@@ -789,6 +1034,7 @@ def synthesize(args: argparse.Namespace, out: Path) -> dict[str, Any]:
 
     sky = with_layout(image_metadata, shape, layout, 4)
     sky["attributes"]["object_name"] = "carta-zarr-bench synthetic"
+    sky["attributes"]["telescope"] = ASKAP_TELESCOPE
     if flag_name:
         sky["attributes"]["flag"] = flag_name
     write_array_metadata(out / image, sky)
@@ -820,8 +1066,15 @@ def synthesize(args: argparse.Namespace, out: Path) -> dict[str, Any]:
             "template": str(template),
             "seed": args.seed,
             "noise": args.noise,
-            "sources": args.sources,
-            "nan_radius": synthetic.nan_radius,
+            "frequency_start": args.frequency_start,
+            "channel_width": args.channel_width,
+            "rest_frequency": args.rest_frequency,
+            "line_sources": synthetic.line_sources,
+            "point_sources": args.point_sources,
+            "extended_sources": args.extended_sources,
+            "footprint_fill": synthetic.footprint_fill,
+            "flagged_channels": args.flagged_channels,
+            "flagged_range": args.flagged_range,
         },
         "image": image,
         "flag": flag_name,
@@ -979,8 +1232,15 @@ def identity(args: argparse.Namespace) -> dict[str, Any]:
             "shape": args.shape,
             "seed": args.seed,
             "noise": args.noise,
-            "sources": args.sources,
-            "nan_radius": args.nan_radius,
+            "frequency_start": args.frequency_start,
+            "channel_width": args.channel_width,
+            "rest_frequency": args.rest_frequency,
+            "line_sources": args.line_sources,
+            "point_sources": args.point_sources,
+            "extended_sources": args.extended_sources,
+            "footprint_fill": args.footprint_fill,
+            "flagged_channels": args.flagged_channels,
+            "flagged_range": args.flagged_range,
             "flag": args.flag,
         }
     return {
@@ -1041,12 +1301,25 @@ def parse_arguments(argv: list[str] | None) -> argparse.Namespace:
     synthetic.add_argument("--template", default=str(DEFAULT_TEMPLATE), help="an XRADIO dataset to take metadata from")
     synthetic.add_argument("--shape", help="frequency=F,polarization=P,l=L,m=M")
     synthetic.add_argument("--seed", type=int, default=1)
-    synthetic.add_argument("--noise", type=float, default=1.0e-3, help="noise sigma, in the image's units")
-    synthetic.add_argument("--sources", type=int, default=200)
-    synthetic.add_argument("--nan-radius", type=float, default=1.0,
-                           help="NaN outside this fraction of the half-width; 0 for none")
+    synthetic.add_argument("--noise", type=float, default=ASKAP_NOISE,
+                           help="noise rms at the footprint's centre, in the image's units")
+    synthetic.add_argument("--frequency-start", type=float, default=ASKAP_FREQUENCY_START,
+                           help="the first channel's frequency, in Hz (ASKAP's 1295.5 MHz)")
+    synthetic.add_argument("--channel-width", type=float, default=ASKAP_CHANNEL_WIDTH,
+                           help="in Hz (ASKAP's 18.5 kHz)")
+    synthetic.add_argument("--rest-frequency", type=float, default=HI_REST_FREQUENCY, help="in Hz (HI's)")
+    synthetic.add_argument("--line-sources", type=int,
+                           help=f"HI-like line sources; one per {PIXELS_PER_LINE_SOURCE:.0e} pixels by default")
+    synthetic.add_argument("--point-sources", type=int, default=0, help="continuum point sources")
+    synthetic.add_argument("--extended-sources", type=int, default=0, help="extended continuum sources")
+    synthetic.add_argument("--footprint-fill", type=float, default=0.76,
+                           help="the fraction of a plane inside the footprint, NaN outside it; 1 for none")
+    synthetic.add_argument("--flagged-channels", type=float, default=0.02,
+                           help="the fraction of channels in flagged runs, flagged whole or in part")
+    synthetic.add_argument("--flagged-range", metavar="START:STOP",
+                           help="channels to flag whole besides those runs, e.g. 128:192 to cover whole chunks")
     synthetic.add_argument("--flag", action="store_true",
-                           help="flag the outside of that circle in a flag variable instead of writing NaN there")
+                           help="flag what is not data in a flag variable instead of writing NaN there")
 
     execution = parser.add_argument_group("execution")
     execution.add_argument("--workers", type=int, default=os.cpu_count() or 1)
@@ -1057,6 +1330,10 @@ def parse_arguments(argv: list[str] | None) -> argparse.Namespace:
     args = parser.parse_args(argv)
     if args.synthetic and not args.shape:
         parser.error("--synthetic needs --shape")
+    if not 0 < args.footprint_fill:
+        parser.error("--footprint-fill must be positive")
+    if not 0 <= args.flagged_channels <= 0.5:
+        parser.error("--flagged-channels must be between 0 and 0.5")
     if args.source and args.shape:
         parser.error("--shape is for --synthetic; a rewrite takes its shape from the source, and --crop")
     if args.layout_from_source:

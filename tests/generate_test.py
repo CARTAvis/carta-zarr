@@ -341,5 +341,126 @@ class SyntheticCoordinatesTest(unittest.TestCase):
                 self.assertEqual(written.shape, (1024, 1024))
                 np.testing.assert_allclose(written, values, rtol=0, atol=1e-15, err_msg=name)
 
+
+class SyntheticPixelsTest(unittest.TestCase):
+    """What a synthetic cube holds: a pixel that depends on where it is and not on the block that wrote
+    it, and the parts of an ASKAP HI cube the test set is calibrated against -- a footprint, flagged
+    channels, line sources confined to their band, and ASKAP's frequency axis."""
+
+    def cube(self, shape: tuple[int, int, int, int, int], **given: Any) -> "generate.Synthetic":
+        import numpy as np
+
+        options = {"seed": 7, "noise": 2.0e-3, "line_sources": 20, "point_sources": 3, "extended_sources": 1,
+                   "footprint_fill": 0.76, "flagged_channels": 0.05, "flag": False}
+        options.update(given)
+        frequencies = generate.ASKAP_FREQUENCY_START + generate.ASKAP_CHANNEL_WIDTH * np.arange(shape[1])
+        return generate.Synthetic(shape=shape, frequencies=tuple(frequencies), **options)
+
+    def test_a_pixel_is_the_same_whichever_block_holds_it(self) -> None:
+        import numpy as np
+
+        # A block may begin on any pixel, including the last one a source reaches, and on any channel.
+        cube = self.cube((1, 40, 1, 150, 130), footprint_fill=None, flagged_channels=0.0)
+        whole = cube.pixels((0, 0, 0, 0, 0), (1, 40, 1, 150, 130))
+        for l0 in range(150):
+            part = cube.pixels((0, 0, 0, l0, 0), (1, 40, 1, 150, 130))
+            self.assertTrue(np.array_equal(whole[..., l0:, :].view(np.uint32), part.view(np.uint32)), f"from l = {l0}")
+        for m0 in range(0, 130, 3):
+            part = cube.pixels((0, 0, 0, 0, m0), (1, 40, 1, 150, 130))
+            self.assertTrue(np.array_equal(whole[..., m0:].view(np.uint32), part.view(np.uint32)), f"from m = {m0}")
+        for f0, f1 in ((13, 29), (39, 40)):
+            part = cube.pixels((0, f0, 0, 0, 0), (1, f1, 1, 150, 130))
+            self.assertTrue(np.array_equal(whole[:, f0:f1].view(np.uint32), part.view(np.uint32)), f"channels {f0}:{f1}")
+        # Without noise the background is signed zeros, and a -0 must stay -0 in every block, the ones a
+        # source adds to and the ones it does not. A line's peak is a multiple of the noise, so the
+        # source is taken from the same cube with noise; the table is drawn from the seed alone.
+        shape = (1, 300, 1, 40, 40)
+        options = dict(line_sources=1, point_sources=0, extended_sources=0, footprint_fill=None, flagged_channels=0.0)
+        quiet = self.cube(shape, noise=0.0, **options)
+        quiet.__dict__["lines"] = self.cube(shape, noise=1.0, **options).lines
+        whole = quiet.pixels((0, 0, 0, 0, 0), shape)
+        self.assertTrue(np.any(whole > 0), "the source added nothing, so this tests nothing")
+        self.assertTrue(np.any(np.signbit(whole) & (whole == 0)), "no -0 in the background to keep")
+        for f0 in range(0, 300, 7):
+            part = quiet.pixels((0, f0, 0, 0, 0), (1, f0 + 1, 1, 40, 40))
+            self.assertTrue(np.array_equal(whole[:, f0 : f0 + 1].view(np.uint32), part.view(np.uint32)), f"channel {f0}")
+        masked = self.cube((1, 40, 1, 150, 130))
+        whole = masked.pixels((0, 0, 0, 0, 0), (1, 40, 1, 150, 130))
+        part = masked.pixels((0, 13, 0, 37, 61), (1, 29, 1, 100, 130))
+        self.assertTrue(np.array_equal(whole[:, 13:29, :, 37:100, 61:130].view(np.uint32), part.view(np.uint32)))
+
+    def test_the_footprint_holds_the_fraction_asked_for_and_leaves_the_corners_out(self) -> None:
+        import numpy as np
+
+        cube = self.cube((1, 4, 1, 600, 400), flagged_channels=0.0)
+        nan = np.isnan(cube.pixels((0, 0, 0, 0, 0), (1, 4, 1, 600, 400)))
+        self.assertAlmostEqual(nan.mean(), 0.24, delta=0.02)
+        self.assertTrue(nan[..., 0, 0].all() and nan[..., -1, -1].all())
+        self.assertFalse(nan[..., 300, 200].any())
+
+    def test_flagged_channels_are_runs_flagged_whole_or_in_part(self) -> None:
+        import numpy as np
+
+        cube = self.cube((1, 2000, 1, 64, 64), footprint_fill=None, flagged_channels=0.1)
+        self.assertIsNone(cube.within(range(64), range(64)))
+        nan = np.isnan(cube.pixels((0, 0, 0, 0, 0), (1, 2000, 1, 64, 64))).reshape(2000, -1).mean(axis=1)
+        self.assertAlmostEqual((nan > 0).mean(), 0.1, delta=0.03)
+        self.assertTrue((nan == 1).any(), "no channel is flagged whole")
+        self.assertTrue(((nan > 0) & (nan < 1)).any(), "no channel is flagged in part")
+
+    def test_a_flagged_range_is_flagged_whole_on_top_of_the_runs(self) -> None:
+        import numpy as np
+
+        runs = self.cube((1, 256, 1, 32, 32), footprint_fill=None, flagged_channels=0.1)
+        ranged = self.cube((1, 256, 1, 32, 32), footprint_fill=None, flagged_channels=0.1, flagged_range=(128, 192))
+        expected = runs.flagged["whole"].copy()
+        expected[128:192] = True
+        self.assertTrue(np.array_equal(ranged.flagged["whole"], expected))
+        self.assertTrue(np.isnan(ranged.pixels((0, 128, 0, 0, 0), (1, 192, 1, 32, 32))).all())
+
+    def test_a_flag_marks_what_nan_would_have(self) -> None:
+        import numpy as np
+
+        start, stop = (0, 0, 0, 0, 0), (1, 300, 1, 90, 70)
+        plain = self.cube((1, 300, 1, 90, 70)).pixels(start, stop)
+        flagged = self.cube((1, 300, 1, 90, 70), flag=True)
+        self.assertTrue(np.array_equal(flagged.flags(start, stop), np.isnan(plain)))
+        self.assertTrue(np.isfinite(flagged.pixels(start, stop)).all())
+
+    def test_a_line_source_is_confined_to_its_band(self) -> None:
+        import numpy as np
+
+        cube = self.cube((1, 3000, 1, 64, 64))
+        for index in range(cube.line_sources):
+            spectrum = cube.line_spectrum(index, 0, 3000)
+            if spectrum is None:
+                continue
+            inside = np.flatnonzero(spectrum)
+            centre, width = cube.lines["centre"][index], cube.lines["width"][index]
+            # A Gaussian reaches five sigma either side, 4.25 widths in all; a double horn its width
+            # and soft edges. Either way a few hundred km/s, not the band.
+            self.assertLessEqual(inside.max() - inside.min() + 1, 4.25 * width + 3)
+            if 0 < inside.min() and inside.max() < 2999:
+                self.assertLessEqual(abs((inside.max() + inside.min()) / 2 - centre), 1.0)
+
+    def test_the_frequency_axis_is_askaps_unless_told(self) -> None:
+        import numpy as np
+        import zarr
+
+        with tempfile.TemporaryDirectory() as directory:
+            out = Path(directory) / "synthetic.zarr"
+            args = generate.parse_arguments(
+                ["--synthetic", "--shape", "frequency=5,polarization=1,l=32,m=32", "--output", str(out),
+                 "--chunk", "l=32,m=32", "--workers", "1"])
+            generate.synthesize(args, out)
+            frequency = np.asarray(zarr.open_array(str(out / "frequency"), mode="r")[...])
+            np.testing.assert_allclose(frequency, 1.2955e9 + 18518.518518518518 * np.arange(5))
+            attributes = json.loads((out / "frequency" / "zarr.json").read_text())["attributes"]
+            self.assertEqual(attributes["rest_frequency"]["data"], generate.HI_REST_FREQUENCY)
+            self.assertEqual(attributes["reference_frequency"]["data"], 1.2955e9)
+            velocity = np.asarray(zarr.open_array(str(out / "velocity"), mode="r")[...])
+            np.testing.assert_allclose(velocity, generate.SPEED_OF_LIGHT * (1 - frequency / generate.HI_REST_FREQUENCY))
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -224,6 +224,20 @@ void TestTheCommandLine() {
     Require(!Get<Usage>(Parse({"run", "--help"})).error, "asking for help is not an error");
     Require(Get<ProbeOptions>(Parse({"probe", "cube.zarr", "--image", "SKY"})).image_id == "SKY",
             "probe lost its --image");
+    Require(Get<ProbeOptions>(Parse({"probe", "cube.zarr", "--describe"})).describe, "probe lost its --describe");
+    Require(!Get<ProbeOptions>(Parse({"probe", "cube.zarr"})).describe, "probe describes without being asked");
+    const auto pixels = Get<PixelsOptions>(Parse({"pixels", "cube.zarr", "--channels", "8:16", "--image", "SKY"}));
+    Require(pixels.dataset == "cube.zarr" && pixels.image_id == "SKY", "pixels lost its dataset or --image");
+    Require(pixels.channel_start == 8 && pixels.channel_stop == 16, "pixels lost its --channels");
+    Require(pixels.apply_pixel_mask, "pixels reads unmasked without being asked");
+    Require(!Get<PixelsOptions>(Parse({"pixels", "cube.zarr", "--channels", "0:1", "--unmasked"})).apply_pixel_mask,
+            "pixels lost its --unmasked");
+    Require(Get<Usage>(Parse({"pixels", "cube.zarr"})).error, "pixels without --channels was accepted");
+    Require(Get<Usage>(Parse({"pixels", "--channels", "0:1"})).error, "pixels without a dataset was accepted");
+    for (const auto* wrong : {"8", "8:8", "9:8", "a:8", "8:", ":8"}) {
+        Require(Get<Usage>(Parse({"pixels", "cube.zarr", "--channels", wrong})).error,
+                std::string("pixels accepted --channels ") + wrong);
+    }
     (void)Get<IdentityOptions>(Parse({"identity"}));
     Require(Get<Usage>(Parse({"identity", "cube.zarr"})).error, "identity took a dataset it does not read");
 }

@@ -19,10 +19,12 @@
 
 #include <nlohmann/json.hpp>
 
+#include <array>
 #include <csignal>
 #include <cstdio>
 #include <random>
 #include <string>
+#include <vector>
 
 #include <carta-zarr/carta_zarr.h>
 
@@ -69,6 +71,73 @@ nlohmann::json Diagnostics(const std::vector<Diagnostic>& diagnostics) {
                         {"node", diagnostic.node_path}});
     }
     return list;
+}
+
+const char* DataTypeName(DataType type) {
+    constexpr std::array<const char*, 15> kNames{"unknown", "bool",    "int8",    "uint8",     "int16",
+                                                 "uint16",  "int32",   "uint32",  "int64",     "uint64",
+                                                 "float16", "float32", "float64", "complex64", "complex128"};
+    return kNames.at(static_cast<std::size_t>(type));
+}
+
+template <typename T>
+nlohmann::json Optional(const std::optional<T>& value) {
+    return value ? nlohmann::json(*value) : nlohmann::json();
+}
+
+// What an image means as the library reads it, every field a consumer builds coordinates from.
+nlohmann::json Description(const ImageDescriptor& descriptor, const std::vector<Beam>& beams) {
+    nlohmann::json description{{"stored_type", DataTypeName(descriptor.stored_type)},
+                               {"unit", descriptor.unit},
+                               {"pixel_mask_id", descriptor.pixel_mask_id}};
+    if (const auto& direction = descriptor.direction) {
+        description["direction"] = {{"projection", direction->projection},
+                                    {"reference_frame", direction->reference_frame},
+                                    {"equinox", Optional(direction->equinox)},
+                                    {"reference_pixel", direction->reference_pixel},
+                                    {"reference_value", direction->reference_value},
+                                    {"increment", direction->increment},
+                                    {"transformation_matrix", direction->transformation_matrix},
+                                    {"projection_parameters", direction->projection_parameters},
+                                    {"native_pole_direction", direction->native_pole_direction}};
+    }
+    if (const auto& spectral = descriptor.spectral) {
+        description["spectral"] = {{"unit", spectral->unit},
+                                   {"system", spectral->system},
+                                   {"reference_pixel", Optional(spectral->reference_pixel)},
+                                   {"reference_value", Optional(spectral->reference_value)},
+                                   {"increment", Optional(spectral->increment)},
+                                   {"rest_frequency", Optional(spectral->rest_frequency)},
+                                   {"channel_frequencies", spectral->channel_frequencies}};
+    }
+    if (const auto& polarization = descriptor.polarization) {
+        description["polarization"] = polarization->labels;
+    }
+    if (const auto& temporal = descriptor.temporal) {
+        description["temporal"] = {{"values", temporal->values},
+                                   {"unit", temporal->unit},
+                                   {"scale", temporal->scale},
+                                   {"format", temporal->format}};
+    }
+    if (const auto& observation = descriptor.observation) {
+        description["observation"] = {{"telescope_name", observation->telescope_name},
+                                      {"observatory_position", Optional(observation->observatory_position)},
+                                      {"timesys", observation->timesys},
+                                      {"date_obs", observation->date_obs},
+                                      {"mjd_obs", Optional(observation->mjd_obs)}};
+    }
+    auto planes = nlohmann::json::array();
+    for (const auto& beam : beams) {
+        planes.push_back({{"time", beam.time},
+                          {"channel", beam.channel},
+                          {"polarization", beam.polarization},
+                          {"major", beam.major},
+                          {"minor", beam.minor},
+                          {"position_angle", beam.position_angle},
+                          {"unit", beam.unit}});
+    }
+    description["beams"] = planes;
+    return description;
 }
 
 // One line of JSON, written whether or not the dataset opens, so that a caller always has something
@@ -137,11 +206,73 @@ int Probe(const ProbeOptions& options) {
                        {"compressor", geometry.compressor},
                        {"has_pixel_mask", descriptor.has_pixel_mask},
                        {"diagnostics", Diagnostics(descriptor.diagnostics)}};
+    if (options.describe) {
+        const auto beams = image->ReadBeams();
+        if (!beams) {
+            return finish("ReadBeams: " + std::string(ErrorCodeName(beams.error().code)) + ": " +
+                          beams.error().message);
+        }
+        report["image"]["description"] = Description(descriptor, beams.value());
+    }
     if (const auto cube = CubeAxes::Of(descriptor); !cube) {
         return finish(cube.error().message);
     }
     report["ok"] = true;
     return finish("");
+}
+
+// Raw float32 on stdout, or a reason on stderr and a non-zero exit.
+int Pixels(const PixelsOptions& options) {
+    const auto fail = [](const std::string& what) {
+        std::fprintf(stderr, "error: %s\n", what.c_str());
+        return 1;
+    };
+    const auto context = Context::Create();
+    if (!context) {
+        return fail("Context::Create: " + context.error().message);
+    }
+    const auto dataset = Dataset::Open(*context, options.dataset);
+    if (!dataset) {
+        return fail("Dataset::Open: " + std::string(ErrorCodeName(dataset.error().code)) + ": " +
+                    dataset.error().message);
+    }
+    const auto id = options.image_id.empty() ? dataset->descriptor().default_image_id.value_or("") : options.image_id;
+    if (id.empty()) {
+        return fail("the dataset lists no image that opens");
+    }
+    const auto image = dataset->OpenImage(id);
+    if (!image) {
+        return fail("OpenImage: " + std::string(ErrorCodeName(image.error().code)) + ": " + image.error().message);
+    }
+    ReadRequest request;
+    std::size_t elements = 1;
+    bool has_spectral = false;
+    for (const auto& axis : image->descriptor().axes) {
+        Range range{0, axis.length, 1};
+        if (axis.role == AxisRole::spectral) {
+            if (options.channel_stop > axis.length) {
+                return fail("--channels runs past the image's " + std::to_string(axis.length) + " channels");
+            }
+            range = Range{options.channel_start, options.channel_stop - options.channel_start, 1};
+            has_spectral = true;
+        }
+        request.axes.push_back(range);
+        elements *= range.count;
+    }
+    if (!has_spectral) {
+        return fail("the image has no spectral axis");
+    }
+    std::vector<float> pixels(elements);
+    ReadOptions read;
+    read.apply_pixel_mask = options.apply_pixel_mask;
+    const auto count = image->Read(request, BufferView<float>{pixels.data(), pixels.size()}, read);
+    if (!count) {
+        return fail("Read: " + std::string(ErrorCodeName(count.error().code)) + ": " + count.error().message);
+    }
+    if (std::fwrite(pixels.data(), sizeof(float), pixels.size(), stdout) != pixels.size() || std::fflush(stdout) != 0) {
+        return fail("could not write the pixels to stdout");
+    }
+    return 0;
 }
 
 std::string RunId() {
@@ -212,6 +343,9 @@ int main(int argc, char** argv) {
     }
     if (const auto* probe = std::get_if<ProbeOptions>(&command)) {
         return Probe(*probe);
+    }
+    if (const auto* pixels = std::get_if<PixelsOptions>(&command)) {
+        return Pixels(*pixels);
     }
     if (std::holds_alternative<IdentityOptions>(command)) {
         std::printf("%s\n", BuildIdentity().c_str());

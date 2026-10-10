@@ -51,7 +51,7 @@ function(changed name code)
     file(COPY "${cube}/" DESTINATION "${copy}")
     execute_process(
         COMMAND "${UV}" run --quiet --no-project --python-preference only-managed --with zarr==3.2.1 --with numpy==2.3.1
-                python -c "import json, numpy as np, zarr\nroot = '${copy}'\n${code}\nzarr.consolidate_metadata(root)"
+                --with astropy==7.1.0 python -c "import json, numpy as np, zarr\nroot = '${copy}'\n${code}\nzarr.consolidate_metadata(root)"
         RESULT_VARIABLE result)
     if(result)
         message(FATAL_ERROR "changing ${name} failed: ${result}")
@@ -175,11 +175,32 @@ values[0, 5, 0, 0] *= 2
 b[...] = values")
 refused("a Zarr whose beam is wider in one channel" "${OUTPUT_DIR}/cube.fits" "${OUTPUT_DIR}/widebeam.zarr" --flag no
         --chunks 32,32,8)
-changed(transposed "for path in (root + '/SKY/zarr.json',):
-    meta = json.load(open(path))
-    meta['codecs'].insert(0, {'name': 'transpose', 'configuration': {'order': [0, 1, 2, 4, 3]}})
-    json.dump(meta, open(path, 'w'))")
+# The same pixels in shards whose chunks are stored transposed: the pixels read back alike, and only the
+# layout says the chunks are not in the image's axis order.
+changed(transposed "import shutil
+from zarr.codecs import TransposeCodec
+old = zarr.open_array(root + '/SKY', mode='r')
+values, attributes, names = old[...], old.attrs.asdict(), list(old.metadata.dimension_names)
+shutil.rmtree(root + '/SKY')
+sky = zarr.create_array(root + '/SKY', shape=values.shape, chunks=(1, 8, 1, 32, 32), shards=(1, 8, 1, 64, 64), dtype='float32',
+                        filters=[TransposeCodec(order=(0, 1, 2, 4, 3))], dimension_names=names, fill_value=np.nan)
+sky[...] = values
+sky.attrs.update(attributes)")
 refused("a Zarr whose chunks are stored transposed" "${OUTPUT_DIR}/cube.fits" "${OUTPUT_DIR}/transposed.zarr" --flag no
+        --chunks 32,32,8 --shards 64,64,8)
+# obsdate as an ISO date, which carta-zarr reads, and as a numeric string, which it does not.
+changed(isodate "a = zarr.open_array(root + '/SKY', mode='r+')
+from astropy.time import Time
+date = dict(a.attrs['obsdate'])
+date['data'] = Time(date['data'], format='mjd', scale='utc').isot
+a.attrs['obsdate'] = date")
+run("verify.py with an ISO obsdate" "${SOURCE_DIR}/tools/testset/verify.py" "${OUTPUT_DIR}/cube.fits" "${OUTPUT_DIR}/isodate.zarr"
+    --flag no --chunks 32,32,8)
+changed(textdate "a = zarr.open_array(root + '/SKY', mode='r+')
+date = dict(a.attrs['obsdate'])
+date['data'] = str(date['data'])
+a.attrs['obsdate'] = date")
+refused("a Zarr whose obsdate is a number written as text" "${OUTPUT_DIR}/cube.fits" "${OUTPUT_DIR}/textdate.zarr" --flag no
         --chunks 32,32,8)
 refused("a Zarr rotated on the sky" "${OUTPUT_DIR}/cube.fits" "${OUTPUT_DIR}/rotated.zarr" --flag no --chunks 32,32,8)
 changed(nonfinite "f = zarr.open_array(root + '/frequency', mode='r+')

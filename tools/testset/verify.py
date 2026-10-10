@@ -144,21 +144,20 @@ def usable_flag(documents: dict[str, dict], root_attributes: dict, image: str) -
     return None, "no flag is declared, and no single variable is typed flag and shaped as the image", False
 
 
-def layout(metadata: dict) -> tuple[list[int], list[int] | None] | None:
-    """An array's inner chunk and, when it is sharded, its shard, as stored; None when a transpose
-    codec reorders the axes, whose chunks are then not in the image's axis order. The converter writes
-    none, and composing one is more than this needs."""
+def layout(metadata: dict) -> tuple[list[int], list[int] | None, bool]:
+    """An array's inner chunk; when it is sharded, its shard; and whether a transpose codec reorders
+    the axes, when its inner chunk is not in the image's axis order. The converter writes none, and
+    composing one is more than this needs, so a transposed layout is refused where one is checked."""
     def transposes(codecs: list[dict]) -> bool:
         return any(codec.get("name") == "transpose"
                    or (codec.get("name") == "sharding_indexed" and transposes(codec["configuration"].get("codecs", [])))
                    for codec in codecs)
-    if transposes(metadata.get("codecs", [])):
-        return None
+    transposed = transposes(metadata.get("codecs", []))
     grid = metadata["chunk_grid"]["configuration"]["chunk_shape"]
     for codec in metadata.get("codecs", []):
         if codec.get("name") == "sharding_indexed":
-            return codec["configuration"]["chunk_shape"], grid
-    return grid, None
+            return codec["configuration"]["chunk_shape"], grid, transposed
+    return grid, None, transposed
 
 
 def extents(text: str) -> list[int]:
@@ -221,15 +220,14 @@ def main() -> int:
     check(f"axes {' '.join(AXES)}", metadata.get("dimension_names") == AXES)
     # A converter that ignored the layout asked of it would be published under the wrong name.
     stored = layout(metadata)
-    inner, shard = stored if stored else (None, None)
     check(f"chunk {args.chunks}" + (f", shard {args.shards}" if args.shards else ", unsharded") + ", untransposed",
-          stored is not None and inner == extents(args.chunks) and shard == (extents(args.shards) if args.shards else None))
+          stored == (extents(args.chunks), extents(args.shards) if args.shards else None, False))
 
     flag_name, why, refused = usable_flag(documents, root_attributes, "SKY")
     # The flag is read beside the pixels, so its layout is part of what a layout name promises.
     if flag_name:
         check(f"{flag_name} in the same chunk" + (" and shard" if args.shards else ""),
-              stored is not None and layout(documents[flag_name]) == stored)
+              layout(documents[flag_name]) == stored)
     flag = zarr.open_array(f"{args.zarr}/{flag_name}", mode="r") if flag_name else None
     if args.flag == "yes":
         check(f"a flag carta-zarr applies{'' if flag_name else f' ({why})'}", flag is not None)
@@ -271,14 +269,26 @@ def main() -> int:
     check("polarization", polarization == [stokes.get(int(round(code)), "?") for code in codes])
     observed = Time(header["DATE-OBS"], scale=str(header.get("TIMESYS", "UTC")).lower()).utc.mjd
 
-    def same_date(attributes: dict, value: float) -> bool:
-        return (attributes.get("format") == "mjd" and attributes.get("scale") == "utc" and attributes.get("units") == "d"
-                and abs(value - observed) < 1e-6)
-
-    check("time", same_date(documents["time"].get("attributes", {}), float(zarr.open_array(f"{args.zarr}/time", mode="r")[0])))
-    # carta-zarr takes the observation date from the image's own obsdate, not from the time axis.
+    time_attributes = documents["time"].get("attributes", {})
+    stored_time = float(zarr.open_array(f"{args.zarr}/time", mode="r")[0])
+    check("time", time_attributes.get("format") == "mjd" and time_attributes.get("scale") == "utc"
+          and time_attributes.get("units") == "d" and abs(stored_time - observed) < 1e-6)
+    # carta-zarr takes the observation date from the image's own obsdate, not from the time axis, as
+    # observation.cc reads it: a string is an ISO date, a number is an MJD (or seconds since 1970 with
+    # format "unix"), in the scale its attrs give.
     obsdate = metadata.get("attributes", {}).get("obsdate") or {}
-    check("observation date", same_date(obsdate.get("attrs", {}), float(obsdate.get("data", math.nan))))
+    obs_attrs = obsdate.get("attrs", {})
+    data, form = obsdate.get("data"), str(obs_attrs.get("format", "")).upper()
+    if isinstance(data, str):
+        try:
+            mjd = Time(data, format="isot", scale="utc").mjd
+        except ValueError:
+            mjd = math.nan
+    elif isinstance(data, (int, float)) and not isinstance(data, bool):
+        mjd = float(data) if form in ("", "MJD") else 40587.0 + float(data) / 86400.0 if form == "UNIX" else math.nan
+    else:
+        mjd = math.nan
+    check("observation date", str(obs_attrs.get("scale", "")).upper() == "UTC" and abs(mjd - observed) < 1e-6)
     # The restoring beam a Jy/beam image is calibrated by, for every channel and polarization, in the
     # order its labels say. A FITS file without one has an image without one.
     beam_name = metadata.get("attributes", {}).get("beam_fit_params")

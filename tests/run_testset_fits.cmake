@@ -317,3 +317,25 @@ execute_process(COMMAND "${UV}" run --quiet --script "${SOURCE_DIR}/tools/testse
 if(NOT result OR NOT err MATCHES "carries a flag")
     message(FATAL_ERROR "zarr-to-fits.py wrote a flagged dataset: ${result}\n${err}")
 endif()
+# Nor one whose flag is declared by any data group, wherever it is kept.
+set(nested "${OUTPUT_DIR}/nested.zarr")
+file(COPY "${cube}/" DESTINATION "${nested}")
+execute_process(
+    COMMAND "${UV}" run --quiet --no-project --python-preference only-managed --with zarr==3.2.1 --with numpy==2.3.1
+            python -c "import json, numpy as np, zarr
+root = '${nested}'
+sky = zarr.open_array(root + '/SKY', mode='r')
+zarr.create_array(root + '/masks/FLAG_SKY', shape=sky.shape, chunks=sky.chunks, dtype=bool,
+                  dimension_names=list(sky.metadata.dimension_names), fill_value=False)
+meta = json.load(open(root + '/zarr.json'))
+meta['attributes']['data_groups']['other'] = {'sky': 'SKY', 'flag': 'masks/FLAG_SKY'}
+json.dump(meta, open(root + '/zarr.json', 'w'))"
+    RESULT_VARIABLE result)
+if(result)
+    message(FATAL_ERROR "nesting a flag failed: ${result}")
+endif()
+execute_process(COMMAND "${UV}" run --quiet --script "${SOURCE_DIR}/tools/testset/zarr-to-fits.py" "${nested}" "${OUTPUT_DIR}/nested.fits"
+    RESULT_VARIABLE result OUTPUT_QUIET ERROR_VARIABLE err)
+if(NOT result OR NOT err MATCHES "carries a flag")
+    message(FATAL_ERROR "zarr-to-fits.py wrote a dataset whose flag another group declares: ${result}\n${err}")
+endif()

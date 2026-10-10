@@ -145,9 +145,10 @@ def main() -> int:
     # A FITS cube marks a flagged pixel by NaN alone, and a flagged dataset may hold finite values under
     # its flag (generate.py --flag does), which would be written as valid pixels. The test set's cubes
     # carry their NaN in the pixels and get a flag only from the converter, so a flag here is refused.
-    flags = [entry.parent.name for entry in root.glob("*/zarr.json")
-             if json.loads(entry.read_text()).get("attributes", {}).get("type") == "flag"]
-    if sky.attrs.get("flag") or metadata(root)["attributes"]["data_groups"]["base"].get("flag") or flags:
+    flags = [str(entry.parent.relative_to(root)) for entry in root.glob("**/zarr.json")
+             if entry.parent != root and json.loads(entry.read_text()).get("attributes", {}).get("type") == "flag"]
+    groups = metadata(root)["attributes"].get("data_groups", {}).values()
+    if sky.attrs.get("flag") or any(isinstance(group, dict) and group.get("flag") for group in groups) or flags:
         raise SystemExit(f"{args.dataset} carries a flag ({', '.join(flags) or 'declared'}); FITS would show what it "
                          "hides, so write the cube without one")
     _, n_freq, n_pol, n_l, n_m = sky.shape

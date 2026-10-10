@@ -327,12 +327,6 @@ root = '${nested}'
 sky = zarr.open_array(root + '/SKY', mode='r')
 zarr.create_array(root + '/masks/FLAG_SKY', shape=sky.shape, chunks=sky.chunks, dtype=bool,
                   dimension_names=list(sky.metadata.dimension_names), fill_value=False)
-# Undeclared and typed, through a link: found by its type, wherever the directory really is.
-linked = zarr.create_array(root + '/../linked_flag', shape=sky.shape, chunks=sky.chunks, dtype=bool,
-                           dimension_names=list(sky.metadata.dimension_names), fill_value=False)
-linked.attrs['type'] = 'flag'
-import os
-os.symlink(os.path.abspath(root + '/../linked_flag'), root + '/LINKED')
 meta = json.load(open(root + '/zarr.json'))
 meta['attributes']['data_groups']['other'] = {'sky': 'SKY', 'flag': 'masks/FLAG_SKY'}
 json.dump(meta, open(root + '/zarr.json', 'w'))"
@@ -345,10 +339,19 @@ execute_process(COMMAND "${UV}" run --quiet --script "${SOURCE_DIR}/tools/testse
 if(NOT result OR NOT err MATCHES "carries a flag")
     message(FATAL_ERROR "zarr-to-fits.py wrote a dataset whose flag another group declares: ${result}\n${err}")
 endif()
-# The linked, typed flag alone, with nothing declaring it.
-file(REMOVE_RECURSE "${OUTPUT_DIR}/linked.zarr")
-file(MAKE_DIRECTORY "${OUTPUT_DIR}/linked.zarr")
+# Nor one with a flag typed as one and declared by nothing, kept behind a directory link.
 file(COPY "${cube}/" DESTINATION "${OUTPUT_DIR}/linked.zarr")
+execute_process(
+    COMMAND "${UV}" run --quiet --no-project --python-preference only-managed --with zarr==3.2.1 --with numpy==2.3.1
+            python -c "import zarr
+sky = zarr.open_array('${cube}/SKY', mode='r')
+flag = zarr.create_array('${OUTPUT_DIR}/linked_flag', shape=sky.shape, chunks=sky.chunks, dtype=bool,
+                         dimension_names=list(sky.metadata.dimension_names), fill_value=False)
+flag.attrs['type'] = 'flag'"
+    RESULT_VARIABLE result)
+if(result)
+    message(FATAL_ERROR "writing the linked flag failed: ${result}")
+endif()
 file(CREATE_LINK "${OUTPUT_DIR}/linked_flag" "${OUTPUT_DIR}/linked.zarr/LINKED" SYMBOLIC)
 execute_process(COMMAND "${UV}" run --quiet --script "${SOURCE_DIR}/tools/testset/zarr-to-fits.py" "${OUTPUT_DIR}/linked.zarr"
                         "${OUTPUT_DIR}/linked.fits"

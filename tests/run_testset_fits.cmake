@@ -256,6 +256,66 @@ sky[...] = values
 sky.attrs.update(attributes)")
 refused("a Zarr whose pixels carta-zarr cannot decode" "${OUTPUT_DIR}/cube.fits" "${OUTPUT_DIR}/zlibbed.zarr" --flag no
         --chunks 32,32,8)
+# Frequencies written in GHz: carta-zarr gives the rest frequency in the axis's unit too, so one left in
+# Hz beside them is a rest frequency a billion times too high, which RESTFRQ, in Hz, must expose.
+changed(ghz "f = zarr.open_array(root + '/frequency', mode='r+')
+f[...] = f[...] / 1e9
+f.attrs['units'] = 'GHz'
+reference = dict(f.attrs['reference_frequency'])
+reference['data'] = reference['data'] / 1e9
+f.attrs['reference_frequency'] = reference
+rest = dict(f.attrs['rest_frequency'])
+rest['data'] = rest['data'] / 1e9
+f.attrs['rest_frequency'] = rest")
+run("verify.py with the frequencies in GHz" "${SOURCE_DIR}/tools/testset/verify.py" "${OUTPUT_DIR}/cube.fits"
+    "${OUTPUT_DIR}/ghz.zarr" --flag no --chunks 32,32,8)
+changed(ghz_rest_hz "f = zarr.open_array(root + '/frequency', mode='r+')
+f[...] = f[...] / 1e9
+f.attrs['units'] = 'GHz'
+reference = dict(f.attrs['reference_frequency'])
+reference['data'] = reference['data'] / 1e9
+f.attrs['reference_frequency'] = reference")
+refused("a Zarr in GHz with its rest frequency left in Hz" "${OUTPUT_DIR}/cube.fits" "${OUTPUT_DIR}/ghz_rest_hz.zarr" --flag no
+        --chunks 32,32,8)
+# The FITS side's linear transformation whole: CD alike to CDELT and PC, and sky axes mixed with the
+# spectral one, which carta-zarr's direction cannot hold, refused.
+function(fits_variant name code)
+    execute_process(
+        COMMAND "${UV}" run --quiet --no-project --python-preference only-managed --with astropy==7.1.0 python -c "from astropy.io import fits
+header = fits.getheader('${OUTPUT_DIR}/cube.fits')
+data = fits.getdata('${OUTPUT_DIR}/cube.fits')
+${code}
+fits.writeto('${OUTPUT_DIR}/${name}.fits', data, header, overwrite=True)"
+        RESULT_VARIABLE result)
+    if(result)
+        message(FATAL_ERROR "writing ${name}.fits failed: ${result}")
+    endif()
+endfunction()
+fits_variant(cd "for i in range(1, 5):
+    header[f'CD{i}_{i}'] = header.pop(f'CDELT{i}')
+for key in ('PC1_1', 'PC1_2', 'PC2_1', 'PC2_2'):
+    del header[key]")
+fits_variant(coupled "header['PC1_4'] = 0.1")
+run("verify.py against a FITS file in CD" "${SOURCE_DIR}/tools/testset/verify.py" "${OUTPUT_DIR}/cd.fits" "${cube}" --flag no
+    --chunks 32,32,8)
+refused("a FITS file whose RA moves with frequency" "${OUTPUT_DIR}/coupled.fits" "${cube}" --flag no --chunks 32,32,8)
+# A carta-zarr whose linear frequency axis were a channel off -- what carta-backend builds when it is
+# given one -- with the table of frequencies right, which only a stand-in for the bench can make.
+file(WRITE "${OUTPUT_DIR}/misfitted.py" "import json, subprocess, sys
+result = subprocess.run(['${BENCH}'] + sys.argv[1:], capture_output=True)
+out = result.stdout
+if sys.argv[1] == 'probe' and '--describe' in sys.argv and not result.returncode:
+    report = json.loads(out)
+    report['image']['description']['spectral']['reference_pixel'] += 1
+    out = json.dumps(report).encode()
+sys.stdout.buffer.write(out)
+sys.stderr.buffer.write(result.stderr)
+sys.exit(result.returncode)
+")
+file(WRITE "${OUTPUT_DIR}/misfitted.sh" "#!/bin/sh\nexec \"${UV}\" run --quiet --no-project --python-preference only-managed python \"${OUTPUT_DIR}/misfitted.py\" \"$@\"\n")
+file(CHMOD "${OUTPUT_DIR}/misfitted.sh" PERMISSIONS OWNER_READ OWNER_WRITE OWNER_EXECUTE)
+refused("a linear frequency axis a channel off" "${OUTPUT_DIR}/cube.fits" "${cube}" --flag no --chunks 32,32,8
+        --bench "${OUTPUT_DIR}/misfitted.sh")
 # obsdate as an ISO date, which carta-zarr reads, and as a numeric string, which it does not.
 changed(isodate "a = zarr.open_array(root + '/SKY', mode='r+')
 from astropy.time import Time
@@ -547,7 +607,7 @@ a = zarr.open_array(root + '/SKY', mode='r+')
 date = dict(a.attrs['obsdate'])
 date['attrs'] = dict(date['attrs'], scale='tai')
 a.attrs['obsdate'] = date")
-foreach(case "middle|evenly spaced" "widebeam|plane to plane" "tai|wrong instant")
+foreach(case "middle|evenly spaced" "widebeam|plane to plane" "tai|wrong instant" "halfbeam|one on each")
     string(REPLACE "|" ";" case "${case}")
     list(GET case 0 name)
     list(GET case 1 reason)

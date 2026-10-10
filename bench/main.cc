@@ -104,6 +104,9 @@ nlohmann::json Description(const ImageDescriptor& descriptor, const std::vector<
     if (const auto& spectral = descriptor.spectral) {
         description["spectral"] = {{"unit", spectral->unit},
                                    {"system", spectral->system},
+                                   {"reference_pixel", Optional(spectral->reference_pixel)},
+                                   {"reference_value", Optional(spectral->reference_value)},
+                                   {"increment", Optional(spectral->increment)},
                                    {"rest_frequency", Optional(spectral->rest_frequency)},
                                    {"channel_frequencies", spectral->channel_frequencies}};
     }

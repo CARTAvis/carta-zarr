@@ -49,6 +49,7 @@ from typing import Any
 
 import numpy as np
 import zarr
+from astropy import units
 from astropy.io import fits
 from astropy.time import Time
 
@@ -149,7 +150,8 @@ def header_of(root: Path, image: str, sky: Any, described: dict[str, Any]) -> fi
     header["PV2_1"], header["PV2_2"] = direction.get("projection_parameters") or [0.0, 0.0]
     header["SPECSYS"] = spectral["system"]
     if spectral.get("rest_frequency") is not None:
-        header["RESTFRQ"] = spectral["rest_frequency"]
+        # In the spectral axis's unit as carta-zarr gives it, and in Hz as FITS takes it.
+        header["RESTFRQ"] = spectral["rest_frequency"] * units.Unit(spectral["unit"]).to(units.Hz)
     # ASKAP, as the frequency axis is: xradio wants an observatory and a date to place it. The date is
     # the dataset's own, as carta-zarr reads it, and the time axis must agree with it, as it does in
     # a FITS file, which has only the one.
@@ -171,6 +173,10 @@ def header_of(root: Path, image: str, sky: Any, described: dict[str, Any]) -> fi
     header["OBSGEO-Y"] = 5.095672176508e06
     header["OBSGEO-Z"] = -2.849020838078e06
     header["BTYPE"] = "Intensity"
+    planes = sorted((beam["time"], beam["channel"], beam["polarization"]) for beam in meaning.get("beams", []))
+    if planes and planes != [(0, c, p) for c in range(n_freq) for p in range(n_pol)]:
+        raise SystemExit(f"{image}'s restoring beams are not one on each of its planes; a FITS header's beam is "
+                         "every plane's")
     beams = {(beam["major"], beam["minor"], beam["position_angle"], beam["unit"]) for beam in meaning.get("beams", [])}
     if len(beams) > 1:
         raise SystemExit(f"{image}'s restoring beam differs from plane to plane; a FITS header holds one")

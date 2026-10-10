@@ -25,8 +25,8 @@ carta-zarr would refuse, or read differently, is refused. That description is he
 header: the image opens, as SKY, float32, in the FITS unit, in the chunks (and shards) asked for, with
 a pixel mask or without one as --flag says; its direction coordinate has the FITS file's projection,
 frame, equinox, reference pixel and value, increment, matrix, parameters and native pole; every
-channel's frequency, the spectral unit, frame and rest frequency, the Stokes parameters, the time and
-the observation date match; and so does the restoring beam of every plane. Then every pixel, as
+channel's frequency (in Hz, whatever unit each is written in), the spectral frame and rest
+frequency, the Stokes parameters, the time and the observation date match; and so does the restoring beam of every plane. Then every pixel, as
 carta-zarr decodes it (`carta-zarr-bench pixels`), is compared bit for bit, a block of channels at a
 time; with the pixel mask applied it must be NaN exactly where the FITS cube is, and the flag itself,
 as stored, true exactly there and in the same chunks as the pixels.
@@ -191,6 +191,11 @@ def main() -> int:
         # The direction coordinate carta-zarr builds, against the FITS file's own.
         direction = described.get("direction") or {}
         pv = {(i, m): value for i, m, value in wcs.wcs.get_pv()}
+        # The linear part of the FITS WCS whole, increment times matrix, so that CDELT and PC, or CD,
+        # alike describe it; carta-zarr's direction is the sky axes' alone, so a FITS file whose sky
+        # axes mix with the others -- PC1_4, say -- means something it cannot, and is refused.
+        linear = np.diag(wcs.wcs.get_cdelt()) @ wcs.wcs.get_pc()
+        check("sky axes independent of the others", not linear[:2, 2:].any() and not linear[2:, :2].any())
         check("direction coordinate",
               direction.get("projection") == wcs.wcs.ctype[0][-3:] and wcs.wcs.ctype[1][-3:] == wcs.wcs.ctype[0][-3:]
               and direction.get("reference_frame", "").upper() == wcs.wcs.radesys.upper()
@@ -198,25 +203,30 @@ def main() -> int:
                    or (direction.get("equinox") is None and math.isnan(wcs.wcs.equinox)))
               and close(direction.get("reference_pixel"), wcs.wcs.crpix[:2])
               and close(direction.get("reference_value"), wcs.wcs.crval[:2])
-              and close(direction.get("increment"), wcs.wcs.cdelt[:2])
-              and close(direction.get("transformation_matrix"), wcs.wcs.get_pc()[:2, :2])
+              and close(np.diag(direction.get("increment") or [np.nan] * 2) @ np.asarray(direction.get("transformation_matrix") or np.nan, dtype=float),
+                        linear[:2, :2])
               and close(direction.get("projection_parameters") or [0.0, 0.0], [pv.get((2, 1), 0.0), pv.get((2, 2), 0.0)])
               and close(direction.get("native_pole_direction"), [wcs.wcs.lonpole, wcs.wcs.latpole]))
 
         # Every channel's frequency, and what the frequencies mean.
         spectral = described.get("spectral") or {}
         world = wcs.pixel_to_world_values(np.zeros(n_freq), np.zeros(n_freq), np.zeros(n_freq), np.arange(n_freq))[3]
-        # astropy gives the FITS frequencies in Hz whatever CUNIT4 says; carta-zarr, in the dataset's unit.
+        # astropy gives the FITS frequencies in Hz whatever CUNIT4 says, and RESTFRQ is in Hz always;
+        # carta-zarr gives both in the dataset's unit.
         try:
-            in_hz = (np.asarray(spectral.get("channel_frequencies"), dtype=float)
-                     * units.Unit(spectral.get("unit", "")).to(units.Hz))
+            hertz = units.Unit(spectral.get("unit", "")).to(units.Hz)
         except (TypeError, ValueError):
-            in_hz = None
-        check("frequency of every channel", close(in_hz, world))
-        check("frequency unit, frame and rest frequency",
-              spectral.get("unit") == header.get("CUNIT4") and spectral.get("system", "").upper() == str(header.get("SPECSYS", "")).upper()
-              and "RESTFRQ" in header and close(spectral.get("rest_frequency"), header["RESTFRQ"], 1e-12))
-        codes = wcs.wcs.crval[2] + wcs.wcs.cdelt[2] * (np.arange(n_pol) + 1 - wcs.wcs.crpix[2])
+            hertz = math.nan
+        check("frequency of every channel", close(np.asarray(spectral.get("channel_frequencies"), dtype=float) * hertz, world))
+        # The linear axis carta-backend builds when carta-zarr gives one, rather than the table.
+        if spectral.get("reference_pixel") is not None:
+            fitted = spectral["reference_value"] + (np.arange(n_freq) + 1 - spectral["reference_pixel"]) * spectral["increment"]
+            check("frequency axis as carta-backend builds it", close(fitted * hertz, world))
+        check("frequency frame and rest frequency",
+              math.isfinite(hertz) and spectral.get("system", "").upper() == str(header.get("SPECSYS", "")).upper()
+              and "RESTFRQ" in header and spectral.get("rest_frequency") is not None
+              and close(spectral["rest_frequency"] * hertz, header["RESTFRQ"], 1e-12))
+        codes = wcs.wcs.crval[2] + linear[2, 2] * (np.arange(n_pol) + 1 - wcs.wcs.crpix[2])
         check("polarization", described.get("polarization") == [STOKES.get(int(round(code)), "?") for code in codes])
 
         # The time axis and the observation date, which carta-zarr takes from different places.

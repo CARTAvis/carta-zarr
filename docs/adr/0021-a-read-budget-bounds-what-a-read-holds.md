@@ -65,8 +65,13 @@ can be.
   each piece waiting on its slowest chunk. One the budget affords fewer is cut to them, and a watched
   read is always cut to the chunks its budget affords, so that it has pieces to report. The bound
   takes the I/O threads to be no more than the decode threads, as carta-backend's two are against
-  its decode threads: each I/O thread can hold one chunk's compressed bytes ahead of the decoders, so
-  a context with many more of them holds that much more than a read's budget says.
+  its decode threads: the I/O threads read compressed chunks ahead of the decoders, so a context with
+  many more of them holds more than a read's budget says. On the 28-thread machine, one unwatched
+  read of 16 and then 128 whole planes of the 7763 x 4742 test cube in 256 x 256 x 16 chunks held,
+  beside its destination, 257 and 314 MiB with two I/O threads and no cache (dev: 208 and 243 MiB,
+  at the same speed; watched, about 20 MiB more) -- and 1.1 and 3.0 GiB
+  with TensorStore's default I/O concurrency, which dev held alike (1.1 and 3.0 GiB): the growth is
+  the read-ahead's, not the budget's, and comes in a context that leaves its I/O threads unset.
 - **A piece too large at one chunk deep is read in segments**, cut along the axes below the piece's
   down to a single chunk, each gathered in a buffer of the library's and put in place. Progress is
   still reported a piece at a time, so the finished part stays a prefix, which carta-backend's cursor

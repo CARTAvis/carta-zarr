@@ -260,36 +260,45 @@ void TestASplitReadAgreesWithAnUnsplitOne() {
     Require(split == whole, "a split read and an unsplit one disagreed about the same cube");
 }
 
-// Whether a read is watched is what decides whether a budget that affords a chunk for every decode
-// thread cuts it: TensorStore decodes no more than that at once, so a read nobody watches is issued
-// whole, and a watched one is cut so that there is a piece to report. The budget here affords one
-// chunk row, eight chunks, and four decode threads are fewer than that -- so the same read is one
-// piece unwatched, three watched; with sixteen threads, more than the row, it is three either way.
-// Checked through ReadInPieces and PrefetchChunks rather than the plan alone, because it is whether
-// the caller's callback reaches the plan as "watched" that a slip would break.
-void TestOnlyAWatchedReadIsCutWhileItsChunksInFlightFit() {
+// A read nobody watches is cut into layers of its chunks -- a chunk deep along the spectral axis and
+// the whole plane -- once its budget affords a chunk for every decode thread: no finer, because a
+// piece spanning part of the plane is gathered in segments, and no coarser, because what a read holds
+// beyond that grows with its extent. A layer here is eight chunks; the budget affords four, as many
+// as the decode threads. So the cube's three layers are three reads unwatched; watched, or with more
+// threads than the budget affords chunks, the read is cut to its budget, each layer in segments.
+// Checked through ReadInPieces and PrefetchChunks, because it is whether the caller's callback
+// reaches the plan as "watched" that a slip would break.
+void TestAReadNobodyWatchesIsCutIntoLayers() {
     const auto image = MakeImage();
     const auto geometry = MakeGeometry();
-    constexpr std::size_t kFewerThreadsThanTheRow = 4;
+    constexpr std::size_t kAsManyThreadsAsTheBudgetAffords = 4;
+    constexpr std::size_t kLayerElements = static_cast<std::size_t>(kX * kY * 2);
     ReadOptions options;
-    options.read_budget_bytes = kThreePieces;
+    options.read_budget_bytes = kThreePieces / 2;
     const ProgressCallback watching = [](std::size_t, std::size_t) { return true; };
 
-    const auto pieces = [&](std::size_t threads, const ProgressCallback& progress) {
+    const auto reads = [&](const ReadRequest& request, std::size_t threads, const ProgressCallback& progress) {
         SyntheticPixelSource source(image, geometry, Value);
         std::vector<float> destination(kElements, kUntouched);
         const auto read =
-            ReadInPieces(source, image, geometry, geometry, WholeCube(),
+            ReadInPieces(source, image, geometry, geometry, request,
                          BufferView<float>{destination.data(), destination.size()}, options, threads, progress);
         Require(static_cast<bool>(read), "the read failed");
-        RequireCubeMatchesTheFormula(destination, "a read cut or not by whether it is watched");
+        if (request.axes.at(2).count == kZ) {
+            RequireCubeMatchesTheFormula(destination, "a read cut into layers or to its budget");
+        }
         return source.pixel_reads();
     };
-    Require(pieces(kFewerThreadsThanTheRow, ProgressCallback{}) == 1,
-            "a read nobody watches was cut though its chunks in flight fit the budget");
-    Require(pieces(kFewerThreadsThanTheRow, watching) == 3, "a watched read was not cut into pieces to report");
-    Require(pieces(kDecodeThreads, ProgressCallback{}) == 3,
-            "a read nobody watches was not cut though more chunks are in flight than the budget affords");
+    ReadRequest one_layer = WholeCube();
+    one_layer.axes.at(2).count = 2;
+    Require(reads(WholeCube(), kAsManyThreadsAsTheBudgetAffords, ProgressCallback{}) == 3,
+            "a read nobody watches was not cut into its three layers, a read each");
+    Require(reads(one_layer, kAsManyThreadsAsTheBudgetAffords, ProgressCallback{}) == 1,
+            "a read nobody watches of one layer was cut, though its budget affords a chunk a thread");
+    Require(reads(WholeCube(), kAsManyThreadsAsTheBudgetAffords, watching) > 3,
+            "a watched read was not cut to its budget");
+    Require(reads(WholeCube(), kDecodeThreads, ProgressCallback{}) > 3,
+            "a read nobody watches was not cut to its budget though it affords fewer chunks than threads");
 
     const auto prefetch_reads = [&](std::size_t threads) {
         SyntheticPixelSource source(image, geometry, Value);
@@ -297,59 +306,24 @@ void TestOnlyAWatchedReadIsCutWhileItsChunksInFlightFit() {
                 "the prefetch failed");
         return source.pixel_reads();
     };
-    Require(prefetch_reads(kFewerThreadsThanTheRow) == 1,
-            "a prefetch was cut though its chunks in flight fit the budget");
-    Require(prefetch_reads(kDecodeThreads) > 1, "a prefetch was not cut though it holds more than the budget affords");
-}
+    Require(prefetch_reads(kAsManyThreadsAsTheBudgetAffords) == 3, "a prefetch was not cut into its layers");
+    Require(prefetch_reads(kDecodeThreads) > 3, "a prefetch was not cut to its budget");
 
-// A read nobody watches is issued whole while its chunks in flight fit the budget -- but the flag it
-// folds in is allocated for its whole extent, a byte an element, so a masked one is still cut where
-// that would outgrow what the chunks in flight leave. Here a masked chunk holds 10,240 bytes and its
-// flag 640, so at five decode threads the budget of 61,440 leaves 10,240 for the flag: sixteen chunks,
-// two of the cube's three layers. Unmasked, the same read is one piece.
-void TestAWholeReadIsCutWhereItsFlagWouldOutgrowTheBudget() {
-    const auto image = MakeImage(true);
-    const auto geometry = MakeGeometry();
-    constexpr std::size_t kFiveThreads = 5;
-    ReadOptions options;
-    options.read_budget_bytes = kThreePieces;
-
-    SyntheticPixelSource source(image, geometry, Value);
+    // The flag it folds in is a layer's, not the whole read's. A masked chunk holds 10,240 bytes, so the
+    // same budget affords three, and three threads.
+    const auto flagged = MakeImage(true);
+    SyntheticPixelSource source(flagged, geometry, Value);
     source.set_flags([](const std::vector<std::uint64_t>& logical) { return logical.at(0) % 2 == 0; });
     std::vector<float> destination(kElements, kUntouched);
-    Require(static_cast<bool>(ReadInPieces(source, image, geometry, geometry, WholeCube(),
-                                           BufferView<float>{destination.data(), destination.size()}, options,
-                                           kFiveThreads, ProgressCallback{})),
-            "a masked read nobody watches failed");
-    Require(source.pixel_reads() == 2, "a masked read nobody watches was not cut where its flag outgrew the budget");
-    for (const auto size : source.mask_destinations()) {
-        Require(size <= options.read_budget_bytes, "a read folded in a flag of " + std::to_string(size) +
-                                                       " bytes against a budget of " +
-                                                       std::to_string(options.read_budget_bytes));
-    }
-
-    SyntheticPixelSource reference(image, geometry, Value);
-    reference.set_flags([](const std::vector<std::uint64_t>& logical) { return logical.at(0) % 2 == 0; });
-    std::vector<float> expected(kElements, kUntouched);
-    Require(static_cast<bool>(ReadInPieces(reference, image, geometry, geometry, WholeCube(),
-                                           BufferView<float>{expected.data(), expected.size()}, options, kDecodeThreads,
+    Require(static_cast<bool>(ReadInPieces(source, flagged, geometry, geometry, WholeCube(),
+                                           BufferView<float>{destination.data(), destination.size()}, options, 3,
                                            ProgressCallback{})),
-            "the reference read failed");
-    for (std::size_t i = 0; i < kElements; ++i) {
-        const bool both_nan = destination.at(i) != destination.at(i) && expected.at(i) != expected.at(i);
-        Require(both_nan || destination.at(i) == expected.at(i),
-                "a read cut by its flag disagreed with one cut by its budget");
+            "a masked read nobody watches failed");
+    Require(source.pixel_reads() == 3, "a masked read nobody watches was not cut into its layers");
+    for (const auto size : source.mask_destinations()) {
+        Require(size <= kLayerElements, "a read folded in a flag of " + std::to_string(size) +
+                                            " bytes, more than a layer's " + std::to_string(kLayerElements));
     }
-
-    ReadOptions unmasked = options;
-    unmasked.apply_pixel_mask = false;
-    SyntheticPixelSource plain(image, geometry, Value);
-    std::vector<float> whole(kElements, kUntouched);
-    Require(static_cast<bool>(ReadInPieces(plain, image, geometry, geometry, WholeCube(),
-                                           BufferView<float>{whole.data(), whole.size()}, unmasked, kFiveThreads,
-                                           ProgressCallback{})) &&
-                plain.pixel_reads() == 1,
-            "an unmasked read nobody watches was cut though nothing it holds grows with it");
 }
 
 // What crosses the seam is the caller's buffer from where a piece lands to its end, not the piece's
@@ -575,8 +549,7 @@ int main() {
         TestProgressCanStopTheRead();
         TestASplitReadAgreesWithAnUnsplitOne();
         TestEachPieceIsHandedTheRestOfTheBuffer();
-        TestOnlyAWatchedReadIsCutWhileItsChunksInFlightFit();
-        TestAWholeReadIsCutWhereItsFlagWouldOutgrowTheBudget();
+        TestAReadNobodyWatchesIsCutIntoLayers();
         TestAFlaggedPixelArrivesAsNaN();
         TestDecliningTheMaskReadsNoFlag();
         TestASampleTakesOneElementOfEachChunk();

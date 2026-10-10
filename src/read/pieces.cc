@@ -110,6 +110,19 @@ void Segment(const ChunkGeometry& geometry, const ReadRequest& request, std::uin
     });
 }
 
+// The first layer of a request's chunks: a single index along every axis but the sky's, so a chunk
+// deep along each, and the whole of the request across the sky plane.
+ReadRequest OneLayer(const ImageDescriptor& descriptor, const ReadRequest& request) {
+    ReadRequest layer = request;
+    for (std::size_t axis = 0; axis < layer.axes.size() && axis < descriptor.axes.size(); ++axis) {
+        const auto role = descriptor.axes.at(axis).role;
+        if (role != AxisRole::spatial_x && role != AxisRole::spatial_y) {
+            layer.axes.at(axis).count = std::min<std::uint64_t>(layer.axes.at(axis).count, 1);
+        }
+    }
+    return layer;
+}
+
 }  // namespace
 
 std::vector<Piece> PlanPieces(const ImageDescriptor& descriptor, const ChunkGeometry& geometry,
@@ -126,18 +139,17 @@ std::vector<Piece> PlanPieces(const ImageDescriptor& descriptor, const ChunkGeom
     // when the library holds each part's pixels itself.
     const auto cost = ReadCost::Of(descriptor, geometry, flag_geometry, options, PixelsHeld::by_caller, decode_threads);
     auto affordable = std::max<std::uint64_t>(1, cost.ChunksPerRead(PixelsHeld::by_caller));
-    // TensorStore decodes no more chunks at once than the context has decode threads, so a read holds
-    // what that many chunks hold however many it asks for. One the budget affords that many of has
-    // nothing to gain from being cut -- a plane of 4 MiB chunks read whole held 80 MiB beside its
-    // destination, and cut into pieces it ran half as fast again -- unless a caller is watching it,
-    // and then it is cut so that there is a piece to report.
-    // The flag a read folds in is the one thing it holds for its whole extent, so a read issued whole
-    // is still cut where its flag would outgrow what the chunks in flight leave of the budget.
-    // Affording the whole request is said as exactly that many chunks, not as an unbounded count that
-    // would only stay correct as long as no arithmetic downstream overflowed on it.
+    // A read nobody watches is cut into layers of its chunks -- a chunk deep along the spectral,
+    // polarization and time axes, and the whole of its sky plane -- or into what its budget affords,
+    // when that is more. No finer: a piece that spans the plane's chunks only in part is gathered in
+    // segments and copied into place, which ran a quarter to two thirds slower. And no coarser: what a
+    // read holds grows with its extent beyond a layer -- the folded-in flag, a byte an element, and,
+    // when the decode threads fall behind the I/O, the compressed chunks queued for them (9 GiB beside
+    // 128 planes of the 7763 x 4742 test cube on four threads). A watched read is cut to its budget,
+    // so that it has pieces to report.
     if (!reports_progress && affordable >= std::max<std::size_t>(1, decode_threads)) {
-        affordable = std::max<std::uint64_t>(
-            affordable, std::min(ChunksOf(geometry, request), cost.ChunksReadWhole(decode_threads)));
+        affordable = std::max(affordable,
+                              std::min(ChunksOf(geometry, request), ChunksOf(geometry, OneLayer(descriptor, request))));
     }
     const auto gathered = std::max<std::uint64_t>(1, cost.ChunksPerRead(PixelsHeld::by_library));
 

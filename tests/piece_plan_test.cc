@@ -167,29 +167,44 @@ void TestAWatchedReadIsCutToItsBudget() {
             "a read with a memory ceiling was not cut");
 }
 
-// A read nobody watches holds the chunks TensorStore decodes at once, no more than one a decode
-// thread, so it is cut only when the budget affords fewer chunks than that.
-void TestAnUnwatchedReadIsCutOnlyPastWhatIsInFlight() {
-    const auto unwatched = [](const ImageDescriptor& image, const ChunkGeometry& geometry, const ReadOptions& options) {
-        return PlanPieces(image, geometry, geometry, WholeImage(image), options, kDecodeThreads, false);
+// A read nobody watches whose budget affords a chunk a decode thread is cut into layers of its
+// chunks, a chunk deep along the spectral axis and the whole plane, or into what its budget affords
+// when that is more -- never into segments of a layer, and never whole past its budget.
+void TestAnUnwatchedReadIsCutIntoLayersOrItsBudget() {
+    const auto unwatched = [](const ImageDescriptor& image, const ChunkGeometry& geometry, const ReadOptions& options,
+                              std::size_t threads) {
+        return PlanPieces(image, geometry, geometry, WholeImage(image), options, threads, false);
     };
-    // Chunks of 32 x 64 float32 decode to 8 KiB and hold 24 KiB.
-    const auto geometry = MakeGeometry(32, 64, 1);
-    const auto large = MakeImage(64, 64, 8192);
-    Require(unwatched(large, geometry, ReadOptions{}).size() == 1,
-            "an unwatched read whose budget affords a chunk a decode thread was cut");
+    const auto no_segments = [](const std::vector<Piece>& pieces) {
+        for (const auto& piece : pieces) {
+            if (!piece.segments.empty()) {
+                return false;
+            }
+        }
+        return true;
+    };
 
+    // Chunks of 16 x 16 float32 decode to 1 KiB and hold 3 KiB; a plane of 64 x 64 is sixteen of them.
     const auto image = MakeImage(64, 64, 8);
-    ReadOptions enough;
-    enough.read_budget_bytes = kDecodeThreads * 24 * 1024;
-    Require(unwatched(image, geometry, enough).size() == 1,
-            "a budget of exactly a chunk a decode thread holds every chunk in flight, and was cut");
+    const auto geometry = MakeGeometry(16, 16, 1);
+    ReadOptions four;
+    four.read_budget_bytes = 4 * 3 * 1024;
+    const auto layers = unwatched(image, geometry, four, 4);
+    Require(layers.size() == 8 && no_segments(layers),
+            "an unwatched read whose budget affords a chunk a thread was not cut into its eight layers");
+    RequireTheyFillTheDestination(layers, WholeImage(image), "an unwatched read cut into layers");
+    const auto watched = PlanPieces(image, geometry, geometry, WholeImage(image), four, 4, true);
+    Require(!no_segments(watched), "a watched read was not cut to its budget, into segments of each layer");
+    Require(!no_segments(unwatched(image, geometry, four, 5)),
+            "an unwatched read whose budget affords fewer chunks than threads was not cut to its budget");
 
-    ReadOptions short_of_it;
-    short_of_it.read_budget_bytes = enough.read_budget_bytes - 1;
-    const auto cut = unwatched(image, geometry, short_of_it);
-    Require(cut.size() > 1, "an unwatched read whose budget affords fewer chunks than decode threads was not cut");
-    RequireTheyFillTheDestination(cut, WholeImage(image), "an unwatched read cut short of its decode threads");
+    ReadOptions all;
+    all.read_budget_bytes = 128 * 3 * 1024;
+    Require(unwatched(image, geometry, all, 4).size() == 1, "an unwatched read its budget affords whole was cut");
+    ReadOptions half;
+    half.read_budget_bytes = 64 * 3 * 1024;
+    const auto halves = unwatched(image, geometry, half, 4);
+    Require(halves.size() == 2 && no_segments(halves), "an unwatched read was not cut to what its budget affords");
 }
 
 // The cut goes on the slowest-varying axis that selects more than one element, because the
@@ -454,7 +469,7 @@ int main() {
     try {
         TestAReadThatFitsIsOnePiece();
         TestAWatchedReadIsCutToItsBudget();
-        TestAnUnwatchedReadIsCutOnlyPastWhatIsInFlight();
+        TestAnUnwatchedReadIsCutIntoLayersOrItsBudget();
         TestTheCutGoesOnTheSlowestSelectedAxis();
         TestAReadWithNowhereToCutIsOnePiece();
         TestATighterCeilingBuysFewerChunks();

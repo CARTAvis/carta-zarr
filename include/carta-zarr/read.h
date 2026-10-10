@@ -92,10 +92,11 @@ private:
 /// cube histogram through a CubeHistogramProgressCallback of its own. As a field it would be one the
 /// other entry points silently ignored; as an argument it is simply not part of what they take.
 ///
-/// Supplying one can cut a read that would otherwise be issued whole: a read nobody watches is not
-/// cut while the chunks decoded at once, no more than one a decode thread, fit its budget, and one that
-/// is watched is cut to the chunks the budget affords so that there is a piece to report. On large
-/// chunks the two are cut alike; on small ones the watched read is somewhat slower.
+/// Supplying one can cut a read finer: a read nobody watches is cut into layers of its chunks -- a
+/// chunk deep along the spectral axis and the whole of its plane -- when its budget affords a chunk a
+/// decode thread, and one that is watched is cut to the chunks the budget affords so that there is a
+/// piece to report. On large chunks the two are cut alike; on small ones the watched read is somewhat
+/// slower.
 using ProgressCallback = std::function<bool(std::size_t elements_written, std::size_t elements_total)>;
 
 // What a read is allowed to do while it runs, whatever it is reading for.

@@ -58,20 +58,28 @@ can be.
   64 MiB chunks above ran 2.4 times slower. 256 MiB keeps small chunks to at least sixty-four a read,
   as before; 2 GiB holds the 64 MiB chunks above to about ten on twenty-eight threads, which trades
   some of their speed for the bound.
-- **Every read is held to its budget**, the caller's or the library's, whether or not it is watched.
-  TensorStore decodes no more chunks at once than the context has decode threads, so a read holds at
-  most one chunk a thread however many it asks for. A read nobody watches whose budget affords that
-  many is issued whole: cut into pieces, a plane of 4 MiB chunks held no less and ran 40 % slower,
-  each piece waiting on its slowest chunk. One the budget affords fewer is cut to them, and a watched
-  read is always cut to the chunks its budget affords, so that it has pieces to report. The bound
-  takes the I/O threads to be no more than the decode threads, as carta-backend's two are against
-  its decode threads: the I/O threads read compressed chunks ahead of the decoders, so a context with
-  many more of them holds more than a read's budget says. On the 28-thread machine, one unwatched
-  read of 16 and then 128 whole planes of the 7763 x 4742 test cube in 256 x 256 x 16 chunks held,
-  beside its destination, 257 and 314 MiB with two I/O threads and no cache (dev: 208 and 243 MiB,
-  at the same speed; watched, about 20 MiB more) -- and 1.1 and 3.0 GiB
-  with TensorStore's default I/O concurrency, which dev held alike (1.1 and 3.0 GiB): the growth is
-  the read-ahead's, not the budget's, and comes in a context that leaves its I/O threads unset.
+- **Every read is held to its budget**, the caller's or the library's, whether or not it is watched,
+  in pieces of at most what the budget affords -- with one exception, below. A read is not a fixed
+  number of chunks in flight however large it is: TensorStore decodes no more at once than the
+  context has decode threads, but it reads every chunk the request spans as fast as its I/O threads
+  allow, and when the decoders fall behind the compressed chunks queue for them. On the 28-thread
+  machine, one unwatched read of 128 whole planes of the 7763 x 4742 test cube in 256 x 256 x 16
+  chunks, issued whole with two I/O threads and no cache, held beside its destination 292 MiB on
+  twenty-eight decode threads, 5.1 GiB on four and 9.6 GiB on one -- dev alike -- and 4.7 to 9.2 GiB
+  with a flag, whose folded-in mask is a byte an element of the whole read. With the I/O threads left
+  to TensorStore's default the queue grows on twenty-eight threads too (3.0 GiB).
+- **A read nobody watches is cut into layers of its chunks**, a chunk deep along the spectral,
+  polarization and time axes and the whole of its sky plane, when its budget affords a chunk for
+  every decode thread and fewer than a layer. That is the exception: a layer of the test cube is 589
+  chunks, more than any default budget affords, and cut finer each piece spans the plane's chunks only
+  in part and is gathered in segments (below), which ran the 128-plane read 25-65 % slower (9.0 s
+  against 7.0 s on twenty-eight threads, 12.4 s against 7.5 s on four). In layers it ran as fast as
+  issued whole and held 277 MiB on twenty-eight threads and 960 MiB on four -- 0.8 and 2.0 GiB with
+  the flag -- bounded by the plane and the chunk depth rather than by the read's extent. A plane is
+  one layer and is read whole, as before, at the same speed. A watched read is always cut to its
+  budget, so that it has pieces to report. Reading segments straight into the destination rather
+  than gathering them would let a layer be cut to the budget at no cost, and is left to a later
+  change.
 - **A piece too large at one chunk deep is read in segments**, cut along the axes below the piece's
   down to a single chunk, each gathered in a buffer of the library's and put in place. Progress is
   still reported a piece at a time, so the finished part stays a prefix, which carta-backend's cursor

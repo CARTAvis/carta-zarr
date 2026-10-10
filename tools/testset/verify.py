@@ -266,8 +266,10 @@ def main() -> int:
                 where = first_difference(expected_pixels.view(np.uint32), stored.view(np.uint32))
                 first_pixels = None if where is None else (start + where[0], *where[1:])
             if flag is not None and first_masked is None:
-                # NaN where the FITS cube is NaN, and the stored pixel everywhere else.
-                where = first_difference(np.isnan(applied) | (applied != stored), np.isnan(expected_pixels))
+                # NaN where the FITS cube is NaN, and the stored pixel, bit for bit, everywhere else.
+                nan = np.isnan(applied)
+                wrong = (nan != np.isnan(expected_pixels)) | (~nan & (applied.view(np.uint32) != stored.view(np.uint32)))
+                where = first_difference(wrong, np.zeros_like(wrong))
                 first_masked = None if where is None else (start + where[0], *where[1:])
             if flag is not None and first_flag is None:
                 where = first_difference(logical(flag, start, stop).astype(bool), np.isnan(expected_pixels))

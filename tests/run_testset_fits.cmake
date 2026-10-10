@@ -383,6 +383,25 @@ sharded_flag(flag_across "('outer', 32, 16)" "('outer', 16, 32)")
 refused("a flag sharded after a transpose in other chunks than SKY's" "${OUTPUT_DIR}/cube.fits"
         "${OUTPUT_DIR}/flag_across.zarr" --flag yes --chunks 32,16,8 --shards 64,64,8)
 
+# A carta-zarr that applied the mask wrongly -- one masked NaN read back as a finite value -- must be
+# caught by the masked comparison, which only a stand-in for the bench can make happen.
+file(WRITE "${OUTPUT_DIR}/misapplied.py" "import subprocess, sys
+import numpy as np
+result = subprocess.run(['${BENCH}'] + sys.argv[1:], capture_output=True)
+out = result.stdout
+if sys.argv[1] == 'pixels' and '--unmasked' not in sys.argv and not result.returncode:
+    pixels = np.frombuffer(out, dtype=np.float32).copy()
+    pixels[np.flatnonzero(np.isnan(pixels))[0]] = 123.0
+    out = pixels.tobytes()
+sys.stdout.buffer.write(out)
+sys.stderr.buffer.write(result.stderr)
+sys.exit(result.returncode)
+")
+file(WRITE "${OUTPUT_DIR}/misapplied.sh" "#!/bin/sh\nexec \"${UV}\" run --quiet --no-project --python-preference only-managed --with numpy==2.3.1 python \"${OUTPUT_DIR}/misapplied.py\" \"$@\"\n")
+file(CHMOD "${OUTPUT_DIR}/misapplied.sh" PERMISSIONS OWNER_READ OWNER_WRITE OWNER_EXECUTE)
+refused("a pixel mask applied where the FITS cube is not NaN" "${OUTPUT_DIR}/cube.fits" "${OUTPUT_DIR}/flagged.zarr" --flag yes
+        --chunks 32,32,8 --bench "${OUTPUT_DIR}/misapplied.sh")
+
 with_flag(untyped False False)
 refused("a flag carta-zarr would not apply" "${OUTPUT_DIR}/cube.fits" "${OUTPUT_DIR}/untyped.zarr" --flag yes --chunks 32,32,8)
 run("verify.py beside a flag carta-zarr ignores" "${SOURCE_DIR}/tools/testset/verify.py" "${OUTPUT_DIR}/cube.fits"
@@ -501,6 +520,13 @@ foreach(name rotated equinox observer pole tan)
     run("verify.py ${name} against its own FITS file" "${SOURCE_DIR}/tools/testset/verify.py" "${OUTPUT_DIR}/${name}.fits"
         "${OUTPUT_DIR}/${name}.zarr" --flag no --chunks 32,32,8)
 endforeach()
+# As many channels as the cigar has, evenly spaced: the increment taken from the first two would be off
+# by their rounding 30,000 times over, and the cigar refused.
+run("generate.py long" "${SOURCE_DIR}/tools/zarr-bench/generate.py" --synthetic --shape frequency=30000,polarization=1,l=8,m=8
+    --chunk l=8,m=8,frequency=1000 --workers 1 --output "${OUTPUT_DIR}/long.zarr")
+run("zarr-to-fits.py long" "${SOURCE_DIR}/tools/testset/zarr-to-fits.py" "${OUTPUT_DIR}/long.zarr" "${OUTPUT_DIR}/long.fits")
+run("verify.py long" "${SOURCE_DIR}/tools/testset/verify.py" "${OUTPUT_DIR}/long.fits" "${OUTPUT_DIR}/long.zarr" --flag no
+    --chunks 8,8,1000)
 foreach(case "middle|evenly spaced" "widebeam|plane to plane")
     string(REPLACE "|" ";" case "${case}")
     list(GET case 0 name)

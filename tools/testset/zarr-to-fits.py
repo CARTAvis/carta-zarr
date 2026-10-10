@@ -131,7 +131,9 @@ def header_of(root: Path, image: str, sky: Any, described: dict[str, Any]) -> fi
     header["CUNIT3"] = ""
 
     frequencies = np.asarray(spectral["channel_frequencies"], dtype=float)
-    step = float(frequencies[1] - frequencies[0]) if n_freq > 1 else 1.0
+    # The increment over the whole axis: one taken from the first two channels is off by their rounding,
+    # which 30,000 channels multiply past any tolerance.
+    step = float(frequencies[-1] - frequencies[0]) / (n_freq - 1) if n_freq > 1 else 1.0
     if not np.allclose(frequencies, frequencies[0] + step * np.arange(n_freq), rtol=1e-12, atol=0):
         raise SystemExit(f"{image}'s channels are not evenly spaced in frequency, which a FITS axis cannot hold")
     header["CTYPE4"] = "FREQ"

@@ -155,6 +155,10 @@ def header_of(root: Path, image: str, sky: Any, described: dict[str, Any]) -> fi
     # a FITS file, which has only the one.
     observation, temporal = meaning.get("observation") or {}, meaning.get("temporal") or {}
     observed = observation.get("mjd_obs")
+    scales = {str(observation.get("timesys", "")).upper(), str(temporal.get("scale", "")).upper()}
+    if scales != {"UTC"}:
+        raise SystemExit(f"{image}'s observation is in {' and '.join(sorted(scales))}; this writes UTC, and a date "
+                         "in another scale would be written as the wrong instant")
     if observed is None or temporal.get("values") != [observed]:
         raise SystemExit(f"{image}'s observation date {observed} is not the one time on its time axis "
                          f"{temporal.get('values')}")

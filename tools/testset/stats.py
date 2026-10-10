@@ -57,8 +57,10 @@ def compression(array: Path) -> float | None:
     sharding = next((codec["configuration"] for codec in metadata.get("codecs", [])
                      if codec.get("name") == "sharding_indexed"), None)
     decoded = stored = 0
-    for entry in (array / "c").rglob("*"):
-        if not entry.is_file():
+    # Every file of the array but its metadata is a chunk or a shard, however chunk_key_encoding names
+    # them: c/0/0, c.0.0, 0.0 or 0/0.
+    for entry in array.rglob("*"):
+        if not entry.is_file() or entry == array / "zarr.json" or entry.name.startswith("."):
             continue
         stored += entry.stat().st_size
         if sharding is None:

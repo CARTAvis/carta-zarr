@@ -479,7 +479,13 @@ sparse[:4] = 1.0
 assert stats.compression(root / 'sparse') == 16 / 52, stats.compression(root / 'sparse')
 # Nothing on disk at all, as a cube flagged whole leaves: no ratio to give, rather than a division by zero.
 zarr.create_array(str(root / 'empty'), shape=(20,), chunks=(4,), dtype='float32', compressors=None, fill_value=np.nan)
-assert stats.compression(root / 'empty') is None"
+assert stats.compression(root / 'empty') is None
+# The same chunks named by the other encodings, c.0 and 0, are found as well.
+for name, encoding in (('dotted', {'name': 'default', 'separator': '.'}), ('v2', {'name': 'v2', 'separator': '.'})):
+    other = zarr.create_array(str(root / name), shape=(5,), chunks=(4,), dtype='float32', compressors=None, fill_value=np.nan,
+                              chunk_key_encoding=encoding)
+    other[:] = 1.0
+    assert stats.compression(root / name) == 1.0, (name, stats.compression(root / name))"
     RESULT_VARIABLE result OUTPUT_VARIABLE out ERROR_VARIABLE err)
 if(result)
     message(FATAL_ERROR "stats.py compression failed: ${result}\n${out}\n${err}")
@@ -514,7 +520,7 @@ endif()
 # zarr-to-fits.py writes the coordinates carta-zarr reads, whatever they are, so the FITS file it writes
 # of a rotated, B1950, barycentric or otherwise unusual dataset verifies against that dataset; and it
 # refuses one a FITS header cannot hold.
-foreach(name rotated equinox observer pole tan)
+foreach(name rotated equinox observer pole tan gigahertz)
     run("zarr-to-fits.py ${name}" "${SOURCE_DIR}/tools/testset/zarr-to-fits.py" "${OUTPUT_DIR}/${name}.zarr"
         "${OUTPUT_DIR}/${name}.fits" --block-mib 1)
     run("verify.py ${name} against its own FITS file" "${SOURCE_DIR}/tools/testset/verify.py" "${OUTPUT_DIR}/${name}.fits"
@@ -527,7 +533,13 @@ run("generate.py long" "${SOURCE_DIR}/tools/zarr-bench/generate.py" --synthetic 
 run("zarr-to-fits.py long" "${SOURCE_DIR}/tools/testset/zarr-to-fits.py" "${OUTPUT_DIR}/long.zarr" "${OUTPUT_DIR}/long.fits")
 run("verify.py long" "${SOURCE_DIR}/tools/testset/verify.py" "${OUTPUT_DIR}/long.fits" "${OUTPUT_DIR}/long.zarr" --flag no
     --chunks 8,8,1000)
-foreach(case "middle|evenly spaced" "widebeam|plane to plane")
+changed(tai "t = zarr.open_array(root + '/time', mode='r+')
+t.attrs['scale'] = 'tai'
+a = zarr.open_array(root + '/SKY', mode='r+')
+date = dict(a.attrs['obsdate'])
+date['attrs'] = dict(date['attrs'], scale='tai')
+a.attrs['obsdate'] = date")
+foreach(case "middle|evenly spaced" "widebeam|plane to plane" "tai|wrong instant")
     string(REPLACE "|" ";" case "${case}")
     list(GET case 0 name)
     list(GET case 1 reason)

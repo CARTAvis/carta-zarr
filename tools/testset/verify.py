@@ -50,6 +50,7 @@ import warnings
 
 import numpy as np
 import zarr
+from astropy import units
 from astropy.io import fits
 from astropy.time import Time
 from astropy.wcs import WCS
@@ -205,7 +206,13 @@ def main() -> int:
         # Every channel's frequency, and what the frequencies mean.
         spectral = described.get("spectral") or {}
         world = wcs.pixel_to_world_values(np.zeros(n_freq), np.zeros(n_freq), np.zeros(n_freq), np.arange(n_freq))[3]
-        check("frequency of every channel", close(spectral.get("channel_frequencies"), world))
+        # astropy gives the FITS frequencies in Hz whatever CUNIT4 says; carta-zarr, in the dataset's unit.
+        try:
+            in_hz = (np.asarray(spectral.get("channel_frequencies"), dtype=float)
+                     * units.Unit(spectral.get("unit", "")).to(units.Hz))
+        except (TypeError, ValueError):
+            in_hz = None
+        check("frequency of every channel", close(in_hz, world))
         check("frequency unit, frame and rest frequency",
               spectral.get("unit") == header.get("CUNIT4") and spectral.get("system", "").upper() == str(header.get("SPECSYS", "")).upper()
               and "RESTFRQ" in header and close(spectral.get("rest_frequency"), header["RESTFRQ"], 1e-12))

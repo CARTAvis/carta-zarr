@@ -307,9 +307,29 @@ fits_variant(cd "for i in range(1, 5):
 for key in ('PC1_1', 'PC1_2', 'PC2_1', 'PC2_2'):
     del header[key]")
 fits_variant(coupled "header['PC1_4'] = 0.1")
+fits_variant(stokes_coupled "header['PC3_4'] = 0.1")
+# The cube's FITS header put in the Galactic frame while still calling its axes RA and Dec.
+fits_variant(radec_galactic "header['RADESYS'] = 'GALACTIC'
+del header['EQUINOX']")
 run("verify.py against a FITS file in CD" "${SOURCE_DIR}/tools/testset/verify.py" "${OUTPUT_DIR}/cd.fits" "${cube}" --flag no
     --chunks 32,32,8)
-refused("a FITS file whose RA moves with frequency" "${OUTPUT_DIR}/coupled.fits" "${cube}" --flag no --chunks 32,32,8)
+refused_for("a FITS file whose RA moves with frequency" "each axis independent" "${OUTPUT_DIR}/coupled.fits" "${cube}"
+            --flag no --chunks 32,32,8)
+refused_for("a FITS file whose Stokes parameter moves with frequency" "each axis independent"
+            "${OUTPUT_DIR}/stokes_coupled.fits" "${cube}" --flag no --chunks 32,32,8)
+# A dataset in the Galactic frame: written with GLON and GLAT it verifies, and the same header calling
+# them RA and Dec does not.
+changed(galactic "meta = json.load(open(root + '/zarr.json'))
+attributes = meta['attributes']['coordinate_system_info']['reference_direction']['attrs']
+attributes['frame'] = 'galactic'
+del attributes['equinox']
+json.dump(meta, open(root + '/zarr.json', 'w'))")
+run("zarr-to-fits.py galactic" "${SOURCE_DIR}/tools/testset/zarr-to-fits.py" "${OUTPUT_DIR}/galactic.zarr"
+    "${OUTPUT_DIR}/galactic.fits")
+run("verify.py galactic against its own FITS file" "${SOURCE_DIR}/tools/testset/verify.py" "${OUTPUT_DIR}/galactic.fits"
+    "${OUTPUT_DIR}/galactic.zarr" --flag no --chunks 32,32,8)
+refused_for("a Galactic dataset against a header calling its axes RA and Dec" "direction coordinate"
+            "${OUTPUT_DIR}/radec_galactic.fits" "${OUTPUT_DIR}/galactic.zarr" --flag no --chunks 32,32,8)
 # A carta-zarr whose linear frequency axis were a channel off -- what carta-backend builds when it is
 # given one -- with the table of frequencies right, which only a stand-in for the bench can make.
 file(WRITE "${OUTPUT_DIR}/misfitted.py" "import json, subprocess, sys
@@ -626,8 +646,10 @@ endforeach()
 run("generate.py long" "${SOURCE_DIR}/tools/zarr-bench/generate.py" --synthetic --shape frequency=30000,polarization=1,l=8,m=8
     --chunk l=8,m=8,frequency=1000 --workers 1 --output "${OUTPUT_DIR}/long.zarr")
 run("zarr-to-fits.py long" "${SOURCE_DIR}/tools/testset/zarr-to-fits.py" "${OUTPUT_DIR}/long.zarr" "${OUTPUT_DIR}/long.fits")
+# A block of 4,096 channels at a time, so that the reads past the first start where the last stopped,
+# as the production cubes' do.
 run("verify.py long" "${SOURCE_DIR}/tools/testset/verify.py" "${OUTPUT_DIR}/long.fits" "${OUTPUT_DIR}/long.zarr" --flag no
-    --chunks 8,8,1000)
+    --chunks 8,8,1000 --block-mib 1)
 changed(tai "t = zarr.open_array(root + '/time', mode='r+')
 t.attrs['scale'] = 'tai'
 a = zarr.open_array(root + '/SKY', mode='r+')

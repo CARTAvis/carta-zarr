@@ -55,6 +55,8 @@ from astropy.time import Time
 
 STOKES_CODE = {"I": 1, "Q": 2, "U": 3, "V": 4}
 SKY_AXES = ["time", "frequency", "polarization", "l", "m"]
+# The FITS axis types of a direction in each frame carta-zarr reports; RADESYS says which equatorial one.
+CELESTIAL = {"ICRS": ("RA", "DEC"), "FK5": ("RA", "DEC"), "FK4": ("RA", "DEC"), "GALACTIC": ("GLON", "GLAT")}
 
 
 def metadata(path: Path) -> dict[str, Any]:
@@ -111,8 +113,11 @@ def header_of(root: Path, image: str, sky: Any, described: dict[str, Any]) -> fi
     header["BUNIT"] = meaning["unit"]
     header["OBJECT"] = sky.attrs.get("object_name", "")
     projection = direction["projection"]
-    for axis, ctype in ((1, "RA---"), (2, "DEC--")):
-        header[f"CTYPE{axis}"] = ctype + projection
+    frame = direction["reference_frame"].upper()
+    if frame not in CELESTIAL:
+        raise SystemExit(f"{image}'s direction is in the {frame} frame, which this does not write")
+    for axis, ctype in ((1, CELESTIAL[frame][0]), (2, CELESTIAL[frame][1])):
+        header[f"CTYPE{axis}"] = ctype.ljust(5, "-") + projection
         header[f"CRVAL{axis}"] = direction["reference_value"][axis - 1]
         header[f"CDELT{axis}"] = direction["increment"][axis - 1]
         header[f"CRPIX{axis}"] = direction["reference_pixel"][axis - 1]
@@ -143,9 +148,10 @@ def header_of(root: Path, image: str, sky: Any, described: dict[str, Any]) -> fi
     header["CRPIX4"] = 1.0
     header["CUNIT4"] = spectral["unit"]
 
-    header["RADESYS"] = direction["reference_frame"]
-    if direction.get("equinox") is not None:
-        header["EQUINOX"] = direction["equinox"]
+    if frame != "GALACTIC":
+        header["RADESYS"] = direction["reference_frame"]
+        if direction.get("equinox") is not None:
+            header["EQUINOX"] = direction["equinox"]
     header["LONPOLE"], header["LATPOLE"] = direction["native_pole_direction"]
     header["PV2_1"], header["PV2_2"] = direction.get("projection_parameters") or [0.0, 0.0]
     header["SPECSYS"] = spectral["system"]

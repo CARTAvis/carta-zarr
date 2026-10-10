@@ -56,6 +56,8 @@ from astropy.time import Time
 from astropy.wcs import WCS
 
 STOKES = {1: "I", 2: "Q", 3: "U", 4: "V"}
+# The FITS axis types of a direction in each frame carta-zarr reports.
+CELESTIAL = {"ICRS": ("RA", "DEC"), "FK5": ("RA", "DEC"), "FK4": ("RA", "DEC"), "GALACTIC": ("GLON", "GLAT")}
 
 
 def first_difference(a: np.ndarray, b: np.ndarray) -> tuple[int, ...] | None:
@@ -190,15 +192,20 @@ def main() -> int:
 
         # The direction coordinate carta-zarr builds, against the FITS file's own.
         direction = described.get("direction") or {}
+        frame = str(direction.get("reference_frame", "")).upper()
         pv = {(i, m): value for i, m, value in wcs.wcs.get_pv()}
         # The linear part of the FITS WCS whole, increment times matrix, so that CDELT and PC, or CD,
         # alike describe it; carta-zarr's direction is the sky axes' alone, so a FITS file whose sky
         # axes mix with the others -- PC1_4, say -- means something it cannot, and is refused.
         linear = np.diag(wcs.wcs.get_cdelt()) @ wcs.wcs.get_pc()
-        check("sky axes independent of the others", not linear[:2, 2:].any() and not linear[2:, :2].any())
+        # Nor can its Stokes or frequency axis vary along any other: Stokes I in every channel is not
+        # Stokes I in the first and V by the thirtieth.
+        check("each axis independent of the others but l and m of each other",
+              not linear[:2, 2:].any() and not linear[2:, :2].any() and linear[2, 3] == 0 and linear[3, 2] == 0)
         check("direction coordinate",
               direction.get("projection") == wcs.wcs.ctype[0][-3:] and wcs.wcs.ctype[1][-3:] == wcs.wcs.ctype[0][-3:]
-              and direction.get("reference_frame", "").upper() == wcs.wcs.radesys.upper()
+              and (frame == "GALACTIC" or frame == wcs.wcs.radesys.upper())
+              and [ctype[:4].rstrip("-") for ctype in list(wcs.wcs.ctype)[:2]] == list(CELESTIAL.get(frame, ("?", "?")))
               and (close(direction.get("equinox"), wcs.wcs.equinox)
                    or (direction.get("equinox") is None and math.isnan(wcs.wcs.equinox)))
               and close(direction.get("reference_pixel"), wcs.wcs.crpix[:2])

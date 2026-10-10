@@ -72,6 +72,24 @@ meta['attributes']['coordinate_system_info']['projection'] = 'TAN'
 json.dump(meta, open(root + '/zarr.json', 'w'))")
 refused("a Zarr declaring a projection the sky check does not invert" "${OUTPUT_DIR}/cube.fits"
         "${OUTPUT_DIR}/tan.zarr" --flag no --chunks 32,32,8)
+changed(pole "meta = json.load(open(root + '/zarr.json'))
+meta['attributes']['coordinate_system_info']['native_pole_direction']['data'][0] = 0.0
+json.dump(meta, open(root + '/zarr.json', 'w'))")
+refused("a Zarr about another native pole" "${OUTPUT_DIR}/cube.fits" "${OUTPUT_DIR}/pole.zarr" --flag no --chunks 32,32,8)
+changed(rotated "meta = json.load(open(root + '/zarr.json'))
+meta['attributes']['coordinate_system_info']['pixel_coordinate_transformation_matrix'] = [[0.0, -1.0], [1.0, 0.0]]
+json.dump(meta, open(root + '/zarr.json', 'w'))")
+refused("a Zarr rotated on the sky" "${OUTPUT_DIR}/cube.fits" "${OUTPUT_DIR}/rotated.zarr" --flag no --chunks 32,32,8)
+changed(nonfinite "f = zarr.open_array(root + '/frequency', mode='r+')
+f[0] = np.nan")
+refused("a Zarr with a channel's frequency not a number" "${OUTPUT_DIR}/cube.fits" "${OUTPUT_DIR}/nonfinite.zarr"
+        --flag no --chunks 32,32,8)
+changed(integer "meta = json.load(open(root + '/SKY/zarr.json'))
+meta['data_type'] = 'uint32'
+meta['fill_value'] = 0
+json.dump(meta, open(root + '/SKY/zarr.json', 'w'))")
+refused("a Zarr of integers with the pixels' bits" "${OUTPUT_DIR}/cube.fits" "${OUTPUT_DIR}/integer.zarr" --flag no
+        --chunks 32,32,8)
 
 # Copies of the cube with a flag beside it, true where the pixel is NaN, as the converter's
 # --compute_mask writes one: declared and typed it is the flag carta-zarr applies, and verifies; with
@@ -115,6 +133,30 @@ with_flag(declared_untyped False True)
 refused("a declared flag carta-zarr refuses the image over" "${OUTPUT_DIR}/cube.fits" "${OUTPUT_DIR}/declared_untyped.zarr"
         --flag no --chunks 32,32,8)
 
+# Declarations as carta-zarr reads them: names compared as the store files them, groups naming two
+# flags refused, and a flag another image's group declares never taken for this one's.
+function(declared name code)
+    set(copy "${OUTPUT_DIR}/${name}.zarr")
+    file(COPY "${OUTPUT_DIR}/flagged.zarr/" DESTINATION "${copy}")
+    execute_process(
+        COMMAND "${UV}" run --quiet --no-project --python-preference only-managed --with zarr==3.2.1 --with numpy==2.3.1
+                python -c "import json\nroot = '${copy}'\nmeta = json.load(open(root + '/zarr.json'))\ngroups = meta['attributes']['data_groups']\n${code}\njson.dump(meta, open(root + '/zarr.json', 'w'))"
+        RESULT_VARIABLE result)
+    if(result)
+        message(FATAL_ERROR "declaring ${name} failed: ${result}")
+    endif()
+endfunction()
+declared(aliased "groups['other'] = {'sky': './SKY', 'flag': './FLAG_SKY'}")
+run("verify.py with one flag spelt two ways" "${SOURCE_DIR}/tools/testset/verify.py" "${OUTPUT_DIR}/cube.fits"
+    "${OUTPUT_DIR}/aliased.zarr" --flag yes --chunks 32,32,8)
+declared(conflicting "groups['other'] = {'sky': 'SKY', 'flag': 'OTHER_FLAG'}")
+refused("data groups naming two flags for the image" "${OUTPUT_DIR}/cube.fits" "${OUTPUT_DIR}/conflicting.zarr"
+        --flag no --chunks 32,32,8)
+declared(owned "del groups['base']['flag']
+groups['other'] = {'sky': 'OTHER', 'flag': './FLAG_SKY'}")
+refused("a flag another image's group declares, taken for this one" "${OUTPUT_DIR}/cube.fits" "${OUTPUT_DIR}/owned.zarr"
+        --flag yes --chunks 32,32,8)
+
 # The same cube with one pixel changed, away from any plane or spectrum one might sample.
 set(changed "${OUTPUT_DIR}/changed.zarr")
 file(COPY "${cube}/" DESTINATION "${changed}")
@@ -145,7 +187,12 @@ sharded = zarr.create_array(str(root / 'sharded'), shape=(20,), chunks=(4,), sha
                             fill_value=np.nan)
 sharded[:5] = 1.0
 # One shard on disk holding two of its chunks, 32 bytes, behind an index of 2 x 16 bytes and a checksum.
-assert stats.compression(root / 'sharded') == 32 / 68, stats.compression(root / 'sharded')"
+assert stats.compression(root / 'sharded') == 32 / 68, stats.compression(root / 'sharded')
+sparse = zarr.create_array(str(root / 'sparse'), shape=(20,), chunks=(4,), shards=(8,), dtype='float32', compressors=None,
+                           fill_value=np.nan)
+sparse[:4] = 1.0
+# The same shard with its second chunk left out: 16 bytes, not the shard's 32.
+assert stats.compression(root / 'sparse') == 16 / 52, stats.compression(root / 'sparse')"
     RESULT_VARIABLE result OUTPUT_VARIABLE out ERROR_VARIABLE err)
 if(result)
     message(FATAL_ERROR "stats.py compression failed: ${result}\n${out}\n${err}")

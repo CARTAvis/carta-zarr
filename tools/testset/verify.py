@@ -38,6 +38,7 @@ from __future__ import annotations
 import argparse
 import json
 import math
+import posixpath
 import sys
 import warnings
 from pathlib import Path
@@ -49,6 +50,13 @@ from astropy.wcs import WCS
 
 
 AXES = ["time", "frequency", "polarization", "l", "m"]
+
+
+def canonical(name: str) -> str:
+    """A node a document names, as the store files it, the way carta-zarr compares them: "./FLAG" is
+    FLAG. A name that leaves the store is kept as written."""
+    normal = posixpath.normpath(name.lstrip("/"))
+    return name if normal.startswith("..") else normal
 
 
 def usable_flag(root: Path, image: str) -> tuple[str | None, str, bool]:
@@ -73,16 +81,17 @@ def usable_flag(root: Path, image: str) -> tuple[str | None, str, bool]:
     # The image's own attribute outranks a group; groups naming different flags for it are refused.
     declared = sky.get("attributes", {}).get("flag")
     if not declared:
-        named = {group["flag"] for group in groups if group.get("sky") == image}
+        named = {canonical(group["flag"]) for group in groups if canonical(group.get("sky") or "") == image}
         if len(named) > 1:
             return None, f"data groups declare different flags {sorted(named)}", True
         declared = next(iter(named), None)
     if declared:
+        declared = canonical(declared)
         if usable(declared):
             return declared, "", False
         return None, f"{declared} is declared but is not a usable flag", True
     # With nothing declared, the one usable variable no group declares for another image.
-    others = {group["flag"] for group in groups if group.get("sky") != image}
+    others = {canonical(group["flag"]) for group in groups if canonical(group.get("sky") or "") != image}
     candidates = [entry.name for entry in root.iterdir()
                   if entry.is_dir() and entry.name != image and entry.name not in others and usable(entry.name)]
     if len(candidates) == 1:
@@ -177,7 +186,7 @@ def main() -> int:
     frequency = zarr.open_array(f"{args.zarr}/frequency", mode="r")[...]
     channels = np.arange(n_freq)
     world = wcs.pixel_to_world_values(np.zeros(n_freq), np.zeros(n_freq), np.zeros(n_freq), channels)[3]
-    wrong = np.flatnonzero(np.abs(world - frequency) > 1e-9 * np.abs(frequency))
+    wrong = np.flatnonzero(~(np.isfinite(frequency) & (np.abs(world - frequency) <= 1e-9 * np.abs(frequency))))
     check("frequency of every channel" + (f" (first differs at channel {wrong[0]})" if wrong.size else ""), wrong.size == 0)
     # xradio's converter writes l and m but not the sky position of every pixel, so the position is
     # the SIN projection of l and m from the reference direction, inverted as XRADIO's would be. That
@@ -186,10 +195,13 @@ def main() -> int:
     root = json.loads(Path(args.zarr, "zarr.json").read_text())["attributes"]
     system = root["coordinate_system_info"]
     frame = system["reference_direction"]["attrs"].get("frame", "")
-    check("unrotated SIN projection in the FITS frame",
+    wcs.wcs.set()
+    pole = [math.degrees(angle) for angle in system.get("native_pole_direction", {}).get("data", [math.nan, math.nan])]
+    check("unrotated SIN projection in the FITS frame, about the FITS file's native pole",
           system.get("projection") == "SIN" and system.get("pixel_coordinate_transformation_matrix") == [[1.0, 0.0], [0.0, 1.0]]
           and not any(system.get("projection_parameters", [])) and frame.lower() == wcs.wcs.radesys.lower()
-          and all(t.endswith("-SIN") for t in list(wcs.wcs.ctype)[:2]))
+          and all(t.endswith("-SIN") for t in list(wcs.wcs.ctype)[:2])
+          and np.allclose(pole, [wcs.wcs.lonpole, wcs.wcs.latpole], rtol=0, atol=1e-9))
     ra0, dec0 = system["reference_direction"]["data"]
     l_axis = zarr.open_array(f"{args.zarr}/l", mode="r")[...]
     m_axis = zarr.open_array(f"{args.zarr}/m", mode="r")[...]

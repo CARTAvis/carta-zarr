@@ -3,7 +3,6 @@
 # requires-python = ">=3.12"
 # dependencies = [
 #   "numpy==2.3.1",
-#   "zarr==3.2.1",
 # ]
 #
 # [tool.uv]
@@ -24,8 +23,11 @@
   nan_channels   how many channels are wholly NaN
   nan_chunks     how many chunks are wholly NaN (or not written at all)
 
-    stats.py DATASET [--every N] [--block-mib 1024]
+    stats.py DATASET [--every N] [--block-mib 1024] [--bench PATH]
 
+The pixels, the shape and the chunk are taken as carta-zarr reads them -- `carta-zarr-bench`, at
+--bench or $CARTA_ZARR_BENCH -- so they are by axis name, of the chunk a read decodes, whatever order
+the dimensions are stored in and whatever transpose precedes the shards; the pixel mask is applied.
 Every Nth channel is sampled for the per-plane medians (8 by default); every channel for the NaN
 counts. A statistic with nothing to take it of -- no chunk on disk, or no finite pixel in any plane
 sampled -- is null.
@@ -36,11 +38,12 @@ from __future__ import annotations
 import argparse
 import json
 import math
+import os
+import subprocess
 import sys
 from pathlib import Path
 
 import numpy as np
-import zarr
 
 
 def compression(array: Path) -> float | None:
@@ -62,7 +65,9 @@ def compression(array: Path) -> float | None:
             decoded += itemsize * math.prod(chunk)
             continue
         inner = sharding["chunk_shape"]
-        count = math.prod(outer // extent for outer, extent in zip(chunk, inner))
+        # A transpose ahead of the shards gives the inner chunk in its own axis order, so the count is
+        # taken of the volumes, which no order changes.
+        count = math.prod(chunk) // math.prod(inner)
         # The index is an (offset, length) pair of little-endian uint64 a chunk, then a crc32c when
         # its codecs say so; an absent chunk is all ones.
         checksum = any(codec.get("name") == "crc32c" for codec in sharding.get("index_codecs", []))
@@ -82,31 +87,44 @@ def main() -> int:
     parser.add_argument("dataset")
     parser.add_argument("--every", type=int, default=8)
     parser.add_argument("--block-mib", type=int, default=1024, help="how much to read at a time")
+    parser.add_argument("--bench", default=os.environ.get("CARTA_ZARR_BENCH"), help="the carta-zarr-bench executable")
     args = parser.parse_args()
+    if not args.bench:
+        parser.error("--bench or $CARTA_ZARR_BENCH must name carta-zarr-bench")
 
     root = Path(args.dataset)
-    sky = zarr.open_array(str(root / "SKY"), mode="r")
-    _, n_freq, _, n_l, n_m = sky.shape
-    chunk = sky.chunks  # the inner chunk, sharded or not
-    depth = chunk[1]
+    probe = subprocess.run([args.bench, "probe", str(root)], capture_output=True, text=True)
+    report = json.loads(probe.stdout) if probe.stdout.strip() else {}
+    if not report.get("ok"):
+        raise SystemExit(f"carta-zarr does not open {root}: {report.get('error') or probe.stderr.strip()}")
+    axes = {axis["name"]: axis for axis in report["image"]["axes"]}
+    n_l, n_m, n_freq, n_pol = (axes[name]["length"] for name in ("l", "m", "frequency", "polarization"))
+    chunk_l, chunk_m, depth = (axes[name]["chunk"] for name in ("l", "m", "frequency"))
+
+    def first_polarization(start: int, stop: int) -> np.ndarray:
+        """Channels start to stop of the first polarization through carta-zarr, as frequency, l, m."""
+        result = subprocess.run([args.bench, "pixels", str(root), "--channels", f"{start}:{stop}"], capture_output=True)
+        if result.returncode:
+            raise SystemExit(result.stderr.decode(errors="replace").strip())
+        return np.frombuffer(result.stdout, dtype=np.float32).reshape(n_pol, stop - start, n_m, n_l)[0].transpose(0, 2, 1)
 
     # Read a bounded number of planes at a time, whatever the chunk depth, and keep for each chunk
     # only whether any of its pixels so far is finite.
-    planes = max(1, (args.block_mib << 20) // (n_l * n_m * 4))
-    grid = (math.ceil(n_l / chunk[3]), math.ceil(n_m / chunk[4]))
-    padded = (grid[0] * chunk[3], grid[1] * chunk[4])
+    planes = max(1, (args.block_mib << 20) // (n_pol * n_l * n_m * 4))
+    grid = (math.ceil(n_l / chunk_l), math.ceil(n_m / chunk_m))
+    padded = (grid[0] * chunk_l, grid[1] * chunk_m)
     chunk_finite = np.zeros((math.ceil(n_freq / depth), *grid), dtype=bool)
     nan_fraction, rms, above, below = [], [], [], []
     channel_nan = np.zeros(n_freq, dtype=bool)
     for start in range(0, n_freq, planes):
-        block = np.asarray(sky[0, start : min(n_freq, start + planes), 0])  # frequency, l, m
+        block = first_polarization(start, min(n_freq, start + planes))
         for offset, plane in enumerate(block):
             f = start + offset
             finite = np.isfinite(plane)
             channel_nan[f] = not finite.any()
             whole = np.zeros(padded, dtype=bool)
             whole[:n_l, :n_m] = finite
-            chunk_finite[f // depth] |= whole.reshape(grid[0], chunk[3], grid[1], chunk[4]).any(axis=(1, 3))
+            chunk_finite[f // depth] |= whole.reshape(grid[0], chunk_l, grid[1], chunk_m).any(axis=(1, 3))
             if f % args.every:
                 continue
             values = plane[finite]
@@ -128,7 +146,7 @@ def main() -> int:
     print(json.dumps({
         "dataset": root.name,
         "shape": [n_l, n_m, n_freq],
-        "chunk": [chunk[3], chunk[4], depth],
+        "chunk": [chunk_l, chunk_m, depth],
         "compression": None if ratio is None else round(ratio, 3),
         "nan": median(nan_fraction, 4),
         "rms": float(f"{np.median(rms):.4g}") if rms else None,

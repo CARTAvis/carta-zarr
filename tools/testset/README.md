@@ -15,8 +15,9 @@ file or a Zarr appears under its own name only once it is complete, and a Zarr o
 has found it to hold the FITS file's pixels, bit for bit, and carta-zarr to read it as the FITS file
 describes it: in the chunks (and shards) asked for, with its flag (or none), and with the same unit,
 coordinates, observation date and beam (the report is left beside it as `NAME.verify.txt`). What the
-Zarr means is taken from carta-zarr itself, through `carta-zarr-bench probe --describe`, rather than
-from its metadata read a second way, so a Zarr carta-zarr would refuse or read otherwise is refused.
+Zarr means is taken from carta-zarr itself, through `carta-zarr-bench probe --describe`, and its
+pixels are read through `carta-zarr-bench pixels`, rather than read a second way, so a Zarr carta-zarr
+would refuse, read otherwise or fail to decode is refused.
 It needs `uv`, the converter, carta-zarr-bench (a build with `-DCARTA_ZARR_BUILD_BENCH=ON`), and
 about 155 GB (190 GB while a cube is being synthesized); on a
 28-thread machine with local NVMe it takes about 13 minutes, a third of it verifying.
@@ -80,11 +81,14 @@ HI cube from an ASKAP mosaic:
   whole chunks.
 
 `zarr-to-fits.py` writes the FITS file, with the axes ASKAPsoft writes (RA, Dec, Stokes, frequency)
-and the header keywords xradio's FITS reader requires.
+and the header keywords xradio's FITS reader requires. Its coordinates are the ones carta-zarr reads
+from the synthetic dataset, and a dataset a FITS header cannot describe -- unevenly spaced channels, a
+beam that changes from plane to plane -- is refused rather than written as something else.
 
 ## Calibration
 
-`stats.py` measures a dataset the way the synthetic cube was calibrated. The real cube is ASKAP
+`stats.py` measures a dataset the way the synthetic cube was calibrated, reading its pixels, shape and
+chunk through carta-zarr-bench ($CARTA_ZARR_BENCH). The real cube is ASKAP
 Hydra (`askap_hydra_extragalactic_256`), converted the same way at 256 x 256 x 16:
 
 | | ASKAP Hydra | synthetic pancake |

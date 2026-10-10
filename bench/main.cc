@@ -24,6 +24,7 @@
 #include <cstdio>
 #include <random>
 #include <string>
+#include <vector>
 
 #include <carta-zarr/carta_zarr.h>
 
@@ -215,6 +216,60 @@ int Probe(const ProbeOptions& options) {
     return finish("");
 }
 
+// Raw float32 on stdout, or a reason on stderr and a non-zero exit.
+int Pixels(const PixelsOptions& options) {
+    const auto fail = [](const std::string& what) {
+        std::fprintf(stderr, "error: %s\n", what.c_str());
+        return 1;
+    };
+    const auto context = Context::Create();
+    if (!context) {
+        return fail("Context::Create: " + context.error().message);
+    }
+    const auto dataset = Dataset::Open(*context, options.dataset);
+    if (!dataset) {
+        return fail("Dataset::Open: " + std::string(ErrorCodeName(dataset.error().code)) + ": " +
+                    dataset.error().message);
+    }
+    const auto id = options.image_id.empty() ? dataset->descriptor().default_image_id.value_or("") : options.image_id;
+    if (id.empty()) {
+        return fail("the dataset lists no image that opens");
+    }
+    const auto image = dataset->OpenImage(id);
+    if (!image) {
+        return fail("OpenImage: " + std::string(ErrorCodeName(image.error().code)) + ": " + image.error().message);
+    }
+    ReadRequest request;
+    std::size_t elements = 1;
+    bool has_spectral = false;
+    for (const auto& axis : image->descriptor().axes) {
+        Range range{0, axis.length, 1};
+        if (axis.role == AxisRole::spectral) {
+            if (options.channel_stop > axis.length) {
+                return fail("--channels runs past the image's " + std::to_string(axis.length) + " channels");
+            }
+            range = Range{options.channel_start, options.channel_stop - options.channel_start, 1};
+            has_spectral = true;
+        }
+        request.axes.push_back(range);
+        elements *= range.count;
+    }
+    if (!has_spectral) {
+        return fail("the image has no spectral axis");
+    }
+    std::vector<float> pixels(elements);
+    ReadOptions read;
+    read.apply_pixel_mask = options.apply_pixel_mask;
+    const auto count = image->Read(request, BufferView<float>{pixels.data(), pixels.size()}, read);
+    if (!count) {
+        return fail("Read: " + std::string(ErrorCodeName(count.error().code)) + ": " + count.error().message);
+    }
+    if (std::fwrite(pixels.data(), sizeof(float), pixels.size(), stdout) != pixels.size() || std::fflush(stdout) != 0) {
+        return fail("could not write the pixels to stdout");
+    }
+    return 0;
+}
+
 std::string RunId() {
     std::random_device device;
     const auto high = static_cast<std::uint64_t>(device()) << 32;
@@ -283,6 +338,9 @@ int main(int argc, char** argv) {
     }
     if (const auto* probe = std::get_if<ProbeOptions>(&command)) {
         return Probe(*probe);
+    }
+    if (const auto* pixels = std::get_if<PixelsOptions>(&command)) {
+        return Pixels(*pixels);
     }
     if (std::holds_alternative<IdentityOptions>(command)) {
         std::printf("%s\n", BuildIdentity().c_str());

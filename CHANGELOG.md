@@ -9,6 +9,7 @@ minor release may change the ABI, and the soname says so ([ADR 0020](docs/adr/00
 
 ### Added
 * `carta-zarr-bench probe --describe` adds what the image means as the library reads it: stored type and unit, pixel mask, direction, spectral, polarization and time coordinates, the observation, and the beam of every plane.
+* `carta-zarr-bench pixels` writes a run of channels as the library reads them, with the pixel mask applied or not, as raw float32 on stdout.
 * `tools/testset`: builds the standard read-path test set -- a pancake (7763 x 4742 x 256) and a cigar (512 x 512 x 30000), each a FITS cube and the Zarr layouts the site's xradio converter makes from it -- and checks that each Zarr holds its FITS cube's pixels.
 
 ### Changed

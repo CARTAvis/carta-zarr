@@ -59,7 +59,7 @@ for entry in "${cubes[@]}"; do
         --chunk "l=$((l < 1024 ? l : 1024)),m=$((m < 1024 ? m : 1024)),frequency=8" --codec zstd:1 \
         $options --output "$work" --force > /dev/null
     say "$cube: writing $fits"
-    uv run --quiet "$here/zarr-to-fits.py" "$work" "$fits" > /dev/null
+    uv run --quiet "$here/zarr-to-fits.py" "$work" "$fits" --bench "$bench" > /dev/null
     rm -rf "$work"
 done
 

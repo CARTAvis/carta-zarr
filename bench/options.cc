@@ -61,12 +61,17 @@ constexpr std::array<std::string_view, 19> kRunOptions{
 constexpr std::string_view kUsage = R"(usage:
   carta-zarr-bench run <dataset> [options]
   carta-zarr-bench probe <dataset> [--image ID] [--describe]
+  carta-zarr-bench pixels <dataset> --channels START:STOP [--image ID] [--unmasked]
   carta-zarr-bench identity
 
 probe opens the dataset as carta-backend would and prints what the library sees, as one line of JSON.
 It exits non-zero when the dataset does not open. --describe adds what the image means: its stored
 type and unit, its pixel mask, its direction, spectral, polarization and time coordinates, the
 observation, and the beam of every plane.
+
+pixels writes channels START to STOP (exclusive) of the image, every polarization and the whole plane,
+to stdout as float32 in the machine's byte order, l fastest, then m, frequency, polarization and time.
+The pixel mask is applied unless --unmasked is given.
 
 identity prints which build this is: a hash of the executable's bytes and those of the carta-zarr it
 loaded. It is in every run key, so --resume skips only what this build measured.
@@ -390,6 +395,56 @@ Command ParseProbe(Arguments& arguments) {
     return options;
 }
 
+Command ParsePixels(Arguments& arguments) {
+    PixelsOptions options;
+    bool have_dataset = false;
+    bool have_channels = false;
+    while (!arguments.Done()) {
+        std::string_view word = arguments.words[arguments.next++];
+        if (word.substr(0, 2) != "--") {
+            if (have_dataset) {
+                return Wrong("more than one dataset: " + std::string(word));
+            }
+            options.dataset = std::string(word);
+            have_dataset = true;
+            continue;
+        }
+        if (word == "--unmasked") {
+            options.apply_pixel_mask = false;
+            continue;
+        }
+        const auto value = arguments.Value(word);
+        if (word != "--image" && word != "--channels") {
+            return Wrong("unknown option for pixels: " + std::string(word));
+        }
+        if (!value) {
+            return Wrong(std::string(word) + " needs a value");
+        }
+        if (word == "--image") {
+            options.image_id = std::string(*value);
+            continue;
+        }
+        const auto colon = value->find(':');
+        const auto start =
+            colon == std::string_view::npos ? std::nullopt : ParseNumber<std::uint64_t>(value->substr(0, colon));
+        const auto stop =
+            colon == std::string_view::npos ? std::nullopt : ParseNumber<std::uint64_t>(value->substr(colon + 1));
+        if (!start || !stop || *stop <= *start) {
+            return Wrong("--channels must be START:STOP with START < STOP: " + std::string(*value));
+        }
+        options.channel_start = *start;
+        options.channel_stop = *stop;
+        have_channels = true;
+    }
+    if (!have_dataset) {
+        return Wrong("pixels needs a dataset");
+    }
+    if (!have_channels) {
+        return Wrong("pixels needs --channels");
+    }
+    return options;
+}
+
 }  // namespace
 
 const char* ModeName(Mode mode) noexcept {
@@ -524,6 +579,9 @@ Command ParseCommandLine(int argc, const char* const* argv) {
     }
     if (command == "probe") {
         return ParseProbe(arguments);
+    }
+    if (command == "pixels") {
+        return ParsePixels(arguments);
     }
     if (command == "identity") {
         if (!arguments.Done()) {

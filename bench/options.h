@@ -144,6 +144,19 @@ struct ProbeOptions {
     bool describe = false;
 };
 
+// Asked for the pixels of a run of channels, as the library reads them: every polarization and the
+// whole plane, written to stdout as float32 in the machine's byte order, l fastest, then m, frequency,
+// polarization and time -- the order Image::Read packs. So that a caller can compare them with another
+// copy of the same image through the reader carta-backend uses rather than a second one.
+struct PixelsOptions {
+    std::string dataset;
+    std::string image_id;
+    std::uint64_t channel_start = 0;
+    std::uint64_t channel_stop = 0;
+    // Off to read the pixels as stored, under the pixel mask too.
+    bool apply_pixel_mask = true;
+};
+
 // Asked which build this is: prints BuildIdentity, which a sweep resumes only for.
 struct IdentityOptions {};
 
@@ -153,7 +166,7 @@ struct Usage {
     bool error = false;
 };
 
-using Command = std::variant<RunOptions, ProbeOptions, IdentityOptions, Usage>;
+using Command = std::variant<RunOptions, ProbeOptions, PixelsOptions, IdentityOptions, Usage>;
 
 Command ParseCommandLine(int argc, const char* const* argv);
 

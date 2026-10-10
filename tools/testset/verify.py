@@ -26,9 +26,10 @@ header: the image opens, as SKY, float32, in the FITS unit, in the chunks (and s
 a pixel mask or without one as --flag says; its direction coordinate has the FITS file's projection,
 frame, equinox, reference pixel and value, increment, matrix, parameters and native pole; every
 channel's frequency, the spectral unit, frame and rest frequency, the Stokes parameters, the time and
-the observation date match; and so does the restoring beam of every plane. Then every pixel is
-compared, bit for bit, a block of channels at a time, and the pixel mask is checked true exactly where
-the FITS cube is NaN, in the same chunks as the pixels.
+the observation date match; and so does the restoring beam of every plane. Then every pixel, as
+carta-zarr decodes it (`carta-zarr-bench pixels`), is compared bit for bit, a block of channels at a
+time; with the pixel mask applied it must be NaN exactly where the FITS cube is, and the flag itself,
+as stored, true exactly there and in the same chunks as the pixels.
 
     verify.py CUBE.fits CUBE.zarr --flag {yes,no} --chunks L,M,F [--shards L,M,F]
               [--bench PATH] [--block-mib 1024]
@@ -232,28 +233,53 @@ def main() -> int:
         else:
             check("no restoring beam, as the FITS file has none", not beams)
 
-        # The pixels, and the mask carta-zarr applies, as stored. The mask is read beside the pixels, so
-        # its layout is part of what a layout name promises.
+        # The pixels as carta-zarr decodes them, stored and with its pixel mask applied, so a codec it
+        # cannot decode, or a mask it applies elsewhere than the NaN, is refused however zarr-python reads
+        # them. The flag itself is read as stored too: a flag true exactly where the FITS cube is NaN is
+        # what keeps the two formats' statistics alike, and its layout is part of what a layout name
+        # promises, since the mask is read beside the pixels.
+        def read(start: int, stop: int, masked: bool) -> np.ndarray:
+            """Channels start to stop through carta-zarr, as frequency, polarization, l, m."""
+            command = [args.bench, "pixels", args.zarr, "--channels", f"{start}:{stop}"] + ([] if masked else ["--unmasked"])
+            result = subprocess.run(command, capture_output=True)
+            if result.returncode:
+                # TensorStore's own source locations and spec follow the reason, at length.
+                raise RuntimeError(result.stderr.decode(errors="replace").strip().split(" [source locations=")[0])
+            return np.frombuffer(result.stdout, dtype=np.float32).reshape(n_pol, stop - start, n_m, n_l).transpose(1, 0, 3, 2)
+
         sky = zarr.open_array(f"{args.zarr}/SKY", mode="r")
         flag = zarr.open_array(f"{args.zarr}/{mask}", mode="r") if image["has_pixel_mask"] and mask else None
         if flag is not None:
             check(f"{mask} in the same chunk" + (" and shard" if args.shards else ""), layout(flag) == layout(sky))
         channels = max(1, (args.block_mib << 20) // (n_pol * n_l * n_m * 4))
-        first_pixels = first_flag = None
+        first_pixels = first_masked = first_flag = unreadable = None
         for start in range(0, n_freq, channels):
             stop = min(n_freq, start + channels)
             expected_pixels = np.ascontiguousarray(np.asarray(data[start:stop]).transpose(0, 1, 3, 2), dtype=np.float32)
-            stored = np.ascontiguousarray(logical(sky, start, stop))
+            try:
+                stored = np.ascontiguousarray(read(start, stop, masked=False))
+                applied = read(start, stop, masked=True) if flag is not None else None
+            except RuntimeError as error:
+                unreadable = f"channels {start}:{stop}: {error}"
+                break
             if first_pixels is None:
                 where = first_difference(expected_pixels.view(np.uint32), stored.view(np.uint32))
                 first_pixels = None if where is None else (start + where[0], *where[1:])
+            if flag is not None and first_masked is None:
+                # NaN where the FITS cube is NaN, and the stored pixel everywhere else.
+                where = first_difference(np.isnan(applied) | (applied != stored), np.isnan(expected_pixels))
+                first_masked = None if where is None else (start + where[0], *where[1:])
             if flag is not None and first_flag is None:
                 where = first_difference(logical(flag, start, stop).astype(bool), np.isnan(expected_pixels))
                 first_flag = None if where is None else (start + where[0], *where[1:])
-        check("every pixel" + (f" (first differs at channel, stokes, x, y {first_pixels})" if first_pixels else ""),
-              first_pixels is None)
-        if flag is not None:
-            check("mask where NaN" + (f" (first differs at {first_flag})" if first_flag else ""), first_flag is None)
+        check("carta-zarr reads every pixel" + (f" ({unreadable})" if unreadable else ""), unreadable is None)
+        if unreadable is None:
+            check("every pixel" + (f" (first differs at channel, stokes, x, y {first_pixels})" if first_pixels else ""),
+                  first_pixels is None)
+            if flag is not None:
+                check("mask where NaN" + (f" (first differs at {first_flag})" if first_flag else ""), first_flag is None)
+                check("pixels masked where NaN" + (f" (first differs at {first_masked})" if first_masked else ""),
+                      first_masked is None)
 
     return finish()
 

@@ -26,9 +26,11 @@ test set's Zarr can be made the way a site's is, and so that there is a FITS cub
 The axes are RA, Dec, Stokes and frequency (NAXIS1 to 4), the order ASKAPsoft writes, so FITS pixel
 (x, y, stokes, channel) is the dataset's (l, m, polarization, frequency). The header carries what
 xradio's FITS reader requires of one: CUNIT on every axis, LONPOLE and LATPOLE, PV2_1 and PV2_2, and
-DATE-OBS. Channels are written a block at a time, so a cube larger than memory can be written.
+DATE-OBS. The coordinates are written as carta-zarr reads them -- `carta-zarr-bench probe --describe`,
+at --bench or $CARTA_ZARR_BENCH -- and a dataset whose coordinates a FITS header cannot hold is
+refused. Channels are written a block at a time, so a cube larger than memory can be written.
 
-    zarr-to-fits.py DATASET OUTPUT.fits [--block-mib 1024]
+    zarr-to-fits.py DATASET OUTPUT.fits [--block-mib 1024] [--bench PATH]
 
 The file appears at OUTPUT.fits only once it is complete.
 """
@@ -39,6 +41,7 @@ import argparse
 import json
 import math
 import os
+import subprocess
 import sys
 import time
 from pathlib import Path
@@ -72,17 +75,28 @@ def nodes_under(root: Path) -> list[tuple[str, dict[str, Any]]]:
     return found
 
 
-def header_of(root: Path, image: str, sky: Any) -> fits.Header:
-    attributes = metadata(root)["attributes"]
-    _, n_freq, n_pol, n_l, n_m = sky.shape
-    l = zarr.open_array(str(root / "l"), mode="r")[...]
-    m = zarr.open_array(str(root / "m"), mode="r")[...]
-    freq = zarr.open_array(str(root / "frequency"), mode="r")[...]
-    pol = zarr.open_array(str(root / "polarization"), mode="r")[...]
-    system = attributes["coordinate_system_info"]
-    ra0, dec0 = system["reference_direction"]["data"]
-    projection = system.get("projection", "SIN")
-    sky_attributes = sky.attrs.asdict()
+def describe(bench: str, root: Path) -> dict[str, Any]:
+    """The default image as carta-zarr reads it: `carta-zarr-bench probe --describe`."""
+    probe = subprocess.run([bench, "probe", str(root), "--describe"], capture_output=True, text=True)
+    report = json.loads(probe.stdout) if probe.stdout.strip() else {}
+    if not report.get("ok"):
+        raise SystemExit(f"carta-zarr does not open {root}: {report.get('error') or probe.stderr.strip()}")
+    return report["image"]
+
+
+def header_of(root: Path, image: str, sky: Any, described: dict[str, Any]) -> fits.Header:
+    """The FITS header of what carta-zarr reads the image as, so that the FITS file means what the
+    dataset does, whatever its coordinates; what a FITS header cannot say -- frequencies that are not
+    evenly spaced, Stokes parameters out of sequence, a beam that differs from plane to plane -- is
+    refused rather than written as something else."""
+    meaning = described["description"]
+    lengths = {axis["name"]: axis["length"] for axis in described["axes"]}
+    n_l, n_m, n_freq, n_pol = (lengths[name] for name in ("l", "m", "frequency", "polarization"))
+    direction, spectral = meaning.get("direction"), meaning.get("spectral")
+    if not direction or not spectral:
+        raise SystemExit(f"{image} has no direction or no spectral coordinate to write")
+    if meaning["stored_type"] != "float32":
+        raise SystemExit(f"{image} is {meaning['stored_type']}; the FITS cube is float32")
 
     header = fits.Header()
     header["SIMPLE"] = True
@@ -93,52 +107,74 @@ def header_of(root: Path, image: str, sky: Any) -> fits.Header:
     header["NAXIS3"] = n_pol
     header["NAXIS4"] = n_freq
     header["EXTEND"] = True
-    header["BUNIT"] = sky_attributes.get("units", "Jy/beam")
-    header["OBJECT"] = sky_attributes.get("object_name", "")
-    # l is x times the increment from the reference direction, so the reference pixel is where l is 0.
-    for axis, values, ctype, crval in ((1, l, "RA---", ra0), (2, m, "DEC--", dec0)):
-        increment = float(values[1] - values[0])
+    header["BUNIT"] = meaning["unit"]
+    header["OBJECT"] = sky.attrs.get("object_name", "")
+    projection = direction["projection"]
+    for axis, ctype in ((1, "RA---"), (2, "DEC--")):
         header[f"CTYPE{axis}"] = ctype + projection
-        header[f"CRVAL{axis}"] = math.degrees(crval)
-        header[f"CDELT{axis}"] = math.degrees(increment)
-        header[f"CRPIX{axis}"] = 1.0 - float(values[0]) / increment
+        header[f"CRVAL{axis}"] = direction["reference_value"][axis - 1]
+        header[f"CDELT{axis}"] = direction["increment"][axis - 1]
+        header[f"CRPIX{axis}"] = direction["reference_pixel"][axis - 1]
         header[f"CUNIT{axis}"] = "deg"
+    for i in (1, 2):
+        for j in (1, 2):
+            header[f"PC{i}_{j}"] = direction["transformation_matrix"][i - 1][j - 1]
+
+    labels = meaning.get("polarization") or []
+    codes = [STOKES_CODE.get(label) for label in labels]
+    if not codes or None in codes or codes != list(range(codes[0], codes[0] + len(codes))):
+        raise SystemExit(f"{image}'s Stokes parameters {labels} are not a sequence a FITS axis can hold")
     header["CTYPE3"] = "STOKES"
-    header["CRVAL3"] = float(STOKES_CODE[str(pol[0])])
+    header["CRVAL3"] = float(codes[0])
     header["CDELT3"] = 1.0
     header["CRPIX3"] = 1.0
     header["CUNIT3"] = ""
+
+    frequencies = np.asarray(spectral["channel_frequencies"], dtype=float)
+    step = float(frequencies[1] - frequencies[0]) if n_freq > 1 else 1.0
+    if not np.allclose(frequencies, frequencies[0] + step * np.arange(n_freq), rtol=1e-12, atol=0):
+        raise SystemExit(f"{image}'s channels are not evenly spaced in frequency, which a FITS axis cannot hold")
     header["CTYPE4"] = "FREQ"
-    header["CRVAL4"] = float(freq[0])
-    header["CDELT4"] = float(freq[1] - freq[0]) if n_freq > 1 else 1.0
+    header["CRVAL4"] = float(frequencies[0])
+    header["CDELT4"] = step
     header["CRPIX4"] = 1.0
-    header["CUNIT4"] = "Hz"
-    header["RADESYS"] = "FK5"
-    header["EQUINOX"] = 2000.0
-    header["LONPOLE"] = 180.0
-    header["LATPOLE"] = math.degrees(dec0)
-    header["PV2_1"] = 0.0
-    header["PV2_2"] = 0.0
-    header["SPECSYS"] = "LSRK"
-    rest = metadata(root / "frequency").get("attributes", {}).get("rest_frequency", {}).get("data")
-    if rest is not None:
-        header["RESTFRQ"] = float(rest)
+    header["CUNIT4"] = spectral["unit"]
+
+    header["RADESYS"] = direction["reference_frame"]
+    if direction.get("equinox") is not None:
+        header["EQUINOX"] = direction["equinox"]
+    header["LONPOLE"], header["LATPOLE"] = direction["native_pole_direction"]
+    header["PV2_1"], header["PV2_2"] = direction.get("projection_parameters") or [0.0, 0.0]
+    header["SPECSYS"] = spectral["system"]
+    if spectral.get("rest_frequency") is not None:
+        header["RESTFRQ"] = spectral["rest_frequency"]
     # ASKAP, as the frequency axis is: xradio wants an observatory and a date to place it. The date is
-    # the dataset's own, so that the FITS file and the dataset agree on it as on everything else.
+    # the dataset's own, as carta-zarr reads it, and the time axis must agree with it, as it does in
+    # a FITS file, which has only the one.
+    observation, temporal = meaning.get("observation") or {}, meaning.get("temporal") or {}
+    observed = observation.get("mjd_obs")
+    if observed is None or temporal.get("values") != [observed]:
+        raise SystemExit(f"{image}'s observation date {observed} is not the one time on its time axis "
+                         f"{temporal.get('values')}")
     header["TELESCOP"] = "ASKAP"
-    header["DATE-OBS"] = Time(float(zarr.open_array(str(root / "time"), mode="r")[0]), format="mjd", scale="utc").isot
+    header["DATE-OBS"] = Time(observed, format="mjd", scale="utc").isot
     header["TIMESYS"] = "UTC"
-    header["VELREF"] = 257
+    if (velref := {"LSRK": 257, "BARY": 258, "TOPO": 259}.get(spectral["system"].upper())) is not None:
+        header["VELREF"] = velref
     header["OBSGEO-X"] = -2.558266717765e06
     header["OBSGEO-Y"] = 5.095672176508e06
     header["OBSGEO-Z"] = -2.849020838078e06
     header["BTYPE"] = "Intensity"
-    beam_name = attributes.get("data_groups", {}).get("base", {}).get("beam_fit_params_sky")
-    if beam_name and (root / beam_name).exists():
-        beam = zarr.open_array(str(root / beam_name), mode="r")[0, 0, 0, :]
-        header["BMAJ"] = math.degrees(float(beam[0]))
-        header["BMIN"] = math.degrees(float(beam[1]))
-        header["BPA"] = math.degrees(float(beam[2]))
+    beams = {(beam["major"], beam["minor"], beam["position_angle"], beam["unit"]) for beam in meaning.get("beams", [])}
+    if len(beams) > 1:
+        raise SystemExit(f"{image}'s restoring beam differs from plane to plane; a FITS header holds one")
+    if beams:
+        major, minor, angle, unit = beams.pop()
+        if unit != "rad":
+            raise SystemExit(f"{image}'s restoring beam is in {unit}, not rad")
+        header["BMAJ"] = math.degrees(major)
+        header["BMIN"] = math.degrees(minor)
+        header["BPA"] = math.degrees(angle)
     header["ORIGIN"] = "carta-zarr tools/testset/zarr-to-fits.py"
     header["HISTORY"] = f"pixels of {root.name}/{image}"
     return header
@@ -149,7 +185,10 @@ def main() -> int:
     parser.add_argument("dataset", help="an XRADIO image dataset")
     parser.add_argument("output", help="the FITS file to write")
     parser.add_argument("--block-mib", type=int, default=1024, help="how much to read and write at a time")
+    parser.add_argument("--bench", default=os.environ.get("CARTA_ZARR_BENCH"), help="the carta-zarr-bench executable")
     args = parser.parse_args()
+    if not args.bench:
+        parser.error("--bench or $CARTA_ZARR_BENCH must name carta-zarr-bench")
 
     root = Path(args.dataset)
     image = metadata(root)["attributes"]["data_groups"]["base"]["sky"]
@@ -166,6 +205,9 @@ def main() -> int:
     if sky.attrs.get("flag") or any(isinstance(group, dict) and group.get("flag") for group in groups) or flags:
         raise SystemExit(f"{args.dataset} carries a flag ({', '.join(flags) or 'declared'}); FITS would show what it "
                          "hides, so write the cube without one")
+    described = describe(args.bench, root)
+    if described["id"] != image:
+        raise SystemExit(f"carta-zarr opens {described['id']} by default, not {image}")
     _, n_freq, n_pol, n_l, n_m = sky.shape
     channels = max(1, (args.block_mib << 20) // (n_pol * n_l * n_m * 4))
 
@@ -173,7 +215,7 @@ def main() -> int:
     partial = out.with_name(out.name + ".partial")
     started = last_report = time.monotonic()
     with open(partial, "wb") as f:
-        f.write(header_of(root, image, sky).tostring().encode("ascii"))
+        f.write(header_of(root, image, sky, described).tostring().encode("ascii"))
         written = 0
         for start in range(0, n_freq, channels):
             stop = min(n_freq, start + channels)

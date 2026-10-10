@@ -244,6 +244,18 @@ beam.attrs.update(attributes)")
 refused("a Zarr whose beams cover as many planes as it has, but other ones" "${OUTPUT_DIR}/cube.fits"
         "${OUTPUT_DIR}/halfbeam.zarr" --flag no --chunks 32,32,8)
 
+# Pixels zarr-python decodes and carta-zarr cannot: numcodecs' zlib, which TensorStore does not register.
+changed(zlibbed "import shutil
+from numcodecs.zarr3 import Zlib
+old = zarr.open_array(root + '/SKY', mode='r')
+values, attributes, names = old[...], old.attrs.asdict(), list(old.metadata.dimension_names)
+shutil.rmtree(root + '/SKY')
+sky = zarr.create_array(root + '/SKY', shape=values.shape, chunks=old.chunks, dtype='float32', compressors=[Zlib(level=1)],
+                        dimension_names=names, fill_value=np.nan)
+sky[...] = values
+sky.attrs.update(attributes)")
+refused("a Zarr whose pixels carta-zarr cannot decode" "${OUTPUT_DIR}/cube.fits" "${OUTPUT_DIR}/zlibbed.zarr" --flag no
+        --chunks 32,32,8)
 # obsdate as an ISO date, which carta-zarr reads, and as a numeric string, which it does not.
 changed(isodate "a = zarr.open_array(root + '/SKY', mode='r+')
 from astropy.time import Time
@@ -453,6 +465,53 @@ assert stats.compression(root / 'empty') is None"
 if(result)
     message(FATAL_ERROR "stats.py compression failed: ${result}\n${out}\n${err}")
 endif()
+
+# stats.py takes the shape and the chunk as carta-zarr reads them: by name, so m stored before l is the
+# same cube; and of the chunk a read decodes, which zarr-python's .chunks does not give past a transpose
+# ahead of the shards.
+function(stats_of dataset variable)
+    execute_process(COMMAND "${UV}" run --quiet --script "${SOURCE_DIR}/tools/testset/stats.py" "${OUTPUT_DIR}/${dataset}.zarr"
+        RESULT_VARIABLE result OUTPUT_VARIABLE out ERROR_VARIABLE err)
+    if(result)
+        message(FATAL_ERROR "stats.py ${dataset} failed: ${result}\n${err}")
+    endif()
+    string(JSON shape GET "${out}" shape)
+    string(JSON chunk GET "${out}" chunk)
+    string(JSON nan GET "${out}" nan)
+    string(JSON channels GET "${out}" nan_channels)
+    string(REGEX REPLACE "[ \n]" "" summary "${shape}${chunk} ${nan} ${channels}")
+    set(${variable} "${summary}" PARENT_SCOPE)
+endfunction()
+stats_of(cube plain)
+stats_of(reordered reordered)
+if(NOT reordered STREQUAL plain)
+    message(FATAL_ERROR "stats.py read m stored before l as another cube: ${reordered}, not ${plain}")
+endif()
+stats_of(flag_outer outer)
+if(NOT outer MATCHES "^\\[90,70,40\\]\\[32,16,8\\]")
+    message(FATAL_ERROR "stats.py took the shards of a transposed layout for its chunks: ${outer}")
+endif()
+
+# zarr-to-fits.py writes the coordinates carta-zarr reads, whatever they are, so the FITS file it writes
+# of a rotated, B1950, barycentric or otherwise unusual dataset verifies against that dataset; and it
+# refuses one a FITS header cannot hold.
+foreach(name rotated equinox observer pole tan)
+    run("zarr-to-fits.py ${name}" "${SOURCE_DIR}/tools/testset/zarr-to-fits.py" "${OUTPUT_DIR}/${name}.zarr"
+        "${OUTPUT_DIR}/${name}.fits" --block-mib 1)
+    run("verify.py ${name} against its own FITS file" "${SOURCE_DIR}/tools/testset/verify.py" "${OUTPUT_DIR}/${name}.fits"
+        "${OUTPUT_DIR}/${name}.zarr" --flag no --chunks 32,32,8)
+endforeach()
+foreach(case "middle|evenly spaced" "widebeam|plane to plane")
+    string(REPLACE "|" ";" case "${case}")
+    list(GET case 0 name)
+    list(GET case 1 reason)
+    execute_process(COMMAND "${UV}" run --quiet --script "${SOURCE_DIR}/tools/testset/zarr-to-fits.py" "${OUTPUT_DIR}/${name}.zarr"
+                            "${OUTPUT_DIR}/${name}.fits"
+        RESULT_VARIABLE result OUTPUT_QUIET ERROR_VARIABLE err)
+    if(NOT result OR NOT err MATCHES "${reason}")
+        message(FATAL_ERROR "zarr-to-fits.py wrote ${name}, which a FITS header cannot hold: ${result}\n${err}")
+    endif()
+endforeach()
 
 # zarr-to-fits.py refuses a dataset with a flag: FITS has only NaN to mark a pixel with, and a flagged
 # dataset may hold finite values under its flag.

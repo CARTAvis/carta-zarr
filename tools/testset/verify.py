@@ -18,21 +18,23 @@
 
 """Check that a FITS cube and a Zarr made from it hold the same pixels at the same coordinates.
 
-A comparison between FITS and Zarr is only a comparison of the formats if both hold the same
-pixels. It reads the Zarr as carta-zarr does, its consolidated metadata included, and checks that
-the image is an image (not typed flag), float32 over time, frequency, polarization, l and m, in the
-unit the FITS file states, and that it and its flag are in the chunks (and shards) asked for; compares every pixel, bit for bit, a block of channels at a time; the Stokes parameters, the
-time, every channel's frequency with its unit, frame and rest frequency, every l and m, and the sky
-position of the corners and the centre, from an unrotated SIN projection, which is checked to be
-what the Zarr declares. --flag says whether the Zarr must carry
-a flag: one that must is refused without one carta-zarr would apply -- typed "flag", boolean, shaped
-as the image, and declared for it or the only such variable not declared for another -- and its flag
-must be true exactly where the FITS cube is NaN; one that must not is refused with one, and with a
-declaration carta-zarr would refuse to open the image over.
+A comparison between FITS and Zarr is only a comparison of the formats if both hold the same pixels.
+What the Zarr means is taken from carta-zarr itself -- `carta-zarr-bench probe --describe`, which
+opens it as carta-backend would -- rather than from its metadata read a second way here, so a Zarr
+carta-zarr would refuse, or read differently, is refused. That description is held to the FITS
+header: the image opens, as SKY, float32, in the FITS unit, in the chunks (and shards) asked for, with
+a pixel mask or without one as --flag says; its direction coordinate has the FITS file's projection,
+frame, equinox, reference pixel and value, increment, matrix, parameters and native pole; every
+channel's frequency, the spectral unit, frame and rest frequency, the Stokes parameters, the time and
+the observation date match; and so does the restoring beam of every plane. Then every pixel is
+compared, bit for bit, a block of channels at a time, and the pixel mask is checked true exactly where
+the FITS cube is NaN, in the same chunks as the pixels.
 
-    verify.py CUBE.fits CUBE.zarr --flag {yes,no} --chunks L,M,F [--shards L,M,F] [--block-mib 1024]
+    verify.py CUBE.fits CUBE.zarr --flag {yes,no} --chunks L,M,F [--shards L,M,F]
+              [--bench PATH] [--block-mib 1024]
 
-Prints what it compared, and exits nonzero if anything differs.
+--bench is the carta-zarr-bench executable, $CARTA_ZARR_BENCH by default. Prints what it compared, and
+exits nonzero if anything differs.
 """
 
 from __future__ import annotations
@@ -40,10 +42,10 @@ from __future__ import annotations
 import argparse
 import json
 import math
-import re
+import os
+import subprocess
 import sys
 import warnings
-from pathlib import Path
 
 import numpy as np
 import zarr
@@ -51,119 +53,7 @@ from astropy.io import fits
 from astropy.time import Time
 from astropy.wcs import WCS
 
-
-AXES = ["time", "frequency", "polarization", "l", "m"]
-REAL_TYPES = {"int8", "uint8", "int16", "uint16", "int32", "uint32", "int64", "uint64", "float16", "float32", "float64"}
-
-
-def canonical(name: str) -> str | None:
-    """A node a document names, as the store files it, the way carta-zarr's NormalizeNodeName reads
-    it: "./FLAG" is FLAG. None for a name that is no node -- empty, absolute, or with a ".." anywhere
-    in it -- which carta-zarr refuses."""
-    if not name or name.startswith("/"):
-        return None
-    parts = [part for part in name.split("/") if part not in ("", ".")]
-    if not parts or ".." in parts:
-        return None
-    return "/".join(parts)
-
-
-def nodes(root: Path) -> tuple[dict[str, dict], list[str]]:
-    """Every node's metadata as carta-zarr reads it (src/store.cc), and the nodes whose copy in the
-    root's consolidated metadata disagrees with their own zarr.json. A consolidated store is listed by
-    its consolidated block alone -- a node written beside it afterwards is not in it -- and each node
-    is described by its copy there, which for an array must agree with its own zarr.json in what
-    carta-zarr reads; a store without one, by the directories that hold a zarr.json."""
-    block = json.loads((root / "zarr.json").read_text()).get("consolidated_metadata")
-    if block is None:
-        return {entry.name: json.loads((entry / "zarr.json").read_text())
-                for entry in root.iterdir() if (entry / "zarr.json").is_file()}, []
-    documents, stale = {}, []
-    for key, document in block.get("metadata", {}).items():
-        spelled = key.lstrip("/").removesuffix("zarr.json").rstrip("/")
-        if not spelled and isinstance(document, dict) and document.get("node_type"):
-            continue  # the root's own document
-        name = canonical(spelled)
-        # A key that names no node, or a node twice, is a store carta-zarr refuses (CollectConsolidatedMetadata).
-        if name is None or name in documents:
-            stale.append(key)
-            continue
-        documents[name] = document
-        if document.get("node_type") != "array":
-            continue
-        # What carta-zarr holds an array's copy to (RequireSameArray): what it plans reads and reads
-        # meaning from. Fields it does not read, such as an empty storage_transformers, may differ.
-        try:
-            own = json.loads((root / name / "zarr.json").read_text())
-        except OSError:
-            stale.append(name)
-            continue
-        if any(document.get(field) != own.get(field) for field in ("shape", "dimension_names", "data_type", "attributes")) \
-                or layout(document) != layout(own):
-            stale.append(name)
-    return documents, stale
-
-
-def usable_flag(documents: dict[str, dict], root_attributes: dict, image: str) -> tuple[str | None, str, bool]:
-    """The flag carta-zarr would apply to `image`, by its rules (src/schema/xradio/flag.h, DeclaredFlag
-    and DetermineFlag); why there is none when there is none; and whether that is a declaration
-    carta-zarr refuses to open the image over rather than an image it opens unmasked."""
-    sky = documents[image]
-
-    def usable(name: str | None) -> bool:
-        metadata = documents.get(name) if name is not None else None
-        if metadata is None:
-            return False
-        attributes = metadata.get("attributes", {})
-        boolean = metadata.get("data_type") == "bool" or (
-            metadata.get("data_type") == "int8" and attributes.get("dtype") == "bool")
-        return (attributes.get("type") == "flag" and boolean and metadata.get("node_type") == "array"
-                and metadata.get("dimension_names") == sky.get("dimension_names") and metadata.get("shape") == sky.get("shape"))
-
-    groups = root_attributes.get("data_groups") or {}
-    groups = [group for group in groups.values() if isinstance(group, dict) and group.get("flag")]
-    # The image's own attribute outranks a group; groups naming different flags for it are refused.
-    declared = sky.get("attributes", {}).get("flag")
-    if not declared:
-        # A name carta-zarr refuses stays as written, so that it is declared and then found unusable.
-        named = {canonical(group["flag"]) or group["flag"] for group in groups
-                 if canonical(group.get("sky") or "") == image}
-        if len(named) > 1:
-            return None, f"data groups declare different flags {sorted(named)}", True
-        declared = next(iter(named), None)
-    if declared:
-        if usable(canonical(declared)):
-            return canonical(declared), "", False
-        return None, f"{declared} is declared but is not a usable flag", True
-    # With nothing declared, the one usable variable no group declares for another image.
-    others = {canonical(group["flag"]) or group["flag"] for group in groups
-              if canonical(group.get("sky") or "") != image}
-    candidates = [name for name in documents if name != image and name not in others and usable(name)]
-    if len(candidates) == 1:
-        return candidates[0], "", False
-    return None, "no flag is declared, and no single variable is typed flag and shaped as the image", False
-
-
-def layout(metadata: dict) -> tuple[list[int], list[int] | None, bool]:
-    """An array's inner chunk; when it is sharded, its shard; and whether a transpose codec reorders
-    the axes, when its inner chunk is not in the image's axis order. The converter writes none, and
-    composing one is more than this needs, so a transposed layout is refused where one is checked."""
-    def transposes(codecs: list[dict]) -> bool:
-        return any(codec.get("name") == "transpose"
-                   or (codec.get("name") == "sharding_indexed" and transposes(codec["configuration"].get("codecs", [])))
-                   for codec in codecs)
-    transposed = transposes(metadata.get("codecs", []))
-    grid = metadata["chunk_grid"]["configuration"]["chunk_shape"]
-    for codec in metadata.get("codecs", []):
-        if codec.get("name") == "sharding_indexed":
-            return codec["configuration"]["chunk_shape"], grid, transposed
-    return grid, None, transposed
-
-
-def extents(text: str) -> list[int]:
-    """L,M,F as the image's own axis order."""
-    l, m, f = (int(part) for part in text.split(","))
-    return [1, f, 1, l, m]
+STOKES = {1: "I", 2: "Q", 3: "U", 4: "V"}
 
 
 def first_difference(a: np.ndarray, b: np.ndarray) -> tuple[int, ...] | None:
@@ -174,6 +64,15 @@ def first_difference(a: np.ndarray, b: np.ndarray) -> tuple[int, ...] | None:
     return tuple(int(i) for i in np.unravel_index(int(np.argmax(differ)), differ.shape))
 
 
+def close(a, b, tolerance: float = 1e-9) -> bool:
+    """Equal to a part in 10^9, or within 10^-9 of zero; a NaN or a missing value is never close."""
+    try:
+        a, b = np.asarray(a, dtype=float), np.asarray(b, dtype=float)
+    except (TypeError, ValueError):
+        return False
+    return a.shape == b.shape and bool(np.all(np.isfinite(a)) and np.allclose(a, b, rtol=tolerance, atol=tolerance))
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("fits")
@@ -181,11 +80,12 @@ def main() -> int:
     parser.add_argument("--flag", choices=("yes", "no"), required=True, help="whether the Zarr must carry a flag")
     parser.add_argument("--chunks", required=True, help="the chunk asked for, as l,m,frequency")
     parser.add_argument("--shards", help="the shard asked for, as l,m,frequency; none means unsharded")
+    parser.add_argument("--bench", default=os.environ.get("CARTA_ZARR_BENCH"), help="the carta-zarr-bench executable")
     parser.add_argument("--block-mib", type=int, default=1024, help="how much of each to compare at a time")
     args = parser.parse_args()
+    if not args.bench:
+        parser.error("--bench or $CARTA_ZARR_BENCH must name carta-zarr-bench")
 
-    sky = zarr.open_array(f"{args.zarr}/SKY", mode="r")
-    n_time, n_freq, n_pol, n_l, n_m = sky.shape
     failures = []
 
     def check(what: str, ok: bool) -> None:
@@ -193,181 +93,128 @@ def main() -> int:
         if not ok:
             failures.append(what)
 
-    documents, stale = nodes(Path(args.zarr))
-    root_attributes = json.loads(Path(args.zarr, "zarr.json").read_text()).get("attributes", {})
-    # carta-zarr describes a node by the root's consolidated copy and refuses one that disagrees with the
-    # node's own zarr.json; checking either alone would pass a Zarr patched after consolidating.
-    check("consolidated metadata naming each node once, as its own zarr.json" + (f" (not {', '.join(stale)})" if stale else ""),
-          not stale)
-    # The coordinates every image needs, one sample along each of its axes, named for it and of the type
-    # carta-zarr reads it as (CheckCoordinate): labels for the polarization, real numbers otherwise.
-    def coordinate(axis: str, length: int) -> bool:
-        document = documents.get(axis, {})
-        data_type = document.get("data_type")
-        typed = (isinstance(data_type, dict) and data_type.get("name") == "fixed_length_utf32") if axis == "polarization" \
-            else data_type in REAL_TYPES
-        return document.get("shape") == [length] and document.get("dimension_names") == [axis] and typed
-    missing = [axis for axis, length in zip(AXES, sky.shape) if not coordinate(axis, length)]
-    check("a coordinate along every axis" + (f" (not {', '.join(missing)})" if missing else ""), not missing)
-    if "SKY" not in documents or missing:
-        print(f"MISMATCH: {', '.join(failures)}")
-        return 1
-    # The pixels are compared as bits in this axis order, which carta-zarr takes from the names.
-    metadata = documents["SKY"]
-    check("float32", metadata.get("data_type") == "float32")
-    # carta-zarr passes over a node typed flag when it lists images, so such a SKY is no image at all.
-    check("an image, not typed flag", metadata.get("attributes", {}).get("type") != "flag")
-    check(f"axes {' '.join(AXES)}", metadata.get("dimension_names") == AXES)
-    # A converter that ignored the layout asked of it would be published under the wrong name.
-    stored = layout(metadata)
-    check(f"chunk {args.chunks}" + (f", shard {args.shards}" if args.shards else ", unsharded") + ", untransposed",
-          stored == (extents(args.chunks), extents(args.shards) if args.shards else None, False))
+    def finish() -> int:
+        print("OK" if not failures else f"MISMATCH: {', '.join(failures)}")
+        return 1 if failures else 0
 
-    flag_name, why, refused = usable_flag(documents, root_attributes, "SKY")
-    # The flag is read beside the pixels, so its layout is part of what a layout name promises.
-    if flag_name:
-        check(f"{flag_name} in the same chunk" + (" and shard" if args.shards else ""),
-              layout(documents[flag_name]) == stored)
-    flag = zarr.open_array(f"{args.zarr}/{flag_name}", mode="r") if flag_name else None
-    if args.flag == "yes":
-        check(f"a flag carta-zarr applies{'' if flag_name else f' ({why})'}", flag is not None)
-    else:
-        check("no flag" + (f" ({why}, so carta-zarr refuses the image)" if refused else ""), flag is None and not refused)
+    # What carta-zarr sees. A dataset it does not open, or whose default image is not SKY, is refused
+    # before anything else is compared.
+    probe = subprocess.run([args.bench, "probe", args.zarr, "--describe"], capture_output=True, text=True)
+    try:
+        report = json.loads(probe.stdout)
+    except json.JSONDecodeError:
+        report = {"ok": False, "error": (probe.stderr or probe.stdout).strip()}
+    image = report.get("image", {})
+    check("carta-zarr opens it" + ("" if report.get("ok") else f" ({report.get('error', 'no reason given')})"),
+          bool(report.get("ok")) and image.get("id") == "SKY" and report.get("default_image_id") == "SKY")
+    if failures:
+        return finish()
+    described = image["description"]
+    axes = {axis["name"]: axis for axis in image["axes"]}
 
     with fits.open(args.fits, memmap=True) as hdul:
         data = hdul[0].data  # frequency, stokes, y = m, x = l
+        header = hdul[0].header.copy()
         with warnings.catch_warnings():
             warnings.simplefilter("ignore")
-            wcs = WCS(hdul[0].header)
-        header = hdul[0].header.copy()
-        check("brightness unit", metadata.get("attributes", {}).get("units") == header.get("BUNIT"))
-        check("shape", n_time == 1 and data.shape == (n_freq, n_pol, n_m, n_l))
+            wcs = WCS(header)
+        wcs.wcs.set()
+        n_freq, n_pol, n_m, n_l = data.shape
+
+        check("axes l m frequency polarization time, as the FITS cube's",
+              [axis["name"] for axis in image["axes"]] == ["l", "m", "frequency", "polarization", "time"]
+              and [axis["length"] for axis in image["axes"]] == [n_l, n_m, n_freq, n_pol, 1])
         if failures:
-            print(f"MISMATCH: {', '.join(failures)}")
-            return 1
+            return finish()
+
+        # The layout as carta-zarr reads it, in the image's axis order whatever the store's.
+        l, m, f = (int(part) for part in args.chunks.split(","))
+        chunk = {"l": l, "m": m, "frequency": f, "polarization": 1, "time": 1}
+        shard = dict(chunk)
+        if args.shards:
+            sl, sm, sf = (int(part) for part in args.shards.split(","))
+            shard.update(l=sl, m=sm, frequency=sf)
+        check(f"chunk {args.chunks}" + (f", shard {args.shards}" if args.shards else ", unsharded"),
+              all(axes[name]["chunk"] == chunk[name] and axes[name]["shard"] == shard[name] for name in chunk)
+              and image["sharded"] == bool(args.shards))
+        check("float32", described["stored_type"] == "float32")
+        check("brightness unit", described["unit"] == header.get("BUNIT"))
+
+        mask = described["pixel_mask_id"]
+        if args.flag == "yes":
+            check("a pixel mask carta-zarr applies", image["has_pixel_mask"] and bool(mask))
+        else:
+            check("no pixel mask", not image["has_pixel_mask"])
+
+        # The direction coordinate carta-zarr builds, against the FITS file's own.
+        direction = described.get("direction") or {}
+        pv = {(i, m): value for i, m, value in wcs.wcs.get_pv()}
+        check("direction coordinate",
+              direction.get("projection") == wcs.wcs.ctype[0][-3:] and wcs.wcs.ctype[1][-3:] == wcs.wcs.ctype[0][-3:]
+              and direction.get("reference_frame", "").upper() == wcs.wcs.radesys.upper()
+              and (close(direction.get("equinox"), wcs.wcs.equinox)
+                   or (direction.get("equinox") is None and math.isnan(wcs.wcs.equinox)))
+              and close(direction.get("reference_pixel"), wcs.wcs.crpix[:2])
+              and close(direction.get("reference_value"), wcs.wcs.crval[:2])
+              and close(direction.get("increment"), wcs.wcs.cdelt[:2])
+              and close(direction.get("transformation_matrix"), wcs.wcs.get_pc()[:2, :2])
+              and close(direction.get("projection_parameters") or [0.0, 0.0], [pv.get((2, 1), 0.0), pv.get((2, 2), 0.0)])
+              and close(direction.get("native_pole_direction"), [wcs.wcs.lonpole, wcs.wcs.latpole]))
+
+        # Every channel's frequency, and what the frequencies mean.
+        spectral = described.get("spectral") or {}
+        world = wcs.pixel_to_world_values(np.zeros(n_freq), np.zeros(n_freq), np.zeros(n_freq), np.arange(n_freq))[3]
+        check("frequency of every channel", close(spectral.get("channel_frequencies"), world))
+        check("frequency unit, frame and rest frequency",
+              spectral.get("unit") == header.get("CUNIT4") and spectral.get("system", "").upper() == str(header.get("SPECSYS", "")).upper()
+              and "RESTFRQ" in header and close(spectral.get("rest_frequency"), header["RESTFRQ"], 1e-12))
+        codes = wcs.wcs.crval[2] + wcs.wcs.cdelt[2] * (np.arange(n_pol) + 1 - wcs.wcs.crpix[2])
+        check("polarization", described.get("polarization") == [STOKES.get(int(round(code)), "?") for code in codes])
+
+        # The time axis and the observation date, which carta-zarr takes from different places.
+        observed = Time(header["DATE-OBS"], scale=str(header.get("TIMESYS", "UTC")).lower()).utc.mjd
+        temporal = described.get("temporal") or {}
+        check("time", temporal.get("format", "").upper() == "MJD" and temporal.get("scale", "").upper() == "UTC"
+              and temporal.get("unit") == "d" and close(temporal.get("values"), [observed], 1e-12))
+        observation = described.get("observation") or {}
+        check("observation date", observation.get("timesys", "").upper() == "UTC"
+              and close(observation.get("mjd_obs"), observed, 1e-12))
+
+        # The restoring beam a Jy/beam image is calibrated by, on every plane; none where FITS has none.
+        beams = described.get("beams", [])
+        if "BMAJ" in header:
+            expected = [math.radians(header["BMAJ"]), math.radians(header["BMIN"]), math.radians(header.get("BPA", 0.0))]
+            check("restoring beam of every plane",
+                  len(beams) == n_freq * n_pol and all(beam["unit"] == "rad" for beam in beams)
+                  and close([[beam["major"], beam["minor"], beam["position_angle"]] for beam in beams], [expected] * len(beams)))
+        else:
+            check("no restoring beam, as the FITS file has none", not beams)
+
+        # The pixels, and the mask carta-zarr applies, as stored. The mask is read beside the pixels, so
+        # its layout is part of what a layout name promises.
+        sky = zarr.open_array(f"{args.zarr}/SKY", mode="r")
+        flag = zarr.open_array(f"{args.zarr}/{mask}", mode="r") if image["has_pixel_mask"] and mask else None
+        if flag is not None:
+            check(f"{mask} in the same chunk" + (" and shard" if args.shards else ""),
+                  flag.chunks == sky.chunks and flag.shards == sky.shards)
         channels = max(1, (args.block_mib << 20) // (n_pol * n_l * n_m * 4))
         first_pixels = first_flag = None
         for start in range(0, n_freq, channels):
             stop = min(n_freq, start + channels)
-            expected = np.ascontiguousarray(np.asarray(data[start:stop]).transpose(0, 1, 3, 2), dtype=np.float32)
+            expected_pixels = np.ascontiguousarray(np.asarray(data[start:stop]).transpose(0, 1, 3, 2), dtype=np.float32)
             stored = np.asarray(sky[0, start:stop])  # frequency, polarization, l, m
             if first_pixels is None:
-                where = first_difference(expected.view(np.uint32), stored.view(np.uint32))
+                where = first_difference(expected_pixels.view(np.uint32), stored.view(np.uint32))
                 first_pixels = None if where is None else (start + where[0], *where[1:])
             if flag is not None and first_flag is None:
-                where = first_difference(np.asarray(flag[0, start:stop], dtype=bool), np.isnan(expected))
+                where = first_difference(np.asarray(flag[0, start:stop], dtype=bool), np.isnan(expected_pixels))
                 first_flag = None if where is None else (start + where[0], *where[1:])
         check("every pixel" + (f" (first differs at channel, stokes, x, y {first_pixels})" if first_pixels else ""),
               first_pixels is None)
         if flag is not None:
-            check("flag where NaN" + (f" (first differs at {first_flag})" if first_flag else ""), first_flag is None)
+            check("mask where NaN" + (f" (first differs at {first_flag})" if first_flag else ""), first_flag is None)
 
-    # The Stokes parameter of every polarization, and the time, as the FITS file states them.
-    stokes = {1: "I", 2: "Q", 3: "U", 4: "V"}
-    codes = wcs.wcs.crval[2] + wcs.wcs.cdelt[2] * (np.arange(n_pol) + 1 - wcs.wcs.crpix[2])
-    polarization = [str(label) for label in zarr.open_array(f"{args.zarr}/polarization", mode="r")[...]]
-    check("polarization", polarization == [stokes.get(int(round(code)), "?") for code in codes])
-    observed = Time(header["DATE-OBS"], scale=str(header.get("TIMESYS", "UTC")).lower()).utc.mjd
-
-    time_attributes = documents["time"].get("attributes", {})
-    stored_time = float(zarr.open_array(f"{args.zarr}/time", mode="r")[0])
-    check("time", time_attributes.get("format") == "mjd" and time_attributes.get("scale") == "utc"
-          and time_attributes.get("units") == "d" and abs(stored_time - observed) < 1e-6)
-    # carta-zarr takes the observation date from the image's own obsdate, not from the time axis, as
-    # observation.cc reads it: a string is an ISO date, a number is an MJD (or seconds since 1970 with
-    # format "unix"), in the scale its attrs give.
-    obsdate = metadata.get("attributes", {}).get("obsdate") or {}
-    obs_attrs = obsdate.get("attrs", {})
-    data, form = obsdate.get("data"), str(obs_attrs.get("format", "")).upper()
-    if isinstance(data, str):
-        try:
-            mjd = Time(data, format="isot", scale="utc").mjd
-        except ValueError:
-            mjd = math.nan
-    elif isinstance(data, (int, float)) and not isinstance(data, bool):
-        mjd = float(data) if form in ("", "MJD") else 40587.0 + float(data) / 86400.0 if form == "UNIX" else math.nan
-    else:
-        mjd = math.nan
-    check("observation date", str(obs_attrs.get("scale", "")).upper() == "UTC" and abs(mjd - observed) < 1e-6)
-    # The restoring beam a Jy/beam image is calibrated by, for every channel and polarization, in the
-    # order its labels say. A FITS file without one has an image without one.
-    beam_name = metadata.get("attributes", {}).get("beam_fit_params")
-    if "BMAJ" in header:
-        expected_beam = {"major": math.radians(header["BMAJ"]), "minor": math.radians(header["BMIN"]),
-                         "pa": math.radians(header.get("BPA", 0.0))}
-        beam = documents.get(canonical(beam_name or "") or "", {})
-        ok = beam.get("dimension_names") == ["time", "frequency", "polarization", "beam_params_label"] \
-            and beam.get("shape") == [n_time, n_freq, n_pol, 3] and beam.get("attributes", {}).get("units") == "rad"
-        if ok:
-            labels = [str(label) for label in zarr.open_array(f"{args.zarr}/beam_params_label", mode="r")[...]]
-            values = zarr.open_array(f"{args.zarr}/{canonical(beam_name)}", mode="r")[...]
-            ok = sorted(labels) == sorted(expected_beam) and all(
-                np.allclose(values[..., i], expected_beam[label], rtol=1e-9, atol=0) for i, label in enumerate(labels))
-        check("restoring beam of every channel", ok)
-    else:
-        check("no restoring beam, as the FITS file has none", not beam_name)
-    # What the frequencies mean, as the FITS file says: their unit, the frame they are in, and the rest
-    # frequency velocities are taken from.
-    spectral = documents["frequency"].get("attributes", {})
-    reference = spectral.get("reference_frequency", {}).get("attrs", {})
-    rest = spectral.get("rest_frequency", {})
-    # The coordinate's own unit first, then its reference frequency's, as carta-zarr's CoordinateUnit.
-    unit = spectral.get("units") or reference.get("units")
-    check("frequency unit, frame and rest frequency",
-          unit == header.get("CUNIT4") and str(reference.get("observer", "")).lower() == str(header.get("SPECSYS", "")).lower()
-          and rest.get("attrs", {}).get("units") == "Hz" and "RESTFRQ" in header
-          and math.isclose(float(rest.get("data", math.nan)), float(header["RESTFRQ"]), rel_tol=1e-12))
-
-    frequency = zarr.open_array(f"{args.zarr}/frequency", mode="r")[...]
-    channels = np.arange(n_freq)
-    world = wcs.pixel_to_world_values(np.zeros(n_freq), np.zeros(n_freq), np.zeros(n_freq), channels)[3]
-    wrong = np.flatnonzero(~(np.isfinite(frequency) & (np.abs(world - frequency) <= 1e-9 * np.abs(frequency))))
-    check("frequency of every channel" + (f" (first differs at channel {wrong[0]})" if wrong.size else ""), wrong.size == 0)
-    # xradio's converter writes l and m but not the sky position of every pixel, so the position is
-    # the SIN projection of l and m from the reference direction, inverted as XRADIO's would be. That
-    # holds only for the projection the Zarr declares being an unrotated SIN with no parameters, in the
-    # FITS file's frame, so that is checked first.
-    root = json.loads(Path(args.zarr, "zarr.json").read_text())["attributes"]
-    system = root["coordinate_system_info"]
-    frame = system["reference_direction"]["attrs"].get("frame", "")
-    wcs.wcs.set()
-    # The equinox as carta-zarr reads it (direction.cc): a number, or a string whose one leading J or B
-    # is dropped and whose start is read as std::stod reads it; one it cannot read is none, which only
-    # the FITS file's none matches.
-    written = system["reference_direction"]["attrs"].get("equinox")
-    if isinstance(written, str):
-        text = written[1:] if len(written) > 1 and written[0] in "JBjb" else written
-        parsed = re.match(r"\s*([+-]?(?:\d+\.?\d*|\.\d+)(?:[eE][+-]?\d+)?|[+-]?(?:inf(?:inity)?|nan))", text, re.I)
-        equinox = float(parsed.group(1)) if parsed else math.nan
-    else:
-        equinox = float(written) if isinstance(written, (int, float)) else math.nan
-    same_equinox = equinox == wcs.wcs.equinox or (math.isnan(equinox) and math.isnan(wcs.wcs.equinox))
-    pole = [math.degrees(angle) for angle in system.get("native_pole_direction", {}).get("data", [math.nan, math.nan])]
-    check("unrotated SIN projection in the FITS frame and equinox, about the FITS file's native pole",
-          system.get("projection") == "SIN" and system.get("pixel_coordinate_transformation_matrix") == [[1.0, 0.0], [0.0, 1.0]]
-          and not any(system.get("projection_parameters", [])) and frame.lower() == wcs.wcs.radesys.lower()
-          and all(t.endswith("-SIN") for t in list(wcs.wcs.ctype)[:2])
-          and np.allclose(pole, [wcs.wcs.lonpole, wcs.wcs.latpole], rtol=0, atol=1e-9) and same_equinox)
-    ra0, dec0 = system["reference_direction"]["data"]
-    l_axis = zarr.open_array(f"{args.zarr}/l", mode="r")[...]
-    m_axis = zarr.open_array(f"{args.zarr}/m", mode="r")[...]
-    # Every sample of l and m is x (or y) times the FITS increment from the reference pixel; carta-zarr
-    # takes its increment from the first two, so one sample off makes a different axis.
-    for name, values, axis in (("l", l_axis, 0), ("m", m_axis, 1)):
-        step = math.radians(wcs.wcs.cdelt[axis])
-        expected = step * (np.arange(values.size) + 1 - wcs.wcs.crpix[axis])
-        check(f"every {name}", bool(np.all(np.isfinite(values)) and np.allclose(values, expected, rtol=0, atol=1e-9 * abs(step))))
-    for x, y in [(0, 0), (n_l - 1, n_m - 1), (n_l // 2, n_m // 2)]:
-        l, m = float(l_axis[x]), float(m_axis[y])
-        n = math.sqrt(max(0.0, 1.0 - l * l - m * m))
-        dec = math.asin(m * math.cos(dec0) + n * math.sin(dec0))
-        ra = ra0 + math.atan2(l, n * math.cos(dec0) - m * math.sin(dec0))
-        world_ra, world_dec = wcs.celestial.pixel_to_world_values(x, y)
-        close = abs((world_ra - math.degrees(ra) + 180) % 360 - 180) < 1e-8 and abs(world_dec - math.degrees(dec)) < 1e-8
-        check(f"sky position of ({x}, {y})", bool(close))
-
-    print("OK" if not failures else f"MISMATCH: {', '.join(failures)}")
-    return 1 if failures else 0
+    return finish()
 
 
 if __name__ == "__main__":

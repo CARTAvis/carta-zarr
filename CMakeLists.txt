@@ -634,10 +634,13 @@ if(CARTA_ZARR_BUILD_TESTS AND BUILD_TESTING)
         add_test(NAME carta-zarr-generate
             COMMAND ${CARTA_ZARR_UV} run --quiet --script ${CMAKE_CURRENT_SOURCE_DIR}/tests/generate_test.py)
         # tools/testset's FITS writer and verifier, against a synthetic cube: what the test set's
-        # FITS-versus-Zarr comparisons rest on.
-        add_test(NAME carta-zarr-testset-fits
-            COMMAND ${CMAKE_COMMAND} -DUV=${CARTA_ZARR_UV} -DSOURCE_DIR=${CMAKE_CURRENT_SOURCE_DIR}
-                    -DOUTPUT_DIR=${CMAKE_CURRENT_BINARY_DIR}/testset-fits -P ${CMAKE_CURRENT_SOURCE_DIR}/tests/run_testset_fits.cmake)
+        # FITS-versus-Zarr comparisons rest on. The verifier reads the Zarr through carta-zarr-bench.
+        if(CARTA_ZARR_BUILD_BENCH)
+            add_test(NAME carta-zarr-testset-fits
+                COMMAND ${CMAKE_COMMAND} -DUV=${CARTA_ZARR_UV} -DSOURCE_DIR=${CMAKE_CURRENT_SOURCE_DIR}
+                        -DBENCH=$<TARGET_FILE:carta_zarr_bench> -DOUTPUT_DIR=${CMAKE_CURRENT_BINARY_DIR}/testset-fits
+                        -P ${CMAKE_CURRENT_SOURCE_DIR}/tests/run_testset_fits.cmake)
+        endif()
     endif()
 
     #[[

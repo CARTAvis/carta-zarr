@@ -224,6 +224,8 @@ void TestTheCommandLine() {
     Require(!Get<Usage>(Parse({"run", "--help"})).error, "asking for help is not an error");
     Require(Get<ProbeOptions>(Parse({"probe", "cube.zarr", "--image", "SKY"})).image_id == "SKY",
             "probe lost its --image");
+    Require(Get<ProbeOptions>(Parse({"probe", "cube.zarr", "--describe"})).describe, "probe lost its --describe");
+    Require(!Get<ProbeOptions>(Parse({"probe", "cube.zarr"})).describe, "probe describes without being asked");
     (void)Get<IdentityOptions>(Parse({"identity"}));
     Require(Get<Usage>(Parse({"identity", "cube.zarr"})).error, "identity took a dataset it does not read");
 }

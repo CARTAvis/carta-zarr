@@ -60,11 +60,13 @@ constexpr std::array<std::string_view, 19> kRunOptions{
 
 constexpr std::string_view kUsage = R"(usage:
   carta-zarr-bench run <dataset> [options]
-  carta-zarr-bench probe <dataset> [--image ID]
+  carta-zarr-bench probe <dataset> [--image ID] [--describe]
   carta-zarr-bench identity
 
 probe opens the dataset as carta-backend would and prints what the library sees, as one line of JSON.
-It exits non-zero when the dataset does not open.
+It exits non-zero when the dataset does not open. --describe adds what the image means: its stored
+type and unit, its pixel mask, its direction, spectral, polarization and time coordinates, the
+observation, and the beam of every plane.
 
 identity prints which build this is: a hash of the executable's bytes and those of the carta-zarr it
 loaded. It is in every run key, so --resume skips only what this build measured.
@@ -367,6 +369,10 @@ Command ParseProbe(Arguments& arguments) {
             }
             options.dataset = std::string(word);
             have_dataset = true;
+            continue;
+        }
+        if (word == "--describe") {
+            options.describe = true;
             continue;
         }
         const auto value = arguments.Value(word);

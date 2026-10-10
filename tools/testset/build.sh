@@ -7,7 +7,8 @@
 # Build the standard read-path test set in OUTPUT: each cube as a FITS file, and each of its Zarr
 # layouts made from that FITS by the site's xradio converter, as production data is.
 #
-#   XRADIO_CONVERTER=/path/to/fits_to_zarr_xradio_v1.2.2_v1.py tools/testset/build.sh OUTPUT
+#   XRADIO_CONVERTER=/path/to/fits_to_zarr_xradio_v1.2.2_v1.py CARTA_ZARR_BENCH=/path/to/carta-zarr-bench \
+#       tools/testset/build.sh OUTPUT
 #
 # What exists is skipped, so a run that stopped part-way is finished by running it again; a FITS
 # file or a Zarr appears under its name only once it is complete, and a Zarr only once verify.py has
@@ -19,6 +20,9 @@ generate="$here/../zarr-bench/generate.py"
 output=${1:?usage: XRADIO_CONVERTER=... $0 OUTPUT}
 converter=${XRADIO_CONVERTER:?set XRADIO_CONVERTER to the xradio FITS-to-Zarr converter}
 [ -f "$converter" ] || { echo "no converter at $converter" >&2; exit 1; }
+# verify.py reads each Zarr through carta-zarr itself, as carta-backend would.
+bench=${CARTA_ZARR_BENCH:?set CARTA_ZARR_BENCH to carta-zarr-bench, from a build with -DCARTA_ZARR_BUILD_BENCH=ON}
+[ -x "$bench" ] || { echo "no carta-zarr-bench at $bench" >&2; exit 1; }
 export PATH="$HOME/.local/bin:$PATH"
 mkdir -p "$output"
 
@@ -87,7 +91,8 @@ for entry in "${layouts[@]}"; do
     uv run --quiet --python-preference only-managed "$converter" "$output/$cube.fits" "${arguments[@]}" \
         --output "$partial" 2> >(grep -v Warning >&2)
     say "$name: verifying"
-    uv run --quiet "$here/verify.py" "$output/$cube.fits" "$partial" --flag "$flag" "${expected[@]}" > "$output/$name.verify.txt" || {
+    uv run --quiet "$here/verify.py" "$output/$cube.fits" "$partial" --flag "$flag" "${expected[@]}" --bench "$bench" \
+        > "$output/$name.verify.txt" || {
         cat "$output/$name.verify.txt" >&2
         exit 1
     }

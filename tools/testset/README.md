@@ -6,15 +6,19 @@ is a FITS file, and each of its Zarr layouts is made from that FITS by the site'
 set rebuilds from nothing on any machine.
 
 ```sh
-XRADIO_CONVERTER=/path/to/fits_to_zarr_xradio_v1.2.2_v1.py tools/testset/build.sh /data/carta-testset
+XRADIO_CONVERTER=/path/to/fits_to_zarr_xradio_v1.2.2_v1.py CARTA_ZARR_BENCH=/path/to/carta-zarr-bench \
+    tools/testset/build.sh /data/carta-testset
 ```
 
 `build.sh` skips what already exists, so a run that stopped is finished by running it again. A FITS
 file or a Zarr appears under its own name only once it is complete, and a Zarr only once `verify.py`
-has found it float32 over the expected axes in the chunks (and shards) asked for, and every one of its
-pixels, its flag (or the absence of one) and its coordinates to match the FITS file's (the report is
-left beside it as `NAME.verify.txt`).
-It needs `uv`, the converter, and about 155 GB (190 GB while a cube is being synthesized); on a
+has found it to hold the FITS file's pixels, bit for bit, and carta-zarr to read it as the FITS file
+describes it: in the chunks (and shards) asked for, with its flag (or none), and with the same unit,
+coordinates, observation date and beam (the report is left beside it as `NAME.verify.txt`). What the
+Zarr means is taken from carta-zarr itself, through `carta-zarr-bench probe --describe`, rather than
+from its metadata read a second way, so a Zarr carta-zarr would refuse or read otherwise is refused.
+It needs `uv`, the converter, carta-zarr-bench (a build with `-DCARTA_ZARR_BUILD_BENCH=ON`), and
+about 155 GB (190 GB while a cube is being synthesized); on a
 28-thread machine with local NVMe it takes about 13 minutes, a third of it verifying.
 
 ## Cubes and layouts
@@ -51,8 +55,8 @@ Each Zarr is about 21 GB.
   a line to `layouts` in `build.sh`; its name says all three, e.g. `pancake_c256x256x16_s1024x1024x16_flag.zarr`.
 - xradio 1.2.2's FITS reader leaves that flag undeclared: untyped, not named by the image or a data
   group, so carta-zarr does not apply it. The converter has to declare it (type `flag`, the image's
-  `flag` attribute, and a `base` data group naming it); `verify.py` refuses a flag carta-zarr would
-  not apply, so a converter that does not makes `build.sh` stop at the first flagged layout.
+  `flag` attribute, and a `base` data group naming it); `verify.py` refuses a flagged layout carta-zarr
+  opens without a pixel mask, so a converter that does not makes `build.sh` stop at the first one.
 - The converter writes no chunk that is wholly NaN, so a fully flagged run of channels long enough
   to cover a chunk leaves chunks that are not on disk at all.
 

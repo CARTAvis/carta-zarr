@@ -11,9 +11,11 @@
 # flag it was meant to carry, or with one carta-zarr would not apply; and one whose axes, chunks, data
 # type, frequencies or projection are not what the comparison takes them to be.
 
-if(NOT DEFINED UV OR NOT DEFINED SOURCE_DIR OR NOT DEFINED OUTPUT_DIR)
-    message(FATAL_ERROR "UV, SOURCE_DIR and OUTPUT_DIR must be set")
+if(NOT DEFINED UV OR NOT DEFINED SOURCE_DIR OR NOT DEFINED OUTPUT_DIR OR NOT DEFINED BENCH)
+    message(FATAL_ERROR "UV, SOURCE_DIR, OUTPUT_DIR and BENCH must be set")
 endif()
+# verify.py reads every Zarr through carta-zarr-bench.
+set(ENV{CARTA_ZARR_BENCH} "${BENCH}")
 
 file(REMOVE_RECURSE "${OUTPUT_DIR}")
 file(MAKE_DIRECTORY "${OUTPUT_DIR}")
@@ -175,19 +177,21 @@ values[0, 5, 0, 0] *= 2
 b[...] = values")
 refused("a Zarr whose beam is wider in one channel" "${OUTPUT_DIR}/cube.fits" "${OUTPUT_DIR}/widebeam.zarr" --flag no
         --chunks 32,32,8)
-# The same pixels in shards whose chunks are stored transposed: the pixels read back alike, and only the
-# layout says the chunks are not in the image's axis order.
+# The same pixels in shards whose chunks are stored transposed. The layout is what carta-zarr reads,
+# in the image's axis order, so it verifies as that layout.
 changed(transposed "import shutil
 from zarr.codecs import TransposeCodec
 old = zarr.open_array(root + '/SKY', mode='r')
 values, attributes, names = old[...], old.attrs.asdict(), list(old.metadata.dimension_names)
 shutil.rmtree(root + '/SKY')
-sky = zarr.create_array(root + '/SKY', shape=values.shape, chunks=(1, 8, 1, 32, 32), shards=(1, 8, 1, 64, 64), dtype='float32',
+sky = zarr.create_array(root + '/SKY', shape=values.shape, chunks=(1, 8, 1, 32, 16), shards=(1, 8, 1, 64, 64), dtype='float32',
                         filters=[TransposeCodec(order=(0, 1, 2, 4, 3))], dimension_names=names, fill_value=np.nan)
 sky[...] = values
 sky.attrs.update(attributes)")
-refused("a Zarr whose chunks are stored transposed" "${OUTPUT_DIR}/cube.fits" "${OUTPUT_DIR}/transposed.zarr" --flag no
-        --chunks 32,32,8 --shards 64,64,8)
+run("verify.py with transposed chunks in shards" "${SOURCE_DIR}/tools/testset/verify.py" "${OUTPUT_DIR}/cube.fits"
+    "${OUTPUT_DIR}/transposed.zarr" --flag no --chunks 32,16,8 --shards 64,64,8)
+refused("a sharded Zarr verified as another layout" "${OUTPUT_DIR}/cube.fits" "${OUTPUT_DIR}/transposed.zarr" --flag no
+        --chunks 16,32,8 --shards 64,64,8)
 # obsdate as an ISO date, which carta-zarr reads, and as a numeric string, which it does not.
 changed(isodate "a = zarr.open_array(root + '/SKY', mode='r+')
 from astropy.time import Time

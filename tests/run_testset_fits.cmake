@@ -46,6 +46,17 @@ refused("a Zarr in chunks it was not asked for" "${OUTPUT_DIR}/cube.fits" "${cub
 refused("a Zarr unsharded where a shard was asked for" "${OUTPUT_DIR}/cube.fits" "${cube}" --flag no --chunks 32,32,8
         --shards 64,64,8)
 
+# Refused, and for the reason given: a check whose name starts so, reported DIFFERENT. For a fixture
+# that could fail some other way and pass unnoticed.
+function(refused_for what reason)
+    execute_process(COMMAND "${UV}" run --quiet --script "${SOURCE_DIR}/tools/testset/verify.py" ${ARGN}
+        RESULT_VARIABLE result OUTPUT_VARIABLE out ERROR_VARIABLE err)
+    string(REGEX MATCH "(^|\n)${reason}[^\n]*: DIFFERENT" found "${out}")
+    if(NOT result OR NOT found)
+        message(FATAL_ERROR "verify.py did not refuse ${what} for ${reason}: ${result}\n${out}\n${err}")
+    endif()
+endfunction()
+
 # A copy of the cube changed by `code`, Python run with `root` set to the copy, and consolidated again
 # as a converter would, so that what is changed is what carta-zarr reads.
 function(changed name code)
@@ -314,8 +325,24 @@ sys.exit(result.returncode)
 ")
 file(WRITE "${OUTPUT_DIR}/misfitted.sh" "#!/bin/sh\nexec \"${UV}\" run --quiet --no-project --python-preference only-managed python \"${OUTPUT_DIR}/misfitted.py\" \"$@\"\n")
 file(CHMOD "${OUTPUT_DIR}/misfitted.sh" PERMISSIONS OWNER_READ OWNER_WRITE OWNER_EXECUTE)
-refused("a linear frequency axis a channel off" "${OUTPUT_DIR}/cube.fits" "${cube}" --flag no --chunks 32,32,8
-        --bench "${OUTPUT_DIR}/misfitted.sh")
+file(WRITE "${OUTPUT_DIR}/unfitted.py" "import json, subprocess, sys
+result = subprocess.run(['${BENCH}'] + sys.argv[1:], capture_output=True)
+out = result.stdout
+if sys.argv[1] == 'probe' and '--describe' in sys.argv and not result.returncode:
+    report = json.loads(out)
+    for field in ('reference_pixel', 'reference_value', 'increment'):
+        del report['image']['description']['spectral'][field]
+    out = json.dumps(report).encode()
+sys.stdout.buffer.write(out)
+sys.stderr.buffer.write(result.stderr)
+sys.exit(result.returncode)
+")
+file(WRITE "${OUTPUT_DIR}/unfitted.sh" "#!/bin/sh\nexec \"${UV}\" run --quiet --no-project --python-preference only-managed python \"${OUTPUT_DIR}/unfitted.py\" \"$@\"\n")
+file(CHMOD "${OUTPUT_DIR}/unfitted.sh" PERMISSIONS OWNER_READ OWNER_WRITE OWNER_EXECUTE)
+refused_for("a description without the linear frequency axis" "frequency axis as carta-backend builds it"
+            "${OUTPUT_DIR}/cube.fits" "${cube}" --flag no --chunks 32,32,8 --bench "${OUTPUT_DIR}/unfitted.sh")
+refused_for("a linear frequency axis a channel off" "frequency axis as carta-backend builds it" "${OUTPUT_DIR}/cube.fits"
+            "${cube}" --flag no --chunks 32,32,8 --bench "${OUTPUT_DIR}/misfitted.sh")
 # obsdate as an ISO date, which carta-zarr reads, and as a numeric string, which it does not.
 changed(isodate "a = zarr.open_array(root + '/SKY', mode='r+')
 from astropy.time import Time
@@ -459,8 +486,8 @@ sys.exit(result.returncode)
 ")
 file(WRITE "${OUTPUT_DIR}/misapplied.sh" "#!/bin/sh\nexec \"${UV}\" run --quiet --no-project --python-preference only-managed --with numpy==2.3.1 python \"${OUTPUT_DIR}/misapplied.py\" \"$@\"\n")
 file(CHMOD "${OUTPUT_DIR}/misapplied.sh" PERMISSIONS OWNER_READ OWNER_WRITE OWNER_EXECUTE)
-refused("a pixel mask applied where the FITS cube is not NaN" "${OUTPUT_DIR}/cube.fits" "${OUTPUT_DIR}/flagged.zarr" --flag yes
-        --chunks 32,32,8 --bench "${OUTPUT_DIR}/misapplied.sh")
+refused_for("a pixel mask applied where the FITS cube is not NaN" "pixels masked where NaN" "${OUTPUT_DIR}/cube.fits"
+            "${OUTPUT_DIR}/flagged.zarr" --flag yes --chunks 32,32,8 --bench "${OUTPUT_DIR}/misapplied.sh")
 
 with_flag(untyped False False)
 refused("a flag carta-zarr would not apply" "${OUTPUT_DIR}/cube.fits" "${OUTPUT_DIR}/untyped.zarr" --flag yes --chunks 32,32,8)

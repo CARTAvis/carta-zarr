@@ -147,11 +147,12 @@ struct ReadOptions {
     /// for its compressed bytes and the codec's buffer beside the decoded copy -- and the buffers the
     /// library allocates for them: the folded-in pixel mask, a byte an element, and the pixels
     /// themselves wherever the library rather than the caller holds them. Every operation that takes
-    /// these options spends it the same way, and every one keeps to it whether or not anybody watches:
-    /// Image::Read and Image::Prefetch cut their request into pieces that fit, and ReduceSpectral,
-    /// ComputeHistogram and ComputeCubeHistogram size each read of their walk by it. A read holds no
-    /// more chunks than are decoded at once, at most one a decode thread, so one whose budget affords
-    /// that many is held to it without being cut; see ProgressCallback.
+    /// these options spends it the same way: Image::Read and Image::Prefetch cut their request into
+    /// pieces that fit, and ReduceSpectral, ComputeHistogram and ComputeCubeHistogram size each read
+    /// of their walk by it. One exception: a read nobody watches, whose budget affords a chunk a decode
+    /// thread, is cut no finer than a layer of its chunks -- a chunk deep along the spectral axis and
+    /// the whole of its plane -- because cut finer it runs a quarter to two thirds slower, and a layer
+    /// can hold more than the budget; see ProgressCallback and ADR 0021.
     ///
     /// A chunk is the smallest thing that can be decoded: asking for part of one decodes all of it.
     /// So a read holds at least one chunk, and under a budget smaller than that it reads one chunk at

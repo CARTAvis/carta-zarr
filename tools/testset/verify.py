@@ -205,10 +205,12 @@ def main() -> int:
     system = root["coordinate_system_info"]
     frame = system["reference_direction"]["attrs"].get("frame", "")
     wcs.wcs.set()
-    # An equinox is Besselian in FK4 and Julian otherwise, and none at all is the FITS file's none.
-    equinox = re.fullmatch(r"([jb])(\d+(?:\.\d*)?)", str(system["reference_direction"]["attrs"].get("equinox", "")).lower())
-    same_equinox = (equinox is None and math.isnan(wcs.wcs.equinox)) if equinox is None else (
-        float(equinox.group(2)) == wcs.wcs.equinox and (equinox.group(1) == "b") == (wcs.wcs.radesys.upper() == "FK4"))
+    # The equinox as carta-zarr reads it: a number, or a string of one with an optional J or B before it
+    # (direction.cc); one it cannot read is none, which only the FITS file's none matches.
+    written = system["reference_direction"]["attrs"].get("equinox")
+    parsed = re.fullmatch(r"[jb]?(\d+(?:\.\d*)?)", str(written).strip().lower()) if written is not None else None
+    equinox = float(written) if isinstance(written, (int, float)) else float(parsed.group(1)) if parsed else math.nan
+    same_equinox = equinox == wcs.wcs.equinox or (math.isnan(equinox) and math.isnan(wcs.wcs.equinox))
     pole = [math.degrees(angle) for angle in system.get("native_pole_direction", {}).get("data", [math.nan, math.nan])]
     check("unrotated SIN projection in the FITS frame and equinox, about the FITS file's native pole",
           system.get("projection") == "SIN" and system.get("pixel_coordinate_transformation_matrix") == [[1.0, 0.0], [0.0, 1.0]]

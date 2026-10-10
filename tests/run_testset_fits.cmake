@@ -83,6 +83,15 @@ changed(equinox "meta = json.load(open(root + '/zarr.json'))
 meta['attributes']['coordinate_system_info']['reference_direction']['attrs']['equinox'] = 'j1950.0'
 json.dump(meta, open(root + '/zarr.json', 'w'))")
 refused("a Zarr in another equinox" "${OUTPUT_DIR}/cube.fits" "${OUTPUT_DIR}/equinox.zarr" --flag no --chunks 32,32,8)
+# The same equinox in every form carta-zarr reads.
+foreach(form 2000.0 "'2000.0'" "'J2000'" "'b2000'")
+    string(MAKE_C_IDENTIFIER "equinox_${form}" name)
+    changed(${name} "meta = json.load(open(root + '/zarr.json'))
+meta['attributes']['coordinate_system_info']['reference_direction']['attrs']['equinox'] = ${form}
+json.dump(meta, open(root + '/zarr.json', 'w'))")
+    run("verify.py with the equinox written ${form}" "${SOURCE_DIR}/tools/testset/verify.py" "${OUTPUT_DIR}/cube.fits"
+        "${OUTPUT_DIR}/${name}.zarr" --flag no --chunks 32,32,8)
+endforeach()
 refused("a Zarr rotated on the sky" "${OUTPUT_DIR}/cube.fits" "${OUTPUT_DIR}/rotated.zarr" --flag no --chunks 32,32,8)
 changed(nonfinite "f = zarr.open_array(root + '/frequency', mode='r+')
 f[0] = np.nan")

@@ -260,6 +260,48 @@ void TestASplitReadAgreesWithAnUnsplitOne() {
     Require(split == whole, "a split read and an unsplit one disagreed about the same cube");
 }
 
+// Whether a read is watched is what decides whether a budget that affords a chunk for every decode
+// thread cuts it: TensorStore decodes no more than that at once, so a read nobody watches is issued
+// whole, and a watched one is cut so that there is a piece to report. The budget here affords one
+// chunk row, eight chunks, and four decode threads are fewer than that -- so the same read is one
+// piece unwatched, three watched; with sixteen threads, more than the row, it is three either way.
+// Checked through ReadInPieces and PrefetchChunks rather than the plan alone, because it is whether
+// the caller's callback reaches the plan as "watched" that a slip would break.
+void TestOnlyAWatchedReadIsCutWhileItsChunksInFlightFit() {
+    const auto image = MakeImage();
+    const auto geometry = MakeGeometry();
+    constexpr std::size_t kFewerThreadsThanTheRow = 4;
+    ReadOptions options;
+    options.read_budget_bytes = kThreePieces;
+    const ProgressCallback watching = [](std::size_t, std::size_t) { return true; };
+
+    const auto pieces = [&](std::size_t threads, const ProgressCallback& progress) {
+        SyntheticPixelSource source(image, geometry, Value);
+        std::vector<float> destination(kElements, kUntouched);
+        const auto read =
+            ReadInPieces(source, image, geometry, geometry, WholeCube(),
+                         BufferView<float>{destination.data(), destination.size()}, options, threads, progress);
+        Require(static_cast<bool>(read), "the read failed");
+        RequireCubeMatchesTheFormula(destination, "a read cut or not by whether it is watched");
+        return source.pixel_reads();
+    };
+    Require(pieces(kFewerThreadsThanTheRow, ProgressCallback{}) == 1,
+            "a read nobody watches was cut though its chunks in flight fit the budget");
+    Require(pieces(kFewerThreadsThanTheRow, watching) == 3, "a watched read was not cut into pieces to report");
+    Require(pieces(kDecodeThreads, ProgressCallback{}) == 3,
+            "a read nobody watches was not cut though more chunks are in flight than the budget affords");
+
+    const auto prefetch_reads = [&](std::size_t threads) {
+        SyntheticPixelSource source(image, geometry, Value);
+        Require(static_cast<bool>(PrefetchChunks(source, image, geometry, geometry, WholeCube(), options, threads)),
+                "the prefetch failed");
+        return source.pixel_reads();
+    };
+    Require(prefetch_reads(kFewerThreadsThanTheRow) == 1,
+            "a prefetch was cut though its chunks in flight fit the budget");
+    Require(prefetch_reads(kDecodeThreads) > 1, "a prefetch was not cut though it holds more than the budget affords");
+}
+
 // What crosses the seam is the caller's buffer from where a piece lands to its end, not the piece's
 // size restated. The seam's one check -- that the selection fits what it is writing into -- is only
 // a check if the length it is held to comes from the buffer rather than from the very selection it
@@ -483,6 +525,7 @@ int main() {
         TestProgressCanStopTheRead();
         TestASplitReadAgreesWithAnUnsplitOne();
         TestEachPieceIsHandedTheRestOfTheBuffer();
+        TestOnlyAWatchedReadIsCutWhileItsChunksInFlightFit();
         TestAFlaggedPixelArrivesAsNaN();
         TestDecliningTheMaskReadsNoFlag();
         TestASampleTakesOneElementOfEachChunk();

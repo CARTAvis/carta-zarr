@@ -16,7 +16,6 @@
 #include "chunk_blocks.h"
 
 #include <algorithm>
-#include <limits>
 #include <optional>
 #include <utility>
 
@@ -132,8 +131,10 @@ std::vector<Piece> PlanPieces(const ImageDescriptor& descriptor, const ChunkGeom
     // nothing to gain from being cut -- a plane of 4 MiB chunks read whole held 80 MiB beside its
     // destination, and cut into pieces it ran half as fast again -- unless a caller is watching it,
     // and then it is cut so that there is a piece to report.
+    // Affording the whole request is said as exactly that many chunks, not as an unbounded count that
+    // would only stay correct as long as no arithmetic downstream overflowed on it.
     if (!reports_progress && affordable >= std::max<std::size_t>(1, decode_threads)) {
-        affordable = std::numeric_limits<std::uint64_t>::max();
+        affordable = std::max<std::uint64_t>(affordable, ChunksOf(geometry, request));
     }
     const auto gathered = std::max<std::uint64_t>(1, cost.ChunksPerRead(PixelsHeld::by_library));
 

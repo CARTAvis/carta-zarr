@@ -19,10 +19,12 @@
 """Check that a FITS cube and a Zarr made from it hold the same pixels at the same coordinates.
 
 A comparison between FITS and Zarr is only a comparison of the formats if both hold the same
-pixels. This checks that the image is float32 over time, frequency, polarization, l and m, in the
-chunks (and shards) asked for; compares every pixel, bit for bit, a block of channels at a time; the
-frequency of every channel; and the sky position of the corners and the centre, from an unrotated
-SIN projection, which is checked to be what the Zarr declares. --flag says whether the Zarr must carry
+pixels. It reads the Zarr as carta-zarr does, its consolidated metadata included, and checks that
+the image is float32 over time, frequency, polarization, l and m, in the chunks (and shards) asked
+for; compares every pixel, bit for bit, a block of channels at a time; the Stokes parameters, the
+time, every channel's frequency with its unit, frame and rest frequency, every l and m, and the sky
+position of the corners and the centre, from an unrotated SIN projection, which is checked to be
+what the Zarr declares. --flag says whether the Zarr must carry
 a flag: one that must is refused without one carta-zarr would apply -- typed "flag", boolean, shaped
 as the image, and declared for it or the only such variable not declared for another -- and its flag
 must be true exactly where the FITS cube is NaN; one that must not is refused with one, and with a
@@ -46,6 +48,7 @@ from pathlib import Path
 import numpy as np
 import zarr
 from astropy.io import fits
+from astropy.time import Time
 from astropy.wcs import WCS
 
 
@@ -64,18 +67,46 @@ def canonical(name: str) -> str | None:
     return "/".join(parts)
 
 
-def usable_flag(root: Path, image: str) -> tuple[str | None, str, bool]:
+def nodes(root: Path) -> tuple[dict[str, dict], list[str]]:
+    """Every node's metadata as carta-zarr reads it (src/store.cc), and the nodes whose copy in the
+    root's consolidated metadata disagrees with their own zarr.json. A consolidated store is listed by
+    its consolidated block alone -- a node written beside it afterwards is not in it -- and each node
+    is described by its copy there, which for an array must agree with its own zarr.json in what
+    carta-zarr reads; a store without one, by the directories that hold a zarr.json."""
+    block = json.loads((root / "zarr.json").read_text()).get("consolidated_metadata")
+    if block is None:
+        return {entry.name: json.loads((entry / "zarr.json").read_text())
+                for entry in root.iterdir() if (entry / "zarr.json").is_file()}, []
+    documents, stale = {}, []
+    for key, document in block.get("metadata", {}).items():
+        name = canonical(key.strip("/").removesuffix("zarr.json").rstrip("/"))
+        if name is None:
+            continue
+        documents[name] = document
+        if document.get("node_type") != "array":
+            continue
+        # What carta-zarr holds an array's copy to (RequireSameArray): what it plans reads and reads
+        # meaning from. Fields it does not read, such as an empty storage_transformers, may differ.
+        try:
+            own = json.loads((root / name / "zarr.json").read_text())
+        except OSError:
+            stale.append(name)
+            continue
+        if any(document.get(field) != own.get(field) for field in ("shape", "dimension_names", "data_type", "attributes")) \
+                or layout(document) != layout(own):
+            stale.append(name)
+    return documents, stale
+
+
+def usable_flag(documents: dict[str, dict], root_attributes: dict, image: str) -> tuple[str | None, str, bool]:
     """The flag carta-zarr would apply to `image`, by its rules (src/schema/xradio/flag.h, DeclaredFlag
     and DetermineFlag); why there is none when there is none; and whether that is a declaration
     carta-zarr refuses to open the image over rather than an image it opens unmasked."""
-    sky = json.loads((root / image / "zarr.json").read_text())
+    sky = documents[image]
 
     def usable(name: str | None) -> bool:
-        if name is None:
-            return False
-        try:
-            metadata = json.loads((root / name / "zarr.json").read_text())
-        except OSError:
+        metadata = documents.get(name) if name is not None else None
+        if metadata is None:
             return False
         attributes = metadata.get("attributes", {})
         boolean = metadata.get("data_type") == "bool" or (
@@ -83,7 +114,7 @@ def usable_flag(root: Path, image: str) -> tuple[str | None, str, bool]:
         return (attributes.get("type") == "flag" and boolean and metadata.get("node_type") == "array"
                 and metadata.get("dimension_names") == sky.get("dimension_names") and metadata.get("shape") == sky.get("shape"))
 
-    groups = json.loads((root / "zarr.json").read_text()).get("attributes", {}).get("data_groups") or {}
+    groups = root_attributes.get("data_groups") or {}
     groups = [group for group in groups.values() if isinstance(group, dict) and group.get("flag")]
     # The image's own attribute outranks a group; groups naming different flags for it are refused.
     declared = sky.get("attributes", {}).get("flag")
@@ -101,8 +132,7 @@ def usable_flag(root: Path, image: str) -> tuple[str | None, str, bool]:
     # With nothing declared, the one usable variable no group declares for another image.
     others = {canonical(group["flag"]) or group["flag"] for group in groups
               if canonical(group.get("sky") or "") != image}
-    candidates = [entry.name for entry in root.iterdir()
-                  if entry.is_dir() and entry.name != image and entry.name not in others and usable(entry.name)]
+    candidates = [name for name in documents if name != image and name not in others and usable(name)]
     if len(candidates) == 1:
         return candidates[0], "", False
     return None, "no flag is declared, and no single variable is typed flag and shaped as the image", False
@@ -150,8 +180,19 @@ def main() -> int:
         if not ok:
             failures.append(what)
 
+    documents, stale = nodes(Path(args.zarr))
+    root_attributes = json.loads(Path(args.zarr, "zarr.json").read_text()).get("attributes", {})
+    # carta-zarr describes a node by the root's consolidated copy and refuses one that disagrees with the
+    # node's own zarr.json; checking either alone would pass a Zarr patched after consolidating.
+    check("consolidated metadata as each node's own" + (f" (not {', '.join(stale)})" if stale else ""), not stale)
+    # The coordinates every image needs, one sample along each of its axes.
+    missing = [axis for axis, length in zip(AXES, sky.shape) if documents.get(axis, {}).get("shape") != [length]]
+    check("a coordinate along every axis" + (f" (not {', '.join(missing)})" if missing else ""), not missing)
+    if "SKY" not in documents or missing:
+        print(f"MISMATCH: {', '.join(failures)}")
+        return 1
     # The pixels are compared as bits in this axis order, which carta-zarr takes from the names.
-    metadata = json.loads(Path(args.zarr, "SKY", "zarr.json").read_text())
+    metadata = documents["SKY"]
     check("float32", metadata.get("data_type") == "float32")
     check(f"axes {' '.join(AXES)}", metadata.get("dimension_names") == AXES)
     # A converter that ignored the layout asked of it would be published under the wrong name.
@@ -159,7 +200,7 @@ def main() -> int:
     check(f"chunk {args.chunks}" + (f", shard {args.shards}" if args.shards else ", unsharded"),
           inner == extents(args.chunks) and shard == (extents(args.shards) if args.shards else None))
 
-    flag_name, why, refused = usable_flag(Path(args.zarr), "SKY")
+    flag_name, why, refused = usable_flag(documents, root_attributes, "SKY")
     flag = zarr.open_array(f"{args.zarr}/{flag_name}", mode="r") if flag_name else None
     if args.flag == "yes":
         check(f"a flag carta-zarr applies{'' if flag_name else f' ({why})'}", flag is not None)
@@ -171,6 +212,7 @@ def main() -> int:
         with warnings.catch_warnings():
             warnings.simplefilter("ignore")
             wcs = WCS(hdul[0].header)
+        header = hdul[0].header.copy()
         check("shape", n_time == 1 and data.shape == (n_freq, n_pol, n_m, n_l))
         if failures:
             print(f"MISMATCH: {', '.join(failures)}")
@@ -191,6 +233,26 @@ def main() -> int:
               first_pixels is None)
         if flag is not None:
             check("flag where NaN" + (f" (first differs at {first_flag})" if first_flag else ""), first_flag is None)
+
+    # The Stokes parameter of every polarization, and the time, as the FITS file states them.
+    stokes = {1: "I", 2: "Q", 3: "U", 4: "V"}
+    codes = wcs.wcs.crval[2] + wcs.wcs.cdelt[2] * (np.arange(n_pol) + 1 - wcs.wcs.crpix[2])
+    polarization = [str(label) for label in zarr.open_array(f"{args.zarr}/polarization", mode="r")[...]]
+    check("polarization", polarization == [stokes.get(int(round(code)), "?") for code in codes])
+    time_attributes = documents["time"].get("attributes", {})
+    observed = Time(header["DATE-OBS"], scale=str(header.get("TIMESYS", "UTC")).lower()).utc.mjd
+    stored = float(zarr.open_array(f"{args.zarr}/time", mode="r")[0])
+    check("time", time_attributes.get("format") == "mjd" and time_attributes.get("scale") == "utc"
+          and time_attributes.get("units") == "d" and abs(stored - observed) < 1e-6)
+    # What the frequencies mean, as the FITS file says: their unit, the frame they are in, and the rest
+    # frequency velocities are taken from.
+    spectral = documents["frequency"].get("attributes", {})
+    reference = spectral.get("reference_frequency", {}).get("attrs", {})
+    rest = spectral.get("rest_frequency", {})
+    check("frequency unit, frame and rest frequency",
+          reference.get("units") == header.get("CUNIT4") and str(reference.get("observer", "")).lower() == str(header.get("SPECSYS", "")).lower()
+          and rest.get("attrs", {}).get("units") == "Hz" and "RESTFRQ" in header
+          and math.isclose(float(rest.get("data", math.nan)), float(header["RESTFRQ"]), rel_tol=1e-12))
 
     frequency = zarr.open_array(f"{args.zarr}/frequency", mode="r")[...]
     channels = np.arange(n_freq)
@@ -225,6 +287,12 @@ def main() -> int:
     ra0, dec0 = system["reference_direction"]["data"]
     l_axis = zarr.open_array(f"{args.zarr}/l", mode="r")[...]
     m_axis = zarr.open_array(f"{args.zarr}/m", mode="r")[...]
+    # Every sample of l and m is x (or y) times the FITS increment from the reference pixel; carta-zarr
+    # takes its increment from the first two, so one sample off makes a different axis.
+    for name, values, axis in (("l", l_axis, 0), ("m", m_axis, 1)):
+        step = math.radians(wcs.wcs.cdelt[axis])
+        expected = step * (np.arange(values.size) + 1 - wcs.wcs.crpix[axis])
+        check(f"every {name}", bool(np.all(np.isfinite(values)) and np.allclose(values, expected, rtol=0, atol=1e-9 * abs(step))))
     for x, y in [(0, 0), (n_l - 1, n_m - 1), (n_l // 2, n_m // 2)]:
         l, m = float(l_axis[x]), float(m_axis[y])
         n = math.sqrt(max(0.0, 1.0 - l * l - m * m))

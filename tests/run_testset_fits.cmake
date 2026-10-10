@@ -44,13 +44,14 @@ refused("a Zarr in chunks it was not asked for" "${OUTPUT_DIR}/cube.fits" "${cub
 refused("a Zarr unsharded where a shard was asked for" "${OUTPUT_DIR}/cube.fits" "${cube}" --flag no --chunks 32,32,8
         --shards 64,64,8)
 
-# A copy of the cube changed by `code`, Python run with `root` set to the copy.
+# A copy of the cube changed by `code`, Python run with `root` set to the copy, and consolidated again
+# as a converter would, so that what is changed is what carta-zarr reads.
 function(changed name code)
     set(copy "${OUTPUT_DIR}/${name}.zarr")
     file(COPY "${cube}/" DESTINATION "${copy}")
     execute_process(
         COMMAND "${UV}" run --quiet --no-project --python-preference only-managed --with zarr==3.2.1 --with numpy==2.3.1
-                python -c "import json, numpy as np, zarr\nroot = '${copy}'\n${code}"
+                python -c "import json, numpy as np, zarr\nroot = '${copy}'\n${code}\nzarr.consolidate_metadata(root)"
         RESULT_VARIABLE result)
     if(result)
         message(FATAL_ERROR "changing ${name} failed: ${result}")
@@ -92,6 +93,42 @@ json.dump(meta, open(root + '/zarr.json', 'w'))")
     run("verify.py with the equinox written ${form}" "${SOURCE_DIR}/tools/testset/verify.py" "${OUTPUT_DIR}/cube.fits"
         "${OUTPUT_DIR}/${name}.zarr" --flag no --chunks 32,32,8)
 endforeach()
+changed(stokes "p = zarr.open_array(root + '/polarization', mode='r+')
+p[0] = 'Q'")
+refused("a Zarr calling Stokes I Q" "${OUTPUT_DIR}/cube.fits" "${OUTPUT_DIR}/stokes.zarr" --flag no --chunks 32,32,8)
+changed(timeless "import shutil
+shutil.rmtree(root + '/time')")
+refused("a Zarr without a time coordinate" "${OUTPUT_DIR}/cube.fits" "${OUTPUT_DIR}/timeless.zarr" --flag no --chunks 32,32,8)
+changed(later "t = zarr.open_array(root + '/time', mode='r+')
+t[0] = t[0] + 1.0")
+refused("a Zarr a day later than the FITS file" "${OUTPUT_DIR}/cube.fits" "${OUTPUT_DIR}/later.zarr" --flag no --chunks 32,32,8)
+changed(rest "f = zarr.open_array(root + '/frequency', mode='r+')
+f.attrs['rest_frequency'] = dict(f.attrs['rest_frequency'], data=1.4e9)")
+refused("a Zarr with another rest frequency" "${OUTPUT_DIR}/cube.fits" "${OUTPUT_DIR}/rest.zarr" --flag no --chunks 32,32,8)
+changed(observer "f = zarr.open_array(root + '/frequency', mode='r+')
+reference = dict(f.attrs['reference_frequency'])
+reference['attrs'] = dict(reference['attrs'], observer='bary')
+f.attrs['reference_frequency'] = reference")
+refused("a Zarr in another spectral frame" "${OUTPUT_DIR}/cube.fits" "${OUTPUT_DIR}/observer.zarr" --flag no --chunks 32,32,8)
+changed(degenerate "l = zarr.open_array(root + '/l', mode='r+')
+l[1] = l[0]")
+refused("a Zarr whose first two l are the same" "${OUTPUT_DIR}/cube.fits" "${OUTPUT_DIR}/degenerate.zarr" --flag no
+        --chunks 32,32,8)
+# A node patched after the store was consolidated: carta-zarr reads the consolidated copy and refuses one
+# that disagrees with the node's own zarr.json.
+set(stale "${OUTPUT_DIR}/stale.zarr")
+file(COPY "${cube}/" DESTINATION "${stale}")
+execute_process(
+    COMMAND "${UV}" run --quiet --no-project --python-preference only-managed python -c "import json
+path = '${stale}/SKY/zarr.json'
+meta = json.load(open(path))
+meta['attributes']['units'] = 'K'
+json.dump(meta, open(path, 'w'))"
+    RESULT_VARIABLE result)
+if(result)
+    message(FATAL_ERROR "patching stale failed: ${result}")
+endif()
+refused("a Zarr patched after it was consolidated" "${OUTPUT_DIR}/cube.fits" "${stale}" --flag no --chunks 32,32,8)
 refused("a Zarr rotated on the sky" "${OUTPUT_DIR}/cube.fits" "${OUTPUT_DIR}/rotated.zarr" --flag no --chunks 32,32,8)
 changed(nonfinite "f = zarr.open_array(root + '/frequency', mode='r+')
 f[0] = np.nan")
@@ -126,6 +163,7 @@ if ${declared}:
     meta = json.load(open(root + '/zarr.json'))
     meta['attributes']['data_groups']['base']['flag'] = 'FLAG_SKY'
     json.dump(meta, open(root + '/zarr.json', 'w'))
+zarr.consolidate_metadata(root)
 "
         RESULT_VARIABLE result)
     if(result)

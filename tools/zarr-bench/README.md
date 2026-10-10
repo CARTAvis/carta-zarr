@@ -36,7 +36,8 @@ Or synthesize one, when there is no real cube to hand:
   (`--line-sources`), NaN outside an irregular footprint (`--footprint-fill`), runs of flagged
   channels (`--flagged-channels`), on ASKAP's frequency axis (`--frequency-start`,
   `--channel-width`, `--rest-frequency`); `--point-sources` and `--extended-sources` add continuum.
-  It compresses within a few per cent of the real cube, but it is still not a real image. It is
+  It compresses about 10 % worse than the real cube (1.25 against ASKAP Hydra's 1.39), its noise
+  being independent from pixel to pixel, and it is still not a real image. It is
   deterministic: two layouts of the same options hold the same pixels. `tools/testset/README.md`
   has the calibration.
 - **`--stripe`** sets Lustre (`lfs setstripe`) or BeeGFS (`beegfs-ctl --setpattern`, or

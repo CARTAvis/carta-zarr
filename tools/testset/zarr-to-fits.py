@@ -46,6 +46,7 @@ from typing import Any
 import numpy as np
 import zarr
 from astropy.io import fits
+from astropy.time import Time
 
 STOKES_CODE = {"I": 1, "Q": 2, "U": 3, "V": 4}
 SKY_AXES = ["time", "frequency", "polarization", "l", "m"]
@@ -106,9 +107,10 @@ def header_of(root: Path, image: str, sky: Any) -> fits.Header:
     rest = metadata(root / "frequency").get("attributes", {}).get("rest_frequency", {}).get("data")
     if rest is not None:
         header["RESTFRQ"] = float(rest)
-    # ASKAP's, as the frequency axis is: xradio wants an observatory and a date to place it.
+    # ASKAP, as the frequency axis is: xradio wants an observatory and a date to place it. The date is
+    # the dataset's own, so that the FITS file and the dataset agree on it as on everything else.
     header["TELESCOP"] = "ASKAP"
-    header["DATE-OBS"] = "2019-10-25T19:23:47.900000"
+    header["DATE-OBS"] = Time(float(zarr.open_array(str(root / "time"), mode="r")[0]), format="mjd", scale="utc").isot
     header["TIMESYS"] = "UTC"
     header["VELREF"] = 257
     header["OBSGEO-X"] = -2.558266717765e06

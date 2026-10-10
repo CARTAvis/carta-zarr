@@ -206,7 +206,8 @@ def main() -> int:
               direction.get("projection") == wcs.wcs.ctype[0][-3:] and wcs.wcs.ctype[1][-3:] == wcs.wcs.ctype[0][-3:]
               and (frame == "GALACTIC" or frame == wcs.wcs.radesys.upper())
               and [ctype[:4].rstrip("-") for ctype in list(wcs.wcs.ctype)[:2]] == list(CELESTIAL.get(frame, ("?", "?")))
-              and (close(direction.get("equinox"), wcs.wcs.equinox)
+              # Galactic coordinates have no equinox, whatever the dataset carries beside them.
+              and (frame == "GALACTIC" or close(direction.get("equinox"), wcs.wcs.equinox)
                    or (direction.get("equinox") is None and math.isnan(wcs.wcs.equinox)))
               and close(direction.get("reference_pixel"), wcs.wcs.crpix[:2])
               and close(direction.get("reference_value"), wcs.wcs.crval[:2])

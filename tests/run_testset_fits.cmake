@@ -328,6 +328,15 @@ run("zarr-to-fits.py galactic" "${SOURCE_DIR}/tools/testset/zarr-to-fits.py" "${
     "${OUTPUT_DIR}/galactic.fits")
 run("verify.py galactic against its own FITS file" "${SOURCE_DIR}/tools/testset/verify.py" "${OUTPUT_DIR}/galactic.fits"
     "${OUTPUT_DIR}/galactic.zarr" --flag no --chunks 32,32,8)
+# And one that keeps its equinox beside the Galactic frame, which carta-zarr reports and FITS has no
+# place for.
+changed(galactic_equinox "meta = json.load(open(root + '/zarr.json'))
+meta['attributes']['coordinate_system_info']['reference_direction']['attrs']['frame'] = 'galactic'
+json.dump(meta, open(root + '/zarr.json', 'w'))")
+run("zarr-to-fits.py galactic with an equinox" "${SOURCE_DIR}/tools/testset/zarr-to-fits.py" "${OUTPUT_DIR}/galactic_equinox.zarr"
+    "${OUTPUT_DIR}/galactic_equinox.fits")
+run("verify.py galactic with an equinox against its own FITS file" "${SOURCE_DIR}/tools/testset/verify.py"
+    "${OUTPUT_DIR}/galactic_equinox.fits" "${OUTPUT_DIR}/galactic_equinox.zarr" --flag no --chunks 32,32,8)
 refused_for("a Galactic dataset against a header calling its axes RA and Dec" "direction coordinate"
             "${OUTPUT_DIR}/radec_galactic.fits" "${OUTPUT_DIR}/galactic.zarr" --flag no --chunks 32,32,8)
 # A carta-zarr whose linear frequency axis were a channel off -- what carta-backend builds when it is

@@ -39,6 +39,7 @@ import argparse
 import json
 import math
 import os
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -57,10 +58,14 @@ def compression(array: Path) -> float | None:
     sharding = next((codec["configuration"] for codec in metadata.get("codecs", [])
                      if codec.get("name") == "sharding_indexed"), None)
     decoded = stored = 0
-    # Every file of the array but its metadata is a chunk or a shard, however chunk_key_encoding names
-    # them: c/0/0, c.0.0, 0.0 or 0/0.
+    # A chunk or a shard is a file named as chunk_key_encoding names one -- c/0/0 or c.0.0 by default,
+    # 0.0 or 0/0 in v2 -- and nothing else beside the array is.
+    encoding = metadata.get("chunk_key_encoding", {"name": "default"})
+    separator = re.escape((encoding.get("configuration") or {}).get("separator", "/" if encoding["name"] == "default" else "."))
+    indices = separator.join([r"\d+"] * len(chunk))
+    key = re.compile(("c" + (separator + indices if indices else "")) if encoding["name"] == "default" else (indices or "0"))
     for entry in array.rglob("*"):
-        if not entry.is_file() or entry == array / "zarr.json" or entry.name.startswith("."):
+        if not entry.is_file() or not key.fullmatch(entry.relative_to(array).as_posix()):
             continue
         stored += entry.stat().st_size
         if sharding is None:

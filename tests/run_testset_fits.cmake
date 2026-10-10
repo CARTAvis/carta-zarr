@@ -485,7 +485,15 @@ for name, encoding in (('dotted', {'name': 'default', 'separator': '.'}), ('v2',
     other = zarr.create_array(str(root / name), shape=(5,), chunks=(4,), dtype='float32', compressors=None, fill_value=np.nan,
                               chunk_key_encoding=encoding)
     other[:] = 1.0
-    assert stats.compression(root / name) == 1.0, (name, stats.compression(root / name))"
+    assert stats.compression(root / name) == 1.0, (name, stats.compression(root / name))
+# And nothing that is not a chunk, beside the chunks or among a shard's.
+for name in ('plain', 'sharded', 'v2'):
+    (root / name / 'README.txt').write_text('x')
+    (root / name / 'zarr.json~').write_text('x')
+(root / 'sharded' / 'c' / 'notes').write_text('x')
+assert stats.compression(root / 'plain') == 1.0
+assert stats.compression(root / 'sharded') == 32 / 68
+assert stats.compression(root / 'v2') == 1.0"
     RESULT_VARIABLE result OUTPUT_VARIABLE out ERROR_VARIABLE err)
 if(result)
     message(FATAL_ERROR "stats.py compression failed: ${result}\n${out}\n${err}")

@@ -332,6 +332,26 @@ changed(nowhere "a = zarr.open_array(root + '/SKY', mode='r+')
 a.attrs['telescope'] = {'name': 'ASKAP'}")
 refused_for("a Zarr without its observatory's position" "observatory" "${OUTPUT_DIR}/cube.fits" "${OUTPUT_DIR}/nowhere.zarr"
             --flag no --chunks 32,32,8)
+# Another telescope somewhere else: written and verified as itself, not as ASKAP.
+changed(elsewhere "a = zarr.open_array(root + '/SKY', mode='r+')
+telescope = a.attrs['telescope']
+telescope['name'] = 'MeerKAT'
+telescope['direction']['data'] = [0.3739, -0.5361]
+a.attrs['telescope'] = telescope")
+run("zarr-to-fits.py elsewhere" "${SOURCE_DIR}/tools/testset/zarr-to-fits.py" "${OUTPUT_DIR}/elsewhere.zarr"
+    "${OUTPUT_DIR}/elsewhere.fits")
+run("verify.py elsewhere against its own FITS file" "${SOURCE_DIR}/tools/testset/verify.py" "${OUTPUT_DIR}/elsewhere.fits"
+    "${OUTPUT_DIR}/elsewhere.zarr" --flag no --chunks 32,32,8)
+refused_for("a Zarr from another telescope" "observatory" "${OUTPUT_DIR}/cube.fits" "${OUTPUT_DIR}/elsewhere.zarr" --flag no
+            --chunks 32,32,8)
+fits_variant(renamed "header['TELESCOP'] = 'MeerKAT'")
+refused_for("a FITS file naming another telescope at ASKAP's position" "observatory" "${OUTPUT_DIR}/renamed.fits" "${cube}"
+            --flag no --chunks 32,32,8)
+fits_variant(unstokes "header['CTYPE3'] = 'LINEAR'")
+refused_for("a FITS third axis that is not Stokes" "polarization" "${OUTPUT_DIR}/unstokes.fits" "${cube}" --flag no
+            --chunks 32,32,8)
+changed(seconds "t = zarr.open_array(root + '/time', mode='r+')
+t.attrs['units'] = 's'")
 refused_for("a FITS file whose Stokes parameter moves with frequency" "each axis independent"
             "${OUTPUT_DIR}/stokes_coupled.fits" "${cube}" --flag no --chunks 32,32,8)
 # A dataset in the Galactic frame: written with GLON and GLAT it verifies, and the same header calling
@@ -690,7 +710,7 @@ run("verify.py single" "${SOURCE_DIR}/tools/testset/verify.py" "${OUTPUT_DIR}/si
     --chunks 16,16,1)
 changed(jd "t = zarr.open_array(root + '/time', mode='r+')
 t.attrs['format'] = 'jd'")
-foreach(case "middle|evenly spaced" "widebeam|plane to plane" "tai|wrong instant" "halfbeam|one on each" "jd|not MJD"
+foreach(case "middle|evenly spaced" "widebeam|plane to plane" "tai|wrong instant" "halfbeam|one on each" "jd|not MJD" "seconds|not MJD"
         "nowhere|no telescope with a position")
     string(REPLACE "|" ";" case "${case}")
     list(GET case 0 name)

@@ -86,7 +86,7 @@ from fingerprint import reached, source_content
 MANIFEST_NAME = "bench-manifest.json"
 # Bumped whenever the same arguments would produce different bytes, so that a dataset written by an
 # older generator is not mistaken for one this one would write.
-FORMAT_VERSION = 4
+FORMAT_VERSION = 5
 
 AXES = ("time", "frequency", "polarization", "l", "m")
 STOKES = ("I", "Q", "U", "V")

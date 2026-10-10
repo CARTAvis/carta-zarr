@@ -131,10 +131,13 @@ std::vector<Piece> PlanPieces(const ImageDescriptor& descriptor, const ChunkGeom
     // nothing to gain from being cut -- a plane of 4 MiB chunks read whole held 80 MiB beside its
     // destination, and cut into pieces it ran half as fast again -- unless a caller is watching it,
     // and then it is cut so that there is a piece to report.
+    // The flag a read folds in is the one thing it holds for its whole extent, so a read issued whole
+    // is still cut where its flag would outgrow what the chunks in flight leave of the budget.
     // Affording the whole request is said as exactly that many chunks, not as an unbounded count that
     // would only stay correct as long as no arithmetic downstream overflowed on it.
     if (!reports_progress && affordable >= std::max<std::size_t>(1, decode_threads)) {
-        affordable = std::max<std::uint64_t>(affordable, ChunksOf(geometry, request));
+        affordable = std::max<std::uint64_t>(
+            affordable, std::min(ChunksOf(geometry, request), cost.ChunksReadWhole(decode_threads)));
     }
     const auto gathered = std::max<std::uint64_t>(1, cost.ChunksPerRead(PixelsHeld::by_library));
 

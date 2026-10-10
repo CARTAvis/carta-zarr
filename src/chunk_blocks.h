@@ -15,6 +15,7 @@
 
 #include <algorithm>
 #include <cstdint>
+#include <limits>
 
 namespace carta::zarr::internal {
 
@@ -191,6 +192,20 @@ struct ReadCost {
     // that can be decoded.
     std::uint64_t ChunksPerRead(PixelsHeld pixels) const {
         return budget_bytes / std::max<std::uint64_t>(1, Held(pixels));
+    }
+
+    // How many chunks a read issued whole may span when `decode_threads` of them are in flight at
+    // once. Their decoding holds what that many chunks hold whatever the read's extent, but the
+    // folded-in flag is allocated for the whole read at a byte an element, so it is what the extent
+    // is bounded by: the budget less what the chunks in flight hold, a byte an element. Unbounded when
+    // no mask is applied.
+    std::uint64_t ChunksReadWhole(std::size_t decode_threads) const {
+        if (!apply_mask) {
+            return std::numeric_limits<std::uint64_t>::max();
+        }
+        const auto in_flight = std::max<std::uint64_t>(1, decode_threads) * Held(PixelsHeld::by_caller);
+        const auto room = budget_bytes > in_flight ? budget_bytes - in_flight : 0;
+        return room / std::max<std::uint64_t>(1, _chunk_elements);
     }
 
 private:

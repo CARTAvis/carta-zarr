@@ -302,6 +302,56 @@ void TestOnlyAWatchedReadIsCutWhileItsChunksInFlightFit() {
     Require(prefetch_reads(kDecodeThreads) > 1, "a prefetch was not cut though it holds more than the budget affords");
 }
 
+// A read nobody watches is issued whole while its chunks in flight fit the budget -- but the flag it
+// folds in is allocated for its whole extent, a byte an element, so a masked one is still cut where
+// that would outgrow what the chunks in flight leave. Here a masked chunk holds 10,240 bytes and its
+// flag 640, so at five decode threads the budget of 61,440 leaves 10,240 for the flag: sixteen chunks,
+// two of the cube's three layers. Unmasked, the same read is one piece.
+void TestAWholeReadIsCutWhereItsFlagWouldOutgrowTheBudget() {
+    const auto image = MakeImage(true);
+    const auto geometry = MakeGeometry();
+    constexpr std::size_t kFiveThreads = 5;
+    ReadOptions options;
+    options.read_budget_bytes = kThreePieces;
+
+    SyntheticPixelSource source(image, geometry, Value);
+    source.set_flags([](const std::vector<std::uint64_t>& logical) { return logical.at(0) % 2 == 0; });
+    std::vector<float> destination(kElements, kUntouched);
+    Require(static_cast<bool>(ReadInPieces(source, image, geometry, geometry, WholeCube(),
+                                           BufferView<float>{destination.data(), destination.size()}, options,
+                                           kFiveThreads, ProgressCallback{})),
+            "a masked read nobody watches failed");
+    Require(source.pixel_reads() == 2, "a masked read nobody watches was not cut where its flag outgrew the budget");
+    for (const auto size : source.mask_destinations()) {
+        Require(size <= options.read_budget_bytes, "a read folded in a flag of " + std::to_string(size) +
+                                                       " bytes against a budget of " +
+                                                       std::to_string(options.read_budget_bytes));
+    }
+
+    SyntheticPixelSource reference(image, geometry, Value);
+    reference.set_flags([](const std::vector<std::uint64_t>& logical) { return logical.at(0) % 2 == 0; });
+    std::vector<float> expected(kElements, kUntouched);
+    Require(static_cast<bool>(ReadInPieces(reference, image, geometry, geometry, WholeCube(),
+                                           BufferView<float>{expected.data(), expected.size()}, options, kDecodeThreads,
+                                           ProgressCallback{})),
+            "the reference read failed");
+    for (std::size_t i = 0; i < kElements; ++i) {
+        const bool both_nan = destination.at(i) != destination.at(i) && expected.at(i) != expected.at(i);
+        Require(both_nan || destination.at(i) == expected.at(i),
+                "a read cut by its flag disagreed with one cut by its budget");
+    }
+
+    ReadOptions unmasked = options;
+    unmasked.apply_pixel_mask = false;
+    SyntheticPixelSource plain(image, geometry, Value);
+    std::vector<float> whole(kElements, kUntouched);
+    Require(static_cast<bool>(ReadInPieces(plain, image, geometry, geometry, WholeCube(),
+                                           BufferView<float>{whole.data(), whole.size()}, unmasked, kFiveThreads,
+                                           ProgressCallback{})) &&
+                plain.pixel_reads() == 1,
+            "an unmasked read nobody watches was cut though nothing it holds grows with it");
+}
+
 // What crosses the seam is the caller's buffer from where a piece lands to its end, not the piece's
 // size restated. The seam's one check -- that the selection fits what it is writing into -- is only
 // a check if the length it is held to comes from the buffer rather than from the very selection it
@@ -526,6 +576,7 @@ int main() {
         TestASplitReadAgreesWithAnUnsplitOne();
         TestEachPieceIsHandedTheRestOfTheBuffer();
         TestOnlyAWatchedReadIsCutWhileItsChunksInFlightFit();
+        TestAWholeReadIsCutWhereItsFlagWouldOutgrowTheBudget();
         TestAFlaggedPixelArrivesAsNaN();
         TestDecliningTheMaskReadsNoFlag();
         TestASampleTakesOneElementOfEachChunk();

@@ -238,6 +238,18 @@ void TestNothingOpenableSaysWhy() {
     refused(complex, carta::zarr::DiagnosticCode::unsupported_data_type,
             "Complex sky-plane variables are not openable");
 
+    // A boolean on the sky plane is a flag that was not typed one -- XRADIO 1.2.2's FITS reader leaves
+    // FLAG_SKY so -- and it is said to be one, not called complex. xarray's encoding of a bool, an int8
+    // that records its dtype, is a boolean too, and is not offered as an image of zeroes and ones.
+    auto boolean = CompleteStore();
+    boolean["SKY"] = SkyArray("bool", "{}");
+    refused(boolean, carta::zarr::DiagnosticCode::unsupported_data_type,
+            "Boolean sky-plane variables are not openable; a flag is typed 'flag'");
+    auto encoded = CompleteStore();
+    encoded["SKY"] = SkyArray("int8", R"({"dtype":"bool"})");
+    refused(encoded, carta::zarr::DiagnosticCode::unsupported_data_type,
+            "Boolean sky-plane variables are not openable; a flag is typed 'flag'");
+
     auto aperture = CompleteStore();
     aperture["SKY"] = SkyArray("float32", "{}", R"(["time","frequency","polarization","u","v"])");
     refused(aperture, carta::zarr::DiagnosticCode::unsupported_coordinate_plane,

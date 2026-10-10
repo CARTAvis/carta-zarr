@@ -159,6 +159,28 @@ refused("a Zarr whose SKY is typed flag" "${OUTPUT_DIR}/cube.fits" "${OUTPUT_DIR
 changed(kelvin "a = zarr.open_array(root + '/SKY', mode='r+')
 a.attrs['units'] = 'K'")
 refused("a Zarr in another brightness unit" "${OUTPUT_DIR}/cube.fits" "${OUTPUT_DIR}/kelvin.zarr" --flag no --chunks 32,32,8)
+changed(obsdate "a = zarr.open_array(root + '/SKY', mode='r+')
+date = dict(a.attrs['obsdate'])
+date['data'] = date['data'] + 1.0
+a.attrs['obsdate'] = date")
+refused("a Zarr observed a day later by its image's obsdate" "${OUTPUT_DIR}/cube.fits" "${OUTPUT_DIR}/obsdate.zarr" --flag no
+        --chunks 32,32,8)
+changed(beamless "a = zarr.open_array(root + '/SKY', mode='r+')
+del a.attrs['beam_fit_params']")
+refused("a Zarr without the FITS file's restoring beam" "${OUTPUT_DIR}/cube.fits" "${OUTPUT_DIR}/beamless.zarr" --flag no
+        --chunks 32,32,8)
+changed(widebeam "b = zarr.open_array(root + '/BEAM_FIT_PARAMS_SKY', mode='r+')
+values = b[...]
+values[0, 5, 0, 0] *= 2
+b[...] = values")
+refused("a Zarr whose beam is wider in one channel" "${OUTPUT_DIR}/cube.fits" "${OUTPUT_DIR}/widebeam.zarr" --flag no
+        --chunks 32,32,8)
+changed(transposed "for path in (root + '/SKY/zarr.json',):
+    meta = json.load(open(path))
+    meta['codecs'].insert(0, {'name': 'transpose', 'configuration': {'order': [0, 1, 2, 4, 3]}})
+    json.dump(meta, open(path, 'w'))")
+refused("a Zarr whose chunks are stored transposed" "${OUTPUT_DIR}/cube.fits" "${OUTPUT_DIR}/transposed.zarr" --flag no
+        --chunks 32,32,8)
 refused("a Zarr rotated on the sky" "${OUTPUT_DIR}/cube.fits" "${OUTPUT_DIR}/rotated.zarr" --flag no --chunks 32,32,8)
 changed(nonfinite "f = zarr.open_array(root + '/frequency', mode='r+')
 f[0] = np.nan")
@@ -301,7 +323,10 @@ sparse = zarr.create_array(str(root / 'sparse'), shape=(20,), chunks=(4,), shard
                            fill_value=np.nan)
 sparse[:4] = 1.0
 # The same shard with its second chunk left out: 16 bytes, not the shard's 32.
-assert stats.compression(root / 'sparse') == 16 / 52, stats.compression(root / 'sparse')"
+assert stats.compression(root / 'sparse') == 16 / 52, stats.compression(root / 'sparse')
+# Nothing on disk at all, as a cube flagged whole leaves: no ratio to give, rather than a division by zero.
+zarr.create_array(str(root / 'empty'), shape=(20,), chunks=(4,), dtype='float32', compressors=None, fill_value=np.nan)
+assert stats.compression(root / 'empty') is None"
     RESULT_VARIABLE result OUTPUT_VARIABLE out ERROR_VARIABLE err)
 if(result)
     message(FATAL_ERROR "stats.py compression failed: ${result}\n${out}\n${err}")

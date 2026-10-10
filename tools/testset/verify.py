@@ -144,8 +144,16 @@ def usable_flag(documents: dict[str, dict], root_attributes: dict, image: str) -
     return None, "no flag is declared, and no single variable is typed flag and shaped as the image", False
 
 
-def layout(metadata: dict) -> tuple[list[int], list[int] | None]:
-    """An array's inner chunk and, when it is sharded, its shard, as stored."""
+def layout(metadata: dict) -> tuple[list[int], list[int] | None] | None:
+    """An array's inner chunk and, when it is sharded, its shard, as stored; None when a transpose
+    codec reorders the axes, whose chunks are then not in the image's axis order. The converter writes
+    none, and composing one is more than this needs."""
+    def transposes(codecs: list[dict]) -> bool:
+        return any(codec.get("name") == "transpose"
+                   or (codec.get("name") == "sharding_indexed" and transposes(codec["configuration"].get("codecs", [])))
+                   for codec in codecs)
+    if transposes(metadata.get("codecs", [])):
+        return None
     grid = metadata["chunk_grid"]["configuration"]["chunk_shape"]
     for codec in metadata.get("codecs", []):
         if codec.get("name") == "sharding_indexed":
@@ -212,15 +220,16 @@ def main() -> int:
     check("an image, not typed flag", metadata.get("attributes", {}).get("type") != "flag")
     check(f"axes {' '.join(AXES)}", metadata.get("dimension_names") == AXES)
     # A converter that ignored the layout asked of it would be published under the wrong name.
-    inner, shard = layout(metadata)
-    check(f"chunk {args.chunks}" + (f", shard {args.shards}" if args.shards else ", unsharded"),
-          inner == extents(args.chunks) and shard == (extents(args.shards) if args.shards else None))
+    stored = layout(metadata)
+    inner, shard = stored if stored else (None, None)
+    check(f"chunk {args.chunks}" + (f", shard {args.shards}" if args.shards else ", unsharded") + ", untransposed",
+          stored is not None and inner == extents(args.chunks) and shard == (extents(args.shards) if args.shards else None))
 
     flag_name, why, refused = usable_flag(documents, root_attributes, "SKY")
     # The flag is read beside the pixels, so its layout is part of what a layout name promises.
     if flag_name:
         check(f"{flag_name} in the same chunk" + (" and shard" if args.shards else ""),
-              layout(documents[flag_name]) == (inner, shard))
+              stored is not None and layout(documents[flag_name]) == stored)
     flag = zarr.open_array(f"{args.zarr}/{flag_name}", mode="r") if flag_name else None
     if args.flag == "yes":
         check(f"a flag carta-zarr applies{'' if flag_name else f' ({why})'}", flag is not None)
@@ -260,11 +269,33 @@ def main() -> int:
     codes = wcs.wcs.crval[2] + wcs.wcs.cdelt[2] * (np.arange(n_pol) + 1 - wcs.wcs.crpix[2])
     polarization = [str(label) for label in zarr.open_array(f"{args.zarr}/polarization", mode="r")[...]]
     check("polarization", polarization == [stokes.get(int(round(code)), "?") for code in codes])
-    time_attributes = documents["time"].get("attributes", {})
     observed = Time(header["DATE-OBS"], scale=str(header.get("TIMESYS", "UTC")).lower()).utc.mjd
-    stored = float(zarr.open_array(f"{args.zarr}/time", mode="r")[0])
-    check("time", time_attributes.get("format") == "mjd" and time_attributes.get("scale") == "utc"
-          and time_attributes.get("units") == "d" and abs(stored - observed) < 1e-6)
+
+    def same_date(attributes: dict, value: float) -> bool:
+        return (attributes.get("format") == "mjd" and attributes.get("scale") == "utc" and attributes.get("units") == "d"
+                and abs(value - observed) < 1e-6)
+
+    check("time", same_date(documents["time"].get("attributes", {}), float(zarr.open_array(f"{args.zarr}/time", mode="r")[0])))
+    # carta-zarr takes the observation date from the image's own obsdate, not from the time axis.
+    obsdate = metadata.get("attributes", {}).get("obsdate") or {}
+    check("observation date", same_date(obsdate.get("attrs", {}), float(obsdate.get("data", math.nan))))
+    # The restoring beam a Jy/beam image is calibrated by, for every channel and polarization, in the
+    # order its labels say. A FITS file without one has an image without one.
+    beam_name = metadata.get("attributes", {}).get("beam_fit_params")
+    if "BMAJ" in header:
+        expected_beam = {"major": math.radians(header["BMAJ"]), "minor": math.radians(header["BMIN"]),
+                         "pa": math.radians(header.get("BPA", 0.0))}
+        beam = documents.get(canonical(beam_name or "") or "", {})
+        ok = beam.get("dimension_names") == ["time", "frequency", "polarization", "beam_params_label"] \
+            and beam.get("shape") == [n_time, n_freq, n_pol, 3] and beam.get("attributes", {}).get("units") == "rad"
+        if ok:
+            labels = [str(label) for label in zarr.open_array(f"{args.zarr}/beam_params_label", mode="r")[...]]
+            values = zarr.open_array(f"{args.zarr}/{canonical(beam_name)}", mode="r")[...]
+            ok = sorted(labels) == sorted(expected_beam) and all(
+                np.allclose(values[..., i], expected_beam[label], rtol=1e-9, atol=0) for i, label in enumerate(labels))
+        check("restoring beam of every channel", ok)
+    else:
+        check("no restoring beam, as the FITS file has none", not beam_name)
     # What the frequencies mean, as the FITS file says: their unit, the frame they are in, and the rest
     # frequency velocities are taken from.
     spectral = documents["frequency"].get("attributes", {})

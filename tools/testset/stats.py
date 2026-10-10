@@ -27,7 +27,8 @@
     stats.py DATASET [--every N] [--block-mib 1024]
 
 Every Nth channel is sampled for the per-plane medians (8 by default); every channel for the NaN
-counts.
+counts. A statistic with nothing to take it of -- no chunk on disk, or no finite pixel in any plane
+sampled -- is null.
 """
 
 from __future__ import annotations
@@ -42,7 +43,7 @@ import numpy as np
 import zarr
 
 
-def compression(array: Path) -> float:
+def compression(array: Path) -> float | None:
     """Decoded bytes over bytes on disk, over the chunks that are on disk. A writer leaves out a chunk
     that is all fill, and counting one as decoded bytes would credit the codec with what the writer
     saved. A chunk is counted whole, the padding of one at the image's edge included, because that is
@@ -72,7 +73,8 @@ def compression(array: Path) -> float:
             index = np.frombuffer(shard.read(16 * count), dtype="<u8").reshape(count, 2)
         present = int((index[:, 0] != np.iinfo(np.uint64).max).sum())
         decoded += present * itemsize * math.prod(inner)
-    return decoded / stored
+    # A dataset whose every chunk is fill has nothing on disk to compress.
+    return decoded / stored if stored else None
 
 
 def main() -> int:
@@ -118,15 +120,20 @@ def main() -> int:
             below.append(np.mean(values < median - 5 * sigma))
     nan_chunks = int((~chunk_finite).sum())
 
+    def median(values: list[float], digits: int) -> float | None:
+        """The median, or None when no plane sampled had a finite pixel to take one of."""
+        return round(float(np.median(values)), digits) if values else None
+
+    ratio = compression(root / "SKY")
     print(json.dumps({
         "dataset": root.name,
         "shape": [n_l, n_m, n_freq],
         "chunk": [chunk[3], chunk[4], depth],
-        "compression": round(compression(root / "SKY"), 3),
-        "nan": round(float(np.median(nan_fraction)), 4),
-        "rms": float(f"{np.median(rms):.4g}"),
-        "above": round(float(np.median(above)), 5),
-        "below": round(float(np.median(below)), 5),
+        "compression": None if ratio is None else round(ratio, 3),
+        "nan": median(nan_fraction, 4),
+        "rms": float(f"{np.median(rms):.4g}") if rms else None,
+        "above": median(above, 5),
+        "below": median(below, 5),
         "nan_channels": int(channel_nan.sum()),
         "nan_chunks": nan_chunks,
     }))

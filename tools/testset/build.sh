@@ -43,8 +43,12 @@ for entry in "${cubes[@]}"; do
     IFS='|' read -r cube shape options <<< "$entry"
     IFS=',' read -r l m f <<< "$shape"
     fits="$output/$cube.fits"
-    [ -e "$fits" ] && continue
     work="$output/.work-$cube.zarr"
+    # A run stopped between publishing the FITS file and removing what it was written from leaves that.
+    if [ -e "$fits" ]; then
+        rm -rf "$work"
+        continue
+    fi
     say "$cube: synthesizing $l x $m x $f"
     # shellcheck disable=SC2086  # the options are words
     uv run --quiet "$generate" --synthetic --shape "frequency=$f,polarization=1,l=$l,m=$m" \

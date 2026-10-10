@@ -225,6 +225,8 @@ def main() -> int:
             hertz = units.Unit(spectral.get("unit", "")).to(units.Hz)
         except (TypeError, ValueError):
             hertz = math.nan
+        check("a FITS frequency axis, in Hz as astropy gives it",
+              str(header.get("CTYPE4", "")).startswith("FREQ") and str(wcs.world_axis_units[3]) == "Hz")
         check("frequency of every channel", close(np.asarray(spectral.get("channel_frequencies"), dtype=float) * hertz, world))
         # The linear axis carta-backend builds when carta-zarr gives one, rather than the table. A FITS
         # frequency axis is linear, so carta-zarr must give one -- unless there is one channel, which has
@@ -240,7 +242,8 @@ def main() -> int:
               and "RESTFRQ" in header and spectral.get("rest_frequency") is not None
               and close(spectral["rest_frequency"] * hertz, header["RESTFRQ"], 1e-12))
         codes = wcs.wcs.crval[2] + linear[2, 2] * (np.arange(n_pol) + 1 - wcs.wcs.crpix[2])
-        check("polarization", described.get("polarization") == [STOKES.get(int(round(code)), "?") for code in codes])
+        check("polarization", header.get("CTYPE3") == "STOKES" and np.allclose(codes, np.round(codes), rtol=0, atol=1e-9)
+              and described.get("polarization") == [STOKES.get(int(round(code)), "?") for code in codes])
 
         # The time axis and the observation date, which carta-zarr takes from different places.
         observed = Time(header["DATE-OBS"], scale=str(header.get("TIMESYS", "UTC")).lower()).utc.mjd
@@ -250,6 +253,12 @@ def main() -> int:
         observation = described.get("observation") or {}
         check("observation date", observation.get("timesys", "").upper() == "UTC"
               and close(observation.get("mjd_obs"), observed, 1e-12))
+        # The observatory a spectral frame is placed by: OBSGEO-X, Y and Z, and its name.
+        if "OBSGEO-X" in header:
+            check("observatory", observation.get("telescope_name") == header.get("TELESCOP")
+                  and close(observation.get("observatory_position"), [header["OBSGEO-X"], header["OBSGEO-Y"], header["OBSGEO-Z"]]))
+        else:
+            check("no observatory, as the FITS file has none", observation.get("observatory_position") is None)
 
         # The restoring beam a Jy/beam image is calibrated by, on every plane; none where FITS has none.
         beams = described.get("beams", [])

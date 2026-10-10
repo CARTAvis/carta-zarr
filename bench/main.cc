@@ -120,7 +120,9 @@ nlohmann::json Description(const ImageDescriptor& descriptor, const std::vector<
                                    {"format", temporal->format}};
     }
     if (const auto& observation = descriptor.observation) {
-        description["observation"] = {{"timesys", observation->timesys},
+        description["observation"] = {{"telescope_name", observation->telescope_name},
+                                      {"observatory_position", Optional(observation->observatory_position)},
+                                      {"timesys", observation->timesys},
                                       {"date_obs", observation->date_obs},
                                       {"mjd_obs", Optional(observation->mjd_obs)}};
     }

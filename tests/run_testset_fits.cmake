@@ -308,12 +308,29 @@ for key in ('PC1_1', 'PC1_2', 'PC2_1', 'PC2_2'):
     del header[key]")
 fits_variant(coupled "header['PC1_4'] = 0.1")
 fits_variant(stokes_coupled "header['PC3_4'] = 0.1")
+fits_variant(metres "header['CTYPE4'], header['CUNIT4'] = 'LINEAR', 'm'")
+fits_variant(between_stokes "header['CRVAL3'] = 1.4")
 # The cube's FITS header put in the Galactic frame while still calling its axes RA and Dec.
 fits_variant(radec_galactic "header['RADESYS'] = 'GALACTIC'
 del header['EQUINOX']")
 run("verify.py against a FITS file in CD" "${SOURCE_DIR}/tools/testset/verify.py" "${OUTPUT_DIR}/cd.fits" "${cube}" --flag no
     --chunks 32,32,8)
 refused_for("a FITS file whose RA moves with frequency" "each axis independent" "${OUTPUT_DIR}/coupled.fits" "${cube}"
+            --flag no --chunks 32,32,8)
+refused_for("a FITS fourth axis in metres with the frequencies' numbers" "a FITS frequency axis" "${OUTPUT_DIR}/metres.fits"
+            "${cube}" --flag no --chunks 32,32,8)
+refused_for("a FITS Stokes axis between I and Q" "polarization" "${OUTPUT_DIR}/between_stokes.fits" "${cube}" --flag no
+            --chunks 32,32,8)
+# The observatory, which places a spectral frame: moved a kilometre, or gone, it is not the FITS file's.
+changed(moved "a = zarr.open_array(root + '/SKY', mode='r+')
+telescope = a.attrs['telescope']
+telescope['distance']['data'] = [telescope['distance']['data'][0] + 1000.0]
+a.attrs['telescope'] = telescope")
+refused_for("a Zarr whose observatory is a kilometre off" "observatory" "${OUTPUT_DIR}/cube.fits" "${OUTPUT_DIR}/moved.zarr"
+            --flag no --chunks 32,32,8)
+changed(nowhere "a = zarr.open_array(root + '/SKY', mode='r+')
+a.attrs['telescope'] = {'name': 'ASKAP'}")
+refused_for("a Zarr without its observatory's position" "observatory" "${OUTPUT_DIR}/cube.fits" "${OUTPUT_DIR}/nowhere.zarr"
             --flag no --chunks 32,32,8)
 refused_for("a FITS file whose Stokes parameter moves with frequency" "each axis independent"
             "${OUTPUT_DIR}/stokes_coupled.fits" "${cube}" --flag no --chunks 32,32,8)
@@ -671,7 +688,10 @@ run("generate.py single" "${SOURCE_DIR}/tools/zarr-bench/generate.py" --syntheti
 run("zarr-to-fits.py single" "${SOURCE_DIR}/tools/testset/zarr-to-fits.py" "${OUTPUT_DIR}/single.zarr" "${OUTPUT_DIR}/single.fits")
 run("verify.py single" "${SOURCE_DIR}/tools/testset/verify.py" "${OUTPUT_DIR}/single.fits" "${OUTPUT_DIR}/single.zarr" --flag no
     --chunks 16,16,1)
-foreach(case "middle|evenly spaced" "widebeam|plane to plane" "tai|wrong instant" "halfbeam|one on each")
+changed(jd "t = zarr.open_array(root + '/time', mode='r+')
+t.attrs['format'] = 'jd'")
+foreach(case "middle|evenly spaced" "widebeam|plane to plane" "tai|wrong instant" "halfbeam|one on each" "jd|not MJD"
+        "nowhere|no telescope with a position")
     string(REPLACE "|" ";" case "${case}")
     list(GET case 0 name)
     list(GET case 1 reason)

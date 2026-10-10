@@ -158,9 +158,9 @@ def header_of(root: Path, image: str, sky: Any, described: dict[str, Any]) -> fi
     if spectral.get("rest_frequency") is not None:
         # In the spectral axis's unit as carta-zarr gives it, and in Hz as FITS takes it.
         header["RESTFRQ"] = spectral["rest_frequency"] * units.Unit(spectral["unit"]).to(units.Hz)
-    # ASKAP, as the frequency axis is: xradio wants an observatory and a date to place it. The date is
-    # the dataset's own, as carta-zarr reads it, and the time axis must agree with it, as it does in
-    # a FITS file, which has only the one.
+    # xradio wants an observatory and a date to place the frequency axis: the dataset's own, as
+    # carta-zarr reads them. The time axis must agree with the date, as it does in a FITS file, which
+    # has only the one, and be an MJD in days, as DATE-OBS is written from.
     observation, temporal = meaning.get("observation") or {}, meaning.get("temporal") or {}
     observed = observation.get("mjd_obs")
     scales = {str(observation.get("timesys", "")).upper(), str(temporal.get("scale", "")).upper()}
@@ -170,14 +170,17 @@ def header_of(root: Path, image: str, sky: Any, described: dict[str, Any]) -> fi
     if observed is None or temporal.get("values") != [observed]:
         raise SystemExit(f"{image}'s observation date {observed} is not the one time on its time axis "
                          f"{temporal.get('values')}")
-    header["TELESCOP"] = "ASKAP"
+    if str(temporal.get("format", "")).upper() != "MJD" or temporal.get("unit") != "d":
+        raise SystemExit(f"{image}'s time axis is {temporal.get('format')} in {temporal.get('unit')}, not MJD in days")
+    position = observation.get("observatory_position")
+    if not observation.get("telescope_name") or position is None:
+        raise SystemExit(f"{image} names no telescope with a position, which xradio needs to place a spectral frame")
+    header["TELESCOP"] = observation["telescope_name"]
     header["DATE-OBS"] = Time(observed, format="mjd", scale="utc").isot
     header["TIMESYS"] = "UTC"
     if (velref := {"LSRK": 257, "BARY": 258, "TOPO": 259}.get(spectral["system"].upper())) is not None:
         header["VELREF"] = velref
-    header["OBSGEO-X"] = -2.558266717765e06
-    header["OBSGEO-Y"] = 5.095672176508e06
-    header["OBSGEO-Z"] = -2.849020838078e06
+    header["OBSGEO-X"], header["OBSGEO-Y"], header["OBSGEO-Z"] = position
     header["BTYPE"] = "Intensity"
     planes = sorted((beam["time"], beam["channel"], beam["polarization"]) for beam in meaning.get("beams", []))
     if planes and planes != [(0, c, p) for c in range(n_freq) for p in range(n_pol)]:

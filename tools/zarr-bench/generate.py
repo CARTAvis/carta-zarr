@@ -102,6 +102,19 @@ NOISE_TILE = 128
 # A synthetic cube's defaults are an ASKAP HI cube's: its first channel, its channel width, HI's rest
 # frequency, and the noise, in Jy/beam, that with the rise towards the footprint's edge comes to
 # ASKAP Hydra's median plane rms of 2.1 mJy/beam.
+# Where ASKAP is, as the site's converter writes it from a FITS file's OBSGEO-X, Y and Z: a spectral
+# frame is placed by it.
+ASKAP_TELESCOPE = {
+    "name": "ASKAP",
+    "direction": {"attrs": {"coordinate_system": "geocentric", "frame": "ITRF", "origin_object_name": "earth",
+                            "type": "location", "units": "rad"},
+                  "data": [2.0360801614255952, -0.46338342174681973], "dims": ["ellipsoid_dir_label"],
+                  "coords": {"ellipsoid_dir_label": {"dims": ["ellipsoid_dir_label"], "data": ["lon", "lat"]}}},
+    "distance": {"attrs": {"coordinate_system": "geocentric", "frame": "ITRF", "origin_object_name": "earth",
+                           "type": "location", "units": "m"},
+                 "data": [6373972.330145822], "dims": ["ellipsoid_dis_label"],
+                 "coords": {"ellipsoid_dis_label": {"dims": ["ellipsoid_dis_label"], "data": ["dist"]}}},
+}
 ASKAP_FREQUENCY_START = 1.2955e9
 ASKAP_CHANNEL_WIDTH = 18518.518518518518
 HI_REST_FREQUENCY = 1.420405751786e9
@@ -1021,6 +1034,7 @@ def synthesize(args: argparse.Namespace, out: Path) -> dict[str, Any]:
 
     sky = with_layout(image_metadata, shape, layout, 4)
     sky["attributes"]["object_name"] = "carta-zarr-bench synthetic"
+    sky["attributes"]["telescope"] = ASKAP_TELESCOPE
     if flag_name:
         sky["attributes"]["flag"] = flag_name
     write_array_metadata(out / image, sky)

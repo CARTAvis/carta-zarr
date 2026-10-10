@@ -80,7 +80,8 @@ can be.
   on the slowest axis the read selects more than one of, so this holds for a read of one Stokes
   parameter, as carta-backend's are; one across several Stokes parameters and many channels is cut
   along polarization and, a polarization chunk deep being more than a layer, falls to segments as it
-  did before. A plane is
+  did before. It also takes the flag to be chunked no deeper than its pixels, as the site's converter
+  writes it: a deeper flag chunk spans several layers and is decoded again for each. A plane is
   one layer and is read whole, as before, at the same speed. A watched read is always cut to its
   budget, so that it has pieces to report. Reading segments straight into the destination rather
   than gathering them would let a layer be cut to the budget at no cost, and is left to a later

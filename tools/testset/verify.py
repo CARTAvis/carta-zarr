@@ -38,7 +38,7 @@ from __future__ import annotations
 import argparse
 import json
 import math
-import posixpath
+import re
 import sys
 import warnings
 from pathlib import Path
@@ -52,11 +52,16 @@ from astropy.wcs import WCS
 AXES = ["time", "frequency", "polarization", "l", "m"]
 
 
-def canonical(name: str) -> str:
-    """A node a document names, as the store files it, the way carta-zarr compares them: "./FLAG" is
-    FLAG. A name that leaves the store is kept as written."""
-    normal = posixpath.normpath(name.lstrip("/"))
-    return name if normal.startswith("..") else normal
+def canonical(name: str) -> str | None:
+    """A node a document names, as the store files it, the way carta-zarr's NormalizeNodeName reads
+    it: "./FLAG" is FLAG. None for a name that is no node -- empty, absolute, or with a ".." anywhere
+    in it -- which carta-zarr refuses."""
+    if not name or name.startswith("/"):
+        return None
+    parts = [part for part in name.split("/") if part not in ("", ".")]
+    if not parts or ".." in parts:
+        return None
+    return "/".join(parts)
 
 
 def usable_flag(root: Path, image: str) -> tuple[str | None, str, bool]:
@@ -65,7 +70,9 @@ def usable_flag(root: Path, image: str) -> tuple[str | None, str, bool]:
     carta-zarr refuses to open the image over rather than an image it opens unmasked."""
     sky = json.loads((root / image / "zarr.json").read_text())
 
-    def usable(name: str) -> bool:
+    def usable(name: str | None) -> bool:
+        if name is None:
+            return False
         try:
             metadata = json.loads((root / name / "zarr.json").read_text())
         except OSError:
@@ -81,17 +88,19 @@ def usable_flag(root: Path, image: str) -> tuple[str | None, str, bool]:
     # The image's own attribute outranks a group; groups naming different flags for it are refused.
     declared = sky.get("attributes", {}).get("flag")
     if not declared:
-        named = {canonical(group["flag"]) for group in groups if canonical(group.get("sky") or "") == image}
+        # A name carta-zarr refuses stays as written, so that it is declared and then found unusable.
+        named = {canonical(group["flag"]) or group["flag"] for group in groups
+                 if canonical(group.get("sky") or "") == image}
         if len(named) > 1:
             return None, f"data groups declare different flags {sorted(named)}", True
         declared = next(iter(named), None)
     if declared:
-        declared = canonical(declared)
-        if usable(declared):
-            return declared, "", False
+        if usable(canonical(declared)):
+            return canonical(declared), "", False
         return None, f"{declared} is declared but is not a usable flag", True
     # With nothing declared, the one usable variable no group declares for another image.
-    others = {canonical(group["flag"]) for group in groups if canonical(group.get("sky") or "") != image}
+    others = {canonical(group["flag"]) or group["flag"] for group in groups
+              if canonical(group.get("sky") or "") != image}
     candidates = [entry.name for entry in root.iterdir()
                   if entry.is_dir() and entry.name != image and entry.name not in others and usable(entry.name)]
     if len(candidates) == 1:
@@ -196,12 +205,16 @@ def main() -> int:
     system = root["coordinate_system_info"]
     frame = system["reference_direction"]["attrs"].get("frame", "")
     wcs.wcs.set()
+    # An equinox is Besselian in FK4 and Julian otherwise, and none at all is the FITS file's none.
+    equinox = re.fullmatch(r"([jb])(\d+(?:\.\d*)?)", str(system["reference_direction"]["attrs"].get("equinox", "")).lower())
+    same_equinox = (equinox is None and math.isnan(wcs.wcs.equinox)) if equinox is None else (
+        float(equinox.group(2)) == wcs.wcs.equinox and (equinox.group(1) == "b") == (wcs.wcs.radesys.upper() == "FK4"))
     pole = [math.degrees(angle) for angle in system.get("native_pole_direction", {}).get("data", [math.nan, math.nan])]
-    check("unrotated SIN projection in the FITS frame, about the FITS file's native pole",
+    check("unrotated SIN projection in the FITS frame and equinox, about the FITS file's native pole",
           system.get("projection") == "SIN" and system.get("pixel_coordinate_transformation_matrix") == [[1.0, 0.0], [0.0, 1.0]]
           and not any(system.get("projection_parameters", [])) and frame.lower() == wcs.wcs.radesys.lower()
           and all(t.endswith("-SIN") for t in list(wcs.wcs.ctype)[:2])
-          and np.allclose(pole, [wcs.wcs.lonpole, wcs.wcs.latpole], rtol=0, atol=1e-9))
+          and np.allclose(pole, [wcs.wcs.lonpole, wcs.wcs.latpole], rtol=0, atol=1e-9) and same_equinox)
     ra0, dec0 = system["reference_direction"]["data"]
     l_axis = zarr.open_array(f"{args.zarr}/l", mode="r")[...]
     m_axis = zarr.open_array(f"{args.zarr}/m", mode="r")[...]

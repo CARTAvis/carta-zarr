@@ -79,6 +79,10 @@ refused("a Zarr about another native pole" "${OUTPUT_DIR}/cube.fits" "${OUTPUT_D
 changed(rotated "meta = json.load(open(root + '/zarr.json'))
 meta['attributes']['coordinate_system_info']['pixel_coordinate_transformation_matrix'] = [[0.0, -1.0], [1.0, 0.0]]
 json.dump(meta, open(root + '/zarr.json', 'w'))")
+changed(equinox "meta = json.load(open(root + '/zarr.json'))
+meta['attributes']['coordinate_system_info']['reference_direction']['attrs']['equinox'] = 'j1950.0'
+json.dump(meta, open(root + '/zarr.json', 'w'))")
+refused("a Zarr in another equinox" "${OUTPUT_DIR}/cube.fits" "${OUTPUT_DIR}/equinox.zarr" --flag no --chunks 32,32,8)
 refused("a Zarr rotated on the sky" "${OUTPUT_DIR}/cube.fits" "${OUTPUT_DIR}/rotated.zarr" --flag no --chunks 32,32,8)
 changed(nonfinite "f = zarr.open_array(root + '/frequency', mode='r+')
 f[0] = np.nan")
@@ -140,18 +144,25 @@ function(declared name code)
     file(COPY "${OUTPUT_DIR}/flagged.zarr/" DESTINATION "${copy}")
     execute_process(
         COMMAND "${UV}" run --quiet --no-project --python-preference only-managed --with zarr==3.2.1 --with numpy==2.3.1
-                python -c "import json\nroot = '${copy}'\nmeta = json.load(open(root + '/zarr.json'))\ngroups = meta['attributes']['data_groups']\n${code}\njson.dump(meta, open(root + '/zarr.json', 'w'))"
+                python -c "import json, shutil\nroot = '${copy}'\nmeta = json.load(open(root + '/zarr.json'))\ngroups = meta['attributes']['data_groups']\n${code}\njson.dump(meta, open(root + '/zarr.json', 'w'))"
         RESULT_VARIABLE result)
     if(result)
         message(FATAL_ERROR "declaring ${name} failed: ${result}")
     endif()
 endfunction()
-declared(aliased "groups['other'] = {'sky': './SKY', 'flag': './FLAG_SKY'}")
+declared(aliased "groups['other'] = {'sky': 'SKY', 'flag': './FLAG_SKY'}")
 run("verify.py with one flag spelt two ways" "${SOURCE_DIR}/tools/testset/verify.py" "${OUTPUT_DIR}/cube.fits"
     "${OUTPUT_DIR}/aliased.zarr" --flag yes --chunks 32,32,8)
-declared(conflicting "groups['other'] = {'sky': 'SKY', 'flag': 'OTHER_FLAG'}")
-refused("data groups naming two flags for the image" "${OUTPUT_DIR}/cube.fits" "${OUTPUT_DIR}/conflicting.zarr"
-        --flag no --chunks 32,32,8)
+declared(conflicting "shutil.copytree(root + '/FLAG_SKY', root + '/OTHER_FLAG')
+groups['other'] = {'sky': 'SKY', 'flag': 'OTHER_FLAG'}")
+refused("data groups naming two usable flags for the image" "${OUTPUT_DIR}/cube.fits" "${OUTPUT_DIR}/conflicting.zarr"
+        --flag yes --chunks 32,32,8)
+declared(absolute "groups['base']['flag'] = '/FLAG_SKY'")
+refused("a flag declared by an absolute path" "${OUTPUT_DIR}/cube.fits" "${OUTPUT_DIR}/absolute.zarr" --flag yes
+        --chunks 32,32,8)
+declared(climbing "shutil.copytree(root + '/FLAG_SKY', root + '/unused')
+groups['base']['flag'] = 'unused/../FLAG_SKY'")
+refused("a flag declared through '..'" "${OUTPUT_DIR}/cube.fits" "${OUTPUT_DIR}/climbing.zarr" --flag yes --chunks 32,32,8)
 declared(owned "del groups['base']['flag']
 groups['other'] = {'sky': 'OTHER', 'flag': './FLAG_SKY'}")
 refused("a flag another image's group declares, taken for this one" "${OUTPUT_DIR}/cube.fits" "${OUTPUT_DIR}/owned.zarr"

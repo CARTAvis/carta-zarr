@@ -525,6 +525,22 @@ class FitsTest(unittest.TestCase):
                              sorted([path.name for path in Path(generate.DEFAULT_TEMPLATE).iterdir()] + ["elsewhere"]))
             self.assertEqual(list(linked.iterdir()), [])
 
+    def test_a_partial_file_left_as_a_link_is_not_written_through(self) -> None:
+        import shutil
+
+        with tempfile.TemporaryDirectory() as directory:
+            template = Path(directory) / "template.zarr"
+            shutil.copytree(generate.DEFAULT_TEMPLATE, template)
+            before = (template / "zarr.json").read_bytes()
+            fits = Path(directory) / "cube.fits"
+            fits.with_name("cube.fits.partial").symlink_to(template / "zarr.json")
+            self.assertEqual(generate.main(["--synthetic", "--shape", self.SHAPE, "--template", str(template),
+                                            "--workers", "1", "--force", "--fits", str(fits)]), 0)
+            self.assertEqual((template / "zarr.json").read_bytes(), before)
+            self.assertFalse(fits.is_symlink())
+            self.assertTrue(fits.read_bytes().startswith(b"SIMPLE  ="))
+            self.assertFalse(fits.with_name("cube.fits.partial").exists() or fits.with_name("cube.fits.partial").is_symlink())
+
     def test_a_fits_file_there_is_replaced_only_when_forced(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             fits = Path(directory) / "cube.fits"

@@ -1190,8 +1190,12 @@ def write_fits(args: argparse.Namespace, path: Path) -> int:
     _, length_f, length_p, length_l, length_m = shape
     data_bytes = math.prod(shape) * 4
     path.parent.mkdir(parents=True, exist_ok=True)
+    # Whatever is at the partial file's name is left from a run that stopped, or is not ours: it goes,
+    # a link without what it points at, and the file is made anew, so that writing it never follows a
+    # link into the template or anywhere else.
+    partial.unlink(missing_ok=True)
     try:
-        with partial.open("wb") as out:
+        with partial.open("xb") as out:
             out.write(header)
             # The data's padding is zeros, which extending the file gives.
             out.truncate(len(header) + -(-data_bytes // FITS_BLOCK) * FITS_BLOCK)

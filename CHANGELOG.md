@@ -14,6 +14,7 @@ minor release may change the ABI, and the soname says so ([ADR 0020](docs/adr/00
 ### Fixed
 * A masked read under a budget smaller than one chunk reads a chunk at a time instead of failing with `buffer_too_small` ([#1](https://github.com/CARTAvis/carta-zarr/issues/1)).
 * A boolean variable on the sky plane that is not typed `flag` is listed as not openable because it is boolean, rather than because it is complex. The `int8` that xarray writes for a bool is treated the same, rather than listed as an openable image ([#9](https://github.com/CARTAvis/carta-zarr/issues/9)).
+* Plane histograms of a cube chunked deep and narrow no longer take twice as long: a read of many channels is split among the workers by channel, rather than each channel by rows, when its busiest worker bins no more rows that way ([#6](https://github.com/CARTAvis/carta-zarr/issues/6)).
 
 ## [0.1.0]
 

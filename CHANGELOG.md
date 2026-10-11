@@ -13,6 +13,7 @@ minor release may change the ABI, and the soname says so ([ADR 0020](docs/adr/00
 
 ### Fixed
 * A masked read under a budget smaller than one chunk reads a chunk at a time instead of failing with `buffer_too_small` ([#1](https://github.com/CARTAvis/carta-zarr/issues/1)).
+* A boolean variable on the sky plane that is not typed `flag` is listed as not openable because it is boolean, rather than because it is complex. The `int8` that xarray writes for a bool is treated the same, rather than listed as an openable image ([#9](https://github.com/CARTAvis/carta-zarr/issues/9)).
 
 ## [0.1.0]
 

@@ -101,7 +101,15 @@ void Segment(const ChunkGeometry& geometry, const ReadRequest& request, std::uin
     }
     const auto across = chunks / ChunksAlong(geometry, request, *axis);
     const auto runs = UnitsAffordable(affordable, across);
-    CutAlong(geometry, request, *axis, IndicesFor(geometry, request, *axis, runs), [&](ReadRequest run, std::uint64_t) {
+    auto indices = IndicesFor(geometry, request, *axis, runs);
+    // A request that starts inside a chunk can reach its end in that many indices and still span two
+    // chunks, which would cut it into itself and recurse forever. A single index grows to the end of
+    // the chunk it is in, which is always short of the end of a request spanning more than one.
+    const auto& cut = request.axes.at(*axis);
+    if (AlignedBlockEnd(0, indices, cut.count, cut.start, cut.stride, geometry.chunk_shape.at(*axis)) >= cut.count) {
+        indices = 1;
+    }
+    CutAlong(geometry, request, *axis, indices, [&](ReadRequest run, std::uint64_t) {
         if (ChunksOf(geometry, run) > affordable) {
             Segment(geometry, run, affordable, segments);
         } else {

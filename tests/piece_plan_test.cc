@@ -498,6 +498,33 @@ void TestSegmentsGoDownToOneChunk() {
     }
 }
 
+// A segment cut from a run that starts inside a chunk can reach the run's end and still span two of
+// them, which cutting it the same way again would never undo: it is cut a chunk at a time instead.
+void TestASegmentStartingInsideAChunkIsCutAtItsBoundary() {
+    const auto image = MakeImage(16, 16, 8);
+    const auto geometry = MakeGeometry(16, 16, 4);
+    auto request = WholeImage(image);
+    request.axes.at(0) = Range{5, 1, 1};
+    request.axes.at(1) = Range{7, 1, 1};
+    request.axes.at(2) = Range{1, 4, 1};
+
+    ReadOptions budget;
+    budget.read_budget_bytes = 1;
+    const auto pieces = Pieces(image, geometry, request, budget);
+    RequireTheyFillTheDestination(pieces, request, "a column across a chunk boundary");
+    std::vector<Range> parts;
+    for (const auto& piece : pieces) {
+        if (piece.segments.empty()) {
+            parts.push_back(piece.request.axes.at(2));
+        }
+        for (const auto& segment : piece.segments) {
+            parts.push_back(segment.axes.at(2));
+        }
+    }
+    Require(parts.size() == 2 && SameRange(parts.at(0), Range{1, 3, 1}) && SameRange(parts.at(1), Range{4, 1, 1}),
+            "channels 1 to 4 over chunks of four should be read as 1 to 3 and then 4");
+}
+
 }  // namespace
 
 int main() {
@@ -516,6 +543,7 @@ int main() {
         TestAStrideOverWholeChunksAlongTheCutIsAChunkAnElement();
         TestAPieceTooLargeIsReadInSegments();
         TestSegmentsGoDownToOneChunk();
+        TestASegmentStartingInsideAChunkIsCutAtItsBoundary();
     } catch (const std::exception& error) {
         std::cerr << "piece plan test failed: " << error.what() << "\n";
         return 1;

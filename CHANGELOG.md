@@ -8,7 +8,7 @@ minor release may change the ABI, and the soname says so ([ADR 0020](docs/adr/00
 ## [Unreleased]
 
 ### Fixed
-* Plane histograms of a cube chunked deep and narrow no longer take twice as long: a read of many channels is split among the workers by channel rather than one channel at a time ([#6](https://github.com/CARTAvis/carta-zarr/issues/6)).
+* Plane histograms of a cube chunked deep and narrow no longer take twice as long: a read of many channels is split among the workers by channel, rather than each channel by rows, when its busiest worker bins no more rows that way ([#6](https://github.com/CARTAvis/carta-zarr/issues/6)).
 
 ## [0.1.0]
 

@@ -161,12 +161,12 @@ how far it raised carta-backend's resident memory above what the session held be
 
 | operation | 256 x 256 x 16 | 512 x 512 x 4 |
 |---|---|---|
-| animation, no cache (a frame) | 190 ms | 60 ms (the FITS file: 60 ms) |
-| animation, 1 GiB cache (a frame) | 104 ms | 26 ms |
+| animation, no cache (mean ms a frame) | 190 ms | 60 ms (the FITS file: 60 ms) |
+| animation, 1 GiB cache (mean ms a frame) | 104 ms | 26 ms |
 | eight channel changes, 1 GiB cache | 0.75 s | 0.18 s |
-| cursor spectrum | 8 ms | 30 ms |
-| cube histogram, exact | 17.4 s | 12.7 s |
-| moment | 27 s, peak +446 MiB | 24 s, peak +1355 MiB |
+| cursor spectrum, no cache | 8 ms | 30 ms |
+| cube histogram, exact, 1 GiB cache | 17.4 s | 12.7 s |
+| moment, 1 GiB cache | 27 s, peak +446 MiB | 24 s, peak +1355 MiB |
 
 A plane in 16-deep chunks decodes 16 channels to show one; in 4-deep chunks, 4. A spectrum pays the
 other way, reading four times as many chunks, and still takes tens of milliseconds. A moment's peak
@@ -188,8 +188,8 @@ peak as above, above what the session held before it):
 | region spectrum | 1.20 s | 0.51 s |
 | moving the cursor nearby (each move after the first) | 271 ms | 1.3 ms |
 | moving the cursor across the image (each move after the first) | 213 ms | 62 ms |
-| animation, no cache (a frame) | 12.9 ms | 29.4 ms |
-| animation, 1 GiB cache (a frame) | 1.4 ms | 3.0 ms |
+| animation, no cache (mean ms a frame) | 12.9 ms | 29.4 ms |
+| animation, 1 GiB cache (mean ms a frame) | 1.4 ms | 3.0 ms |
 | channel change, no cache | 7 ms | 24 ms |
 | moment | 42 s, peak +4280 MiB | 41 s, peak +1146 MiB |
 
@@ -197,7 +197,7 @@ A spectrum in 64-deep chunks reads 469 of them, 1.8 GiB decoded, which is more t
 so carta-backend reads it past the cache and moving the cursor reads every chunk again. In 256-deep
 chunks it is 118, 472 MiB, which the cache keeps, so moving the cursor within the same chunks reads
 nothing. The cost is on the plane: one channel decodes 64 chunks of 256 channels, 256 MiB, to show
-1 MiB. That is still under 30 ms a frame without a cache, well inside an animation's 200 ms, and a
+1 MiB. That is still under 30 ms a frame on average without a cache, 40 ms at most, well inside an animation's 200 ms, and a
 1 GiB cache holds the run of chunks it reads ahead.
 
 The exact cube histogram took 27 s against 14 s. Its plane histograms woke the worker pool once per

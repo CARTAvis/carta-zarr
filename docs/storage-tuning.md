@@ -202,10 +202,10 @@ an animation's 200 ms a frame for the rest of a frame's work -- these times are 
 over the 32 frames of one chunk's depth -- and a 1 GiB cache holds the run of chunks it reads ahead.
 
 The exact cube histogram took 27 s against 14 s. Its plane histograms woke the worker pool once per
-channel of each band a read was cut into, which narrow chunks made small; carta-zarr since #6 splits a
-read of many channels by channel instead, and those plane histograms take 5.7 s rather than 10.7 s, as
-long as at 128 x 128 x 64 (called directly, without a cache). Through carta-backend, with the 1 GiB
-cache, the whole exact cube histogram then takes 16.8 s against 13.6 s at 128 x 128 x 64.
+channel of each band a read was cut into, which narrow chunks made small (#6); carta-zarr since #7
+splits a read of many channels by channel instead, and those plane histograms take 5.7 s rather than
+10.7 s, as long as at 128 x 128 x 64 (called directly, without a cache). Through carta-backend, with the
+1 GiB cache, the whole exact cube histogram then takes 16.8 s against 13.6 s at 128 x 128 x 64.
 
 ### Use more file-reading threads on Lustre
 
@@ -334,7 +334,9 @@ by `tools/testset/build.sh`, with carta-zarr at 21f18a2 and carta-backend's `tes
 rather than a parallel file system. The pancake's 256 x 256 x 16 figures are the earlier runs of the
 same test at `test_zarr` 18d82c15, and its cube histogram and moment at 8a118389. Those differ from
 6e406c80 only in reading a spectrum around the session cache when its chunks outgrow half of it,
-which the pancake's spectrum, 16 chunks or 64 MiB, does not. The cigar's plane histograms before and after #6 were
-timed by calling carta-zarr directly, at 21f18a2 and at the fix (49bb533, the same code as 59789f8),
-on the same machine, and the exact cube histogram again through carta-backend on 2026-10-10 with the
-fix swapped in, the mean of two runs.
+which the pancake's spectrum, 16 chunks or 64 MiB, does not. The cigar's plane histograms before and
+after #7 were timed by calling carta-zarr directly, at 21f18a2 and at #7's first version (59789f8), on
+the same machine, and the exact cube histogram again through carta-backend on 2026-10-10 with that
+version swapped in, the mean of two runs. #7's final version (1c2ac7c) splits by channel only where its
+busiest worker bins no more rows that way; on 28 threads it timed the same as the first version, 5.7 s
+and 16.3 s without a cache.

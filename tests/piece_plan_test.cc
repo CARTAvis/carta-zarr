@@ -167,6 +167,40 @@ void TestAWatchedReadIsCutToItsBudget() {
             "a read with a memory ceiling was not cut");
 }
 
+// A watched read is cut to no more than kWatchedPieceChunks a piece however much its budget affords,
+// so that a spectrum reports as often on many decode threads as on few -- but to no less than one
+// chunk along the cut, which a plane of many chunks is, so that it is never gathered in segments.
+void TestAWatchedPieceIsSixteenChunksOrOneAlongTheCut() {
+    constexpr std::size_t kManyThreads = 28;
+    ReadOptions plenty;
+    plenty.read_budget_bytes = std::size_t{2} << 30;
+
+    // A spectrum of one pixel through 1024 channels of 16 x 16 x 1 chunks is a chunk a channel.
+    const auto image = MakeImage(64, 64, 1024);
+    const auto geometry = MakeGeometry(16, 16, 1);
+    auto spectrum = WholeImage(image);
+    spectrum.axes.at(0) = Range{40, 1, 1};
+    spectrum.axes.at(1) = Range{20, 1, 1};
+    const auto pieces = PlanPieces(image, geometry, geometry, spectrum, plenty, kManyThreads, true);
+    Require(pieces.size() == 1024 / carta::zarr::internal::kWatchedPieceChunks,
+            "a watched spectrum was not cut into pieces of sixteen chunks");
+    for (const auto& piece : pieces) {
+        Require(piece.segments.empty(), "a piece of a watched spectrum was read in segments");
+    }
+    RequireTheyFillTheDestination(pieces, spectrum, "a watched spectrum");
+    Require(PlanPieces(image, geometry, geometry, spectrum, plenty, kManyThreads, false).size() == 1,
+            "a spectrum nobody watches, which its budget affords whole, was cut");
+
+    // A plane of 8 x 8 x 1 chunks is sixty-four of them, more than sixteen: a piece a plane, whole.
+    const auto planes = MakeImage(64, 64, 8);
+    const auto fine = MakeGeometry(8, 8, 1);
+    const auto plane_pieces = PlanPieces(planes, fine, fine, WholeImage(planes), plenty, kManyThreads, true);
+    Require(plane_pieces.size() == 8, "a watched read of planes of many chunks was not cut a plane a piece");
+    for (const auto& piece : plane_pieces) {
+        Require(piece.segments.empty(), "a plane of a watched read was gathered in segments");
+    }
+}
+
 // A read nobody watches whose budget affords a chunk a decode thread is cut into layers of its
 // chunks, a chunk deep along the spectral axis and the whole plane, or into what its budget affords
 // when that is more -- never into segments of a layer, and never whole past its budget.
@@ -366,20 +400,21 @@ void TestACoarseFlagCostsItsOwnChunks() {
 // A stride of a chunk or more along an axis the read is not cut on steps over whole chunks, and the
 // chunks it steps over are not decoded -- so they are not what a piece's budget is spent on. Every
 // other column of 16-wide chunks is two chunks across the image, not the three its first and last
-// element span, and a budget of 24 chunks buys three channels a piece rather than two.
+// element span, and a budget of 16 chunks buys two channels a piece rather than one. (A watched piece
+// is no more than kWatchedPieceChunks anyway, so the budget stays within it.)
 void TestChunksAStrideStepsOverCostNothing() {
     const auto image = MakeImage(64, 64, 32);
     const auto geometry = MakeGeometry(16, 16, 1);
     auto request = WholeImage(image);
     request.axes.at(0) = Range{0, 2, 32};  // columns 0 and 32: chunks 0 and 2
     ReadOptions budget;
-    budget.read_budget_bytes = BudgetFor(24, 16 * 16);
+    budget.read_budget_bytes = BudgetFor(16, 16 * 16);
 
     const auto pieces = Pieces(image, geometry, request, budget);
     for (std::size_t i = 0; i + 1 < pieces.size(); ++i) {
-        Require(pieces.at(i).request.axes.at(2).count == 3,
+        Require(pieces.at(i).request.axes.at(2).count == 2,
                 "a piece holds " + std::to_string(pieces.at(i).request.axes.at(2).count) +
-                    " channels: two chunks across and four down is eight a channel, and 24 buys three");
+                    " channels: two chunks across and four down is eight a channel, and 16 buys two");
     }
     RequireTheyFillTheDestination(pieces, request, "a read striding over whole chunks");
 }
@@ -469,6 +504,7 @@ int main() {
     try {
         TestAReadThatFitsIsOnePiece();
         TestAWatchedReadIsCutToItsBudget();
+        TestAWatchedPieceIsSixteenChunksOrOneAlongTheCut();
         TestAnUnwatchedReadIsCutIntoLayersOrItsBudget();
         TestTheCutGoesOnTheSlowestSelectedAxis();
         TestAReadWithNowhereToCutIsOnePiece();

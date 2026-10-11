@@ -81,11 +81,13 @@ private:
 /// Called as a read advances, with the number of destination elements that are final and the number
 /// the request will produce in total. Returning false cancels the read, which then reports cancelled.
 ///
-/// A watched read is cut into chunk-aligned pieces along the slowest-varying selected axis, as many as
-/// ReadOptions::read_budget_bytes needs, and this is called as each piece is finished. The
-/// destination is dense in logical order with axis 0 fastest, which is what makes the finished part
-/// a prefix rather than a scatter -- a caller can render or forward it as it arrives. A piece too
-/// large to read whole is read in parts and reported when all of them are in, so the prefix holds.
+/// A watched read is cut into chunk-aligned pieces along the slowest-varying selected axis, as many
+/// as ReadOptions::read_budget_bytes needs and of no more than sixteen chunks unless one chunk
+/// along that axis is more, and this is called as each piece is finished -- about as often on many
+/// decode threads as on few. The destination is dense in logical order with axis 0 fastest, which
+/// is what makes the finished part a prefix rather than a scatter -- a caller can render or forward
+/// it as it arrives. A piece too large to read whole is read in parts and reported when all of them
+/// are in, so the prefix holds.
 ///
 /// An argument of Image::Read rather than a field of ReadOptions, because it is the only operation
 /// that has anywhere to report from in these terms -- a reduction reports through its sink, and a
@@ -93,10 +95,10 @@ private:
 /// other entry points silently ignored; as an argument it is simply not part of what they take.
 ///
 /// Supplying one can cut a read finer: a read nobody watches is cut into layers of its chunks -- a
-/// chunk deep along the spectral axis and the whole of its plane -- when its budget affords a chunk a
-/// decode thread, and one that is watched is cut to the chunks the budget affords so that there is a
-/// piece to report. On large chunks the two are cut alike; on small ones the watched read is somewhat
-/// slower.
+/// chunk deep along the spectral axis and the whole of its plane -- when its budget affords a chunk
+/// a decode thread, and one that is watched is cut to the chunks the budget affords, and to
+/// sixteen, so that there is a piece to report and the next is not long coming. On large chunks the
+/// two are cut alike; on small ones the watched read is somewhat slower.
 using ProgressCallback = std::function<bool(std::size_t elements_written, std::size_t elements_total)>;
 
 // What a read is allowed to do while it runs, whatever it is reading for.

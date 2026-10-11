@@ -71,21 +71,24 @@ can be.
 - **A read nobody watches is cut into layers of its chunks**, a chunk deep along the spectral,
   polarization and time axes and the whole of its sky plane, or into what its budget affords when
   that is more, once its budget affords a chunk for every decode thread. That is the exception: a
-  layer of the test cube is 589 chunks, more than any default budget affords, and cut finer each piece
-  spans the plane's chunks only
-  in part and is gathered in segments (below), which ran the 128-plane read 25-65 % slower (9.0 s
-  against 7.0 s on twenty-eight threads, 12.4 s against 7.5 s on four). In layers it ran as fast as
-  issued whole and held 277 MiB on twenty-eight threads and 960 MiB on four -- 0.8 and 2.0 GiB with
-  the flag -- bounded by the plane and the chunk depth rather than by the read's extent. The cut goes
-  on the slowest axis the read selects more than one of, so this holds for a read of one Stokes
-  parameter, as carta-backend's are; one across several Stokes parameters and many channels is cut
-  along polarization and, a polarization chunk deep being more than a layer, falls to segments as it
-  did before. It also takes the flag to be chunked no deeper than its pixels, as the site's converter
-  writes it: a deeper flag chunk spans several layers and is decoded again for each. A plane is
-  one layer and is read whole, as before, at the same speed. A watched read is always cut to its
-  budget, so that it has pieces to report. Reading segments straight into the destination rather
-  than gathering them would let a layer be cut to the budget at no cost, and is left to a later
-  change.
+  layer of the test cube is 589 chunks, more than any default budget affords, and cut finer each
+  piece spans the plane's chunks only in part and is gathered in segments (below), which ran the
+  128-plane read 25-65 % slower (9.0 s against 7.0 s on twenty-eight threads, 12.4 s against 7.5 s
+  on four). In layers it ran as fast as issued whole and held 277 MiB on twenty-eight threads and
+  960 MiB on four -- 0.8 and 2.0 GiB with the flag -- bounded by the plane and the chunk depth
+  rather than by the read's extent. The cut goes on the slowest axis the read selects more than one
+  of, so this holds for a read of one Stokes parameter, as carta-backend's are; one across several
+  Stokes parameters and many channels is cut along polarization and, a polarization chunk deep being
+  more than a layer, falls to segments as it did before. It also takes the flag to be chunked no
+  deeper than its pixels, as the site's converter writes it: a deeper flag chunk spans several
+  layers and is decoded again for each. A plane is one layer and is read whole, as before, at the
+  same speed. A watched read is always cut to its budget, so that it has pieces to report, and to
+  sixteen chunks a piece unless one chunk along the cut is more, so that they come often: a budget
+  aimed at the decode threads grows with them, and a cursor spectrum of the cigar test cube cut to
+  it alone came in nine pieces on 28 threads instead of thirty, 160 ms apart on a cold local disk
+  rather than 55, and further apart on slower storage. Reading segments straight into the
+  destination rather than gathering them would let a layer be cut to the budget at no cost, and is
+  left to a later change.
 - **A piece too large at one chunk deep is read in segments**, cut along the axes below the piece's
   down to a single chunk, each gathered in a buffer of the library's and put in place. Progress is
   still reported a piece at a time, so the finished part stays a prefix, which carta-backend's cursor

@@ -19,6 +19,17 @@
 
 namespace carta::zarr::internal {
 
+// The most chunks a piece of a watched read decodes, unless one chunk along the cut is more. A
+// watched read reports each piece as it lands, so a piece is how long its watcher waits: the cursor
+// spectrum carta-backend draws as it fills. A budget aimed at the decode threads grows with them,
+// and cut to that alone a spectrum of the 512 x 512 x 30000 test cube came in nine pieces on 28
+// threads instead of thirty, each 160 ms apart on a cold local NVMe disk rather than 55 -- a wait
+// that grows with what each chunk costs to fetch, not to decode, since carta-backend's I/O threads
+// stay two. Sixteen is about what the fixed budget before it afforded: cut to it, the spectrum
+// reported thirty times again, 55 ms apart, and took as long as it did then -- a tenth longer than
+// in nine pieces.
+inline constexpr std::uint64_t kWatchedPieceChunks = 16;
+
 /**
  * One piece of an ordinary read. See CONTEXT.md for what a piece is.
  *
@@ -45,13 +56,14 @@ struct Piece {
  * Pure: it reaches no further than the descriptor, the geometry and what the caller asked for, so
  * the strategy is checkable without a store, a transport or a directory tree.
  *
- * Every read is cut to fit its budget -- the caller's, or the library's own when it states none -- so
- * that what a read holds is bounded whether or not anybody watches it. What it holds is the chunks
- * TensorStore decodes at once, which is no more than `decode_threads` of them: a read nobody watches
- * (`reports_progress` false) whose budget affords that many is not cut at all, while one that is
- * watched is cut to the chunks the budget affords, so that it has pieces to report. A read that fits,
- * or that has no axis selecting more than one element, is one piece covering everything, so that the
- * loop reading it is the same loop either way.
+ * Every read is cut to fit its budget -- the caller's, or the library's own when it states none --
+ * so that what a read holds is bounded whether or not anybody watches it. What it holds is the
+ * chunks TensorStore decodes at once, which is no more than `decode_threads` of them: a read nobody
+ * watches (`reports_progress` false) whose budget affords that many is not cut at all, while one
+ * that is watched is cut to the chunks the budget affords and to no more than kWatchedPieceChunks,
+ * so that it has pieces to report and they come often. A read that fits, or that has no axis
+ * selecting more than one element, is one piece covering everything, so that the loop reading it is
+ * the same loop either way.
  *
  * Where to cut, how much one piece may cover, where its end is rounded out to a chunk boundary, and
  * the segments of a piece too large to read whole all happen here. Whether the flag is decoded beside

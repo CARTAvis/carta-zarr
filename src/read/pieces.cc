@@ -146,8 +146,16 @@ std::vector<Piece> PlanPieces(const ImageDescriptor& descriptor, const ChunkGeom
     // read holds grows with its extent beyond a layer -- the folded-in flag, a byte an element, and,
     // when the decode threads fall behind the I/O, the compressed chunks queued for them (9 GiB beside
     // 128 planes of the 7763 x 4742 test cube on four threads). A watched read is cut to its budget,
-    // so that it has pieces to report.
-    if (!reports_progress && affordable >= std::max<std::size_t>(1, decode_threads)) {
+    // so that it has pieces to report, and to no more than kWatchedPieceChunks, so that they come
+    // often -- but to no less than one chunk along the cut, which a piece would have to gather in
+    // segments.
+    //
+    // The other axes already contribute whatever they span, so a plane read needs far fewer rows per
+    // piece than a single-pixel column needs channels.
+    const auto across = ChunksOf(geometry, request) / ChunksAlong(geometry, request, *axis);
+    if (reports_progress) {
+        affordable = std::min(affordable, std::max(kWatchedPieceChunks, across));
+    } else if (affordable >= std::max<std::size_t>(1, decode_threads)) {
         affordable = std::max(affordable,
                               std::min(ChunksOf(geometry, request), ChunksOf(geometry, OneLayer(descriptor, request))));
     }
@@ -161,9 +169,6 @@ std::vector<Piece> PlanPieces(const ImageDescriptor& descriptor, const ChunkGeom
         elements_per_index *= request.axes.at(i).count;
     }
 
-    // The other axes already contribute whatever they span, so a plane read needs far fewer rows per
-    // piece than a single-pixel column needs channels.
-    const auto across = ChunksOf(geometry, request) / ChunksAlong(geometry, request, *axis);
     const auto indices = IndicesFor(geometry, request, *axis, UnitsAffordable(affordable, across));
 
     std::vector<Piece> pieces;

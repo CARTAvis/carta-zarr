@@ -721,7 +721,6 @@ def fill_block(job: Job, start: tuple[int, ...], stop: tuple[int, ...]) -> int:
         _, f0, p0, l0, m0 = start
         _, f1, p1, l1, m1 = stop
         data[f0:f1, p0:p1, m0:m1, l0:l1] = values[0].transpose(0, 1, 3, 2)
-        data.flush()
         return values.nbytes
     if job.kind == "pixels":
         values = job.synthetic.pixels(start, stop)
@@ -1195,8 +1194,11 @@ def write_fits(args: argparse.Namespace, path: Path) -> int:
         log(f"synthesizing {path.name} {shape}")
         job = Job(str(partial), "fits", synthetic=synthetic, data_offset=len(header),
                   fits_shape=(length_f, length_p, length_m, length_l))
-        # Whole planes, so that each block is a run of the file.
-        fill(job, shape, (1, 1, 1, length_l, length_m), 4, args)
+        # Blocks as synthesize() writes a dataset in at the least, eight channels deep: a block works out
+        # the footprint and the sources once for all its channels, and a block of one plane did that
+        # for every channel, seven times as slowly. Blocks never overlap, so the workers' writes never
+        # meet, however they fall across the file's pages.
+        fill(job, shape, (1, min(8, length_f), 1, min(1024, length_l), min(1024, length_m)), 4, args)
         partial.replace(path)
     except BaseException:
         partial.unlink(missing_ok=True)

@@ -182,15 +182,24 @@ Result<void> ComputeHistogram(const ReducibleImage& image, const HistogramReques
             }
         };
 
-        // Whole channels to a task when that keeps as many workers busy as splitting each channel
-        // by rows would. Each channel bins into its own counts, so a task that owns whole channels
-        // needs no partials and the slab is one wake of the pool rather than one per channel. A
-        // chunk deep and narrow is why: 64 x 64 x 256 on a 512 x 512 plane is read in bands of a
-        // few chunk rows, each channel of a band too little to split, and waking the pool for every
-        // channel of every band took twice as long as binning the pixels. #6.
+        // Whole channels to a task when the busiest worker bins no more rows that way than it would
+        // splitting each channel by rows. Each channel bins into its own counts, so a task that owns
+        // whole channels needs no partials and the slab is one wake of the pool rather than one per
+        // channel. A chunk deep and narrow is why: 64 x 64 x 256 on a 512 x 512 plane is read in
+        // bands of a few chunk rows, each channel of a band too little to split, and waking the pool
+        // for every channel of every band took twice as long as binning the pixels. #6. Counted by
+        // the busiest worker rather than by tasks, because the channels need not divide evenly:
+        // sixteen among twelve workers is two each for eight and none for four, half as much again
+        // as each channel's rows split twelve ways.
         const std::size_t row_tasks = split.Tasks(u_count, v_count);
         const std::size_t channel_tasks = split.Tasks(u_count * v_count, slab.channel_count);
-        if (slab.channel_count > 1 && channel_tasks >= row_tasks) {
+        const auto busiest = [](std::uint64_t units, std::size_t tasks) {
+            const auto ways = std::max<std::uint64_t>(1, tasks);
+            return (units + ways - 1) / ways;
+        };
+        const std::uint64_t rows_by_channel = busiest(slab.channel_count, channel_tasks) * v_count;
+        const std::uint64_t rows_by_row = slab.channel_count * busiest(v_count, row_tasks);
+        if (slab.channel_count > 1 && rows_by_channel <= rows_by_row) {
             split.Run(channel_tasks, slab.channel_count, [&](std::size_t, std::uint64_t first, std::uint64_t last) {
                 for (std::uint64_t offset = first; offset < last; ++offset) {
                     bin_rows(slab.pixels + (offset * stride_z), 0, v_count, counts_of(offset));

@@ -495,9 +495,9 @@ void TestAWidePlaneSplitsAndStillCounts(const char* fixture) {
         }
     }
 
-    // Two workers split a slab of two or more channels by channel; sixteen split each channel by
-    // rows; one does neither.
-    for (const unsigned int threads : {1U, 2U, 4U, 16U}) {
+    // Two and four workers split a slab of two or more channels by channel; three, which four
+    // channels do not divide among evenly, and sixteen split each channel by rows; one does neither.
+    for (const unsigned int threads : {1U, 2U, 3U, 4U, 16U}) {
         carta::zarr::ContextOptions options;
         options.decode_threads = threads;
         const auto sky = OpenSky(fixture, options);

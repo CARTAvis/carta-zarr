@@ -73,6 +73,17 @@ NodeQualification QualifyNode(const Store& store, const NodeEntry& entry) {
     }
 
     if (CarriesPlane(array, Plane::sky)) {
+        // A boolean here is a flag that was not typed one, which XRADIO 1.2.2's FITS reader writes. It is
+        // not an image, and was called complex for being not real; xarray's int8 encoding of a bool is
+        // real and was offered as an image of zeroes and ones. Listed, so that the store says why its
+        // image opens with no pixel mask.
+        if (HoldsBooleans(array)) {
+            return NodeQualification{
+                true, false,
+                Diagnostic{DiagnosticCode::unsupported_data_type,
+                           "Boolean sky-plane variables are not openable; a flag is typed 'flag'", std::string(node)},
+                false};
+        }
         if (!zarr_metadata::IsRealDataType(array.data_type)) {
             return NodeQualification{true, false,
                                      Diagnostic{DiagnosticCode::unsupported_data_type,

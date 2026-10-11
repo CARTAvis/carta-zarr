@@ -156,7 +156,8 @@ The read-path test set (`tools/testset`) holds a synthetic pancake, 7763 x 4742 
 FITS file in 4 MiB chunks of two shapes: 256 x 256 x 16, which sites have used, and 512 x 512 x 4, which
 the rule of thumb above points to (about 2.7 channels deep). Measured through carta-backend's own read
 paths on a 28-core machine with local NVMe and a warm page cache, the shallow chunk was the better one
-for everything shown on screen:
+for planes -- a channel shown, changed or animated -- and the deep one for spectra. A moment's peak is
+how far it raised carta-backend's resident memory above what the session held before it:
 
 | operation | 256 x 256 x 16 | 512 x 512 x 4 |
 |---|---|---|
@@ -165,31 +166,32 @@ for everything shown on screen:
 | eight channel changes, 1 GiB cache | 0.75 s | 0.18 s |
 | cursor spectrum | 8 ms | 30 ms |
 | cube histogram, exact | 17.4 s | 12.7 s |
-| moment | 27 s, peak 446 MiB | 24 s, peak 1355 MiB |
+| moment | 27 s, peak +446 MiB | 24 s, peak +1355 MiB |
 
 A plane in 16-deep chunks decodes 16 channels to show one; in 4-deep chunks, 4. A spectrum pays the
 other way, reading four times as many chunks, and still takes tens of milliseconds. A moment's peak
 grows with the chunk's area rather than its depth: carta-backend reads it in slabs a whole column of
 chunks deep, here 512 x 512 x 256 against 256 x 256 x 256. Neither layout let the backend read ahead
-with the default 1 GiB cache, since two runs of chunks come to 4.7 GiB and 1.25 GiB; the shallow
+with the default 1 GiB cache, since two runs of chunks come to 4.6 GiB and 1.25 GiB; the shallow
 chunk did not need it.
 
 ### And for a cigar
 
 The test set's cigar, 512 x 512 x 30000, is chunked 128 x 128 x 64 as sites have shaped their chunks,
 and 64 x 64 x 256, nearer the depth the rule points to for it (about 350). Measured the same way, with
-a 1 GiB cache unless noted, the deep chunk was the better one for what a cigar is opened for:
+a 1 GiB cache unless noted, the deep chunk was the better one for what a cigar is opened for (a moment's
+peak as above, above what the session held before it):
 
 | operation | 128 x 128 x 64 | 64 x 64 x 256 |
 |---|---|---|
 | cursor spectrum | 300 ms | 70 ms |
 | region spectrum | 1.20 s | 0.51 s |
-| moving the cursor nearby (each move) | 271 ms | 1.3 ms |
-| moving the cursor across the image (each move) | 213 ms | 62 ms |
+| moving the cursor nearby (each move after the first) | 271 ms | 1.3 ms |
+| moving the cursor across the image (each move after the first) | 213 ms | 62 ms |
 | animation, no cache (a frame) | 12.9 ms | 29.4 ms |
 | animation, 1 GiB cache (a frame) | 1.4 ms | 3.0 ms |
 | channel change, no cache | 7 ms | 24 ms |
-| moment | 42 s, peak 4280 MiB | 41 s, peak 1146 MiB |
+| moment | 42 s, peak +4280 MiB | 41 s, peak +1146 MiB |
 
 A spectrum in 64-deep chunks reads 469 of them, 1.8 GiB decoded, which is more than half the cache,
 so carta-backend reads it past the cache and moving the cursor reads every chunk again. In 256-deep
@@ -201,8 +203,8 @@ nothing. The cost is on the plane: one channel decodes 64 chunks of 256 channels
 The exact cube histogram took 27 s against 14 s. Its plane histograms woke the worker pool once per
 channel of each band a read was cut into, which narrow chunks made small; carta-zarr since #6 splits a
 read of many channels by channel instead, and those plane histograms take 5.7 s rather than 10.7 s, as
-long as at 128 x 128 x 64. Through carta-backend the whole exact cube histogram then takes 16.5 s
-against 13.5 s at 128 x 128 x 64.
+long as at 128 x 128 x 64 (called directly, without a cache). Through carta-backend, with the 1 GiB
+cache, the whole exact cube histogram then takes 16.8 s against 13.6 s at 128 x 128 x 64.
 
 ### Use more file-reading threads on Lustre
 
@@ -325,9 +327,13 @@ added each tool, eight users, two or three trials, and every cache emptied as de
 configurations and full reports were kept on the machines they ran on rather than in this
 repository, since they describe those machines; rerun the sweep on yours rather than reuse them.
 
-The comparison through carta-backend ran on 2026-10-09, on the read-path test set built by
-`tools/testset/build.sh`, with carta-zarr at 21f18a2 and carta-backend's `test_zarr` branch at 6e406c80
-(its `MeasureReadPaths` test, one operation per process), on a single machine with local NVMe rather
-than a parallel file system. The cigar's plane histograms before and after #6 were
-timed by calling carta-zarr directly, at 21f18a2 and at 59789f8, on the same machine, and the exact cube
-histogram again through carta-backend on 2026-10-10 with the fix swapped in, the mean of two runs.
+The comparison through carta-backend ran on 2026-10-08 and 2026-10-09, on the read-path test set built
+by `tools/testset/build.sh`, with carta-zarr at 21f18a2 and carta-backend's `test_zarr` branch at
+6e406c80 (its `MeasureReadPaths` test, one operation per process), on a single machine with local NVMe
+rather than a parallel file system. The pancake's 256 x 256 x 16 figures are the earlier runs of the
+same test at `test_zarr` 18d82c15, and its cube histogram and moment at 8a118389. Those differ from
+6e406c80 only in reading a spectrum around the session cache when its chunks outgrow half of it,
+which the pancake's spectrum, 16 chunks or 64 MiB, does not. The cigar's plane histograms before and after #6 were
+timed by calling carta-zarr directly, at 21f18a2 and at the fix (49bb533, the same code as 59789f8),
+on the same machine, and the exact cube histogram again through carta-backend on 2026-10-10 with the
+fix swapped in, the mean of two runs.

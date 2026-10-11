@@ -155,7 +155,7 @@ animated, and the sweep's trade-off table gives the run size of each layout.
 The read-path test set (`tools/testset`) holds a synthetic pancake, 7763 x 4742 x 256, made from one
 FITS file in 4 MiB chunks of two shapes: 256 x 256 x 16, which sites have used, and 512 x 512 x 4, which
 the rule of thumb above points to (about 2.7 channels deep). Measured through carta-backend's own read
-paths on a 28-core machine with local NVMe and a warm page cache, the shallow chunk was the better one
+paths on a 28-thread machine with local NVMe and a warm page cache, the shallow chunk was the better one
 for planes -- a channel shown, changed or animated -- and the deep one for spectra. A moment's peak is
 how far it raised carta-backend's resident memory above what the session held before it:
 
@@ -186,8 +186,8 @@ peak as above, above what the session held before it):
 |---|---|---|
 | cursor spectrum | 300 ms | 70 ms |
 | region spectrum | 1.20 s | 0.51 s |
-| moving the cursor nearby (each move after the first) | 271 ms | 1.3 ms |
-| moving the cursor across the image (each move after the first) | 213 ms | 62 ms |
+| moving the cursor nearby (mean of seven moves after the first) | 271 ms | 1.3 ms |
+| moving the cursor across the image (mean of seven moves after the first) | 213 ms | 62 ms |
 | animation, no cache (mean ms a frame) | 12.9 ms | 29.4 ms |
 | animation, 1 GiB cache (mean ms a frame) | 1.4 ms | 3.0 ms |
 | channel change, no cache | 7 ms | 24 ms |
@@ -197,8 +197,9 @@ A spectrum in 64-deep chunks reads 469 of them, 1.8 GiB decoded, which is more t
 so carta-backend reads it past the cache and moving the cursor reads every chunk again. In 256-deep
 chunks it is 118, 472 MiB, which the cache keeps, so moving the cursor within the same chunks reads
 nothing. The cost is on the plane: one channel decodes 64 chunks of 256 channels, 256 MiB, to show
-1 MiB. That is still under 30 ms a frame on average without a cache, 40 ms at most, well inside an animation's 200 ms, and a
-1 GiB cache holds the run of chunks it reads ahead.
+1 MiB. That is still under 30 ms a frame on average without a cache, 40 ms at most, which leaves most of
+an animation's 200 ms a frame for the rest of a frame's work -- these times are the plane's read alone,
+over the 32 frames of one chunk's depth -- and a 1 GiB cache holds the run of chunks it reads ahead.
 
 The exact cube histogram took 27 s against 14 s. Its plane histograms woke the worker pool once per
 channel of each band a read was cut into, which narrow chunks made small; carta-zarr since #6 splits a

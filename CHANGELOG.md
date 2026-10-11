@@ -8,12 +8,12 @@ minor release may change the ABI, and the soname says so ([ADR 0020](docs/adr/00
 ## [Unreleased]
 
 ### Added
-* `carta-zarr-bench pixels` writes a run of channels as the library reads them, with the pixel mask applied or not, as raw float32 on stdout.
-* `tools/testset`: builds the standard read-path test set -- a pancake (7763 x 4742 x 256) and a cigar (512 x 512 x 30000), each a FITS cube and the Zarr layouts the site's xradio converter makes from it -- and checks that each Zarr is the layout asked for, with its flag, holding its FITS cube's pixels.
-* `tools/zarr-bench/generate.py --synthetic --fits PATH` writes the synthetic cube as a FITS file, NaN where it is not data.
+* `carta-zarr-bench pixels` writes a run of channels as the library reads them, with the pixel mask applied or not, as raw float32 on stdout ([#2](https://github.com/CARTAvis/carta-zarr/issues/2)).
+* `tools/testset`: builds the standard read-path test set -- a pancake (7763 x 4742 x 256) and a cigar (512 x 512 x 30000), each a FITS cube and the Zarr layouts the site's xradio converter makes from it -- and checks that each Zarr is the layout asked for, with its flag, holding its FITS cube's pixels ([#2](https://github.com/CARTAvis/carta-zarr/issues/2)).
+* `tools/zarr-bench/generate.py --synthetic --fits PATH` writes the synthetic cube as a FITS file, NaN where it is not data ([#2](https://github.com/CARTAvis/carta-zarr/issues/2)).
 
 ### Changed
-* `tools/zarr-bench/generate.py --synthetic` makes a continuum-subtracted HI cube calibrated against ASKAP's, on ASKAP's frequency axis, instead of continuum point sources inside a circle. `--sources` and `--nan-radius` are replaced by `--line-sources`, `--point-sources`, `--extended-sources`, `--footprint-fill` and `--flagged-channels`; synthetic datasets written before are not reused.
+* `tools/zarr-bench/generate.py --synthetic` makes a continuum-subtracted HI cube calibrated against ASKAP's, on ASKAP's frequency axis, instead of continuum point sources inside a circle. `--sources` and `--nan-radius` are replaced by `--line-sources`, `--point-sources`, `--extended-sources`, `--footprint-fill` and `--flagged-channels`; synthetic datasets written before are not reused ([#2](https://github.com/CARTAvis/carta-zarr/issues/2)).
 
 ## [0.1.0]
 

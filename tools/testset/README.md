@@ -1,26 +1,28 @@
 # Read-path test set
 
 A fixed set of cubes to measure carta-zarr's read paths on, and to compare them with FITS: each cube
-is a FITS file, and each of its Zarr layouts is made from that FITS by the site's xradio converter
-(`fits_to_zarr_xradio_v1.2.2_v1.py`), as production data is. Every cube is synthetic, so the whole
-set rebuilds from nothing on any machine.
+is a FITS file, written by `tools/zarr-bench/generate.py --fits`, and each of its Zarr layouts is
+made from that FITS by the site's xradio converter, as production data is. Every cube is synthetic, so
+the whole set rebuilds from nothing on any machine.
 
 ```sh
-XRADIO_CONVERTER=/path/to/fits_to_zarr_xradio_v1.2.2_v1.py CARTA_ZARR_BENCH=/path/to/carta-zarr-bench \
+XRADIO_CONVERTER=/path/to/fits_to_zarr_xradio.py CARTA_ZARR_BENCH=/path/to/carta-zarr-bench \
     tools/testset/build.sh /data/carta-testset
 ```
 
 `build.sh` skips what already exists, so a run that stopped is finished by running it again. A FITS
 file or a Zarr appears under its own name only once it is complete, and a Zarr only once `verify.py`
-has found it to hold the FITS file's pixels, bit for bit, and carta-zarr to read it as the FITS file
-describes it: in the chunks (and shards) asked for, with its flag (or none), and with the same unit,
-coordinates, observation date and beam (the report is left beside it as `NAME.verify.txt`). What the
-Zarr means is taken from carta-zarr itself, through `carta-zarr-bench probe --describe`, and its
-pixels are read through `carta-zarr-bench pixels`, rather than read a second way, so a Zarr carta-zarr
-would refuse, read otherwise or fail to decode is refused.
+has found it to be the layout it is named after, holding the FITS file's pixels (the report is left
+beside it as `NAME.verify.txt`). It asks carta-zarr, through `carta-zarr-bench`, as carta-backend
+would read the Zarr: that it opens with the FITS cube's shape, in the chunks (and shards) asked for,
+with a flag carta-zarr applies or none, and that every pixel it decodes is the FITS cube's bit for
+bit, NaN exactly where the FITS cube is once the flag is applied. What the coordinates, unit and
+beams mean is not compared: the set is for measuring reads, and whether carta-zarr reads metadata
+right is for its own tests to say.
+
 It needs `uv`, the converter, carta-zarr-bench (a build with `-DCARTA_ZARR_BUILD_BENCH=ON`), and
-about 155 GB (190 GB while a cube is being synthesized); on a
-28-thread machine with local NVMe it takes about 13 minutes, a third of it verifying.
+about 155 GB; on a 28-thread machine with local NVMe it takes about 13 minutes, a third of it
+verifying.
 
 ## Cubes and layouts
 
@@ -54,8 +56,8 @@ Each Zarr is about 21 GB.
   With a flag the converter writes `FLAG_SKY`, true where the pixel is NaN (`--compute_mask`); the
   pixels are the same, so the two differ only in what reading the flag costs. Add a layout by adding
   a line to `layouts` in `build.sh`; its name says all three, e.g. `pancake_c256x256x16_s1024x1024x16_flag.zarr`.
-- xradio 1.2.2's FITS reader leaves that flag undeclared: untyped, not named by the image or a data
-  group, so carta-zarr does not apply it. The converter has to declare it (type `flag`, the image's
+- xradio's FITS reader, 1.2.2 to 1.2.5, leaves that flag undeclared: untyped, not named by the image
+  or a data group, so carta-zarr does not apply it. The converter has to declare it (type `flag`, the image's
   `flag` attribute, and a `base` data group naming it); `verify.py` refuses a flagged layout carta-zarr
   opens without a pixel mask, so a converter that does not makes `build.sh` stop at the first one.
 - The converter writes no chunk that is wholly NaN, so a fully flagged run of channels long enough
@@ -80,10 +82,11 @@ HI cube from an ASKAP mosaic:
   too short for that, so channels 128 to 192 are flagged whole as well (`--flagged-range`), covering
   whole chunks.
 
-`zarr-to-fits.py` writes the FITS file, with the axes ASKAPsoft writes (RA, Dec, Stokes, frequency)
-and the header keywords xradio's FITS reader requires. Its coordinates are the ones carta-zarr reads
-from the synthetic dataset, and a dataset a FITS header cannot describe -- unevenly spaced channels, a
-beam that changes from plane to plane -- is refused rather than written as something else.
+`generate.py --fits` writes the FITS file, with the axes ASKAPsoft writes (RA, Dec, Stokes,
+frequency), the coordinates the synthetic dataset would have, the unit, the spectral frame, the rest
+frequency and one beam, which xradio gives every plane. It writes no telescope, observatory or
+observation date: nothing a read costs depends on them. xradio 1.2.2's FITS reader refuses a file
+without `DATE-OBS`, `TIMESYS` and `TELESCOP`, so the converter has to run on xradio 1.2.5 or later.
 
 ## Calibration
 

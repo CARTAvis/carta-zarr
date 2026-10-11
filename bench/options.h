@@ -139,9 +139,6 @@ struct RunOptions {
 struct ProbeOptions {
     std::string dataset;
     std::string image_id;
-    // Also print what the image means as the library reads it -- its unit, coordinates, observation
-    // and beams -- so that a caller can hold it to another description of the same data.
-    bool describe = false;
 };
 
 // Asked for the pixels of a run of channels, as the library reads them: every polarization and the

@@ -47,6 +47,10 @@ The layout is named per axis, in XRADIO's axis names, and an axis left out is 1:
 
   --chunk l=512,m=512,frequency=16 --shard frequency=256 --codec blosc:zstd:5:shuffle
 
+--fits PATH writes a synthetic cube as a FITS file instead, NaN where it is not data, with the
+coordinates the dataset would have: the cube the test set's converter makes its layouts from
+(tools/testset).
+
 Each dataset carries bench-manifest.json beside its zarr.json: what it was made from, the layout,
 the striping it got, and what it came to on disk. The manifest is written last, so a dataset with
 one is complete. With --output-root the directory is named after a hash of everything that decides
@@ -86,7 +90,7 @@ from fingerprint import reached, source_content
 MANIFEST_NAME = "bench-manifest.json"
 # Bumped whenever the same arguments would produce different bytes, so that a dataset written by an
 # older generator is not mistaken for one this one would write.
-FORMAT_VERSION = 5
+FORMAT_VERSION = 6
 
 AXES = ("time", "frequency", "polarization", "l", "m")
 STOKES = ("I", "Q", "U", "V")
@@ -102,19 +106,6 @@ NOISE_TILE = 128
 # A synthetic cube's defaults are an ASKAP HI cube's: its first channel, its channel width, HI's rest
 # frequency, and the noise, in Jy/beam, that with the rise towards the footprint's edge comes to
 # ASKAP Hydra's median plane rms of 2.1 mJy/beam.
-# Where ASKAP is, as the site's converter writes it from a FITS file's OBSGEO-X, Y and Z: a spectral
-# frame is placed by it.
-ASKAP_TELESCOPE = {
-    "name": "ASKAP",
-    "direction": {"attrs": {"coordinate_system": "geocentric", "frame": "ITRF", "origin_object_name": "earth",
-                            "type": "location", "units": "rad"},
-                  "data": [2.0360801614255952, -0.46338342174681973], "dims": ["ellipsoid_dir_label"],
-                  "coords": {"ellipsoid_dir_label": {"dims": ["ellipsoid_dir_label"], "data": ["lon", "lat"]}}},
-    "distance": {"attrs": {"coordinate_system": "geocentric", "frame": "ITRF", "origin_object_name": "earth",
-                           "type": "location", "units": "m"},
-                 "data": [6373972.330145822], "dims": ["ellipsoid_dis_label"],
-                 "coords": {"ellipsoid_dis_label": {"dims": ["ellipsoid_dis_label"], "data": ["dist"]}}},
-}
 ASKAP_FREQUENCY_START = 1.2955e9
 ASKAP_CHANNEL_WIDTH = 18518.518518518518
 HI_REST_FREQUENCY = 1.420405751786e9
@@ -683,6 +674,8 @@ class Job:
     synthetic: Synthetic | None = None
     keep_bits: int | None = None
     direction: SkyDirection | None = None
+    data_offset: int = 0  # where a FITS file's data begins, for "fits"
+    fits_shape: tuple[int, ...] = ()  # its data's shape, frequency, polarization, m, l
 
 
 _OPEN: dict[str, Any] = {}
@@ -694,6 +687,13 @@ def _open(path: str, mode: str) -> Any:
         with warnings.catch_warnings():
             warnings.simplefilter("ignore")
             _OPEN[key] = zarr.open_array(path, mode=mode)
+    return _OPEN[key]
+
+
+def _fits_data(job: Job) -> np.ndarray:
+    key = f"fits:{job.target}"
+    if key not in _OPEN:
+        _OPEN[key] = np.memmap(job.target, dtype=">f4", mode="r+", offset=job.data_offset, shape=job.fits_shape)
     return _OPEN[key]
 
 
@@ -713,6 +713,16 @@ def _fill_taken(start: tuple[int, ...], stop: tuple[int, ...]) -> int:
 
 def fill_block(job: Job, start: tuple[int, ...], stop: tuple[int, ...]) -> int:
     window = tuple(slice(a, b) for a, b in zip(start, stop))
+    if job.kind == "fits":
+        # FITS holds l fastest, then m, polarization and frequency: the block's own axes reversed but
+        # for time, of which there is one.
+        values = job.synthetic.pixels(start, stop)
+        data = _fits_data(job)
+        _, f0, p0, l0, m0 = start
+        _, f1, p1, l1, m1 = stop
+        data[f0:f1, p0:p1, m0:m1, l0:l1] = values[0].transpose(0, 1, 3, 2)
+        data.flush()
+        return values.nbytes
     if job.kind == "pixels":
         values = job.synthetic.pixels(start, stop)
     elif job.kind == "flags":
@@ -929,6 +939,42 @@ def line_sources(args: argparse.Namespace, shape: list[int]) -> int:
     return round(math.prod(shape) / PIXELS_PER_LINE_SOURCE)
 
 
+def synthetic_shape(args: argparse.Namespace) -> list[int]:
+    """--shape as time, frequency, polarization, l, m."""
+    requested = parse_axis_map(args.shape, "--shape")
+    if "time" in requested and requested["time"] != 1:
+        raise SystemExit("--shape: a synthetic cube has one time; CARTA displays no other kind")
+    shape = [1, requested.get("frequency", 1), requested.get("polarization", 1), requested.get("l", 1), requested.get("m", 1)]
+    if shape[2] > len(STOKES):
+        raise SystemExit(f"--shape: at most {len(STOKES)} polarizations, {', '.join(STOKES)}")
+    return shape
+
+
+def synthetic_cube(args: argparse.Namespace, shape: list[int]) -> Synthetic:
+    """The cube the synthesizing options describe: the same pixels whether written as a dataset or as
+    a FITS file."""
+    frequencies = args.frequency_start + args.channel_width * np.arange(shape[1])
+    return Synthetic(
+        shape=tuple(shape),
+        frequencies=tuple(float(value) for value in frequencies),
+        seed=args.seed,
+        noise=args.noise,
+        line_sources=line_sources(args, shape),
+        point_sources=args.point_sources,
+        extended_sources=args.extended_sources,
+        footprint_fill=None if args.footprint_fill >= 1 else args.footprint_fill,
+        flagged_channels=args.flagged_channels,
+        flag=args.flag,
+        flagged_range=parse_range(args.flagged_range, shape[1]),
+    )
+
+
+def template_values(template: Path, name: str) -> np.ndarray:
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        return np.asarray(zarr.open_array(str(template / name), mode="r")[...])
+
+
 def synthesize(args: argparse.Namespace, out: Path) -> dict[str, Any]:
     template = Path(args.template).resolve()
     root_metadata = read_metadata(template)
@@ -939,21 +985,15 @@ def synthesize(args: argparse.Namespace, out: Path) -> dict[str, Any]:
     if tuple(dims) != AXES:
         raise SystemExit(f"the template's {image} is stored as {dims}; synthesis expects {list(AXES)}")
 
-    requested = parse_axis_map(args.shape, "--shape")
-    if "time" in requested and requested["time"] != 1:
-        raise SystemExit("--shape: a synthetic cube has one time; CARTA displays no other kind")
-    shape = [1, requested.get("frequency", 1), requested.get("polarization", 1), requested.get("l", 1), requested.get("m", 1)]
-    if shape[2] > len(STOKES):
-        raise SystemExit(f"--shape: at most {len(STOKES)} polarizations, {', '.join(STOKES)}")
+    shape = synthetic_shape(args)
     layout = resolve_layout(args, dims, shape)
+    synthetic = synthetic_cube(args, shape)
 
     def values(name: str) -> np.ndarray:
-        with warnings.catch_warnings():
-            warnings.simplefilter("ignore")
-            return np.asarray(zarr.open_array(str(template / name), mode="r")[...])
+        return template_values(template, name)
 
     _, length_f, length_p, length_l, length_m = shape
-    frequencies = args.frequency_start + args.channel_width * np.arange(length_f)
+    frequencies = np.asarray(synthetic.frequencies)
     l_values, m_values = values("l"), values("m")
     l_axis = (np.arange(length_l) - length_l // 2) * (l_values[1] - l_values[0])
     m_axis = (np.arange(length_m) - length_m // 2) * (m_values[1] - m_values[0])
@@ -979,20 +1019,6 @@ def synthesize(args: argparse.Namespace, out: Path) -> dict[str, Any]:
     unknown = [name for name in names if name != image and name not in coordinates and name not in SKY_DIRECTION]
     if unknown:
         raise SystemExit(f"the template has arrays this generator does not know how to stretch: {', '.join(unknown)}")
-
-    synthetic = Synthetic(
-        shape=tuple(shape),
-        frequencies=tuple(float(value) for value in frequencies),
-        seed=args.seed,
-        noise=args.noise,
-        line_sources=line_sources(args, shape),
-        point_sources=args.point_sources,
-        extended_sources=args.extended_sources,
-        footprint_fill=None if args.footprint_fill >= 1 else args.footprint_fill,
-        flagged_channels=args.flagged_channels,
-        flag=args.flag,
-        flagged_range=parse_range(args.flagged_range, shape[1]),
-    )
 
     attributes = json.loads(json.dumps(root_metadata.get("attributes", {})))
     flag_name = "FLAG_SKY" if args.flag else None
@@ -1034,7 +1060,6 @@ def synthesize(args: argparse.Namespace, out: Path) -> dict[str, Any]:
 
     sky = with_layout(image_metadata, shape, layout, 4)
     sky["attributes"]["object_name"] = "carta-zarr-bench synthetic"
-    sky["attributes"]["telescope"] = ASKAP_TELESCOPE
     if flag_name:
         sky["attributes"]["flag"] = flag_name
     write_array_metadata(out / image, sky)
@@ -1084,6 +1109,100 @@ def synthesize(args: argparse.Namespace, out: Path) -> dict[str, Any]:
         "layout": layout,
         "consolidate": not args.no_consolidate,
     }
+
+
+# -- FITS ---------------------------------------------------------------------------------------
+
+# A FITS file is a header of 80-character cards in blocks of this many bytes, then the data, padded
+# to a whole block.
+FITS_BLOCK = 2880
+# The FITS SPECSYS of each frame XRADIO's frequency observer names.
+SPECSYS = {"lsrk": "LSRK", "lsrd": "LSRD", "bary": "BARYCENT", "topo": "TOPOCENT", "geo": "GEOCENTR"}
+
+
+def fits_card(key: str, value: Any) -> str:
+    if isinstance(value, bool):
+        text = ("T" if value else "F").rjust(20)
+    elif isinstance(value, str):
+        text = "'" + value.replace("'", "''").ljust(8) + "'"
+    elif isinstance(value, int):
+        text = str(value).rjust(20)
+    else:
+        text = repr(float(value)).upper().rjust(20)
+    card = f"{key:<8}= {text}"
+    if len(card) > 80:
+        raise ValueError(f"FITS card {key} does not fit in 80 characters: {card}")
+    return card.ljust(80)
+
+
+def fits_header(args: argparse.Namespace, shape: list[int]) -> bytes:
+    """What a benchmark needs of the cube and xradio's FITS reader asks for: the axes ASKAPsoft writes
+    (RA, Dec, Stokes, frequency), their coordinates as synthesize() writes them from the template, the
+    unit, the spectral frame and rest frequency, and the beam. No observatory, telescope or date:
+    nothing a read's cost depends on."""
+    template = Path(args.template).resolve()
+    info = read_metadata(template)["attributes"]["coordinate_system_info"]
+    reference = info["reference_direction"]
+    pole = info["native_pole_direction"]["data"]
+    observer = read_metadata(template / "frequency")["attributes"]["reference_frequency"]["attrs"]["observer"]
+    unit = read_metadata(template / default_image(read_metadata(template)))["attributes"]["units"]
+    l_values, m_values = template_values(template, "l"), template_values(template, "m")
+    beam = template_values(template, "BEAM_FIT_PARAMS_SKY")[0, 0, 0]
+    _, length_f, length_p, length_l, length_m = shape
+    cards = [
+        ("SIMPLE", True), ("BITPIX", -32), ("NAXIS", 4),
+        ("NAXIS1", length_l), ("NAXIS2", length_m), ("NAXIS3", length_p), ("NAXIS4", length_f),
+        ("BUNIT", unit), ("BTYPE", "Intensity"), ("OBJECT", "carta-zarr-bench synthetic"),
+        ("CTYPE1", "RA---" + info["projection"]), ("CRVAL1", math.degrees(reference["data"][0])),
+        ("CDELT1", math.degrees(l_values[1] - l_values[0])), ("CRPIX1", float(length_l // 2 + 1)), ("CUNIT1", "deg"),
+        ("CTYPE2", "DEC--" + info["projection"]), ("CRVAL2", math.degrees(reference["data"][1])),
+        ("CDELT2", math.degrees(m_values[1] - m_values[0])), ("CRPIX2", float(length_m // 2 + 1)), ("CUNIT2", "deg"),
+        ("CTYPE3", "STOKES"), ("CRVAL3", 1.0), ("CDELT3", 1.0), ("CRPIX3", 1.0),
+        ("CTYPE4", "FREQ"), ("CRVAL4", args.frequency_start), ("CDELT4", args.channel_width), ("CRPIX4", 1.0),
+        ("CUNIT4", "Hz"),
+        ("LONPOLE", math.degrees(pole[0])), ("LATPOLE", math.degrees(pole[1])),
+        ("RADESYS", reference["attrs"]["frame"].upper()),
+    ]
+    if equinox := reference["attrs"].get("equinox"):
+        cards.append(("EQUINOX", float(equinox.lower().lstrip("bj"))))
+    cards += [
+        ("SPECSYS", SPECSYS[observer.lower()]), ("RESTFRQ", args.rest_frequency),
+        ("BMAJ", math.degrees(beam[0])), ("BMIN", math.degrees(beam[1])), ("BPA", math.degrees(beam[2])),
+        ("ORIGIN", "carta-zarr tools/zarr-bench/generate.py"),
+    ]
+    text = "".join(fits_card(key, value) for key, value in cards) + "END".ljust(80)
+    return text.ljust(-(-len(text) // FITS_BLOCK) * FITS_BLOCK).encode("ascii")
+
+
+def write_fits(args: argparse.Namespace, path: Path) -> int:
+    """The synthetic cube as a FITS file: the pixels synthesize() writes, NaN where it writes NaN,
+    in the file a converter makes the dataset's layouts from. Written beside `path` and renamed into
+    place, so a file at `path` is a finished one."""
+    if path.exists() and not args.force:
+        raise SystemExit(f"{path} exists; --force replaces it")
+    shape = synthetic_shape(args)
+    synthetic = synthetic_cube(args, shape)
+    header = fits_header(args, shape)
+    _, length_f, length_p, length_l, length_m = shape
+    data_bytes = math.prod(shape) * 4
+    partial = path.with_name(path.name + ".partial")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        with partial.open("wb") as out:
+            out.write(header)
+            # The data's padding is zeros, which extending the file gives.
+            out.truncate(len(header) + -(-data_bytes // FITS_BLOCK) * FITS_BLOCK)
+        log(f"synthesizing {path.name} {shape}")
+        job = Job(str(partial), "fits", synthetic=synthetic, data_offset=len(header),
+                  fits_shape=(length_f, length_p, length_m, length_l))
+        # Whole planes, so that each block is a run of the file.
+        fill(job, shape, (1, 1, 1, length_l, length_m), 4, args)
+        partial.replace(path)
+    except BaseException:
+        partial.unlink(missing_ok=True)
+        raise
+    print(path)
+    return 0
 
 
 # -- Storage --------------------------------------------------------------------------------------
@@ -1282,6 +1401,7 @@ def parse_arguments(argv: list[str] | None) -> argparse.Namespace:
     where = parser.add_mutually_exclusive_group(required=True)
     where.add_argument("--output", help="the dataset to write")
     where.add_argument("--output-root", help="a directory to write it in, named after what decides its bytes")
+    where.add_argument("--fits", help="write the synthetic cube as this FITS file instead, NaN where it is not data")
 
     layout = parser.add_argument_group("layout")
     layout.add_argument("--chunk", help="chunk shape per axis, e.g. l=512,m=512,frequency=16; others are 1")
@@ -1336,6 +1456,17 @@ def parse_arguments(argv: list[str] | None) -> argparse.Namespace:
         parser.error("--flagged-channels must be between 0 and 0.5")
     if args.source and args.shape:
         parser.error("--shape is for --synthetic; a rewrite takes its shape from the source, and --crop")
+    if args.fits:
+        if not args.synthetic:
+            parser.error("--fits writes a synthetic cube; a source is already a dataset")
+        if args.flag:
+            parser.error("--fits marks what is not data with NaN; FITS has no flag")
+        given = [flag for flag, value in (("--chunk", args.chunk), ("--shard", args.shard), ("--codec", args.codec),
+                                          ("--keep-bits", args.keep_bits), ("--stripe", args.stripe),
+                                          ("--no-consolidate", args.no_consolidate)) if value]
+        if given:
+            parser.error(f"--fits writes no layout; leave out {', '.join(given)}")
+        return args
     if args.layout_from_source:
         if not args.source:
             parser.error("--layout-from-source needs --source: a synthetic cube has no layout of its own")
@@ -1461,6 +1592,8 @@ def main(argv: list[str] | None = None) -> int:
     if any(argument.split("=", 1)[0] == "--check-stripe" for argument in arguments):
         return check_stripe(arguments)
     args = parse_arguments(argv)
+    if args.fits:
+        return write_fits(args, Path(args.fits).resolve())
     stripe = Stripe.parse(args.stripe) if args.stripe else None
     key = identity(args)
     digest = hashlib.sha256(json.dumps(key, sort_keys=True).encode()).hexdigest()[:16]

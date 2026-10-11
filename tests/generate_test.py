@@ -462,5 +462,61 @@ class SyntheticPixelsTest(unittest.TestCase):
             np.testing.assert_allclose(velocity, generate.SPEED_OF_LIGHT * (1 - frequency / generate.HI_REST_FREQUENCY))
 
 
+
+class FitsTest(unittest.TestCase):
+    """--fits writes the cube synthesize() would, as FITS: the test set's converter makes its layouts
+    from that file, so its pixels must be the dataset's bit for bit, in FITS order, after a header a
+    FITS reader takes."""
+
+    SHAPE = "frequency=12,polarization=1,l=37,m=23"
+
+    def test_the_pixels_are_the_datasets_in_fits_order(self) -> None:
+        import numpy as np
+        import zarr
+
+        with tempfile.TemporaryDirectory() as directory:
+            fits, out = Path(directory) / "cube.fits", Path(directory) / "cube.zarr"
+            common = ["--synthetic", "--shape", self.SHAPE, "--flagged-channels", "0.2", "--workers", "2", "--block-mib", "0"]
+            self.assertEqual(generate.main(common + ["--fits", str(fits)]), 0)
+            self.assertFalse(fits.with_name("cube.fits.partial").exists())
+            args = generate.parse_arguments(common + ["--chunk", "l=16,m=16,frequency=4", "--output", str(out)])
+            generate.synthesize(args, out)
+            raw = fits.read_bytes()
+            self.assertEqual(len(raw) % generate.FITS_BLOCK, 0)
+            cards = [raw[i : i + 80].decode("latin-1") for i in range(0, len(raw), 80)]
+            end = next(i for i, card in enumerate(cards) if card.rstrip() == "END")
+            header = {card[:8].strip(): card[10:].strip().strip("'").strip() for card in cards[:end]}
+            self.assertEqual([header[k] for k in ("SIMPLE", "BITPIX", "NAXIS", "NAXIS1", "NAXIS2", "NAXIS3", "NAXIS4")],
+                             ["T", "-32", "4", "37", "23", "1", "12"])
+            self.assertEqual((header["CTYPE1"], header["CTYPE2"], header["CTYPE3"], header["CTYPE4"]),
+                             ("RA---SIN", "DEC--SIN", "STOKES", "FREQ"))
+            self.assertEqual(float(header["CRVAL4"]), generate.ASKAP_FREQUENCY_START)
+            self.assertFalse({"TELESCOP", "OBSGEO-X", "DATE-OBS"} & header.keys())
+            offset = -(-(end + 1) * 80 // generate.FITS_BLOCK) * generate.FITS_BLOCK
+            data = np.frombuffer(raw, dtype=">f4", count=12 * 23 * 37, offset=offset).reshape(12, 1, 23, 37)
+            sky = np.asarray(zarr.open_array(str(out / "SKY"), mode="r")[...])[0].transpose(0, 1, 3, 2)
+            self.assertTrue(np.isnan(sky).any(), "nothing is NaN, so the order of NaN is not tested")
+            self.assertTrue(np.array_equal(data.astype(np.float32).view(np.uint32), sky.astype(np.float32).view(np.uint32)))
+            self.assertFalse(raw[offset + data.nbytes :].strip(b"\0"), "the padding is not zeros")
+
+    def test_a_fits_file_is_written_only_of_a_synthetic_cube_without_a_flag_or_layout(self) -> None:
+        for extra in (["--flag"], ["--chunk", "l=16"], ["--codec", "none"]):
+            with self.assertRaises(SystemExit, msg=extra):
+                generate.parse_arguments(["--synthetic", "--shape", self.SHAPE, "--fits", "cube.fits", *extra])
+        with self.assertRaises(SystemExit):
+            generate.parse_arguments(["--source", "cube.zarr", "--fits", "cube.fits"])
+
+    def test_a_fits_file_there_is_replaced_only_when_forced(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            fits = Path(directory) / "cube.fits"
+            fits.write_text("not this cube")
+            common = ["--synthetic", "--shape", self.SHAPE, "--workers", "1", "--fits", str(fits)]
+            with self.assertRaises(SystemExit):
+                generate.main(common)
+            self.assertEqual(fits.read_text(), "not this cube")
+            self.assertEqual(generate.main(common + ["--force"]), 0)
+            self.assertTrue(fits.read_bytes().startswith(b"SIMPLE  ="))
+
+
 if __name__ == "__main__":
     unittest.main()

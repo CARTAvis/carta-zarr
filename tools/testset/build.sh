@@ -4,10 +4,13 @@
 # Associated Universities, Inc. (AUI) and the Inter-University Institute for Data Intensive Astronomy (IDIA)
 # SPDX-License-Identifier: GPL-3.0-or-later
 
-# Build the standard read-path test set in OUTPUT: each cube as a FITS file, and each of its Zarr
-# layouts made from that FITS by the site's xradio converter, as production data is.
+# Build the standard read-path test set in OUTPUT: each cube as a FITS file, written by generate.py,
+# and each of its Zarr layouts made from that FITS by the site's xradio converter, as production data
+# is. The converter must run on xradio 1.2.5 or later, whose FITS reader asks for no telescope or
+# observation date, which the FITS files do not carry; and for a flagged layout it must declare the
+# flag it computes (see README.md).
 #
-#   XRADIO_CONVERTER=/path/to/fits_to_zarr_xradio_v1.2.2_v1.py CARTA_ZARR_BENCH=/path/to/carta-zarr-bench \
+#   XRADIO_CONVERTER=/path/to/fits_to_zarr_xradio.py CARTA_ZARR_BENCH=/path/to/carta-zarr-bench \
 #       tools/testset/build.sh OUTPUT
 #
 # What exists is skipped, so a run that stopped part-way is finished by running it again; a FITS
@@ -47,20 +50,11 @@ for entry in "${cubes[@]}"; do
     IFS='|' read -r cube shape options <<< "$entry"
     IFS=',' read -r l m f <<< "$shape"
     fits="$output/$cube.fits"
-    work="$output/.work-$cube.zarr"
-    # A run stopped between publishing the FITS file and removing what it was written from leaves that.
-    if [ -e "$fits" ]; then
-        rm -rf "$work"
-        continue
-    fi
-    say "$cube: synthesizing $l x $m x $f"
+    [ -e "$fits" ] && continue
+    say "$cube: synthesizing $l x $m x $f as $fits"
     # shellcheck disable=SC2086  # the options are words
-    uv run --quiet "$generate" --synthetic --shape "frequency=$f,polarization=1,l=$l,m=$m" \
-        --chunk "l=$((l < 1024 ? l : 1024)),m=$((m < 1024 ? m : 1024)),frequency=8" --codec zstd:1 \
-        $options --output "$work" --force > /dev/null
-    say "$cube: writing $fits"
-    uv run --quiet "$here/zarr-to-fits.py" "$work" "$fits" --bench "$bench" > /dev/null
-    rm -rf "$work"
+    uv run --quiet "$generate" --synthetic --shape "frequency=$f,polarization=1,l=$l,m=$m" $options \
+        --fits "$fits" > /dev/null
 done
 
 for entry in "${layouts[@]}"; do

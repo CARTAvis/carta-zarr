@@ -60,14 +60,12 @@ constexpr std::array<std::string_view, 19> kRunOptions{
 
 constexpr std::string_view kUsage = R"(usage:
   carta-zarr-bench run <dataset> [options]
-  carta-zarr-bench probe <dataset> [--image ID] [--describe]
+  carta-zarr-bench probe <dataset> [--image ID]
   carta-zarr-bench pixels <dataset> --channels START:STOP [--image ID] [--unmasked]
   carta-zarr-bench identity
 
 probe opens the dataset as carta-backend would and prints what the library sees, as one line of JSON.
-It exits non-zero when the dataset does not open. --describe adds what the image means: its stored
-type and unit, its pixel mask, its direction, spectral, polarization and time coordinates, the
-observation, and the beam of every plane.
+It exits non-zero when the dataset does not open.
 
 pixels writes channels START to STOP (exclusive) of the image, every polarization and the whole plane,
 to stdout as float32 in the machine's byte order, l fastest, then m, frequency, polarization and time.
@@ -374,10 +372,6 @@ Command ParseProbe(Arguments& arguments) {
             }
             options.dataset = std::string(word);
             have_dataset = true;
-            continue;
-        }
-        if (word == "--describe") {
-            options.describe = true;
             continue;
         }
         const auto value = arguments.Value(word);

@@ -73,73 +73,6 @@ nlohmann::json Diagnostics(const std::vector<Diagnostic>& diagnostics) {
     return list;
 }
 
-const char* DataTypeName(DataType type) {
-    constexpr std::array<const char*, 15> kNames{"unknown", "bool",    "int8",    "uint8",     "int16",
-                                                 "uint16",  "int32",   "uint32",  "int64",     "uint64",
-                                                 "float16", "float32", "float64", "complex64", "complex128"};
-    return kNames.at(static_cast<std::size_t>(type));
-}
-
-template <typename T>
-nlohmann::json Optional(const std::optional<T>& value) {
-    return value ? nlohmann::json(*value) : nlohmann::json();
-}
-
-// What an image means as the library reads it, every field a consumer builds coordinates from.
-nlohmann::json Description(const ImageDescriptor& descriptor, const std::vector<Beam>& beams) {
-    nlohmann::json description{{"stored_type", DataTypeName(descriptor.stored_type)},
-                               {"unit", descriptor.unit},
-                               {"pixel_mask_id", descriptor.pixel_mask_id}};
-    if (const auto& direction = descriptor.direction) {
-        description["direction"] = {{"projection", direction->projection},
-                                    {"reference_frame", direction->reference_frame},
-                                    {"equinox", Optional(direction->equinox)},
-                                    {"reference_pixel", direction->reference_pixel},
-                                    {"reference_value", direction->reference_value},
-                                    {"increment", direction->increment},
-                                    {"transformation_matrix", direction->transformation_matrix},
-                                    {"projection_parameters", direction->projection_parameters},
-                                    {"native_pole_direction", direction->native_pole_direction}};
-    }
-    if (const auto& spectral = descriptor.spectral) {
-        description["spectral"] = {{"unit", spectral->unit},
-                                   {"system", spectral->system},
-                                   {"reference_pixel", Optional(spectral->reference_pixel)},
-                                   {"reference_value", Optional(spectral->reference_value)},
-                                   {"increment", Optional(spectral->increment)},
-                                   {"rest_frequency", Optional(spectral->rest_frequency)},
-                                   {"channel_frequencies", spectral->channel_frequencies}};
-    }
-    if (const auto& polarization = descriptor.polarization) {
-        description["polarization"] = polarization->labels;
-    }
-    if (const auto& temporal = descriptor.temporal) {
-        description["temporal"] = {{"values", temporal->values},
-                                   {"unit", temporal->unit},
-                                   {"scale", temporal->scale},
-                                   {"format", temporal->format}};
-    }
-    if (const auto& observation = descriptor.observation) {
-        description["observation"] = {{"telescope_name", observation->telescope_name},
-                                      {"observatory_position", Optional(observation->observatory_position)},
-                                      {"timesys", observation->timesys},
-                                      {"date_obs", observation->date_obs},
-                                      {"mjd_obs", Optional(observation->mjd_obs)}};
-    }
-    auto planes = nlohmann::json::array();
-    for (const auto& beam : beams) {
-        planes.push_back({{"time", beam.time},
-                          {"channel", beam.channel},
-                          {"polarization", beam.polarization},
-                          {"major", beam.major},
-                          {"minor", beam.minor},
-                          {"position_angle", beam.position_angle},
-                          {"unit", beam.unit}});
-    }
-    description["beams"] = planes;
-    return description;
-}
-
 // One line of JSON, written whether or not the dataset opens, so that a caller always has something
 // to parse; the exit status says whether it did.
 int Probe(const ProbeOptions& options) {
@@ -206,14 +139,6 @@ int Probe(const ProbeOptions& options) {
                        {"compressor", geometry.compressor},
                        {"has_pixel_mask", descriptor.has_pixel_mask},
                        {"diagnostics", Diagnostics(descriptor.diagnostics)}};
-    if (options.describe) {
-        const auto beams = image->ReadBeams();
-        if (!beams) {
-            return finish("ReadBeams: " + std::string(ErrorCodeName(beams.error().code)) + ": " +
-                          beams.error().message);
-        }
-        report["image"]["description"] = Description(descriptor, beams.value());
-    }
     if (const auto cube = CubeAxes::Of(descriptor); !cube) {
         return finish(cube.error().message);
     }

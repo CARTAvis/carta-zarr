@@ -38,8 +38,8 @@ Or synthesize one, when there is no real cube to hand:
   `--channel-width`, `--rest-frequency`); `--point-sources` and `--extended-sources` add continuum.
   It compresses about 10 % worse than the real cube (1.25 against ASKAP Hydra's 1.39), its noise
   being independent from pixel to pixel, and it is still not a real image. It is
-  deterministic: two layouts of the same options hold the same pixels. `tools/testset/README.md`
-  has the calibration.
+  deterministic: two layouts of the same options hold the same pixels, and `--fits PATH` writes them
+  as a FITS file instead. `tools/testset/README.md` has the calibration.
 - **`--stripe`** sets Lustre (`lfs setstripe`) or BeeGFS (`beegfs-ctl --setpattern`, or
   `beegfs entry set` on BeeGFS 8) striping on the output directory before anything is written,
   since striping applies only to files created after it. BeeGFS normally reserves this for root;

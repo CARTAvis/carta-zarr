@@ -1177,6 +1177,11 @@ def write_fits(args: argparse.Namespace, path: Path) -> int:
     """The synthetic cube as a FITS file: the pixels synthesize() writes, NaN where it writes NaN,
     in the file a converter makes the dataset's layouts from. Written beside `path` and renamed into
     place, so a file at `path` is a finished one."""
+    partial = path.with_name(path.name + ".partial")
+    # The template is read, and a FITS file written over it, or the file beside it written first,
+    # would replace its metadata with pixels.
+    for written in (path, partial):
+        refuse_overlap(written, inputs_read(args))
     if path.exists() and not args.force:
         raise SystemExit(f"{path} exists; --force replaces it")
     shape = synthetic_shape(args)
@@ -1184,7 +1189,6 @@ def write_fits(args: argparse.Namespace, path: Path) -> int:
     header = fits_header(args, shape)
     _, length_f, length_p, length_l, length_m = shape
     data_bytes = math.prod(shape) * 4
-    partial = path.with_name(path.name + ".partial")
     path.parent.mkdir(parents=True, exist_ok=True)
     try:
         with partial.open("wb") as out:
@@ -1536,6 +1540,19 @@ def inputs_read(args: argparse.Namespace) -> list[tuple[str, Path]]:
     return [("--template", Path(args.template).resolve())]
 
 
+def refuse_overlap(path: Path, reads: list[tuple[str, Path]]) -> None:
+    """Refuse an output over any dataset the run reads: --force deletes or overwrites what is at the
+    output, so an output that is a dataset read, an alias of it or a directory around it would take
+    it with it, and one inside it would be written into it."""
+    for flag, read in reads:
+        # What a link in the dataset points at is the dataset too, however far from its own
+        # directory: an output that holds it would delete those bytes or write among them.
+        for held in (read, *(entry.resolve() for entry in reached(read) if entry.is_symlink())):
+            if overlaps(path, held):
+                where = "" if held == read else f" through a link to {held}"
+                raise SystemExit(f"{path} overlaps {flag} {read}{where}; write the output somewhere else")
+
+
 @dataclasses.dataclass(frozen=True)
 class Output:
     """The dataset a run writes, claimed before anything at its path is deleted or made.
@@ -1559,13 +1576,7 @@ class Output:
 
         `force` replaces even this dataset: it is how to write one again when what the identity can
         see of its origin is not all there is to it."""
-        for flag, read in reads:
-            # What a link in the dataset points at is the dataset too, however far from its own
-            # directory: an output that holds it would delete those bytes or write among them.
-            for held in (read, *(entry.resolve() for entry in reached(read) if entry.is_symlink())):
-                if overlaps(path, held):
-                    where = "" if held == read else f" through a link to {held}"
-                    raise SystemExit(f"{path} overlaps {flag} {read}{where}; write the dataset somewhere else")
+        refuse_overlap(path, reads)
         if path.exists():
             manifest = read_manifest(path)
             if not force and manifest and manifest.get("identity_hash") == digest and manifest.get("complete"):

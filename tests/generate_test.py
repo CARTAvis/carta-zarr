@@ -506,6 +506,25 @@ class FitsTest(unittest.TestCase):
         with self.assertRaises(SystemExit):
             generate.parse_arguments(["--source", "cube.zarr", "--fits", "cube.fits"])
 
+    def test_a_fits_file_over_the_template_is_refused_even_when_forced(self) -> None:
+        import shutil
+
+        with tempfile.TemporaryDirectory() as directory:
+            template = Path(directory) / "template.zarr"
+            shutil.copytree(generate.DEFAULT_TEMPLATE, template)
+            before = (template / "zarr.json").read_bytes()
+            linked = Path(directory) / "linked"
+            linked.mkdir()
+            (template / "elsewhere").symlink_to(linked)
+            for fits in (template / "zarr.json", template / "cube.fits", Path(directory), linked / "cube.fits"):
+                with self.assertRaises(SystemExit, msg=str(fits)):
+                    generate.main(["--synthetic", "--shape", self.SHAPE, "--template", str(template), "--workers", "1",
+                                   "--force", "--fits", str(fits)])
+            self.assertEqual((template / "zarr.json").read_bytes(), before)
+            self.assertEqual(sorted(path.name for path in template.iterdir()),
+                             sorted([path.name for path in Path(generate.DEFAULT_TEMPLATE).iterdir()] + ["elsewhere"]))
+            self.assertEqual(list(linked.iterdir()), [])
+
     def test_a_fits_file_there_is_replaced_only_when_forced(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             fits = Path(directory) / "cube.fits"

@@ -341,5 +341,217 @@ class SyntheticCoordinatesTest(unittest.TestCase):
                 self.assertEqual(written.shape, (1024, 1024))
                 np.testing.assert_allclose(written, values, rtol=0, atol=1e-15, err_msg=name)
 
+
+class SyntheticPixelsTest(unittest.TestCase):
+    """What a synthetic cube holds: a pixel that depends on where it is and not on the block that wrote
+    it, and the parts of an ASKAP HI cube the test set is calibrated against -- a footprint, flagged
+    channels, line sources confined to their band, and ASKAP's frequency axis."""
+
+    def cube(self, shape: tuple[int, int, int, int, int], **given: Any) -> "generate.Synthetic":
+        import numpy as np
+
+        options = {"seed": 7, "noise": 2.0e-3, "line_sources": 20, "point_sources": 3, "extended_sources": 1,
+                   "footprint_fill": 0.76, "flagged_channels": 0.05, "flag": False}
+        options.update(given)
+        frequencies = generate.ASKAP_FREQUENCY_START + generate.ASKAP_CHANNEL_WIDTH * np.arange(shape[1])
+        return generate.Synthetic(shape=shape, frequencies=tuple(frequencies), **options)
+
+    def test_a_pixel_is_the_same_whichever_block_holds_it(self) -> None:
+        import numpy as np
+
+        # A block may begin on any pixel, including the last one a source reaches, and on any channel.
+        cube = self.cube((1, 40, 1, 150, 130), footprint_fill=None, flagged_channels=0.0)
+        whole = cube.pixels((0, 0, 0, 0, 0), (1, 40, 1, 150, 130))
+        for l0 in range(150):
+            part = cube.pixels((0, 0, 0, l0, 0), (1, 40, 1, 150, 130))
+            self.assertTrue(np.array_equal(whole[..., l0:, :].view(np.uint32), part.view(np.uint32)), f"from l = {l0}")
+        for m0 in range(0, 130, 3):
+            part = cube.pixels((0, 0, 0, 0, m0), (1, 40, 1, 150, 130))
+            self.assertTrue(np.array_equal(whole[..., m0:].view(np.uint32), part.view(np.uint32)), f"from m = {m0}")
+        for f0, f1 in ((13, 29), (39, 40)):
+            part = cube.pixels((0, f0, 0, 0, 0), (1, f1, 1, 150, 130))
+            self.assertTrue(np.array_equal(whole[:, f0:f1].view(np.uint32), part.view(np.uint32)), f"channels {f0}:{f1}")
+        # Without noise the background is signed zeros, and a -0 must stay -0 in every block, the ones a
+        # source adds to and the ones it does not. A line's peak is a multiple of the noise, so the
+        # source is taken from the same cube with noise; the table is drawn from the seed alone.
+        shape = (1, 300, 1, 40, 40)
+        options = dict(line_sources=1, point_sources=0, extended_sources=0, footprint_fill=None, flagged_channels=0.0)
+        quiet = self.cube(shape, noise=0.0, **options)
+        quiet.__dict__["lines"] = self.cube(shape, noise=1.0, **options).lines
+        whole = quiet.pixels((0, 0, 0, 0, 0), shape)
+        self.assertTrue(np.any(whole > 0), "the source added nothing, so this tests nothing")
+        self.assertTrue(np.any(np.signbit(whole) & (whole == 0)), "no -0 in the background to keep")
+        for f0 in range(0, 300, 7):
+            part = quiet.pixels((0, f0, 0, 0, 0), (1, f0 + 1, 1, 40, 40))
+            self.assertTrue(np.array_equal(whole[:, f0 : f0 + 1].view(np.uint32), part.view(np.uint32)), f"channel {f0}")
+        masked = self.cube((1, 40, 1, 150, 130))
+        whole = masked.pixels((0, 0, 0, 0, 0), (1, 40, 1, 150, 130))
+        part = masked.pixels((0, 13, 0, 37, 61), (1, 29, 1, 100, 130))
+        self.assertTrue(np.array_equal(whole[:, 13:29, :, 37:100, 61:130].view(np.uint32), part.view(np.uint32)))
+
+    def test_the_footprint_holds_the_fraction_asked_for_and_leaves_the_corners_out(self) -> None:
+        import numpy as np
+
+        cube = self.cube((1, 4, 1, 600, 400), flagged_channels=0.0)
+        nan = np.isnan(cube.pixels((0, 0, 0, 0, 0), (1, 4, 1, 600, 400)))
+        self.assertAlmostEqual(nan.mean(), 0.24, delta=0.02)
+        self.assertTrue(nan[..., 0, 0].all() and nan[..., -1, -1].all())
+        self.assertFalse(nan[..., 300, 200].any())
+
+    def test_flagged_channels_are_runs_flagged_whole_or_in_part(self) -> None:
+        import numpy as np
+
+        cube = self.cube((1, 2000, 1, 64, 64), footprint_fill=None, flagged_channels=0.1)
+        self.assertIsNone(cube.within(range(64), range(64)))
+        nan = np.isnan(cube.pixels((0, 0, 0, 0, 0), (1, 2000, 1, 64, 64))).reshape(2000, -1).mean(axis=1)
+        self.assertAlmostEqual((nan > 0).mean(), 0.1, delta=0.03)
+        self.assertTrue((nan == 1).any(), "no channel is flagged whole")
+        self.assertTrue(((nan > 0) & (nan < 1)).any(), "no channel is flagged in part")
+
+    def test_a_flagged_range_is_flagged_whole_on_top_of_the_runs(self) -> None:
+        import numpy as np
+
+        runs = self.cube((1, 256, 1, 32, 32), footprint_fill=None, flagged_channels=0.1)
+        ranged = self.cube((1, 256, 1, 32, 32), footprint_fill=None, flagged_channels=0.1, flagged_range=(128, 192))
+        expected = runs.flagged["whole"].copy()
+        expected[128:192] = True
+        self.assertTrue(np.array_equal(ranged.flagged["whole"], expected))
+        self.assertTrue(np.isnan(ranged.pixels((0, 128, 0, 0, 0), (1, 192, 1, 32, 32))).all())
+
+    def test_a_flag_marks_what_nan_would_have(self) -> None:
+        import numpy as np
+
+        start, stop = (0, 0, 0, 0, 0), (1, 300, 1, 90, 70)
+        plain = self.cube((1, 300, 1, 90, 70)).pixels(start, stop)
+        flagged = self.cube((1, 300, 1, 90, 70), flag=True)
+        self.assertTrue(np.array_equal(flagged.flags(start, stop), np.isnan(plain)))
+        self.assertTrue(np.isfinite(flagged.pixels(start, stop)).all())
+
+    def test_a_line_source_is_confined_to_its_band(self) -> None:
+        import numpy as np
+
+        cube = self.cube((1, 3000, 1, 64, 64))
+        for index in range(cube.line_sources):
+            spectrum = cube.line_spectrum(index, 0, 3000)
+            if spectrum is None:
+                continue
+            inside = np.flatnonzero(spectrum)
+            centre, width = cube.lines["centre"][index], cube.lines["width"][index]
+            # A Gaussian reaches five sigma either side, 4.25 widths in all; a double horn its width
+            # and soft edges. Either way a few hundred km/s, not the band.
+            self.assertLessEqual(inside.max() - inside.min() + 1, 4.25 * width + 3)
+            if 0 < inside.min() and inside.max() < 2999:
+                self.assertLessEqual(abs((inside.max() + inside.min()) / 2 - centre), 1.0)
+
+    def test_the_frequency_axis_is_askaps_unless_told(self) -> None:
+        import numpy as np
+        import zarr
+
+        with tempfile.TemporaryDirectory() as directory:
+            out = Path(directory) / "synthetic.zarr"
+            args = generate.parse_arguments(
+                ["--synthetic", "--shape", "frequency=5,polarization=1,l=32,m=32", "--output", str(out),
+                 "--chunk", "l=32,m=32", "--workers", "1"])
+            generate.synthesize(args, out)
+            frequency = np.asarray(zarr.open_array(str(out / "frequency"), mode="r")[...])
+            np.testing.assert_allclose(frequency, 1.2955e9 + 18518.518518518518 * np.arange(5))
+            attributes = json.loads((out / "frequency" / "zarr.json").read_text())["attributes"]
+            self.assertEqual(attributes["rest_frequency"]["data"], generate.HI_REST_FREQUENCY)
+            self.assertEqual(attributes["reference_frequency"]["data"], 1.2955e9)
+            velocity = np.asarray(zarr.open_array(str(out / "velocity"), mode="r")[...])
+            np.testing.assert_allclose(velocity, generate.SPEED_OF_LIGHT * (1 - frequency / generate.HI_REST_FREQUENCY))
+
+
+
+class FitsTest(unittest.TestCase):
+    """--fits writes the cube synthesize() would, as FITS: the test set's converter makes its layouts
+    from that file, so its pixels must be the dataset's bit for bit, in FITS order, after a header a
+    FITS reader takes."""
+
+    SHAPE = "frequency=12,polarization=1,l=37,m=23"
+
+    def test_the_pixels_are_the_datasets_in_fits_order(self) -> None:
+        import numpy as np
+        import zarr
+
+        with tempfile.TemporaryDirectory() as directory:
+            fits, out = Path(directory) / "cube.fits", Path(directory) / "cube.zarr"
+            common = ["--synthetic", "--shape", self.SHAPE, "--flagged-channels", "0.2", "--workers", "2", "--block-mib", "0"]
+            self.assertEqual(generate.main(common + ["--fits", str(fits)]), 0)
+            self.assertFalse(fits.with_name("cube.fits.partial").exists())
+            args = generate.parse_arguments(common + ["--chunk", "l=16,m=16,frequency=4", "--output", str(out)])
+            generate.synthesize(args, out)
+            raw = fits.read_bytes()
+            self.assertEqual(len(raw) % generate.FITS_BLOCK, 0)
+            cards = [raw[i : i + 80].decode("latin-1") for i in range(0, len(raw), 80)]
+            end = next(i for i, card in enumerate(cards) if card.rstrip() == "END")
+            header = {card[:8].strip(): card[10:].strip().strip("'").strip() for card in cards[:end]}
+            self.assertEqual([header[k] for k in ("SIMPLE", "BITPIX", "NAXIS", "NAXIS1", "NAXIS2", "NAXIS3", "NAXIS4")],
+                             ["T", "-32", "4", "37", "23", "1", "12"])
+            self.assertEqual((header["CTYPE1"], header["CTYPE2"], header["CTYPE3"], header["CTYPE4"]),
+                             ("RA---SIN", "DEC--SIN", "STOKES", "FREQ"))
+            self.assertEqual(float(header["CRVAL4"]), generate.ASKAP_FREQUENCY_START)
+            self.assertFalse({"TELESCOP", "OBSGEO-X", "DATE-OBS"} & header.keys())
+            offset = -(-(end + 1) * 80 // generate.FITS_BLOCK) * generate.FITS_BLOCK
+            data = np.frombuffer(raw, dtype=">f4", count=12 * 23 * 37, offset=offset).reshape(12, 1, 23, 37)
+            sky = np.asarray(zarr.open_array(str(out / "SKY"), mode="r")[...])[0].transpose(0, 1, 3, 2)
+            self.assertTrue(np.isnan(sky).any(), "nothing is NaN, so the order of NaN is not tested")
+            self.assertTrue(np.array_equal(data.astype(np.float32).view(np.uint32), sky.astype(np.float32).view(np.uint32)))
+            self.assertFalse(raw[offset + data.nbytes :].strip(b"\0"), "the padding is not zeros")
+
+    def test_a_fits_file_is_written_only_of_a_synthetic_cube_without_a_flag_or_layout(self) -> None:
+        for extra in (["--flag"], ["--chunk", "l=16"], ["--codec", "none"]):
+            with self.assertRaises(SystemExit, msg=extra):
+                generate.parse_arguments(["--synthetic", "--shape", self.SHAPE, "--fits", "cube.fits", *extra])
+        with self.assertRaises(SystemExit):
+            generate.parse_arguments(["--source", "cube.zarr", "--fits", "cube.fits"])
+
+    def test_a_fits_file_over_the_template_is_refused_even_when_forced(self) -> None:
+        import shutil
+
+        with tempfile.TemporaryDirectory() as directory:
+            template = Path(directory) / "template.zarr"
+            shutil.copytree(generate.DEFAULT_TEMPLATE, template)
+            before = (template / "zarr.json").read_bytes()
+            linked = Path(directory) / "linked"
+            linked.mkdir()
+            (template / "elsewhere").symlink_to(linked)
+            for fits in (template / "zarr.json", template / "cube.fits", Path(directory), linked / "cube.fits"):
+                with self.assertRaises(SystemExit, msg=str(fits)):
+                    generate.main(["--synthetic", "--shape", self.SHAPE, "--template", str(template), "--workers", "1",
+                                   "--force", "--fits", str(fits)])
+            self.assertEqual((template / "zarr.json").read_bytes(), before)
+            self.assertEqual(sorted(path.name for path in template.iterdir()),
+                             sorted([path.name for path in Path(generate.DEFAULT_TEMPLATE).iterdir()] + ["elsewhere"]))
+            self.assertEqual(list(linked.iterdir()), [])
+
+    def test_a_partial_file_left_as_a_link_is_not_written_through(self) -> None:
+        import shutil
+
+        with tempfile.TemporaryDirectory() as directory:
+            template = Path(directory) / "template.zarr"
+            shutil.copytree(generate.DEFAULT_TEMPLATE, template)
+            before = (template / "zarr.json").read_bytes()
+            fits = Path(directory) / "cube.fits"
+            fits.with_name("cube.fits.partial").symlink_to(template / "zarr.json")
+            self.assertEqual(generate.main(["--synthetic", "--shape", self.SHAPE, "--template", str(template),
+                                            "--workers", "1", "--force", "--fits", str(fits)]), 0)
+            self.assertEqual((template / "zarr.json").read_bytes(), before)
+            self.assertFalse(fits.is_symlink())
+            self.assertTrue(fits.read_bytes().startswith(b"SIMPLE  ="))
+            self.assertFalse(fits.with_name("cube.fits.partial").exists() or fits.with_name("cube.fits.partial").is_symlink())
+
+    def test_a_fits_file_there_is_replaced_only_when_forced(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            fits = Path(directory) / "cube.fits"
+            fits.write_text("not this cube")
+            common = ["--synthetic", "--shape", self.SHAPE, "--workers", "1", "--fits", str(fits)]
+            with self.assertRaises(SystemExit):
+                generate.main(common)
+            self.assertEqual(fits.read_text(), "not this cube")
+            self.assertEqual(generate.main(common + ["--force"]), 0)
+            self.assertTrue(fits.read_bytes().startswith(b"SIMPLE  ="))
+
+
 if __name__ == "__main__":
     unittest.main()

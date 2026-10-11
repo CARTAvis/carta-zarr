@@ -13,7 +13,7 @@ minor release may change the ABI, and the soname says so ([ADR 0020](docs/adr/00
 * `tools/zarr-bench/generate.py --synthetic --fits PATH` writes the synthetic cube as a FITS file, NaN where it is not data ([#2](https://github.com/CARTAvis/carta-zarr/issues/2)).
 
 ### Changed
-* `tools/zarr-bench/generate.py --synthetic` makes a continuum-subtracted HI cube calibrated against ASKAP's, on ASKAP's frequency axis, instead of continuum point sources inside a circle. `--sources` and `--nan-radius` are replaced by `--line-sources`, `--point-sources`, `--extended-sources`, `--footprint-fill` and `--flagged-channels`; synthetic datasets written before are not reused ([#2](https://github.com/CARTAvis/carta-zarr/issues/2)).
+* `tools/zarr-bench/generate.py --synthetic` makes a continuum-subtracted HI cube calibrated against ASKAP's, on ASKAP's frequency axis, instead of continuum point sources inside a circle. `--sources` and `--nan-radius` are replaced by `--line-sources`, `--point-sources`, `--extended-sources`, `--footprint-fill` and `--flagged-channels`, and `--flagged-range` flags a run of channels whole; `--frequency-start`, `--channel-width` and `--rest-frequency` set the frequency axis; synthetic datasets written before are not reused ([#2](https://github.com/CARTAvis/carta-zarr/issues/2)).
 
 ## [0.1.0]
 

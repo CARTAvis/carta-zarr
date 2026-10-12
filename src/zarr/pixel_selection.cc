@@ -13,6 +13,7 @@
 
 #include "zarr/pixel_selection.h"
 
+#include <algorithm>
 #include <chrono>
 #include <limits>
 #include <string>
@@ -86,14 +87,56 @@ Result<PixelSelection> BuildSelection(const ImageDescriptor& descriptor, const R
         elements *= count;
     }
     selection._elements = elements;
+    selection._destination_extent = elements;
+    return selection;
+}
+
+Result<PixelSelection> BuildSelectionWithin(const ImageDescriptor& descriptor, const ReadRequest& part,
+                                            const ReadRequest& whole) {
+    auto selection = BuildSelection(descriptor, part, DestinationOrder::logical);
+    if (!selection) {
+        return selection;
+    }
+    if (whole.axes.size() != part.axes.size()) {
+        return Error{ErrorCode::invalid_argument, "A part has a different number of axes from the read it is part of",
+                     descriptor.id};
+    }
+    auto& built = selection.value();
+    const auto rank = part.axes.size();
+    built._destination_strides.assign(rank, 1);
+    std::uint64_t running = 1;
+    std::uint64_t offset = 0;
+    std::uint64_t last = 0;
+    for (std::size_t axis = 0; axis < rank; ++axis) {
+        const auto& outer = whole.axes.at(axis);
+        const auto& inner = part.axes.at(axis);
+        const auto outer_stride = std::max<std::uint64_t>(1, outer.stride);
+        // Every element of the part an element of the whole: it starts on one, steps as the whole does
+        // or over a single element, and ends inside it.
+        const bool on_whole = inner.start >= outer.start && (inner.start - outer.start) % outer_stride == 0;
+        const auto first = on_whole ? (inner.start - outer.start) / outer_stride : 0;
+        if (!on_whole || (inner.count > 1 && inner.stride != outer.stride) || first >= outer.count ||
+            inner.count > outer.count - first) {
+            return Error{ErrorCode::invalid_argument,
+                         "Axis '" + descriptor.axes.at(axis).name + "' of a part is not within the read it is part of",
+                         descriptor.id};
+        }
+        built._destination_strides.at(axis) = running;
+        offset += first * running;
+        last += (inner.count - 1) * running;
+        running *= outer.count;
+    }
+    built._destination_offset = offset;
+    built._destination_extent = offset + last + 1;
     return selection;
 }
 
 std::vector<std::uint64_t> PixelSelection::DestinationStrides() const {
     std::vector<std::uint64_t> strides(_count.size(), 1);
     std::uint64_t running = 1;
-    for (const auto stored : _destination_to_stored) {
-        strides.at(stored) = running;
+    for (std::size_t axis = 0; axis < _destination_to_stored.size(); ++axis) {
+        const auto stored = _destination_to_stored.at(axis);
+        strides.at(stored) = _destination_strides.empty() ? running : _destination_strides.at(axis);
         running *= _count.at(stored);
     }
     return strides;

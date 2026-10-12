@@ -1,5 +1,11 @@
 # carta-zarr
 
+> [!WARNING]
+> carta-zarr is still under heavy development, and its API may change often and without notice.
+> Before 1.0 any minor release may break source and binary compatibility
+> ([ADR 0020](docs/adr/0020-before-1-0-the-minor-version-is-the-abi.md)), so build against an exact
+> version and expect to change your code when you move to another.
+
 A read-only C++17 library for XRADIO images stored as Zarr v3. It is written as the Zarr reader of
 [carta-backend](https://github.com/CARTAvis/carta-backend), CARTA's image server, and kept apart
 from it so that CARTA and other C++ consumers can read these datasets without depending on

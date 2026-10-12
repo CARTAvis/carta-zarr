@@ -19,6 +19,7 @@
 #include <cstdio>
 #include <exception>
 #include <string>
+#include <tuple>
 #include <vector>
 
 namespace {
@@ -28,6 +29,7 @@ using carta::zarr::ImageDescriptor;
 using carta::zarr::Range;
 using carta::zarr::ReadRequest;
 using carta::zarr::internal::zarr::BuildSelection;
+using carta::zarr::internal::zarr::BuildSelectionWithin;
 using carta::zarr::internal::zarr::DestinationOrder;
 using carta::zarr::internal::zarr::PixelSelection;
 
@@ -118,6 +120,53 @@ void TestTheOrderDoesNotChangeWhatIsRead() {
             "the request was not translated into the array's stored order");
 }
 
+// A part of a larger read lands where it is in that read's dense logical-order destination: each step
+// moves as far as it does there, the first element is where the part begins, and the destination has
+// to reach as far as the part's last element. A dense selection starts at zero and reaches its count.
+void TestAPartLandsWhereItIsInTheWhole() {
+    const auto dense = Built(DestinationOrder::logical);
+    Require(dense.destination_offset() == 0 && dense.destination_extent() == dense.elements(),
+            "a dense selection did not start at zero and reach its own count");
+
+    ReadRequest part = Whole();
+    part.axes.at(0) = Range{1, 2, 1};
+    part.axes.at(1) = Range{2, 3, 1};
+    part.axes.at(2) = Range{1, 1, 1};
+    const auto within = BuildSelectionWithin(MakeImage(), part, Whole());
+    Require(static_cast<bool>(within), "a part of the whole read was refused");
+    // The whole's strides, l 1, m 4, frequency 20, polarization 60, time 120, by stored dimension.
+    Require(within.value().DestinationStrides() == std::vector<std::uint64_t>{120, 20, 60, 1, 4},
+            "a part did not step as the whole read's destination does");
+    Require(within.value().destination_offset() == (1 * 1) + (2 * 4) + (1 * 20),
+            "a part did not start where it is in the whole");
+    Require(within.value().destination_extent() == 29 + (1 * 1) + (2 * 4) + (1 * 60) + 1,
+            "a part did not reach as far as its last element");
+    Require(within.value().elements() == 2 * 3 * 2, "a part did not count only its own elements");
+
+    // A strided whole: the part's elements must be the whole's.
+    ReadRequest strided = Whole();
+    strided.axes.at(0) = Range{0, 2, 2};
+    ReadRequest on = strided;
+    on.axes.at(0) = Range{2, 1, 1};
+    Require(static_cast<bool>(BuildSelectionWithin(MakeImage(), on, strided)),
+            "an element of a strided whole was refused");
+    ReadRequest between = strided;
+    between.axes.at(0) = Range{1, 1, 1};
+    ReadRequest finer = strided;
+    finer.axes.at(0) = Range{0, 2, 1};
+    ReadRequest beyond = Whole();
+    beyond.axes.at(1) = Range{3, 2, 1};
+    ReadRequest short_whole = Whole();
+    short_whole.axes.at(1) = Range{0, 4, 1};
+    for (const auto& [outside, of, what] : {std::tuple{between, strided, "between two of the whole's elements"},
+                                            std::tuple{finer, strided, "stepping finer than the whole"},
+                                            std::tuple{beyond, short_whole, "past the end of the whole"}}) {
+        const auto refused = BuildSelectionWithin(MakeImage(), outside, of);
+        Require(!refused && refused.error().code == carta::zarr::ErrorCode::invalid_argument,
+                std::string("a part ") + what + " was not refused");
+    }
+}
+
 // Counted once, when the selection is built, and never zero: a selection that would produce nothing
 // is refused rather than made.
 void TestASelectionKnowsHowManyElementsItProduces() {
@@ -183,6 +232,7 @@ int main() {
         TestALogicalDestinationFollowsTheImage();
         TestAStoredDestinationFollowsTheArray();
         TestTheOrderDoesNotChangeWhatIsRead();
+        TestAPartLandsWhereItIsInTheWhole();
         TestASelectionKnowsHowManyElementsItProduces();
         TestAMalformedRequestNeverBecomesASelection();
     } catch (const std::exception& error) {

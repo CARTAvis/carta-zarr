@@ -15,6 +15,7 @@
 #include <tensorstore/index.h>
 #include <tensorstore/index_space/dim_expression.h>
 #include <tensorstore/internal/unowned_to_shared.h>
+#include <tensorstore/strided_layout.h>
 #include <tensorstore/tensorstore.h>
 #include <tensorstore/util/result.h>
 
@@ -40,8 +41,7 @@ Result<void> ReadInto(const std::filesystem::path& array_path, const StoreContex
     // destination is not the selection's: it is whatever the caller handed across the seam, and the
     // read writes through it as far as the selection reaches. Holding the one to the other is what
     // stands between a caller's mistake and a write past the end of its buffer.
-    const auto elements = selection.elements();
-    if (elements > destination.size) {
+    if (selection.destination_extent() > destination.size) {
         return Error{ErrorCode::invalid_argument, "Destination buffer is too small", std::string(node)};
     }
 
@@ -110,16 +110,21 @@ Result<void> ReadInto(const std::filesystem::path& array_path, const StoreContex
                          std::string(node)};
         }
 
+        // Axis 0 is the fastest-varying destination dimension: over a densely packed buffer the strides
+        // are Fortran order's, and within a larger read they are that read's, from where this part of
+        // it begins. TensorStore requires a shared array here; the caller owns this buffer and the read
+        // below is awaited before returning, so a non-owning shared pointer is what the ownership
+        // actually is rather than a way around the check.
+        const auto strides = selection.DestinationStrides();
         std::vector<tensorstore::Index> shape(rank);
+        std::vector<tensorstore::Index> byte_strides(rank);
         for (std::size_t i = 0; i < rank; ++i) {
             shape.at(i) = count.at(order.at(i));
+            byte_strides.at(i) = static_cast<tensorstore::Index>(strides.at(order.at(i)) * sizeof(Element));
         }
-        // Axis 0 is the fastest-varying destination dimension, so a logical-order shape over a
-        // densely packed buffer is Fortran-ordered. TensorStore requires a shared array here; the
-        // caller owns this buffer and the read below is awaited before returning, so a non-owning
-        // shared pointer is what the ownership actually is rather than a way around the check.
-        auto target = tensorstore::Array(tensorstore::internal::UnownedToShared(destination.data), shape,
-                                         tensorstore::fortran_order);
+        tensorstore::SharedArray<Element> target(
+            tensorstore::internal::UnownedToShared(destination.data + selection.destination_offset()),
+            tensorstore::StridedLayout<>(shape, byte_strides));
 
         auto const read_result = tensorstore::Read(std::move(converted).value(), target).result();
         if (!read_result.ok()) {

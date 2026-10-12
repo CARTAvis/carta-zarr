@@ -471,7 +471,7 @@ if(CARTA_ZARR_BUILD_TESTS AND BUILD_TESTING)
     # walk over a fixture and a two-pass tolerance, and the first had already drifted from its doc.
     carta_zarr_add_test(carta_zarr_provisional_histograms_tests INTERNAL
         TEST_NAME carta-zarr-provisional-histograms
-        SOURCES tests/provisional_histograms_test.cc src/work_pool.cc
+        SOURCES tests/provisional_histograms_test.cc src/work_pool.cc src/zarr/pixel_selection.cc
         LIBRARIES Threads::Threads)
 
     # What a pass decides before it reads anything. Compiled against pass.cc alone: PlanPass touches

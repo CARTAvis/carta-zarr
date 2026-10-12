@@ -19,15 +19,14 @@
 
 namespace carta::zarr::internal {
 
-// The most chunks a piece of a watched read decodes, unless one chunk along the cut is more. A
-// watched read reports each piece as it lands, so a piece is how long its watcher waits: the cursor
-// spectrum carta-backend draws as it fills. A budget aimed at the decode threads grows with them,
-// and cut to that alone a spectrum of the 512 x 512 x 30000 test cube came in nine pieces on 28
-// threads instead of thirty, each 160 ms apart on a cold local NVMe disk rather than 55 -- a wait
-// that grows with what each chunk costs to fetch, not to decode, since carta-backend's I/O threads
-// stay two. Sixteen is about what the fixed budget before it afforded: cut to it, the spectrum
-// reported thirty times again, 55 ms apart, and took as long as it did then -- a tenth longer than
-// in nine pieces.
+// The most chunks a piece of a read with a progress callback decodes, unless one chunk along the cut is
+// more. Such a read reports each piece as it lands, so a piece is how long its caller waits: the cursor
+// spectrum carta-backend draws as it fills. A budget aimed at the decode threads grows with them, and
+// cut to that alone a spectrum of the 512 x 512 x 30000 test cube came in nine pieces on 28 threads
+// instead of thirty, each 160 ms apart on a cold local NVMe disk rather than 55 -- a wait that grows
+// with what each chunk costs to fetch, not to decode, since carta-backend's I/O threads stay two.
+// Sixteen is about what the fixed budget before it afforded: cut to it, the spectrum reported thirty
+// times again, 55 ms apart, and took as long as it did then -- a tenth longer than in nine pieces.
 inline constexpr std::uint64_t kWatchedPieceChunks = 16;
 
 /**
@@ -40,9 +39,9 @@ inline constexpr std::uint64_t kWatchedPieceChunks = 16;
  *
  * A piece is read straight into the destination unless even the least of them -- one chunk along the
  * cut, and the whole of every other axis -- holds more than a read affords. Then `segments` are the
- * parts it is read in, cut along the other axes, each gathered in a buffer of the library's and put in
- * place. A segment is not a run of the destination, which is why it is not a piece: progress is
- * reported when the whole piece is in, and the prefix holds.
+ * parts it is read in, cut along the other axes, each read straight into its place in the piece's run
+ * of the destination. A segment is not a run of the destination, which is why it is not a piece:
+ * progress is reported when the whole piece is in, and the prefix holds.
  */
 struct Piece {
     ReadRequest request;
@@ -56,14 +55,14 @@ struct Piece {
  * Pure: it reaches no further than the descriptor, the geometry and what the caller asked for, so
  * the strategy is checkable without a store, a transport or a directory tree.
  *
- * Every read is cut to fit its budget -- the caller's, or the library's own when it states none --
- * so that what a read holds is bounded whether or not anybody watches it. What it holds is the
- * chunks TensorStore decodes at once, which is no more than `decode_threads` of them: a read nobody
- * watches (`reports_progress` false) whose budget affords that many is not cut at all, while one
- * that is watched is cut to the chunks the budget affords and to no more than kWatchedPieceChunks,
- * so that it has pieces to report and they come often. A read that fits, or that has no axis
- * selecting more than one element, is one piece covering everything, so that the loop reading it is
- * the same loop either way.
+ * Every read is cut to fit its budget -- the caller's, or the library's own when it states none -- so
+ * that what a read holds is bounded whether or not it has a progress callback. One that has one
+ * (`reports_progress` true) is cut to no more than kWatchedPieceChunks as well, so that it has pieces
+ * to report and they come often. The one exception is a single plane with no progress callback, whose
+ * budget affords a chunk for each of `decode_threads`: it is read whole, which is faster than in
+ * segments one after another, and what it holds beyond the budget is bounded by the plane. A read
+ * that fits, or that has no axis selecting more than one element, is one piece covering everything,
+ * so that the loop reading it is the same loop either way.
  *
  * Where to cut, how much one piece may cover, where its end is rounded out to a chunk boundary, and
  * the segments of a piece too large to read whole all happen here. Whether the flag is decoded beside

@@ -87,8 +87,8 @@ std::uint64_t ElementCount(const ReadRequest& request) {
     return elements;
 }
 
-// A read somebody watches, which is cut to the chunks its budget affords; most of what is pinned here is
-// how. See TestAnUnwatchedReadIsCutOnlyPastWhatIsInFlight for the read nobody watches.
+// A read with a progress callback, which is cut to the chunks its budget affords; most of what is
+// pinned here is how. See TestAReadWithoutProgressIsCutToItsBudgetButAPlane for a read without one.
 std::vector<Piece> Pieces(const ImageDescriptor& descriptor, const ChunkGeometry& geometry,
                           const ChunkGeometry& flag_geometry, const ReadRequest& request, const ReadOptions& options) {
     return PlanPieces(descriptor, geometry, flag_geometry, request, options, kDecodeThreads, true);
@@ -149,10 +149,10 @@ void TestAReadThatFitsIsOnePiece() {
             "an uncut read should be one piece covering everything");
 }
 
-// A watched read is cut to its budget. Without a stated budget it is the library's own, so it takes a
-// read larger than that to show: 8192 planes of 64 x 64 float32 decode to 128 MiB and hold three times
-// that. Planning allocates nothing, so the size costs nothing here.
-void TestAWatchedReadIsCutToItsBudget() {
+// A read with a progress callback is cut to its budget. Without a stated budget it is the library's
+// own, so it takes a read larger than that to show: 8192 planes of 64 x 64 float32 decode to 128 MiB
+// and hold three times that. Planning allocates nothing, so the size costs nothing here.
+void TestAReadWithProgressIsCutToItsBudget() {
     const auto large = MakeImage(64, 64, 8192);
     const auto large_geometry = MakeGeometry(32, 64, 1);
     const auto large_request = WholeImage(large);
@@ -167,10 +167,11 @@ void TestAWatchedReadIsCutToItsBudget() {
             "a read with a memory ceiling was not cut");
 }
 
-// A watched read is cut to no more than kWatchedPieceChunks a piece however much its budget affords,
-// so that a spectrum reports as often on many decode threads as on few -- but to no less than one
-// chunk along the cut, which a plane of many chunks is, so that it is never gathered in segments.
-void TestAWatchedPieceIsSixteenChunksOrOneAlongTheCut() {
+// A read with a progress callback is cut to no more than kWatchedPieceChunks a piece however much
+// its budget affords, so that a spectrum reports as often on many decode threads as on few -- but
+// to no less than one chunk along the cut, which a plane of many chunks is, so that it is never
+// gathered in segments.
+void TestAPieceWithProgressIsSixteenChunksOrOneAlongTheCut() {
     constexpr std::size_t kManyThreads = 28;
     ReadOptions plenty;
     plenty.read_budget_bytes = std::size_t{2} << 30;
@@ -183,31 +184,32 @@ void TestAWatchedPieceIsSixteenChunksOrOneAlongTheCut() {
     spectrum.axes.at(1) = Range{20, 1, 1};
     const auto pieces = PlanPieces(image, geometry, geometry, spectrum, plenty, kManyThreads, true);
     Require(pieces.size() == 1024 / carta::zarr::internal::kWatchedPieceChunks,
-            "a watched spectrum was not cut into pieces of sixteen chunks");
+            "a spectrum with progress was not cut into pieces of sixteen chunks");
     for (const auto& piece : pieces) {
-        Require(piece.segments.empty(), "a piece of a watched spectrum was read in segments");
+        Require(piece.segments.empty(), "a piece of a spectrum with progress was read in segments");
     }
-    RequireTheyFillTheDestination(pieces, spectrum, "a watched spectrum");
+    RequireTheyFillTheDestination(pieces, spectrum, "a spectrum with progress");
     Require(PlanPieces(image, geometry, geometry, spectrum, plenty, kManyThreads, false).size() == 1,
-            "a spectrum nobody watches, which its budget affords whole, was cut");
+            "a spectrum without progress, which its budget affords whole, was cut");
 
     // A plane of 8 x 8 x 1 chunks is sixty-four of them, more than sixteen: a piece a plane, whole.
     const auto planes = MakeImage(64, 64, 8);
     const auto fine = MakeGeometry(8, 8, 1);
     const auto plane_pieces = PlanPieces(planes, fine, fine, WholeImage(planes), plenty, kManyThreads, true);
-    Require(plane_pieces.size() == 8, "a watched read of planes of many chunks was not cut a plane a piece");
+    Require(plane_pieces.size() == 8, "a read with progress of planes of many chunks was not cut a plane a piece");
     for (const auto& piece : plane_pieces) {
-        Require(piece.segments.empty(), "a plane of a watched read was gathered in segments");
+        Require(piece.segments.empty(), "a plane of a read with progress was read in segments");
     }
 }
 
-// A read nobody watches whose budget affords a chunk a decode thread is cut into layers of its
-// chunks, a chunk deep along the spectral axis and the whole plane, or into what its budget affords
-// when that is more -- never into segments of a layer, and never whole past its budget.
-void TestAnUnwatchedReadIsCutIntoLayersOrItsBudget() {
-    const auto unwatched = [](const ImageDescriptor& image, const ChunkGeometry& geometry, const ReadOptions& options,
-                              std::size_t threads) {
-        return PlanPieces(image, geometry, geometry, WholeImage(image), options, threads, false);
+// A read with no progress callback is cut to its budget as one with a callback is, into segments where
+// a piece one chunk deep is still too much -- except a single plane, which is read whole once its
+// budget affords a chunk a decode thread: cut, it reads slower one segment after another, and what it
+// holds beyond its budget is bounded by the plane.
+void TestAReadWithoutProgressIsCutToItsBudgetButAPlane() {
+    const auto without_progress = [](const ImageDescriptor& image, const ChunkGeometry& geometry,
+                                     const ReadRequest& request, const ReadOptions& options, std::size_t threads) {
+        return PlanPieces(image, geometry, geometry, request, options, threads, false);
     };
     const auto no_segments = [](const std::vector<Piece>& pieces) {
         for (const auto& piece : pieces) {
@@ -223,22 +225,33 @@ void TestAnUnwatchedReadIsCutIntoLayersOrItsBudget() {
     const auto geometry = MakeGeometry(16, 16, 1);
     ReadOptions four;
     four.read_budget_bytes = 4 * 3 * 1024;
-    const auto layers = unwatched(image, geometry, four, 4);
-    Require(layers.size() == 8 && no_segments(layers),
-            "an unwatched read whose budget affords a chunk a thread was not cut into its eight layers");
-    RequireTheyFillTheDestination(layers, WholeImage(image), "an unwatched read cut into layers");
-    const auto watched = PlanPieces(image, geometry, geometry, WholeImage(image), four, 4, true);
-    Require(!no_segments(watched), "a watched read was not cut to its budget, into segments of each layer");
-    Require(!no_segments(unwatched(image, geometry, four, 5)),
-            "an unwatched read whose budget affords fewer chunks than threads was not cut to its budget");
+    const auto whole = without_progress(image, geometry, WholeImage(image), four, 4);
+    Require(whole.size() == 8, "a read without progress was not cut a plane a piece, one chunk along the cut");
+    RequireTheyFillTheDestination(whole, WholeImage(image), "a read without progress cut to its budget");
+    for (const auto& piece : whole) {
+        Require(piece.segments.size() == 4, "a plane of a read without progress of many was not read in four segments");
+    }
+
+    auto plane = WholeImage(image);
+    plane.axes.at(2) = Range{3, 1, 1};
+    const auto one = without_progress(image, geometry, plane, four, 4);
+    Require(one.size() == 1 && no_segments(one),
+            "a single plane without progress was cut, though its budget affords a chunk a thread");
+    // Cut along m, a row of four chunks a piece, which the budget affords.
+    Require(without_progress(image, geometry, plane, four, 5).size() == 4,
+            "a single plane whose budget affords fewer chunks than threads was not cut to it");
+    Require(PlanPieces(image, geometry, geometry, plane, four, 4, true).size() == 4,
+            "a single plane with progress was not cut to its budget");
 
     ReadOptions all;
     all.read_budget_bytes = 128 * 3 * 1024;
-    Require(unwatched(image, geometry, all, 4).size() == 1, "an unwatched read its budget affords whole was cut");
+    Require(without_progress(image, geometry, WholeImage(image), all, 4).size() == 1,
+            "a read without progress its budget affords whole was cut");
     ReadOptions half;
     half.read_budget_bytes = 64 * 3 * 1024;
-    const auto halves = unwatched(image, geometry, half, 4);
-    Require(halves.size() == 2 && no_segments(halves), "an unwatched read was not cut to what its budget affords");
+    const auto halves = without_progress(image, geometry, WholeImage(image), half, 4);
+    Require(halves.size() == 2 && no_segments(halves),
+            "a read without progress was not cut to what its budget affords");
 }
 
 // The cut goes on the slowest-varying axis that selects more than one element, because the
@@ -400,8 +413,9 @@ void TestACoarseFlagCostsItsOwnChunks() {
 // A stride of a chunk or more along an axis the read is not cut on steps over whole chunks, and the
 // chunks it steps over are not decoded -- so they are not what a piece's budget is spent on. Every
 // other column of 16-wide chunks is two chunks across the image, not the three its first and last
-// element span, and a budget of 16 chunks buys two channels a piece rather than one. (A watched piece
-// is no more than kWatchedPieceChunks anyway, so the budget stays within it.)
+// element span, and a budget of 16 chunks buys two channels a piece rather than one. (A piece of a
+// read with a progress callback is no more than kWatchedPieceChunks anyway, so the budget stays
+// within it.)
 void TestChunksAStrideStepsOverCostNothing() {
     const auto image = MakeImage(64, 64, 32);
     const auto geometry = MakeGeometry(16, 16, 1);
@@ -439,23 +453,23 @@ void TestAStrideOverWholeChunksAlongTheCutIsAChunkAnElement() {
 // The least a piece can be is one chunk along the cut and the whole of every other axis. A plane of
 // chunks deep along the spectrum -- the 512 x 512 x 64 layout that held gigabytes for one plane -- has
 // rows of chunks that hold more than a read affords, so each row is read in segments along the next
-// axis, one chunk at a time, and put in place. The rows are still the pieces, so the finished part is
-// still a prefix.
+// axis, as many chunks as the budget affords, each straight into its place. The rows are still the pieces, so the
+// finished part is still a prefix.
 void TestAPieceTooLargeIsReadInSegments() {
     const auto image = MakeImage(64, 64, 8);
     const auto geometry = MakeGeometry(16, 16, 8);
     auto request = WholeImage(image);
     request.axes.at(2) = Range{3, 1, 1};
 
-    // Two chunks whose pixels the caller holds: less than a row of four, and one chunk once the library
-    // holds what it gathers as well.
+    // Two chunks whose pixels the caller holds: less than a row of four. A segment is read straight into
+    // its place, so the caller holds its pixels too, and it is two chunks.
     ReadOptions budget;
     budget.read_budget_bytes = BudgetFor(2, 16 * 16 * 8);
     const auto pieces = Pieces(image, geometry, request, budget);
     Require(pieces.size() == 4, "each row of chunks should be a piece, not " + std::to_string(pieces.size()));
     RequireTheyFillTheDestination(pieces, request, "a plane read in segments");
     for (const auto& piece : pieces) {
-        Require(piece.segments.size() == 4, "a row of four chunks affording one at a time is four segments, not " +
+        Require(piece.segments.size() == 2, "a row of four chunks affording two at a time is two segments, not " +
                                                 std::to_string(piece.segments.size()));
         std::uint64_t covered = 0;
         std::uint64_t next_x = 0;
@@ -463,8 +477,8 @@ void TestAPieceTooLargeIsReadInSegments() {
             Require(SameRange(segment.axes.at(1), piece.request.axes.at(1)) &&
                         SameRange(segment.axes.at(2), piece.request.axes.at(2)),
                     "a segment should cut only the axis below the piece's");
-            Require(segment.axes.at(0).start == next_x && segment.axes.at(0).count == 16,
-                    "segments should cover the row a chunk at a time, in order");
+            Require(segment.axes.at(0).start == next_x && segment.axes.at(0).count == 32,
+                    "segments should cover the row two chunks at a time, in order");
             next_x += segment.axes.at(0).count;
             covered += ElementCount(segment);
         }
@@ -530,9 +544,9 @@ void TestASegmentStartingInsideAChunkIsCutAtItsBoundary() {
 int main() {
     try {
         TestAReadThatFitsIsOnePiece();
-        TestAWatchedReadIsCutToItsBudget();
-        TestAWatchedPieceIsSixteenChunksOrOneAlongTheCut();
-        TestAnUnwatchedReadIsCutIntoLayersOrItsBudget();
+        TestAReadWithProgressIsCutToItsBudget();
+        TestAPieceWithProgressIsSixteenChunksOrOneAlongTheCut();
+        TestAReadWithoutProgressIsCutToItsBudgetButAPlane();
         TestTheCutGoesOnTheSlowestSelectedAxis();
         TestAReadWithNowhereToCutIsOnePiece();
         TestATighterCeilingBuysFewerChunks();

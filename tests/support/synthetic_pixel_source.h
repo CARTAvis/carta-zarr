@@ -76,13 +76,8 @@ public:
         }
         Record(selection);
         if (_has_constant) {
-            const std::uint64_t total = selection.elements();
-            if (auto fits = Fits(total, destination.size); !fits) {
-                return fits;
-            }
-            _elements += total;
-            std::fill(destination.data, destination.data + total, _constant);
-            return carta::zarr::Result<void>{};
+            return Fill(selection, destination.size,
+                        [&](const std::vector<std::uint64_t>&, std::size_t at) { destination.data[at] = _constant; });
         }
         return Fill(selection, destination.size, [&](const std::vector<std::uint64_t>& logical, std::size_t at) {
             destination.data[at] = _formula(logical);
@@ -131,13 +126,17 @@ private:
     // PixelSelection::destination_to_stored says -- logical order for a plain read, stored order for
     // a pass.
     //
-    // Worked out here rather than asked of PixelSelection::DestinationStrides, deliberately. This
-    // adapter writes pixels where these strides say and the pass reads them where the selection's
-    // say; were both the same function, a mistake in it would be made twice, consistently, and
-    // every test would pass while the real writer -- TensorStore, which lays the destination out
-    // from the permutation and not from that function -- disagreed. Deriving it again is the
-    // cross-check.
+    // Worked out here rather than asked of PixelSelection::DestinationStrides, deliberately, for a
+    // dense destination. This adapter writes pixels where these strides say and the pass reads them
+    // where the selection's say; were both the same function, a mistake in it would be made twice,
+    // consistently, and every test would pass while the real writer -- TensorStore, which lays the
+    // destination out from the permutation and not from that function -- disagreed. Deriving it again
+    // is the cross-check. A selection placed within a larger read says where it lands, which only the
+    // read it is part of knows; what it says is checked by reading the destination back by position.
     std::vector<std::uint64_t> DestinationStrides(const carta::zarr::internal::zarr::PixelSelection& selection) const {
+        if (selection.destination_extent() != selection.elements()) {
+            return selection.DestinationStrides();
+        }
         const auto rank = selection.count().size();
         std::vector<std::uint64_t> strides(rank, 1);
         std::uint64_t running = 1;
@@ -166,7 +165,7 @@ private:
                                    std::size_t destination_elements, Write&& write) const {
         const auto rank = selection.count().size();
         const std::uint64_t total = selection.elements();
-        if (auto fits = Fits(total, destination_elements); !fits) {
+        if (auto fits = Fits(selection.destination_extent(), destination_elements); !fits) {
             return fits;
         }
         _elements += total;
@@ -182,7 +181,7 @@ private:
         std::vector<std::uint64_t> index(rank, 0);
         std::vector<std::uint64_t> logical(rank, 0);
         for (std::uint64_t n = 0; n < total; ++n) {
-            std::size_t at = 0;
+            auto at = static_cast<std::size_t>(selection.destination_offset());
             for (std::size_t stored = 0; stored < rank; ++stored) {
                 at += static_cast<std::size_t>(index.at(stored) * strides.at(stored));
                 logical.at(stored_to_logical.at(stored)) =

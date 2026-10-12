@@ -280,8 +280,8 @@ void TestReadControls(const carta::zarr::Image& sky) {
     Require(!expired_read && expired_read.error().code == carta::zarr::ErrorCode::cancelled,
             "a read past its deadline was not rejected");
 
-    // A stated ceiling splits the read to fit rather than refusing it, whether or not anyone asked
-    // to watch: a caller who says how much memory the read can have is not told no.
+    // A stated ceiling splits the read to fit rather than refusing it, with a progress callback or
+    // without: a caller who says how much memory the read can have is not told no.
     std::vector<float> reference(elements, 0.0F);
     const auto reference_read = sky.Read(request, {reference.data(), reference.size()});
     Require(static_cast<bool>(reference_read), "the unrestricted read this compares against failed");

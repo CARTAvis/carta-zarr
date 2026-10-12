@@ -48,6 +48,13 @@ class PixelSelection;
 Result<PixelSelection> BuildSelection(const ImageDescriptor& descriptor, const ReadRequest& request,
                                       DestinationOrder order);
 
+// `part` of `whole`, with its destination where `part` lands in a dense logical-order destination of
+// all of `whole`: each step along an axis moves as far as it does in that, and the first element is
+// where `part` begins in it. What a segment is read through, straight into its piece's place, so
+// that it needs no buffer of its own and no copy. `part` must select only elements of `whole`.
+Result<PixelSelection> BuildSelectionWithin(const ImageDescriptor& descriptor, const ReadRequest& part,
+                                            const ReadRequest& whole);
+
 /**
  * One hyperslab of an array, addressed in the array's own stored axis order, and the order its
  * destination is written in.
@@ -82,17 +89,30 @@ public:
     std::uint64_t elements() const noexcept { return _elements; }
 
     // How far one step along each stored dimension moves in the destination, by stored dimension.
+    // Dense unless the selection was built within a larger read: then the strides are that read's.
     std::vector<std::uint64_t> DestinationStrides() const;
+
+    // Where the first element lands in the destination, and how far into it the last one reaches:
+    // the length a destination has to have. The element count and zero, unless the selection was
+    // built within a larger read.
+    std::uint64_t destination_offset() const noexcept { return _destination_offset; }
+    std::uint64_t destination_extent() const noexcept { return _destination_extent; }
 
 private:
     PixelSelection() = default;
     friend Result<PixelSelection> BuildSelection(const ImageDescriptor& descriptor, const ReadRequest& request,
                                                  DestinationOrder order);
+    friend Result<PixelSelection> BuildSelectionWithin(const ImageDescriptor& descriptor, const ReadRequest& part,
+                                                       const ReadRequest& whole);
 
     std::vector<std::uint64_t> _start;
     std::vector<std::uint64_t> _count;
     std::vector<std::uint64_t> _stride;
     std::vector<std::size_t> _destination_to_stored;
+    // By destination axis; empty for a dense destination.
+    std::vector<std::uint64_t> _destination_strides;
+    std::uint64_t _destination_offset = 0;
+    std::uint64_t _destination_extent = 0;
     std::uint64_t _elements = 0;
 };
 

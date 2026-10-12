@@ -31,7 +31,7 @@ not have is a defined answer rather than a compile error. `schema_profile_test` 
 that promise standing with a string comparison behind it, which is the same dispatch with the name
 taken off.
 
-CONTEXT.md also names the concept -- "Schema profile: a named, versioned description of how an image
+GLOSSARY.md also names the concept -- "Schema profile: a named, versioned description of how an image
 dataset is laid out, which the library matches a store against" -- so the module is honest about
 intent rather than speculative. A second profile is expected; this is not a seam waiting for a
 caller, it is a table waiting for a row.

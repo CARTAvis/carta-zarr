@@ -187,7 +187,7 @@ and every test as it is, and keeps a listing that offers an image the library wi
 contradiction, minus the duplication.
 
 **Promoting every malformation to `invalid`.** A `MODEL` that disagrees with a coordinate would
-close a dataset whose `SKY` is fine. CONTEXT.md already decides this the other way: a variable that
+close a dataset whose `SKY` is fine. GLOSSARY.md already decides this the other way: a variable that
 cannot be opened is diagnosed rather than refused, because the rest of the dataset is still
 readable.
 

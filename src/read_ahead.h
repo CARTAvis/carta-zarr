@@ -26,7 +26,7 @@
 namespace carta::zarr::internal {
 
 // The chunks a read decodes, as the first and the last chunk it touches along each axis. Two reads
-// with the same box decode the same chunks, which is what makes them one run; see CONTEXT.md.
+// with the same box decode the same chunks, which is what makes them one run; see GLOSSARY.md.
 //
 // Every axis counts alike. A plane is one element along the spectrum and along the polarization,
 // and the chunk it lies in along each is part of which run it is in -- a chunk deep in Stokes puts

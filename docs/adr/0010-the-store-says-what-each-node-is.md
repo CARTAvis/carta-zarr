@@ -12,7 +12,7 @@ answer. They agreed only where those three happened to coincide.
 `Store::Inventory` replaces it. Every node comes back under one canonical name, sorted, as a
 `group`, an `array`, or an `unrecognised` node, and an array comes back with its metadata already
 parsed -- a pointer to the one the store holds, so nothing is copied and a group is never parsed as
-an array. CONTEXT.md calls it the node inventory.
+an array. GLOSSARY.md calls it the node inventory.
 
 ## Why the parse is carried, not just the kind
 
@@ -78,7 +78,7 @@ asked for.
 
 ## A node whose metadata will not parse is diagnosed
 
-CONTEXT.md already decided this. Under **Diagnostic** it lists "a node skipped because its metadata
+GLOSSARY.md already decided this. Under **Diagnostic** it lists "a node skipped because its metadata
 would not parse" among the things diagnosed rather than refused, because the rest of the dataset is
 still readable. The listing did the opposite: it gave up on the first document that would not parse,
 so one stray broken `zarr.json` beside a good image closed the dataset. It was also inconsistent

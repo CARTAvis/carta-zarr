@@ -716,7 +716,7 @@ void TestTheInventorySaysWhatEachNodeIs() {
             "discovery could not walk a store holding a node whose node_type is not a string");
 }
 
-// A node whose document will not parse is diagnosed, not refused. CONTEXT.md says so of a node
+// A node whose document will not parse is diagnosed, not refused. GLOSSARY.md says so of a node
 // whose metadata would not parse -- the rest of the dataset is still readable -- so a stray broken
 // document beside a perfectly good image does not close the dataset.
 void TestANodeThatWillNotParseIsDiagnosedNotRefused() {

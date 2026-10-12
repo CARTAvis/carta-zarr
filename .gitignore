@@ -79,7 +79,7 @@ AGENTS.md
 CLAUDE.md
 
 # Working documents stay local: research drafts, in a language other than the project's and no longer
-# kept in step with the code. What a reader of this repository needs is in the README, CONTEXT.md,
+# kept in step with the code. What a reader of this repository needs is in the README, GLOSSARY.md,
 # docs/storage-tuning.md and the ADRs.
 docs/archive/
 docs/read-api.md

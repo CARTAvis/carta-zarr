@@ -30,7 +30,7 @@ namespace carta::zarr::internal {
 inline constexpr std::uint64_t kWatchedPieceChunks = 16;
 
 /**
- * One piece of an ordinary read. See CONTEXT.md for what a piece is.
+ * One piece of an ordinary read. See GLOSSARY.md for what a piece is.
  *
  * What to read -- the caller's request, narrowed along the axis the read is cut on -- and where in the
  * destination it lands. A piece fills the destination from `first_element` for as many elements as

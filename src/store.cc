@@ -393,7 +393,7 @@ const Result<std::vector<NodeEntry>>& Store::Inventory() const {
             if (!metadata) {
                 // A document that was read and would not parse says nothing about what the node is,
                 // and that is an answer about the node rather than about the hierarchy: the other
-                // nodes were read, and the images among them still open. CONTEXT.md says so of a
+                // nodes were read, and the images among them still open. GLOSSARY.md says so of a
                 // node whose metadata would not parse -- diagnosed rather than refused.
                 //
                 // Only that failure. A read that failed at all -- a transport error, a node listed

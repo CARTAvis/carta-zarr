@@ -145,19 +145,20 @@ std::vector<Piece> PlanPieces(const ImageDescriptor& descriptor, const ChunkGeom
     // straight into its place in it.
     const auto cost = ReadCost::Of(descriptor, geometry, flag_geometry, options, PixelsHeld::by_caller, decode_threads);
     const auto budget = std::max<std::uint64_t>(1, cost.ChunksPerRead(PixelsHeld::by_caller));
-    // A read is cut to its budget, watched or not, so that what it holds -- the chunks it decodes, the
-    // flag folded in beside them, and the compressed chunks the I/O threads queue for the decode
-    // threads when those fall behind -- is bounded by the budget rather than by the read's extent. A
-    // watched read is cut to no more than kWatchedPieceChunks as well, so that its pieces come often,
-    // but to no less than one chunk along the cut; past that its pieces are read in segments, which
-    // only its budget bounds, since a segment reports nothing.
+    // A read is cut to its budget, with a progress callback or without, so that what it holds -- the
+    // chunks it decodes, the flag folded in beside them, and the compressed chunks the I/O threads
+    // queue for the decode threads when those fall behind -- is bounded by the budget rather than by
+    // the read's extent. A read with a progress callback is cut to no more than kWatchedPieceChunks as
+    // well, so that its pieces come often, but to no less than one chunk along the cut; past that its
+    // pieces are read in segments, which only its budget bounds, since a segment reports nothing.
     //
-    // One exception: a single plane nobody watches is read whole once its budget affords a chunk for
-    // every decode thread. Cut into segments it read a quarter slower, one segment after another --
-    // 0.33 s rather than 0.26 s for a plane of the 7763 x 4742 test cube in 256 x 256 x 16 chunks on
-    // 28 threads, holding no less -- and a plane is what a channel change and an animation wait on.
-    // What it holds beyond its budget is bounded by the plane: its decode threads' chunks, the queue
-    // ahead of them, and a flag of one channel, about 130 MiB on 28 threads and 370 MiB on four.
+    // One exception: a single plane read with no progress callback is read whole once its budget
+    // affords a chunk for every decode thread. Cut into segments it read a quarter slower, one segment
+    // after another -- 0.33 s rather than 0.26 s for a plane of the 7763 x 4742 test cube in
+    // 256 x 256 x 16 chunks on 28 threads, holding no less -- and a plane is what a channel change and
+    // an animation wait on. What it holds beyond its budget is bounded by the plane: its decode
+    // threads' chunks, the queue ahead of them, and a flag of one channel, about 130 MiB on 28 threads
+    // and 370 MiB on four.
     //
     // The other axes already contribute whatever they span, so a plane read needs far fewer rows per
     // piece than a single-pixel column needs channels.

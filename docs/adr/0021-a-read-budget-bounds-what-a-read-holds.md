@@ -21,9 +21,9 @@ float32 cube in 512 x 512 x 64 chunks -- 64 MiB decoded each, blosc zstd, 11 GB 
 
 Three things made those numbers, each on its own enough to defeat a budget.
 
-1. `Image::Read` was cut only when somebody watched it or stated a budget. carta-backend's plane
-   reads did neither, so one plane sent all 160 of its chunks, 10 GiB decoded, to TensorStore at
-   once.
+1. `Image::Read` was cut only when it was given a progress callback or a budget. carta-backend's
+   plane reads did neither, so one plane sent all 160 of its chunks, 10 GiB decoded, to TensorStore
+   at once.
 2. It was cut along one axis, the slowest it selects, so its least piece was a whole row of chunks:
    sixteen here, about 1 GiB, whatever the budget said.
 3. The budget counted the bytes a chunk decodes to. A chunk being decoded also holds its compressed
@@ -58,34 +58,36 @@ can be.
   64 MiB chunks above ran 2.4 times slower. 256 MiB keeps small chunks to at least sixty-four a read,
   as before; 2 GiB holds the 64 MiB chunks above to about ten on twenty-eight threads, which trades
   some of their speed for the bound.
-- **Every read is held to its budget**, the caller's or the library's, whether or not it is watched,
-  in pieces of at most what the budget affords -- with one exception, below. A read is not a fixed
-  number of chunks in flight however large it is: TensorStore decodes no more at once than the
-  context has decode threads, but it reads every chunk the request spans as fast as its I/O threads
-  allow, and when the decoders fall behind the compressed chunks queue for them. On the 28-thread
-  machine, one unwatched read of 128 whole planes of the 7763 x 4742 test cube in 256 x 256 x 16
-  chunks, issued whole with two I/O threads and no cache, held beside its destination 292 MiB on
-  twenty-eight decode threads, 5.1 GiB on four and 9.6 GiB on one -- dev alike -- and 4.7 to 9.2 GiB
-  with a flag, whose folded-in mask is a byte an element of the whole read. With the I/O threads left
-  to TensorStore's default the queue grows on twenty-eight threads too (3.0 GiB).
-- **A single plane nobody watches is read whole**, once its budget affords a chunk for every decode
-  thread. That is the exception. A plane of the test cube is 589 chunks, more than any default
-  budget affords, and cut to the budget it is read in segments one after another, which ran a
-  quarter slower -- 0.33 s against 0.26 s on twenty-eight threads -- while holding no less: what a
-  plane holds is bounded by the plane itself, its decode threads' chunks and the queue ahead of them
-  and a flag of one channel, about 130 MiB on twenty-eight threads and 370 MiB on four. A plane is
-  what a channel change and an animation wait on. Any read of more than one plane is cut to its
-  budget: it was cut into layers of its chunks, a chunk deep along the spectral, polarization and
-  time axes and the whole plane, because a segment used to be gathered in a buffer of the library's
-  and copied into place, which ran the 128-plane read 25-65 % slower; read straight into place, it
-  runs within 4-18 % of the layers, and holds 90 MiB rather than 950 MiB on four threads, 90 MiB
-  rather than 2.3 GiB with the flag, and 230 MiB rather than 830 MiB with the flag on twenty-eight.
-  The layers' memory grew with the I/O threads, too: with TensorStore's default, 1.4 GiB on
-  twenty-eight threads where the budget holds 420 MiB. A watched read is always cut to its budget,
-  so that it has pieces to report, and to sixteen chunks a piece unless one chunk along the cut is
-  more, so that they come often: a budget aimed at the decode threads grows with them, and a cursor
-  spectrum of the cigar test cube cut to it alone came in nine pieces on 28 threads instead of
-  thirty, 160 ms apart on a cold local disk rather than 55, and further apart on slower storage.
+- **Every read is held to its budget**, the caller's or the library's, with a progress callback or
+  without, in pieces of at most what the budget affords -- with one exception, below. A read is not
+  a fixed number of chunks in flight however large it is: TensorStore decodes no more at once than
+  the context has decode threads, but it reads every chunk the request spans as fast as its I/O
+  threads allow, and when the decoders fall behind the compressed chunks queue for them. On the
+  28-thread machine, one read with no progress callback of 128 whole planes of the 7763 x 4742 test
+  cube in 256 x 256 x 16 chunks, issued whole with two I/O threads and no cache, held beside its
+  destination 292 MiB on twenty-eight decode threads, 5.1 GiB on four and 9.6 GiB on one -- dev
+  alike -- and 4.7 to 9.2 GiB with a flag, whose folded-in mask is a byte an element of the whole
+  read. With the I/O threads left to TensorStore's default the queue grows on twenty-eight threads
+  too (3.0 GiB).
+- **A single plane read with no progress callback is read whole**, once its budget affords a chunk
+  for every decode thread. That is the exception. A plane of the test cube is 589 chunks, more than
+  any default budget affords, and cut to the budget it is read in segments one after another, which
+  ran a quarter slower -- 0.33 s against 0.26 s on twenty-eight threads -- while holding no less:
+  what a plane holds is bounded by the plane itself, its decode threads' chunks and the queue ahead
+  of them and a flag of one channel, about 130 MiB on twenty-eight threads and 370 MiB on four. A
+  plane is what a channel change and an animation wait on. Any read of more than one plane is cut to
+  its budget: it was cut into layers of its chunks, a chunk deep along the spectral, polarization
+  and time axes and the whole plane, because a segment used to be gathered in a buffer of the
+  library's and copied into place, which ran the 128-plane read 25-65 % slower; read straight into
+  place, it runs within 4-18 % of the layers, and holds 90 MiB rather than 950 MiB on four threads,
+  90 MiB rather than 2.3 GiB with the flag, and 230 MiB rather than 830 MiB with the flag on
+  twenty-eight. The layers' memory grew with the I/O threads, too: with TensorStore's default,
+  1.4 GiB on twenty-eight threads where the budget holds 420 MiB. A read with a progress callback is
+  always cut to its budget, so that it has pieces to report, and to sixteen chunks a piece unless
+  one chunk along the cut is more, so that they come often: a budget aimed at the decode threads
+  grows with them, and a cursor spectrum of the cigar test cube cut to it alone came in nine pieces
+  on 28 threads instead of thirty, 160 ms apart on a cold local disk rather than 55, and further
+  apart on slower storage.
 - **A piece too large at one chunk deep is read in segments**, cut along the axes below the piece's
   down to a single chunk, each read straight into its place in the destination through the strides
   of the piece it is part of. Progress is still reported a piece at a time, so the finished part

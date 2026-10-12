@@ -183,9 +183,9 @@ _Avoid_: block, slab, chunk, batch
 **Read budget**:
 How much memory one read may hold at once beyond the caller's own destination: the chunks it is
 decoding, each charged about three times what it decodes to, and the buffers the library allocates
-for them. Every read, pass and prefetch keeps to it whether or not anybody watches, but for a single
-plane nobody watches, which is read whole once its budget affords a chunk for each decode thread. It
-is per read, and a read holds at least one chunk however small it is.
+for them. Every read, pass and prefetch keeps to it, with a progress callback or without, but for a single
+plane read with no progress callback, which is read whole once its budget affords a chunk for each
+decode thread. It is per read, and a read holds at least one chunk however small it is.
 _Avoid_: ceiling, memory limit, chunk budget
 
 **Cache pool**:

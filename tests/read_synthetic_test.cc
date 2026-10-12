@@ -28,8 +28,8 @@
 namespace {
 
 // What a context gives every read here to aim its default budget at. More than the chunks the budgets
-// stated below afford, so that a read nobody watches is cut by them as a watched one is: with a chunk
-// a thread in flight already, a read is not cut below that.
+// stated below afford, so that a read with no progress callback is cut by them as one with a callback
+// is: with a chunk a thread in flight already, a read is not cut below that.
 constexpr std::size_t kDecodeThreads = 16;
 
 using carta::zarr::AxisRole;
@@ -109,10 +109,10 @@ constexpr float kUntouched = -98765.0F;
 // A ceiling that cuts this cube into three pieces of two channels each.
 //
 // Stated rather than left to the library, because the default budget has a 256 MiB floor and this
-// whole cube is 61 KiB: under it, a watched read is one piece and reports once, which is correct and
-// shows nothing. One chunk row of this cube is eight chunks of 2560 bytes, each holding three times
-// what it decodes to, so a budget of exactly that affords one row, and the split axis's chunk is two
-// channels deep.
+// whole cube is 61 KiB: under it, a read with a progress callback is one piece and reports once,
+// which is correct and shows nothing. One chunk row of this cube is eight chunks of 2560 bytes, each
+// holding three times what it decodes to, so a budget of exactly that affords one row, and the split
+// axis's chunk is two channels deep.
 constexpr std::size_t kThreePieces = 8 * 2560 * carta::zarr::internal::kHeldBytesPerDecodedByte;
 
 // The destination is dense in logical order with axis 0 fastest, so the value at (x, y, z) is the
@@ -205,7 +205,8 @@ void TestProgressCountsElementsAndFinishesAtTheTotal() {
     const auto read =
         ReadInPieces(source, image, geometry, geometry, WholeCube(),
                      BufferView<float>{destination.data(), destination.size()}, options, kDecodeThreads, progress);
-    Require(static_cast<bool>(read) && read.value() == kElements, "a watched read did not produce the whole cube");
+    Require(static_cast<bool>(read) && read.value() == kElements,
+            "a read with progress did not produce the whole cube");
 
     Require(reported_total == kElements, "progress reported a total that is not the destination's size");
     Require(source.pixel_reads() == 3, "the ceiling did not cut the cube into three pieces");
@@ -214,7 +215,7 @@ void TestProgressCountsElementsAndFinishesAtTheTotal() {
     for (std::size_t i = 1; i < written.size(); ++i) {
         Require(written.at(i) > written.at(i - 1), "progress went backwards or stood still");
     }
-    RequireCubeMatchesTheFormula(destination, "a watched read");
+    RequireCubeMatchesTheFormula(destination, "a read with progress");
 }
 
 void TestProgressCanStopTheRead() {
@@ -261,19 +262,20 @@ void TestASplitReadAgreesWithAnUnsplitOne() {
     Require(split == whole, "a split read and an unsplit one disagreed about the same cube");
 }
 
-// A read nobody watches is cut to its budget, as a watched one is, into segments read straight into
-// their place where one chunk along the cut is too much -- but a single plane is read whole once its
-// budget affords a chunk for every decode thread. A plane here is eight chunks; the budget affords
-// four, as many as the decode threads. Checked through ReadInPieces and PrefetchChunks, because it is
-// whether the caller's callback reaches the plan as "watched" that a slip would break.
-void TestAReadNobodyWatchesIsCutToItsBudgetButAPlane() {
+// A read with no progress callback is cut to its budget, as one with a callback is, into segments
+// read straight into their place where one chunk along the cut is too much -- but a single plane is
+// read whole once its budget affords a chunk for every decode thread. A plane here is eight chunks;
+// the budget affords four, as many as the decode threads. Checked through ReadInPieces and
+// PrefetchChunks, because it is whether the caller's callback reaches the plan as
+// `reports_progress` that a slip would break.
+void TestAReadWithoutProgressIsCutToItsBudgetButAPlane() {
     const auto image = MakeImage();
     const auto geometry = MakeGeometry();
     constexpr std::size_t kAsManyThreadsAsTheBudgetAffords = 4;
     constexpr std::size_t kChunkElements = static_cast<std::size_t>(kX * kY * 2 / 8);
     ReadOptions options;
     options.read_budget_bytes = kThreePieces / 2;
-    const ProgressCallback watching = [](std::size_t, std::size_t) { return true; };
+    const ProgressCallback reporting = [](std::size_t, std::size_t) { return true; };
 
     const auto reads = [&](const ReadRequest& request, std::size_t threads, const ProgressCallback& progress) {
         SyntheticPixelSource source(image, geometry, Value);
@@ -290,12 +292,13 @@ void TestAReadNobodyWatchesIsCutToItsBudgetButAPlane() {
     ReadRequest plane = WholeCube();
     plane.axes.at(2) = Range{3, 1, 1};
     Require(reads(WholeCube(), kAsManyThreadsAsTheBudgetAffords, ProgressCallback{}) == 6,
-            "a read nobody watches was not cut to its budget, each layer in two segments");
+            "a read without progress was not cut to its budget, each layer in two segments");
     Require(reads(plane, kAsManyThreadsAsTheBudgetAffords, ProgressCallback{}) == 1,
-            "a single plane nobody watches was cut, though its budget affords a chunk a thread");
-    Require(reads(plane, kAsManyThreadsAsTheBudgetAffords, watching) > 1, "a watched plane was not cut to its budget");
+            "a single plane without progress was cut, though its budget affords a chunk a thread");
+    Require(reads(plane, kAsManyThreadsAsTheBudgetAffords, reporting) > 1,
+            "a plane with progress was not cut to its budget");
     Require(reads(plane, kDecodeThreads, ProgressCallback{}) > 1,
-            "a plane nobody watches was read whole though its budget affords fewer chunks than threads");
+            "a plane without progress was read whole though its budget affords fewer chunks than threads");
 
     SyntheticPixelSource prefetched(image, geometry, Value);
     Require(static_cast<bool>(PrefetchChunks(prefetched, image, geometry, geometry, WholeCube(), options,
@@ -312,7 +315,7 @@ void TestAReadNobodyWatchesIsCutToItsBudgetButAPlane() {
     Require(static_cast<bool>(ReadInPieces(source, flagged, geometry, geometry, WholeCube(),
                                            BufferView<float>{destination.data(), destination.size()}, options, 3,
                                            ProgressCallback{})),
-            "a masked read nobody watches failed");
+            "a masked read without progress failed");
     for (const auto size : source.mask_selections()) {
         Require(size <= 3 * kChunkElements, "a read folded in a flag of " + std::to_string(size) +
                                                 " bytes, more than the three chunks its budget affords");
@@ -549,7 +552,7 @@ int main() {
         TestProgressCanStopTheRead();
         TestASplitReadAgreesWithAnUnsplitOne();
         TestEachPieceIsHandedTheRestOfTheBuffer();
-        TestAReadNobodyWatchesIsCutToItsBudgetButAPlane();
+        TestAReadWithoutProgressIsCutToItsBudgetButAPlane();
         TestAFlaggedPixelArrivesAsNaN();
         TestDecliningTheMaskReadsNoFlag();
         TestASampleTakesOneElementOfEachChunk();

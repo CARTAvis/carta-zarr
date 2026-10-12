@@ -94,8 +94,8 @@ over-counts such a read -- deliberately: both walks count in pixel chunks, an ov
 some parallelism, and an under-count spends memory the caller's budget said not to.
 
 What a chunk costs is what it holds while it is read, not only what it decodes to, and both walks
-keep to the budget whether or not anybody watches; `Image::Read` reads a piece too large at one
-chunk deep in segments. ADR 0021 records why.
+keep to the budget, a read with a progress callback or without; `Image::Read` reads a piece too large
+at one chunk deep in segments. ADR 0021 records why.
 
 ## Consequences
 

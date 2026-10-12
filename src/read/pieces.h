@@ -40,9 +40,9 @@ inline constexpr std::uint64_t kWatchedPieceChunks = 16;
  *
  * A piece is read straight into the destination unless even the least of them -- one chunk along the
  * cut, and the whole of every other axis -- holds more than a read affords. Then `segments` are the
- * parts it is read in, cut along the other axes, each gathered in a buffer of the library's and put in
- * place. A segment is not a run of the destination, which is why it is not a piece: progress is
- * reported when the whole piece is in, and the prefix holds.
+ * parts it is read in, cut along the other axes, each read straight into its place in the piece's run
+ * of the destination. A segment is not a run of the destination, which is why it is not a piece:
+ * progress is reported when the whole piece is in, and the prefix holds.
  */
 struct Piece {
     ReadRequest request;
@@ -57,13 +57,13 @@ struct Piece {
  * the strategy is checkable without a store, a transport or a directory tree.
  *
  * Every read is cut to fit its budget -- the caller's, or the library's own when it states none --
- * so that what a read holds is bounded whether or not anybody watches it. What it holds is the
- * chunks TensorStore decodes at once, which is no more than `decode_threads` of them: a read nobody
- * watches (`reports_progress` false) whose budget affords that many is not cut at all, while one
- * that is watched is cut to the chunks the budget affords and to no more than kWatchedPieceChunks,
- * so that it has pieces to report and they come often. A read that fits, or that has no axis
- * selecting more than one element, is one piece covering everything, so that the loop reading it is
- * the same loop either way.
+ * so that what a read holds is bounded whether or not anybody watches it. One that is watched
+ * (`reports_progress` true) is cut to no more than kWatchedPieceChunks as well, so that it has pieces
+ * to report and they come often. The one exception is a single plane nobody watches, whose budget
+ * affords a chunk for each of `decode_threads`: it is read whole, which is faster than in segments
+ * one after another, and what it holds beyond the budget is bounded by the plane. A read that fits,
+ * or that has no axis selecting more than one element, is one piece covering everything, so that the
+ * loop reading it is the same loop either way.
  *
  * Where to cut, how much one piece may cover, where its end is rounded out to a chunk boundary, and
  * the segments of a piece too large to read whole all happen here. Whether the flag is decoded beside

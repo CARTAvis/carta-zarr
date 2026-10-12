@@ -94,11 +94,9 @@ private:
 /// cube histogram through a CubeHistogramProgressCallback of its own. As a field it would be one the
 /// other entry points silently ignored; as an argument it is simply not part of what they take.
 ///
-/// Supplying one can cut a read finer: a read nobody watches is cut into layers of its chunks -- a
-/// chunk deep along the spectral axis and the whole of its plane -- when its budget affords a chunk
-/// a decode thread, and one that is watched is cut to the chunks the budget affords, and to
-/// sixteen, so that there is a piece to report and the next is not long coming. On large chunks the
-/// two are cut alike; on small ones the watched read is somewhat slower.
+/// Supplying one can cut a read finer: every read is cut to the chunks its budget affords, but one
+/// that is watched is cut to sixteen as well, so that there is a piece to report and the next is not
+/// long coming, and a single plane is read whole only when nobody watches it.
 using ProgressCallback = std::function<bool(std::size_t elements_written, std::size_t elements_total)>;
 
 // What a read is allowed to do while it runs, whatever it is reading for.
@@ -151,10 +149,9 @@ struct ReadOptions {
     /// themselves wherever the library rather than the caller holds them. Every operation that takes
     /// these options spends it the same way: Image::Read and Image::Prefetch cut their request into
     /// pieces that fit, and ReduceSpectral, ComputeHistogram and ComputeCubeHistogram size each read
-    /// of their walk by it. One exception: a read nobody watches, whose budget affords a chunk a decode
-    /// thread, is cut no finer than a layer of its chunks -- a chunk deep along the spectral axis and
-    /// the whole of its plane -- because cut finer it runs a quarter to two thirds slower, and a layer
-    /// can hold more than the budget; see ProgressCallback and ADR 0021.
+    /// of their walk by it. One exception: a single plane nobody watches, whose budget affords a chunk
+    /// a decode thread, is read whole, because cut to the budget it runs a quarter slower, and what it
+    /// holds beyond the budget is bounded by the plane; see ProgressCallback and ADR 0021.
     ///
     /// A chunk is the smallest thing that can be decoded: asking for part of one decodes all of it.
     /// So a read holds at least one chunk, and under a budget smaller than that it reads one chunk at

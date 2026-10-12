@@ -118,17 +118,15 @@ void Segment(const ChunkGeometry& geometry, const ReadRequest& request, std::uin
     });
 }
 
-// The first layer of a request's chunks: a single index along every axis but the sky's, so a chunk
-// deep along each, and the whole of the request across the sky plane.
-ReadRequest OneLayer(const ImageDescriptor& descriptor, const ReadRequest& request) {
-    ReadRequest layer = request;
-    for (std::size_t axis = 0; axis < layer.axes.size() && axis < descriptor.axes.size(); ++axis) {
+// Whether `request` is a single plane: one index along every axis but the sky's.
+bool IsOnePlane(const ImageDescriptor& descriptor, const ReadRequest& request) {
+    for (std::size_t axis = 0; axis < request.axes.size() && axis < descriptor.axes.size(); ++axis) {
         const auto role = descriptor.axes.at(axis).role;
-        if (role != AxisRole::spatial_x && role != AxisRole::spatial_y) {
-            layer.axes.at(axis).count = std::min<std::uint64_t>(layer.axes.at(axis).count, 1);
+        if (role != AxisRole::spatial_x && role != AxisRole::spatial_y && request.axes.at(axis).count > 1) {
+            return false;
         }
     }
-    return layer;
+    return true;
 }
 
 }  // namespace
@@ -143,31 +141,33 @@ std::vector<Piece> PlanPieces(const ImageDescriptor& descriptor, const ChunkGeom
 
     // The flag is decoded beside the pixels when this read will apply it, so what a chunk holds counts
     // it, in the flag's own chunks, which a piece decodes whole. The pixels go to the caller's
-    // destination, which the budget does not pay for -- unless a piece has to be gathered in parts,
-    // when the library holds each part's pixels itself.
+    // destination, which the budget does not pay for, segments as much as pieces: a segment is read
+    // straight into its place in it.
     const auto cost = ReadCost::Of(descriptor, geometry, flag_geometry, options, PixelsHeld::by_caller, decode_threads);
-    auto affordable = std::max<std::uint64_t>(1, cost.ChunksPerRead(PixelsHeld::by_caller));
-    // A read nobody watches is cut into layers of its chunks -- a chunk deep along the spectral,
-    // polarization and time axes, and the whole of its sky plane -- or into what its budget affords,
-    // when that is more. No finer: a piece that spans the plane's chunks only in part is gathered in
-    // segments and copied into place, which ran a quarter to two thirds slower. And no coarser: what a
-    // read holds grows with its extent beyond a layer -- the folded-in flag, a byte an element, and,
-    // when the decode threads fall behind the I/O, the compressed chunks queued for them (9 GiB beside
-    // 128 planes of the 7763 x 4742 test cube on four threads). A watched read is cut to its budget,
-    // so that it has pieces to report, and to no more than kWatchedPieceChunks, so that they come
-    // often -- but to no less than one chunk along the cut, which a piece would have to gather in
-    // segments.
+    const auto budget = std::max<std::uint64_t>(1, cost.ChunksPerRead(PixelsHeld::by_caller));
+    // A read is cut to its budget, watched or not, so that what it holds -- the chunks it decodes, the
+    // flag folded in beside them, and the compressed chunks the I/O threads queue for the decode
+    // threads when those fall behind -- is bounded by the budget rather than by the read's extent. A
+    // watched read is cut to no more than kWatchedPieceChunks as well, so that its pieces come often,
+    // but to no less than one chunk along the cut; past that its pieces are read in segments, which
+    // only its budget bounds, since a segment reports nothing.
+    //
+    // One exception: a single plane nobody watches is read whole once its budget affords a chunk for
+    // every decode thread. Cut into segments it read a quarter slower, one segment after another --
+    // 0.33 s rather than 0.26 s for a plane of the 7763 x 4742 test cube in 256 x 256 x 16 chunks on
+    // 28 threads, holding no less -- and a plane is what a channel change and an animation wait on.
+    // What it holds beyond its budget is bounded by the plane: its decode threads' chunks, the queue
+    // ahead of them, and a flag of one channel, about 130 MiB on 28 threads and 370 MiB on four.
     //
     // The other axes already contribute whatever they span, so a plane read needs far fewer rows per
     // piece than a single-pixel column needs channels.
     const auto across = ChunksOf(geometry, request) / ChunksAlong(geometry, request, *axis);
+    auto affordable = budget;
     if (reports_progress) {
-        affordable = std::min(affordable, std::max(kWatchedPieceChunks, across));
-    } else if (affordable >= std::max<std::size_t>(1, decode_threads)) {
-        affordable = std::max(affordable,
-                              std::min(ChunksOf(geometry, request), ChunksOf(geometry, OneLayer(descriptor, request))));
+        affordable = std::min(budget, std::max(kWatchedPieceChunks, across));
+    } else if (IsOnePlane(descriptor, request) && budget >= std::max<std::size_t>(1, decode_threads)) {
+        affordable = std::max(budget, ChunksOf(geometry, request));
     }
-    const auto gathered = std::max<std::uint64_t>(1, cost.ChunksPerRead(PixelsHeld::by_library));
 
     // Every axis faster than the cut is whole in every piece, so one index of the cut axis is worth
     // their product of the destination -- and a piece of indices [begin, end) fills that many times
@@ -184,9 +184,9 @@ std::vector<Piece> PlanPieces(const ImageDescriptor& descriptor, const ChunkGeom
         Piece piece{std::move(run), begin * elements_per_index, {}};
         // The least a piece can be is one chunk along the cut, and the whole of every other axis. When
         // that is still more than a read affords, it is read in parts that are not runs of the
-        // destination, each gathered by the library and put in place.
-        if (ChunksOf(geometry, piece.request) > affordable) {
-            Segment(geometry, piece.request, gathered, piece.segments);
+        // destination, each straight into its place in the piece's run of it.
+        if (ChunksOf(geometry, piece.request) > std::max(affordable, budget)) {
+            Segment(geometry, piece.request, budget, piece.segments);
         }
         pieces.push_back(std::move(piece));
     });

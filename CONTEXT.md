@@ -176,15 +176,16 @@ more than one element of. A read is always made of pieces, as many as its read b
 that fits is a single piece covering everything. Cutting there and nowhere else is what keeps the
 finished part of the destination a prefix rather than a scatter, which is what lets a caller be told
 how far along it is, or stop it. A piece that holds more than a read affords even at one chunk deep
-is read in **segments**, cut along the axes below, gathered by the library and put in place; it is
-still reported as one piece.
+is read in **segments**, cut along the axes below, each straight into its place in the destination;
+it is still reported as one piece.
 _Avoid_: block, slab, chunk, batch
 
 **Read budget**:
 How much memory one read may hold at once beyond the caller's own destination: the chunks it is
 decoding, each charged about three times what it decodes to, and the buffers the library allocates
-for them. Every read, pass and prefetch keeps to it whether or not anybody watches. It is per read,
-and a read holds at least one chunk however small it is.
+for them. Every read, pass and prefetch keeps to it whether or not anybody watches, but for a single
+plane nobody watches, which is read whole. It is per read, and a read holds at least one chunk
+however small it is.
 _Avoid_: ceiling, memory limit, chunk budget
 
 **Cache pool**:

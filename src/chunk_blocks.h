@@ -146,7 +146,8 @@ inline std::uint64_t DecodedFlagBytes(const ImageDescriptor& descriptor, const C
 }
 
 // Who holds the pixels a read produces: the caller, whose destination they go straight into and which
-// no budget can shrink, or the library, in a buffer of its own that the budget pays for.
+// no budget can shrink -- an ordinary read's, segments included -- or the library, in a buffer of its
+// own that the budget pays for: a pass's slab, which its visitor reads.
 enum class PixelsHeld { by_caller, by_library };
 
 // What one read of this image holds, and how much it may hold at once: the answers every walk starts
@@ -179,8 +180,7 @@ struct ReadCost {
         return cost;
     }
 
-    // What one chunk holds when `pixels` holds what it produces, against the same budget. A read whose
-    // pixels go to its caller still holds some itself when it has to gather them first.
+    // What one chunk holds when `pixels` holds what it produces, against the same budget.
     std::uint64_t Held(PixelsHeld pixels) const {
         return (kHeldBytesPerDecodedByte * chunk_bytes) + (apply_mask ? _chunk_elements : 0) +
                (pixels == PixelsHeld::by_library ? _chunk_elements * sizeof(float) : 0);

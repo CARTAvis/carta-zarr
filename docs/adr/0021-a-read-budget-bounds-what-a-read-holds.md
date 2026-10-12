@@ -68,32 +68,31 @@ can be.
   twenty-eight decode threads, 5.1 GiB on four and 9.6 GiB on one -- dev alike -- and 4.7 to 9.2 GiB
   with a flag, whose folded-in mask is a byte an element of the whole read. With the I/O threads left
   to TensorStore's default the queue grows on twenty-eight threads too (3.0 GiB).
-- **A read nobody watches is cut into layers of its chunks**, a chunk deep along the spectral,
-  polarization and time axes and the whole of its sky plane, or into what its budget affords when
-  that is more, once its budget affords a chunk for every decode thread. That is the exception: a
-  layer of the test cube is 589 chunks, more than any default budget affords, and cut finer each
-  piece spans the plane's chunks only in part and is gathered in segments (below), which ran the
-  128-plane read 25-65 % slower (9.0 s against 7.0 s on twenty-eight threads, 12.4 s against 7.5 s
-  on four). In layers it ran as fast as issued whole and held 277 MiB on twenty-eight threads and
-  960 MiB on four -- 0.8 and 2.0 GiB with the flag -- bounded by the plane and the chunk depth
-  rather than by the read's extent. The cut goes on the slowest axis the read selects more than one
-  of, so this holds for a read of one Stokes parameter, as carta-backend's are; one across several
-  Stokes parameters and many channels is cut along polarization and, a polarization chunk deep being
-  more than a layer, falls to segments as it did before. It also takes the flag to be chunked no
-  deeper than its pixels, as the site's converter writes it: a deeper flag chunk spans several
-  layers and is decoded again for each. A plane is one layer and is read whole, as before, at the
-  same speed. A watched read is always cut to its budget, so that it has pieces to report, and to
-  sixteen chunks a piece unless one chunk along the cut is more, so that they come often: a budget
-  aimed at the decode threads grows with them, and a cursor spectrum of the cigar test cube cut to
-  it alone came in nine pieces on 28 threads instead of thirty, 160 ms apart on a cold local disk
-  rather than 55, and further apart on slower storage. Reading segments straight into the
-  destination rather than gathering them would let a layer be cut to the budget at no cost, and is
-  left to a later change.
+- **A single plane nobody watches is read whole**, once its budget affords a chunk for every decode
+  thread. That is the exception. A plane of the test cube is 589 chunks, more than any default
+  budget affords, and cut to the budget it is read in segments one after another, which ran a
+  quarter slower -- 0.33 s against 0.26 s on twenty-eight threads -- while holding no less: what a
+  plane holds is bounded by the plane itself, its decode threads' chunks and the queue ahead of them
+  and a flag of one channel, about 130 MiB on twenty-eight threads and 370 MiB on four. A plane is
+  what a channel change and an animation wait on. Any read of more than one plane is cut to its
+  budget: it was cut into layers of its chunks, a chunk deep along the spectral, polarization and
+  time axes and the whole plane, because a segment used to be gathered in a buffer of the library's
+  and copied into place, which ran the 128-plane read 25-65 % slower; read straight into place, it
+  runs within 4-18 % of the layers, and holds 90 MiB rather than 950 MiB on four threads, 90 MiB
+  rather than 2.3 GiB with the flag, and 230 MiB rather than 830 MiB with the flag on twenty-eight.
+  The layers' memory grew with the I/O threads, too: with TensorStore's default, 1.4 GiB on
+  twenty-eight threads where the budget holds 420 MiB. A watched read is always cut to its budget,
+  so that it has pieces to report, and to sixteen chunks a piece unless one chunk along the cut is
+  more, so that they come often: a budget aimed at the decode threads grows with them, and a cursor
+  spectrum of the cigar test cube cut to it alone came in nine pieces on 28 threads instead of
+  thirty, 160 ms apart on a cold local disk rather than 55, and further apart on slower storage.
 - **A piece too large at one chunk deep is read in segments**, cut along the axes below the piece's
-  down to a single chunk, each gathered in a buffer of the library's and put in place. Progress is
-  still reported a piece at a time, so the finished part stays a prefix, which carta-backend's cursor
-  spectrum relies on. A gathered segment is a copy of what its chunks decode to and a fraction of what
-  they hold, so it costs nothing measurable beside the decode.
+  down to a single chunk, each read straight into its place in the destination through the strides
+  of the piece it is part of. Progress is still reported a piece at a time, so the finished part
+  stays a prefix, which carta-backend's cursor spectrum relies on. A segment's pixels are the
+  caller's, so the budget pays only for the chunks it decodes and the flag beside them. It was
+  gathered in a buffer of the library's and copied into place, and that copy, transposing each
+  chunk into a small dense buffer, nearly doubled the CPU the decode threads spent on four threads.
 - **Under a budget smaller than one chunk, a read decodes one chunk at a time** and holds what that
   chunk holds. It used to refuse a masked read with `buffer_too_small` when the folded-in flag of its
   least piece would exceed the budget, while the unmasked read beside it went on to decode a gigabyte;

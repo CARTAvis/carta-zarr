@@ -17,6 +17,7 @@
 #include <algorithm>
 #include <cstddef>
 #include <cstdint>
+#include <limits>
 #include <string>
 #include <utility>
 #include <vector>
@@ -48,38 +49,42 @@ Result<zarr::PixelSelection> CheckRead(const ImageDescriptor& descriptor, const 
     return selection;
 }
 
-// Puts a segment, gathered densely in logical order in `from`, where it belongs in its piece's run of
-// the destination, which is dense in the piece's own logical order. Axis 0 is the fastest in both, so
-// the segment arrives a run of its axis-0 count at a time.
-void Place(const ReadRequest& piece, const ReadRequest& segment, const float* from, float* piece_destination) {
-    const std::size_t rank = piece.axes.size();
-    std::vector<std::uint64_t> stride(rank, 1);
-    std::uint64_t offset = 0;
+// Folds `mask`, dense in the selection's own order, into the pixels it was read beside, which lie in
+// `destination` where the selection says: densely for a piece, and in its piece's place for a segment.
+// Axis 0 is the fastest in both, so the mask arrives a run of axis 0's count at a time.
+void ApplyPixelMaskWithin(const zarr::PixelSelection& selection, float* destination, const std::uint8_t* mask) {
+    const auto& order = selection.destination_to_stored();
+    const auto strides = selection.DestinationStrides();
+    const std::size_t rank = order.size();
+    std::vector<std::uint64_t> count(rank);
+    std::vector<std::uint64_t> stride(rank);
     for (std::size_t axis = 0; axis < rank; ++axis) {
-        if (axis > 0) {
-            stride[axis] = stride[axis - 1] * piece.axes[axis - 1].count;
-        }
-        const auto& whole = piece.axes[axis];
-        offset += ((segment.axes[axis].start - whole.start) / std::max<std::uint64_t>(1, whole.stride)) * stride[axis];
+        count[axis] = selection.count().at(order[axis]);
+        stride[axis] = strides.at(order[axis]);
     }
-    const std::uint64_t run = segment.axes[0].count;
+    float* const base = destination + selection.destination_offset();
     std::vector<std::uint64_t> at(rank, 0);
     while (true) {
-        std::uint64_t into = offset;
+        std::uint64_t into = 0;
         for (std::size_t axis = 1; axis < rank; ++axis) {
             into += at[axis] * stride[axis];
         }
-        std::copy_n(from, run, piece_destination + into);
-        from += run;
+        float* run = base + into;
+        for (std::uint64_t i = 0; i < count[0]; ++i) {
+            if (mask[i] != 0) {
+                run[i * stride[0]] = std::numeric_limits<float>::quiet_NaN();
+            }
+        }
+        mask += count[0];
         // The next run, the faster axes first.
         std::size_t axis = 1;
         for (; axis < rank; ++axis) {
-            if (++at[axis] < segment.axes[axis].count) {
+            if (++at[axis] < count[axis]) {
                 break;
             }
             at[axis] = 0;
         }
-        if (axis == rank) {
+        if (axis >= rank) {
             return;
         }
     }
@@ -104,20 +109,26 @@ Result<std::size_t> ReadInPieces(const PixelSource& source, const ImageDescripto
         PlanPieces(descriptor, geometry, flag_geometry, request, options, decode_threads, static_cast<bool>(progress));
 
     std::vector<std::uint8_t> mask;
-    std::vector<float> gathered;
-    // Reads `part` into `into`: its flag first, so that a flag that cannot be read leaves `into` as it
-    // was, then its pixels, then the one folded into the other.
-    const auto read_part = [&](const ReadRequest& part, BufferView<float> into) -> Result<std::size_t> {
-        auto selection = zarr::BuildSelection(descriptor, part, zarr::DestinationOrder::logical);
+    // Reads `part` of `within` into `into`, the destination from where `within` lands, at `part`'s place
+    // in it: its flag first, so that a flag that cannot be read leaves `into` as it was, then its
+    // pixels, then the one folded into the other.
+    const auto read_part = [&](const ReadRequest& part, const ReadRequest& within,
+                               BufferView<float> into) -> Result<std::size_t> {
+        auto selection = zarr::BuildSelectionWithin(descriptor, part, within);
         if (!selection) {
             return selection.error();
         }
         const auto part_elements = static_cast<std::size_t>(selection.value().elements());
         if (apply_mask) {
+            // Dense in a buffer of its own, wherever the pixels land.
+            auto dense = zarr::BuildSelection(descriptor, part, zarr::DestinationOrder::logical);
+            if (!dense) {
+                return dense.error();
+            }
             mask.assign(part_elements, 0);
             // TensorStore still owns the pixel operation's in-flight completion before it returns, so
             // the destination remains valid for the next read.
-            if (auto mask_read = source.ReadMask(selection.value(), {mask.data(), mask.size()}, options.control);
+            if (auto mask_read = source.ReadMask(dense.value(), {mask.data(), mask.size()}, options.control);
                 !mask_read) {
                 return mask_read.error();
             }
@@ -125,8 +136,10 @@ Result<std::size_t> ReadInPieces(const PixelSource& source, const ImageDescripto
         if (auto read = source.ReadPixels(selection.value(), into, options.control); !read) {
             return read.error();
         }
-        if (apply_mask) {
+        if (apply_mask && selection.value().destination_extent() == part_elements) {
             ApplyPixelMask(into.data, mask.data(), part_elements);
+        } else if (apply_mask) {
+            ApplyPixelMaskWithin(selection.value(), into.data, mask.data());
         }
         return part_elements;
     };
@@ -140,23 +153,17 @@ Result<std::size_t> ReadInPieces(const PixelSource& source, const ImageDescripto
                                                   destination.size - static_cast<std::size_t>(piece.first_element)};
         std::size_t piece_elements = 0;
         if (piece.segments.empty()) {
-            auto read = read_part(piece.request, piece_destination);
+            auto read = read_part(piece.request, piece.request, piece_destination);
             if (!read) {
                 return read.error();
             }
             piece_elements = read.value();
         } else {
             for (const auto& segment : piece.segments) {
-                std::uint64_t segment_elements = 1;
-                for (const auto& range : segment.axes) {
-                    segment_elements *= range.count;
-                }
-                gathered.resize(static_cast<std::size_t>(segment_elements));
-                auto read = read_part(segment, {gathered.data(), gathered.size()});
+                auto read = read_part(segment, piece.request, piece_destination);
                 if (!read) {
                     return read.error();
                 }
-                Place(piece.request, segment, gathered.data(), piece_destination.data);
                 piece_elements += read.value();
             }
         }

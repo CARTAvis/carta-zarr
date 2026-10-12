@@ -176,8 +176,9 @@ more than one element of. A read is always made of pieces, as many as its read b
 that fits is a single piece covering everything. Cutting there and nowhere else is what keeps the
 finished part of the destination a prefix rather than a scatter, which is what lets a caller be told
 how far along it is, or stop it. A piece that holds more than a read affords even at one chunk deep
-is read in **segments**, cut along the axes below, each straight into its place in the destination;
-it is still reported as one piece.
+is read in **segments**, cut along the axes below, each straight into its place in the destination.
+A segment is not a run of the destination -- it lands in parts of it, a run of its first axis at a
+time -- so it is not reported on its own; the piece is, once all of its segments are in.
 _Avoid_: block, slab, chunk, batch
 
 **Read budget**:

@@ -26,7 +26,7 @@ namespace carta::zarr::internal::zarr {
 // Check cooperative cancellation and the deadline at a storage-operation boundary.
 Result<void> CheckReadControl(const ReadControl& control, std::string_view node);
 
-// The order a read's destination is laid out in. CONTEXT.md names both.
+// The order a read's destination is laid out in. GLOSSARY.md names both.
 //
 // An ordinary read wants logical order, because its destination is the caller's and its contract is
 // a dense image in the order the library reports. A pass wants stored order, because a plane that

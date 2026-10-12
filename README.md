@@ -228,7 +228,7 @@ request and options, `reduce.h` for reductions and histograms, `read_ahead.h` fo
 ## Documentation
 
 - [include/carta-zarr](include/carta-zarr) — the API reference, in the headers.
-- [CONTEXT.md](CONTEXT.md) — the vocabulary this codebase uses, and the words it avoids.
+- [GLOSSARY.md](GLOSSARY.md) — the vocabulary this codebase uses, and the words it avoids.
 - [CHANGELOG.md](CHANGELOG.md) — what each release changed.
 - [docs/storage-tuning.md](docs/storage-tuning.md) — choosing a Zarr layout and carta-backend's reader
   settings for Lustre or BeeGFS, what measurements found, and how to measure your own.

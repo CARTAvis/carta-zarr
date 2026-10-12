@@ -92,7 +92,7 @@ Result<void> RequireOpenableDataset(const ProbeResult& probe, std::string_view l
  * identifier to be resolved again. It binds the identifier only: the built-in table outlives every
  * store, so binding a store here would invent a lifetime problem that does not exist.
  *
- * "Profile" rather than "adapter" deliberately -- CONTEXT.md names this concept the schema profile,
+ * "Profile" rather than "adapter" deliberately -- GLOSSARY.md names this concept the schema profile,
  * and an adapter in this codebase is the thing satisfying an interface at a seam, as the filesystem
  * and in-memory transports do.
  */

@@ -44,7 +44,7 @@ struct ReadAheadStats {
 
 // Reading ahead of a playing animation: decoding the next run of chunks of each animated image while
 // the frames of this run play from the cache, so that the frame entering it does not stall. See
-// CONTEXT.md, Run and Read-ahead, and ADR 0016.
+// GLOSSARY.md, Run and Read-ahead, and ADR 0016.
 //
 // A frame that enters a run decodes all of it, which costs what jumping to the channel does, and every
 // frame after it in the run is served from the cache in a few milliseconds. On Lustre, a 7763 x 4742

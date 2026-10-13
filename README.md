@@ -84,7 +84,7 @@ Install these before the first configure:
 | C++ compiler | GCC 10, Clang 8 or Apple Xcode 11.3.1, or newer | C++17, and the compilers TensorStore supports. |
 | Python 3 | 3.10 or newer | TensorStore's build turns its Bazel rules into CMake with a Python script at configure time, and the script uses `match`. Only the interpreter is needed. |
 | NASM | any | TensorStore's configure enables the NASM assembler for codecs it declares, although carta-zarr compiles none of them. |
-| patch | any | TensorStore patches some of its dependencies as it unpacks them. |
+| patch | any | TensorStore patches some of its dependencies as it unpacks them. macOS has it already; a Linux system may not. |
 
 The first configure also needs network access. It downloads TensorStore 0.1.84 and the 42 libraries
 TensorStore declares -- 169 MB of archives, 1.4 GB unpacked -- although only ten of them are compiled:
@@ -95,14 +95,29 @@ about 1.3 GB.
 
 Built and tested with:
 
-- macOS 26 on Apple silicon: Apple clang 21, CMake 4.0, Python 3.13, NASM 3.01, from Homebrew
-  (`brew install cmake nasm python`) and the Xcode command line tools.
-- Ubuntu 24.04: GCC 13.3, CMake 3.28, Python 3.12, NASM 2.16
-  (`sudo apt-get install build-essential cmake python3 nasm patch`).
+- macOS 26 on Apple silicon: Apple clang 21, CMake 4.0, Python 3.13 and NASM 3.01 from Homebrew,
+  and the Xcode command line tools. `patch` comes with macOS.
+
+  ```bash
+  brew install cmake nasm python
+  ```
+
+- Ubuntu 24.04: GCC 13.3, CMake 3.28, Python 3.12, NASM 2.16.
+
+  ```bash
+  sudo apt-get install build-essential cmake python3 nasm patch
+  ```
+
 - AlmaLinux 8.10 with the distribution's gcc-toolset-13 (GCC 13.3), CMake 3.26 and Python 3.12, with
-  PowerTools enabled for NASM (`sudo dnf install gcc-toolset-13-gcc-c++ cmake python3.12 nasm patch`).
-  Its own GCC 8 and Python 3.6 are too old: build in `scl enable gcc-toolset-13 bash`, and configure
-  with `-DPython3_EXECUTABLE=/usr/bin/python3.12`, since Python 3.6 is installed too.
+  PowerTools enabled for NASM. Its own GCC 8 and Python 3.6 are too old: build in the toolset's
+  shell, and name Python 3.12 when configuring, since Python 3.6 is installed too.
+
+  ```bash
+  sudo dnf config-manager --set-enabled powertools
+  sudo dnf install gcc-toolset-13-gcc-c++ cmake python3.12 nasm patch
+  scl enable gcc-toolset-13 bash
+  cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DPython3_EXECUTABLE=/usr/bin/python3.12
+  ```
 
 The storage benchmark, `-DCARTA_ZARR_BUILD_BENCH=ON`, also needs [`uv`](https://docs.astral.sh/uv/);
 see [tools/zarr-bench/README.md](tools/zarr-bench/README.md).
@@ -111,12 +126,14 @@ see [tools/zarr-bench/README.md](tools/zarr-bench/README.md).
 
 ```bash
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
-cmake --build build
+cmake --build build -j 8
 ctest --test-dir build --output-on-failure
-cmake --install build --prefix /your/prefix
+sudo cmake --install build --prefix /opt/carta-zarr
 ```
 
-The first configure builds TensorStore, which takes a while; later ones do not.
+`-j 8` builds with eight jobs at once; set it to the number of cores to spare. The first configure
+builds TensorStore, which takes a while; later ones do not. Installing into `/opt` needs `sudo`; a
+prefix you own, such as `$HOME/.local`, does not.
 
 ### Without network access
 
@@ -150,6 +167,9 @@ licences in `THIRD_PARTY_NOTICES`, which the build writes from their sources and
 find_package(CartaZarr 0.1 CONFIG REQUIRED)
 target_link_libraries(your_target PRIVATE CARTA::zarr)
 ```
+
+A prefix CMake does not search by itself, such as `/opt/carta-zarr`, is named when the consumer is
+configured: `-DCMAKE_PREFIX_PATH=/opt/carta-zarr`.
 
 `tests/consumer` is exactly this, built against the install tree by the `carta-zarr-package-consumer`
 test, so the packaging stays consumable.

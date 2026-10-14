@@ -4,28 +4,24 @@
 
 ### With uv (recommended)
 
-Install uv and Doxygen. On macOS:
+Install uv and Doxygen 1.18 (the version CI pins; other releases may break the
+XML post-processing in `docs/conf.py`). On macOS:
 
 ```sh
 brew install uv doxygen
 ```
+
+Homebrew's current Doxygen is what this was validated with; Ubuntu's package is
+older, so download the pinned release from Doxygen's GitHub releases there.
 
 On Ubuntu, install Git and Doxygen with `sudo apt-get install git doxygen`, then
 install uv using its [official instructions](https://docs.astral.sh/uv/getting-started/installation/).
 uv can download the requested Python interpreter when needed; you do not need
 to install the documentation packages into your system Python.
 
-On another computer, first clone the repository and select the documentation
-branch before running the commands below. To preview an unmerged change, check
-out that change's branch; after merge, use `dev`.
+Run the commands below from the root of the checkout you want to preview.
 
-```sh
-git clone https://github.com/CARTAvis/carta-zarr.git
-cd carta-zarr
-git switch dev
-```
-
-From the repository root, build and serve:
+Build and serve:
 
 ```sh
 uv run --no-project --python 3.12 \
@@ -70,11 +66,16 @@ stay under the ignored `build-docs/` directory.
   package, runs them on committed unversioned, 0.0.2 and continuum fixtures,
   and checks missing-argument failures.
   Keep example changes in step with the public API.
-- Keep diagrams as Mermaid text next to their explanation. Rendering uses the
-  pinned Mermaid browser module and requires access to its CDN.
+- Keep diagrams as Mermaid text next to their explanation. CI renders them to SVG
+  while building, so a syntax error fails the build. Locally, `npm install
+  @mermaid-js/mermaid-cli@11.4.2`, then set `CARTA_ZARR_MMDC` to its `mmdc` and
+  `PUPPETEER_EXECUTABLE_PATH` to a Chrome to do the same; without them diagrams
+  render in the browser from the pinned CDN module and are not checked.
 - Run the strict Sphinx HTML build to catch documentation warnings and broken
-  document references. To audit external links separately, run the same command
-  with `-b linkcheck`; transient external failures need manual interpretation.
+  document references. External links are audited separately by the
+  workflow's weekly `linkcheck` job (also runnable from the Actions tab) or
+  locally with `-b linkcheck`; it never blocks a pull request, and transient
+  external failures need manual interpretation.
 
 ## Publishing and versions
 

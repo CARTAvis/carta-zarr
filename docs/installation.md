@@ -33,6 +33,8 @@ ctest --test-dir build --output-on-failure
 cmake --install build --prefix "$HOME/.local"
 ```
 
+The README installs into `/opt/carta-zarr` with `sudo` instead; use whichever
+prefix suits you, and pass it as `CMAKE_PREFIX_PATH` when building against it.
 Choose a parallel job count appropriate to your machine. TensorStore makes the
 first build substantially larger than subsequent builds.
 

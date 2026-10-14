@@ -30,7 +30,7 @@ returned. For example, an optional observation field may be unavailable while
 the pixels remain readable. `DiagnosticCodeName` provides the diagnostic's name.
 The probe's diagnostics can also explain `kind == invalid`, even though the
 probe call itself succeeded. A 0.0.2 version string with `unversioned_schema`
-means a fallback occurred; consult [schema compatibility](guides/compatibility.md)
+means a fallback occurred; consult [schema versions](reference/schema-versions.md)
 before relying on version-specific fields such as `sub_type` or `channel_width`.
 
 ## Surprising pixel or statistic values

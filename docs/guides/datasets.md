@@ -4,7 +4,7 @@ The `xradio.image` profile supports image schema `0.0.2`, written by XRADIO 1.2.
 and older unversioned stores. Conformance fixtures from both XRADIO 1.2.5 and
 1.2.3 are committed and tested. Schema version, XRADIO package version and
 carta-zarr library version are separate values; see
-[schema compatibility](compatibility.md) before interpreting them.
+[schema versions](../reference/schema-versions.md) before interpreting them.
 
 XRADIO converts a FITS or CASA image:
 

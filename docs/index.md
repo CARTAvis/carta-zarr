@@ -27,23 +27,32 @@ learn how [datasets and images](concepts.md) relate.
 Writing, remote object stores, complex-valued images and aperture-plane images
 are outside the current supported set. Discovery can list unsupported image
 candidates with diagnostics explaining why they cannot be opened.
-See [schema compatibility](guides/compatibility.md) for version selection,
-fallback diagnostics and upgrading an application to carta-zarr 0.2.
+See [schema versions and reading rules](reference/schema-versions.md) for version
+selection and fallback diagnostics, or [upgrade to 0.2](upgrading/0.2.md) from 0.1.
 
 ## Choose your next task
 
-- [List images and read a channel or ROI](guides/reading.md).
+**Read and compute**
+
+- [List images and read a channel or region](guides/reading.md).
 - [Reduce regions and compute histograms](guides/statistics.md).
 - [Control memory, cancellation and animation read-ahead](guides/resources.md).
 - [Build and run the C++ examples](examples.md).
-- [Diagnose a failed open or read](troubleshooting.md).
+
+**Data and storage**
+
 - [Prepare an XRADIO dataset](guides/datasets.md).
 - [Tune storage layouts](storage-tuning.md).
+
+**When something goes wrong, or changes**
+
+- [Diagnose a failed open or read](troubleshooting.md).
+- [Upgrade from 0.1 to 0.2](upgrading/0.2.md).
 - [Understand the architecture](architecture.md).
 
 ```{toctree}
 :hidden:
-:caption: Getting started
+:caption: Get started
 
 installation
 quickstart
@@ -53,15 +62,26 @@ examples
 
 ```{toctree}
 :hidden:
-:caption: How-to guides
+:caption: Read and compute
 
 guides/reading
 guides/statistics
 guides/resources
+```
+
+```{toctree}
+:hidden:
+:caption: Data and storage
+
 guides/datasets
-guides/compatibility
-troubleshooting
 storage-tuning
+```
+
+```{toctree}
+:hidden:
+:caption: Troubleshooting
+
+troubleshooting
 ```
 
 ```{toctree}
@@ -69,8 +89,28 @@ storage-tuning
 :caption: Reference
 
 api/index
-architecture
+reference/schema-versions
 glossary
 changelog
+```
+
+```{toctree}
+:hidden:
+:caption: Background
+
+architecture
+```
+
+```{toctree}
+:hidden:
+:caption: Upgrading
+
+upgrading/0.2
+```
+
+```{toctree}
+:hidden:
+:caption: Contributing
+
 contributing-docs
 ```

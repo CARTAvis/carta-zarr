@@ -56,7 +56,7 @@ versions. Binary distributions must carry `LICENSE` and the installed
 
 The current development version is 0.2.0. Applications built for 0.1 must update
 their CMake version requirement and rebuild against 0.2: public descriptor
-changes affect the ABI. See [schema compatibility and upgrading](guides/compatibility.md)
+changes affect the ABI. See [upgrading to 0.2](upgrading/0.2.md)
 for the metadata changes to check in your application.
 
 Continue with [your first image read](quickstart.md).

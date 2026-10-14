@@ -1,4 +1,4 @@
-# List images and read a channel or ROI
+# List images and read a channel or region
 
 The snippets here assume checked `Context`, `Dataset` and `Image` handles as
 created in the [complete example](../quickstart.md), and use namespace `carta::zarr`.

@@ -1,4 +1,4 @@
-# Schema compatibility and upgrading to 0.2
+# Schema versions and reading rules
 
 Three version numbers describe different things:
 
@@ -61,19 +61,10 @@ to contain a root `schema_version`.
   equinox forms not written by XRADIO are no longer interpreted. A numeric
   date without a format is treated as MJD only under the unversioned rules.
 
-## Update a C++ consumer
-
-Use `find_package(CartaZarr 0.2 CONFIG REQUIRED)`, then rebuild and relink your
-application. Before 1.0, minor versions may change the ABI: a 0.1 binary is not
-compatible with 0.2. Replace uses of `ObservationInfo::date_obs`, handle the
-new diagnostic codes and avoid assuming every dataset reports schema `1.2`.
-
-The [quickstart](../quickstart.md) prints the declared version and dataset
-diagnostics before selecting an image. Its opened descriptor also shows the
-subtype and available spectral frame/increment.
-
 The tests cover both schema families and a 0.0.2 single-channel continuum image.
 See [ADR 0022](https://github.com/CARTAvis/carta-zarr/blob/dev/docs/adr/0022-a-store-is-read-by-the-schema-version-it-names.md)
 for the compatibility policy and the
 [fixture notes](https://github.com/CARTAvis/carta-zarr/blob/dev/tests/data/README.md)
 for how these datasets were produced.
+
+To move an application from carta-zarr 0.1, see [upgrading to 0.2](../upgrading/0.2.md).

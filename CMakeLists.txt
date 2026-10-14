@@ -5,7 +5,7 @@
 
 cmake_minimum_required(VERSION 3.24)
 
-project(carta_zarr VERSION 0.1.0 LANGUAGES CXX)
+project(carta_zarr VERSION 0.2.0 LANGUAGES CXX)
 
 include(GNUInstallDirs)
 include(CMakePackageConfigHelpers)
@@ -77,6 +77,7 @@ add_library(carta_zarr SHARED
     src/schema/xradio/qualification.cc
     src/schema/xradio/coordinates.cc
     src/schema/xradio/image.cc
+    src/schema/xradio/schema_row.cc
     src/zarr/array_metadata.cc
     src/zarr/numeric_array.cc
     src/zarr/pixel_reader.cc
@@ -315,6 +316,7 @@ if(CARTA_ZARR_BUILD_TESTS AND BUILD_TESTING)
             src/schema/xradio/qualification.cc
             src/schema/xradio/coordinates.cc
             src/schema/xradio/image.cc
+            src/schema/xradio/schema_row.cc
             src/zarr/numeric_array.cc
             src/zarr/pixel_selection.cc
             src/zarr/string_array.cc
@@ -585,12 +587,20 @@ if(CARTA_ZARR_BUILD_TESTS AND BUILD_TESTING)
         SOURCES tests/pixel_selection_test.cc src/zarr/pixel_selection.cc)
 
     # Conformance runs against a store XRADIO itself produced, so that a bump of the pinned XRADIO
-    # version reports which of this library's assumptions it broke.
+    # version reports which of this library's assumptions it broke. Once on what the pinned XRADIO
+    # writes, and once on XRADIO 1.2.3's conversions, which name no schema version.
     carta_zarr_add_test(carta_zarr_conformance_tests PUBLIC
         TEST_NAME carta-zarr-xradio-conformance
         SOURCES tests/conformance_test.cc
         DEFINITIONS CARTA_ZARR_CONFORMANCE_FIXTURE="${CARTA_ZARR_FIXTURE_DIR}/xradio/conformance"
-                    CARTA_ZARR_CONFORMANCE_FLAGGED_FIXTURE="${CARTA_ZARR_FIXTURE_DIR}/xradio/conformance_flagged")
+                    CARTA_ZARR_CONFORMANCE_FLAGGED_FIXTURE="${CARTA_ZARR_FIXTURE_DIR}/xradio/conformance_flagged"
+                    CARTA_ZARR_CONFORMANCE_SCHEMA_VERSION="0.0.2")
+    carta_zarr_add_test(carta_zarr_conformance_1_2_tests PUBLIC
+        TEST_NAME carta-zarr-xradio-conformance-1-2
+        SOURCES tests/conformance_test.cc
+        DEFINITIONS CARTA_ZARR_CONFORMANCE_FIXTURE="${CARTA_ZARR_FIXTURE_DIR}/xradio/conformance_1_2"
+                    CARTA_ZARR_CONFORMANCE_FLAGGED_FIXTURE="${CARTA_ZARR_FIXTURE_DIR}/xradio/conformance_flagged_1_2"
+                    CARTA_ZARR_CONFORMANCE_SCHEMA_VERSION="")
 
     # Pixel reads run against a fixture whose values encode their own logical coordinates, so the
     # axis permutation, the stride, the fill value of a deleted chunk and the pixel mask each have a

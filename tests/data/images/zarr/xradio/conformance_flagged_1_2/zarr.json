@@ -1,0 +1,966 @@
+{
+  "attributes": {
+    "coordinate_system_info": {
+      "reference_direction": {
+        "attrs": {
+          "frame": "fk5",
+          "type": "sky_coord",
+          "units": "rad",
+          "equinox": "j2000.0"
+        },
+        "data": [
+          0.7853981633974483,
+          0.5235987755982988
+        ],
+        "dims": "sky_dir_label",
+        "coords": {
+          "sky_dir_label": {
+            "data": [
+              "ra",
+              "dec"
+            ],
+            "dims": "sky_dir_label"
+          }
+        }
+      },
+      "native_pole_direction": {
+        "attrs": {
+          "frame": "NATIVE_PROJECTION",
+          "type": "location",
+          "units": "rad"
+        },
+        "data": [
+          3.141592653589793,
+          0.5235987755982988
+        ],
+        "dims": "ellipsoid_dir_label",
+        "coords": {
+          "ellipsoid_dir_label": {
+            "data": [
+              "lon",
+              "lat"
+            ],
+            "dims": "ellipsoid_dir_label"
+          }
+        }
+      },
+      "projection": "SIN",
+      "projection_parameters": [
+        0.0,
+        0.0
+      ],
+      "pixel_coordinate_transformation_matrix": [
+        [
+          1.0,
+          0.0
+        ],
+        [
+          0.0,
+          1.0
+        ]
+      ]
+    },
+    "type": "image_dataset",
+    "data_groups": {
+      "base": {
+        "sky": "SKY",
+        "beam_fit_params_sky": "BEAM_FIT_PARAMS_SKY",
+        "flag": "FLAG_SKY"
+      },
+      "other": {
+        "sky": "SKY_OTHER",
+        "beam_fit_params_sky": "BEAM_FIT_PARAMS_SKY_OTHER",
+        "flag": "FLAG_SKY_OTHER"
+      }
+    }
+  },
+  "zarr_format": 3,
+  "consolidated_metadata": {
+    "kind": "inline",
+    "must_understand": false,
+    "metadata": {
+      "BEAM_FIT_PARAMS_SKY": {
+        "shape": [
+          1,
+          2,
+          3,
+          3
+        ],
+        "data_type": "float64",
+        "chunk_grid": {
+          "name": "regular",
+          "configuration": {
+            "chunk_shape": [
+              1,
+              2,
+              3,
+              3
+            ]
+          }
+        },
+        "chunk_key_encoding": {
+          "name": "default",
+          "configuration": {
+            "separator": "/"
+          }
+        },
+        "fill_value": "NaN",
+        "codecs": [
+          {
+            "name": "bytes",
+            "configuration": {
+              "endian": "little"
+            }
+          },
+          {
+            "name": "zstd",
+            "configuration": {
+              "level": 0,
+              "checksum": false
+            }
+          }
+        ],
+        "attributes": {
+          "units": "rad",
+          "type": "beam_fit_params_sky",
+          "coordinates": "velocity",
+          "_FillValue": "AAAAAAAA+H8="
+        },
+        "dimension_names": [
+          "time",
+          "frequency",
+          "polarization",
+          "beam_params_label"
+        ],
+        "zarr_format": 3,
+        "node_type": "array",
+        "storage_transformers": []
+      },
+      "BEAM_FIT_PARAMS_SKY_OTHER": {
+        "shape": [
+          1,
+          2,
+          3,
+          3
+        ],
+        "data_type": "float64",
+        "chunk_grid": {
+          "name": "regular",
+          "configuration": {
+            "chunk_shape": [
+              1,
+              2,
+              3,
+              3
+            ]
+          }
+        },
+        "chunk_key_encoding": {
+          "name": "default",
+          "configuration": {
+            "separator": "/"
+          }
+        },
+        "fill_value": "NaN",
+        "codecs": [
+          {
+            "name": "bytes",
+            "configuration": {
+              "endian": "little"
+            }
+          },
+          {
+            "name": "zstd",
+            "configuration": {
+              "level": 0,
+              "checksum": false
+            }
+          }
+        ],
+        "attributes": {
+          "units": "rad",
+          "type": "beam_fit_params_sky_other",
+          "coordinates": "velocity",
+          "_FillValue": "AAAAAAAA+H8="
+        },
+        "dimension_names": [
+          "time",
+          "frequency",
+          "polarization",
+          "beam_params_label"
+        ],
+        "zarr_format": 3,
+        "node_type": "array",
+        "storage_transformers": []
+      },
+      "beam_params_label": {
+        "shape": [
+          3
+        ],
+        "data_type": {
+          "name": "fixed_length_utf32",
+          "configuration": {
+            "length_bytes": 20
+          }
+        },
+        "chunk_grid": {
+          "name": "regular",
+          "configuration": {
+            "chunk_shape": [
+              3
+            ]
+          }
+        },
+        "chunk_key_encoding": {
+          "name": "default",
+          "configuration": {
+            "separator": "/"
+          }
+        },
+        "fill_value": "",
+        "codecs": [
+          {
+            "name": "bytes",
+            "configuration": {
+              "endian": "little"
+            }
+          },
+          {
+            "name": "zstd",
+            "configuration": {
+              "level": 0,
+              "checksum": false
+            }
+          }
+        ],
+        "attributes": {},
+        "dimension_names": [
+          "beam_params_label"
+        ],
+        "zarr_format": 3,
+        "node_type": "array",
+        "storage_transformers": []
+      },
+      "declination": {
+        "shape": [
+          5,
+          4
+        ],
+        "data_type": "float64",
+        "chunk_grid": {
+          "name": "regular",
+          "configuration": {
+            "chunk_shape": [
+              5,
+              4
+            ]
+          }
+        },
+        "chunk_key_encoding": {
+          "name": "default",
+          "configuration": {
+            "separator": "/"
+          }
+        },
+        "fill_value": "NaN",
+        "codecs": [
+          {
+            "name": "bytes",
+            "configuration": {
+              "endian": "little"
+            }
+          },
+          {
+            "name": "zstd",
+            "configuration": {
+              "level": 0,
+              "checksum": false
+            }
+          }
+        ],
+        "attributes": {
+          "_FillValue": "AAAAAAAA+H8="
+        },
+        "dimension_names": [
+          "l",
+          "m"
+        ],
+        "zarr_format": 3,
+        "node_type": "array",
+        "storage_transformers": []
+      },
+      "FLAG_SKY": {
+        "shape": [
+          1,
+          2,
+          3,
+          5,
+          4
+        ],
+        "data_type": "int8",
+        "chunk_grid": {
+          "name": "regular",
+          "configuration": {
+            "chunk_shape": [
+              1,
+              2,
+              3,
+              5,
+              4
+            ]
+          }
+        },
+        "chunk_key_encoding": {
+          "name": "default",
+          "configuration": {
+            "separator": "/"
+          }
+        },
+        "fill_value": 0,
+        "codecs": [
+          {
+            "name": "bytes"
+          },
+          {
+            "name": "zstd",
+            "configuration": {
+              "level": 0,
+              "checksum": false
+            }
+          }
+        ],
+        "attributes": {
+          "type": "flag",
+          "coordinates": "declination right_ascension velocity",
+          "dtype": "bool"
+        },
+        "dimension_names": [
+          "time",
+          "frequency",
+          "polarization",
+          "l",
+          "m"
+        ],
+        "zarr_format": 3,
+        "node_type": "array",
+        "storage_transformers": []
+      },
+      "FLAG_SKY_OTHER": {
+        "shape": [
+          1,
+          2,
+          3,
+          5,
+          4
+        ],
+        "data_type": "int8",
+        "chunk_grid": {
+          "name": "regular",
+          "configuration": {
+            "chunk_shape": [
+              1,
+              2,
+              3,
+              5,
+              4
+            ]
+          }
+        },
+        "chunk_key_encoding": {
+          "name": "default",
+          "configuration": {
+            "separator": "/"
+          }
+        },
+        "fill_value": 0,
+        "codecs": [
+          {
+            "name": "bytes"
+          },
+          {
+            "name": "zstd",
+            "configuration": {
+              "level": 0,
+              "checksum": false
+            }
+          }
+        ],
+        "attributes": {
+          "type": "flag",
+          "coordinates": "declination right_ascension velocity",
+          "dtype": "bool"
+        },
+        "dimension_names": [
+          "time",
+          "frequency",
+          "polarization",
+          "l",
+          "m"
+        ],
+        "zarr_format": 3,
+        "node_type": "array",
+        "storage_transformers": []
+      },
+      "frequency": {
+        "shape": [
+          2
+        ],
+        "data_type": "float64",
+        "chunk_grid": {
+          "name": "regular",
+          "configuration": {
+            "chunk_shape": [
+              2
+            ]
+          }
+        },
+        "chunk_key_encoding": {
+          "name": "default",
+          "configuration": {
+            "separator": "/"
+          }
+        },
+        "fill_value": "NaN",
+        "codecs": [
+          {
+            "name": "bytes",
+            "configuration": {
+              "endian": "little"
+            }
+          },
+          {
+            "name": "zstd",
+            "configuration": {
+              "level": 0,
+              "checksum": false
+            }
+          }
+        ],
+        "attributes": {
+          "rest_frequency": {
+            "data": 1420405751.0,
+            "dims": [],
+            "attrs": {
+              "units": "Hz",
+              "type": "quantity"
+            }
+          },
+          "type": "spectral_coord",
+          "wave_units": "mm",
+          "reference_frequency": {
+            "attrs": {
+              "units": "Hz",
+              "observer": "lsrk",
+              "type": "spectral_coord"
+            },
+            "data": 1400000000.0,
+            "dims": []
+          },
+          "_FillValue": "AAAAAAAA+H8="
+        },
+        "dimension_names": [
+          "frequency"
+        ],
+        "zarr_format": 3,
+        "node_type": "array",
+        "storage_transformers": []
+      },
+      "l": {
+        "shape": [
+          5
+        ],
+        "data_type": "float64",
+        "chunk_grid": {
+          "name": "regular",
+          "configuration": {
+            "chunk_shape": [
+              5
+            ]
+          }
+        },
+        "chunk_key_encoding": {
+          "name": "default",
+          "configuration": {
+            "separator": "/"
+          }
+        },
+        "fill_value": "NaN",
+        "codecs": [
+          {
+            "name": "bytes",
+            "configuration": {
+              "endian": "little"
+            }
+          },
+          {
+            "name": "zstd",
+            "configuration": {
+              "level": 0,
+              "checksum": false
+            }
+          }
+        ],
+        "attributes": {
+          "note": "l is the angle measured from the reference direction to the east. So l = x*cdelt, where x is the number of pixels from the reference direction. See AIPS Memo #27, Section III.",
+          "_FillValue": "AAAAAAAA+H8="
+        },
+        "dimension_names": [
+          "l"
+        ],
+        "zarr_format": 3,
+        "node_type": "array",
+        "storage_transformers": []
+      },
+      "m": {
+        "shape": [
+          4
+        ],
+        "data_type": "float64",
+        "chunk_grid": {
+          "name": "regular",
+          "configuration": {
+            "chunk_shape": [
+              4
+            ]
+          }
+        },
+        "chunk_key_encoding": {
+          "name": "default",
+          "configuration": {
+            "separator": "/"
+          }
+        },
+        "fill_value": "NaN",
+        "codecs": [
+          {
+            "name": "bytes",
+            "configuration": {
+              "endian": "little"
+            }
+          },
+          {
+            "name": "zstd",
+            "configuration": {
+              "level": 0,
+              "checksum": false
+            }
+          }
+        ],
+        "attributes": {
+          "note": "m is the angle measured from the reference direction to the north. So m = y*cdelt, where y is the number of pixels from the reference direction. See AIPS Memo #27, Section III.",
+          "_FillValue": "AAAAAAAA+H8="
+        },
+        "dimension_names": [
+          "m"
+        ],
+        "zarr_format": 3,
+        "node_type": "array",
+        "storage_transformers": []
+      },
+      "polarization": {
+        "shape": [
+          3
+        ],
+        "data_type": {
+          "name": "fixed_length_utf32",
+          "configuration": {
+            "length_bytes": 4
+          }
+        },
+        "chunk_grid": {
+          "name": "regular",
+          "configuration": {
+            "chunk_shape": [
+              3
+            ]
+          }
+        },
+        "chunk_key_encoding": {
+          "name": "default",
+          "configuration": {
+            "separator": "/"
+          }
+        },
+        "fill_value": "",
+        "codecs": [
+          {
+            "name": "bytes",
+            "configuration": {
+              "endian": "little"
+            }
+          },
+          {
+            "name": "zstd",
+            "configuration": {
+              "level": 0,
+              "checksum": false
+            }
+          }
+        ],
+        "attributes": {},
+        "dimension_names": [
+          "polarization"
+        ],
+        "zarr_format": 3,
+        "node_type": "array",
+        "storage_transformers": []
+      },
+      "right_ascension": {
+        "shape": [
+          5,
+          4
+        ],
+        "data_type": "float64",
+        "chunk_grid": {
+          "name": "regular",
+          "configuration": {
+            "chunk_shape": [
+              5,
+              4
+            ]
+          }
+        },
+        "chunk_key_encoding": {
+          "name": "default",
+          "configuration": {
+            "separator": "/"
+          }
+        },
+        "fill_value": "NaN",
+        "codecs": [
+          {
+            "name": "bytes",
+            "configuration": {
+              "endian": "little"
+            }
+          },
+          {
+            "name": "zstd",
+            "configuration": {
+              "level": 0,
+              "checksum": false
+            }
+          }
+        ],
+        "attributes": {
+          "_FillValue": "AAAAAAAA+H8="
+        },
+        "dimension_names": [
+          "l",
+          "m"
+        ],
+        "zarr_format": 3,
+        "node_type": "array",
+        "storage_transformers": []
+      },
+      "SKY": {
+        "shape": [
+          1,
+          2,
+          3,
+          5,
+          4
+        ],
+        "data_type": "float32",
+        "chunk_grid": {
+          "name": "regular",
+          "configuration": {
+            "chunk_shape": [
+              1,
+              2,
+              3,
+              5,
+              4
+            ]
+          }
+        },
+        "chunk_key_encoding": {
+          "name": "default",
+          "configuration": {
+            "separator": "/"
+          }
+        },
+        "fill_value": "NaN",
+        "codecs": [
+          {
+            "name": "bytes",
+            "configuration": {
+              "endian": "little"
+            }
+          },
+          {
+            "name": "zstd",
+            "configuration": {
+              "level": 0,
+              "checksum": false
+            }
+          }
+        ],
+        "attributes": {
+          "type": "sky",
+          "units": "Jy/beam",
+          "telescope": {
+            "name": "Test"
+          },
+          "observer": "CARTA",
+          "obsdate": {
+            "attrs": {
+              "units": "d",
+              "scale": "utc",
+              "format": "mjd",
+              "type": "time"
+            },
+            "data": 59000.5,
+            "dims": []
+          },
+          "pointing_center": {
+            "attrs": {
+              "frame": "fk5",
+              "type": "sky_coord",
+              "units": "rad"
+            },
+            "data": [
+              0.0,
+              0.0
+            ],
+            "dims": "sky_dir_label",
+            "coords": {
+              "sky_dir_label": {
+                "data": [
+                  "ra",
+                  "dec"
+                ],
+                "dims": "sky_dir_label"
+              }
+            }
+          },
+          "object_name": "Zarr conformance source",
+          "user": {
+            "bmaj": 2e-05,
+            "bmin": 1e-05,
+            "bpa": 0.1,
+            "btype": "Intensity",
+            "object": "Zarr conformance source"
+          },
+          "description": null,
+          "beam_fit_params": "BEAM_FIT_PARAMS_SKY",
+          "coordinates": "declination right_ascension velocity",
+          "_FillValue": "AAAAAAAA+H8="
+        },
+        "dimension_names": [
+          "time",
+          "frequency",
+          "polarization",
+          "l",
+          "m"
+        ],
+        "zarr_format": 3,
+        "node_type": "array",
+        "storage_transformers": []
+      },
+      "SKY_OTHER": {
+        "shape": [
+          1,
+          2,
+          3,
+          5,
+          4
+        ],
+        "data_type": "float32",
+        "chunk_grid": {
+          "name": "regular",
+          "configuration": {
+            "chunk_shape": [
+              1,
+              2,
+              3,
+              5,
+              4
+            ]
+          }
+        },
+        "chunk_key_encoding": {
+          "name": "default",
+          "configuration": {
+            "separator": "/"
+          }
+        },
+        "fill_value": "NaN",
+        "codecs": [
+          {
+            "name": "bytes",
+            "configuration": {
+              "endian": "little"
+            }
+          },
+          {
+            "name": "zstd",
+            "configuration": {
+              "level": 0,
+              "checksum": false
+            }
+          }
+        ],
+        "attributes": {
+          "type": "sky",
+          "units": "Jy/beam",
+          "telescope": {
+            "name": "Test"
+          },
+          "observer": "CARTA",
+          "obsdate": {
+            "attrs": {
+              "units": "d",
+              "scale": "utc",
+              "format": "mjd",
+              "type": "time"
+            },
+            "data": 59000.5,
+            "dims": []
+          },
+          "pointing_center": {
+            "attrs": {
+              "frame": "fk5",
+              "type": "sky_coord",
+              "units": "rad"
+            },
+            "data": [
+              0.0,
+              0.0
+            ],
+            "dims": "sky_dir_label",
+            "coords": {
+              "sky_dir_label": {
+                "data": [
+                  "ra",
+                  "dec"
+                ],
+                "dims": "sky_dir_label"
+              }
+            }
+          },
+          "object_name": "Zarr conformance source",
+          "user": {
+            "bmaj": 2e-05,
+            "bmin": 1e-05,
+            "bpa": 0.1,
+            "btype": "Intensity",
+            "object": "Zarr conformance source"
+          },
+          "description": null,
+          "beam_fit_params": "BEAM_FIT_PARAMS_SKY_OTHER",
+          "coordinates": "declination right_ascension velocity",
+          "_FillValue": "AAAAAAAA+H8="
+        },
+        "dimension_names": [
+          "time",
+          "frequency",
+          "polarization",
+          "l",
+          "m"
+        ],
+        "zarr_format": 3,
+        "node_type": "array",
+        "storage_transformers": []
+      },
+      "time": {
+        "shape": [
+          1
+        ],
+        "data_type": "float64",
+        "chunk_grid": {
+          "name": "regular",
+          "configuration": {
+            "chunk_shape": [
+              1
+            ]
+          }
+        },
+        "chunk_key_encoding": {
+          "name": "default",
+          "configuration": {
+            "separator": "/"
+          }
+        },
+        "fill_value": "NaN",
+        "codecs": [
+          {
+            "name": "bytes",
+            "configuration": {
+              "endian": "little"
+            }
+          },
+          {
+            "name": "zstd",
+            "configuration": {
+              "level": 0,
+              "checksum": false
+            }
+          }
+        ],
+        "attributes": {
+          "type": "time",
+          "scale": "utc",
+          "units": "d",
+          "format": "mjd",
+          "_FillValue": "AAAAAAAA+H8="
+        },
+        "dimension_names": [
+          "time"
+        ],
+        "zarr_format": 3,
+        "node_type": "array",
+        "storage_transformers": []
+      },
+      "velocity": {
+        "shape": [
+          2
+        ],
+        "data_type": "float64",
+        "chunk_grid": {
+          "name": "regular",
+          "configuration": {
+            "chunk_shape": [
+              2
+            ]
+          }
+        },
+        "chunk_key_encoding": {
+          "name": "default",
+          "configuration": {
+            "separator": "/"
+          }
+        },
+        "fill_value": "NaN",
+        "codecs": [
+          {
+            "name": "bytes",
+            "configuration": {
+              "endian": "little"
+            }
+          },
+          {
+            "name": "zstd",
+            "configuration": {
+              "level": 0,
+              "checksum": false
+            }
+          }
+        ],
+        "attributes": {
+          "doppler_type": "radio",
+          "units": "m/s",
+          "type": "doppler",
+          "_FillValue": "AAAAAAAA+H8="
+        },
+        "dimension_names": [
+          "frequency"
+        ],
+        "zarr_format": 3,
+        "node_type": "array",
+        "storage_transformers": []
+      }
+    }
+  },
+  "node_type": "group"
+}

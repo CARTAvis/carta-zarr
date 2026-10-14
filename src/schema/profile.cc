@@ -21,9 +21,14 @@ std::string RejectionMessage(const std::vector<Diagnostic>& diagnostics, std::st
 Result<void> RequireOpenableDataset(const ProbeResult& probe, std::string_view location) {
     if (probe.kind != ProbeKind::supported_dataset) {
         // Malformed and unrecognised are different answers, and a consumer acts on the difference:
-        // one is a file to complain about, the other is a file this library is not for.
-        const ErrorCode code =
-            probe.kind == ProbeKind::invalid_dataset ? ErrorCode::invalid_metadata : ErrorCode::unsupported_schema;
+        // one is a file to complain about, the other is a file this library is not for. A dataset of
+        // a schema version this build does not read is a third: a file a newer build may open.
+        ErrorCode code = ErrorCode::unsupported_schema;
+        if (probe.kind == ProbeKind::invalid_dataset) {
+            const bool version = !probe.diagnostics.empty() &&
+                                 probe.diagnostics.front().code == DiagnosticCode::unsupported_schema_version;
+            code = version ? ErrorCode::unsupported_schema_version : ErrorCode::invalid_metadata;
+        }
         return Error{code, RejectionMessage(probe.diagnostics, "No built-in schema profile matched the Zarr store"),
                      std::string(location)};
     }

@@ -60,6 +60,11 @@ root's `data_groups`. Two flags of the same shape mean a reader guessing from di
 candidates for each image. Importing casatools downloads CASA's runtime data (about 340 MB, into
 `~/.casa/data`) the first time.
 
+XRADIO 1.2.5 writes them as image schema 0.0.2. `conformance_1_2` and `conformance_flagged_1_2` are
+the same two conversions by XRADIO 1.2.3, which named no schema version. The script no longer writes
+them; they stay, and the conformance test runs over them too, for as long as this library reads
+stores that name no version ([ADR 0022](../../docs/adr/0022-a-store-is-read-by-the-schema-version-it-names.md)).
+
 ```sh
 ./generate_conformance_fixtures.py
 ```

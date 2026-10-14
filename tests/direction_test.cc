@@ -128,13 +128,15 @@ void TestRadiansBecomeDegrees() {
     Require(Near(direction.reference_pixel.at(0), 3.0), "the tangent point is the third sample, 1-based");
 }
 
-// An equinox arrives as a number or as a string with a leading letter naming the system.
+// An equinox arrives as a string with a leading letter naming the system, which XRADIO writes in lower
+// case ("j2000.0"). A number is no XRADIO's, and is not read.
 void TestEquinoxIsReadInEveryFormXradioWrites() {
     const auto with = [](const nlohmann::json& equinox) {
         return Describe(
             {{"reference_direction", {{"data", {0.0, 0.0}}, {"attrs", {{"frame", "fk5"}, {"equinox", equinox}}}}}});
     };
-    Require(with(2000.0).equinox == 2000.0, "a numeric equinox");
+    Require(!with(2000.0).equinox.has_value(), "a numeric equinox was read");
+    Require(with("j2000.0").equinox == 2000.0, "j2000.0, as XRADIO writes it");
     Require(with("J2000").equinox == 2000.0, "J2000");
     Require(with("B1950").equinox == 1950.0, "B1950");
     Require(with("j2000").equinox == 2000.0, "a lowercase prefix");

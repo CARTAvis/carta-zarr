@@ -35,8 +35,8 @@
   ],
   "attributes": {
     "type": "time",
-    "scale": "utc",
     "units": "d",
+    "scale": "utc",
     "format": "mjd",
     "_FillValue": "AAAAAAAA+H8="
   },

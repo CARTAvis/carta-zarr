@@ -8,6 +8,9 @@
 // produced. The fixtures come from tests/data/generate_conformance_fixtures.py, which converts a
 // FITS image, and two CASA images with internal masks, with a pinned XRADIO. When that pin is bumped and one of these
 // fails, the failure names the assumption the new XRADIO version broke.
+//
+// It runs twice: on the stores XRADIO 1.2.5 writes, of schema 0.0.2, and on the same conversions by
+// XRADIO 1.2.3, which named no schema version and are read by the rules for such stores.
 
 #include "support/check.h"
 
@@ -33,6 +36,8 @@ using carta::zarr::AxisRole;
 
 const std::filesystem::path kFixture{CARTA_ZARR_CONFORMANCE_FIXTURE};
 const std::filesystem::path kFlaggedFixture{CARTA_ZARR_CONFORMANCE_FLAGGED_FIXTURE};
+// The schema version the fixtures name; empty for XRADIO 1.2.3's, which named none.
+const std::string kSchemaVersion{CARTA_ZARR_CONFORMANCE_SCHEMA_VERSION};
 
 using carta::zarr::testing::Require;
 
@@ -48,6 +53,14 @@ carta::zarr::Image OpenSky() {
     const auto matched = carta::zarr::ProbeSchema(kFixture.string(), carta::zarr::kXradioImageSchema);
     Require(matched && matched.value().kind == carta::zarr::SchemaMatchKind::match,
             "XRADIO's own output was not recognized as an image dataset");
+    Require(matched.value().schema_version == kSchemaVersion,
+            "XRADIO's own output reported schema version '" + matched.value().schema_version + "'");
+    const bool unversioned = std::any_of(
+        matched.value().diagnostics.begin(), matched.value().diagnostics.end(),
+        [](const auto& diagnostic) { return diagnostic.code == carta::zarr::DiagnosticCode::unversioned_schema; });
+    Require(unversioned == kSchemaVersion.empty(),
+            kSchemaVersion.empty() ? "XRADIO 1.2.3's output was not said to be read by XRADIO 1.2's rules"
+                                   : "XRADIO's own " + kSchemaVersion + " output was not read as one");
 
     const auto context = carta::zarr::Context::Create();
     Require(static_cast<bool>(context), "Context::Create failed");

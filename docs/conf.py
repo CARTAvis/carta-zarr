@@ -47,6 +47,7 @@ html_theme_options = {
 # GitHub adds heading anchors with JavaScript, so a plain fetch never finds them.
 linkcheck_anchors_ignore_for_url = [r"https://github\.com/"]
 linkcheck_retries = 2
+# The in-browser Mermaid module; mermaid-cli (11.4.2 in CI) is a separate package with its own numbering.
 mermaid_version = "11.4.1"
 # With CARTA_ZARR_MMDC naming a mermaid-cli executable (and PUPPETEER_EXECUTABLE_PATH a
 # Chrome), diagrams render to SVG at build time: syntax errors fail the build and the

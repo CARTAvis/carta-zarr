@@ -84,7 +84,8 @@ int main(int argc, char** argv) {
         for (std::uint64_t i = 0; i < block.channel_count; ++i) {
             const auto* counts = block.Counts(i);
             const auto total = std::accumulate(counts, counts + block.bin_count, std::uint64_t{0});
-            std::cout << "histogram channel=" << block.first_channel + i << " counted=" << total << '\n';
+            const auto channel = planes.spectral.start + (block.first_channel + i) * planes.spectral.stride;
+            std::cout << "histogram channel=" << channel << " counted=" << total << '\n';
         }
         return true;
     });

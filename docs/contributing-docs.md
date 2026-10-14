@@ -4,18 +4,19 @@
 
 ### With uv (recommended)
 
-Install uv and Doxygen 1.18 (the version CI pins; other releases may break the
-XML post-processing in `docs/conf.py`). On macOS:
+Install uv and Doxygen 1.18, the version CI pins: other releases may change the
+XML that `docs/conf.py` post-processes. On macOS:
 
 ```sh
 brew install uv doxygen
 ```
 
-Homebrew's current Doxygen is what this was validated with; Ubuntu's package is
-older, so download the pinned release from Doxygen's GitHub releases there.
-
-On Ubuntu, install Git and Doxygen with `sudo apt-get install git doxygen`, then
-install uv using its [official instructions](https://docs.astral.sh/uv/getting-started/installation/).
+On Ubuntu, the packaged Doxygen is older. Install Git with
+`sudo apt-get install git`, download `doxygen-1.18.0.linux.bin.tar.gz` from
+[Doxygen's releases](https://github.com/doxygen/doxygen/releases/tag/Release_1_18_0)
+and put its `bin` directory on `PATH`, then install uv using its
+[official instructions](https://docs.astral.sh/uv/getting-started/installation/).
+Either way, check that `doxygen --version` prints 1.18.0.
 uv can download the requested Python interpreter when needed; you do not need
 to install the documentation packages into your system Python.
 
@@ -39,8 +40,8 @@ invocations; no activation step or `uv init` is needed.
 
 ### With venv and pip
 
-Install Doxygen (`brew install doxygen` on macOS or `sudo apt-get install doxygen`
-on Ubuntu), then run from the repository root with Python 3.11 or newer:
+Install Doxygen 1.18 as above, then run from the repository root with Python
+3.11 or newer:
 
 ```sh
 python3 -m venv build-docs/venv

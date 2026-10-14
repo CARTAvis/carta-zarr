@@ -16,7 +16,11 @@
 namespace examples {
 
 inline int Report(const carta::zarr::Error& error) {
-    std::cerr << carta::zarr::ErrorCodeName(error.code) << ": " << error.message << " [" << error.node_path << "]\n";
+    std::cerr << carta::zarr::ErrorCodeName(error.code) << ": " << error.message;
+    if (!error.node_path.empty()) {
+        std::cerr << " [" << error.node_path << ']';
+    }
+    std::cerr << '\n';
     return 1;
 }
 

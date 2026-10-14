@@ -6,8 +6,11 @@ the error code name, message and node path together:
 
 ```cpp
 const auto& error = result.error();  // Only after checking !result.
-std::cerr << ErrorCodeName(error.code) << ": " << error.message
-          << " [" << error.node_path << "]\n";
+std::cerr << ErrorCodeName(error.code) << ": " << error.message;
+if (!error.node_path.empty()) {
+    std::cerr << " [" << error.node_path << ']';
+}
+std::cerr << '\n';
 ```
 
 ## Error codes

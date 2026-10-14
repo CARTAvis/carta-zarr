@@ -29,13 +29,9 @@ requires only documentation tools.
 | `read_control` | Select a channel, use progress and cancellation, isolate a scan's cache and prefetch | [Read controls](guides/resources.md#complete-read-control-example) |
 | `animation` | Create a ReadAhead controller, read frames, report upcoming frames and cancel | [Animation](guides/resources.md#complete-animation-example) |
 
-The statistics example examines at most four channels at the first polarization
-and time. Its region reduction uses a patch up to 64 × 64 pixels; histograms
-cover **whole planes**. Reading and animation keep the destination bounded to a
-64 × 64 patch, but decoding still operates on whole chunks. The animation cache
-is 64 MiB: on large datasets, creation can fail with the required cache capacity
-in its error message. The animation CLI demonstrates API usage, not frame-rate
-or read-ahead performance.
+Each linked page explains what its program does and its limits. All of them
+bound the destination to a 64 × 64 patch, but decoding still operates on whole
+chunks.
 
 ## Shared setup
 

@@ -82,13 +82,6 @@ storage-tuning
 
 ```{toctree}
 :hidden:
-:caption: Troubleshooting
-
-troubleshooting
-```
-
-```{toctree}
-:hidden:
 :caption: Reference
 
 api/index
@@ -99,21 +92,16 @@ changelog
 
 ```{toctree}
 :hidden:
-:caption: Background
+:caption: Help
 
-architecture
-```
-
-```{toctree}
-:hidden:
-:caption: Upgrading
-
+troubleshooting
 upgrading/0.2
 ```
 
 ```{toctree}
 :hidden:
-:caption: Contributing
+:caption: Project
 
+architecture
 contributing-docs
 ```

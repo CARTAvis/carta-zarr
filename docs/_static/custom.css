@@ -4,6 +4,7 @@
   margin: 1.5rem 0;
   padding: 1rem;
   border-radius: 0.5rem;
-  background: #f8fafc;
+  /* White in both themes: CI renders diagrams as SVGs with dark text on white. */
+  background: #fff;
 }
 .sidebar-brand-text { font-weight: 650; }

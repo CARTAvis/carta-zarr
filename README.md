@@ -167,7 +167,7 @@ licences in `THIRD_PARTY_NOTICES`, which the build writes from their sources and
 ## Using it from CMake
 
 ```cmake
-find_package(CartaZarr 0.1 CONFIG REQUIRED)
+find_package(CartaZarr 0.2 CONFIG REQUIRED)
 target_link_libraries(your_target PRIVATE CARTA::zarr)
 ```
 
@@ -177,8 +177,8 @@ configured: `-DCMAKE_PREFIX_PATH=/opt/carta-zarr`.
 `tests/consumer` is exactly this, built against the install tree by the `carta-zarr-package-consumer`
 test, so the packaging stays consumable.
 
-Before 1.0 a minor release may change the ABI, so `0.1` finds 0.1.x and nothing else, and the soname
-is `libcarta-zarr.so.0.1`. A binary is rebuilt when the minor moves. From 1.0 on that boundary is the
+Before 1.0 a minor release may change the ABI, so `0.2` finds 0.2.x and nothing else, and the soname
+is `libcarta-zarr.so.0.2`. A binary is rebuilt when the minor moves. From 1.0 on that boundary is the
 major ([ADR 0020](docs/adr/0020-before-1-0-the-minor-version-is-the-abi.md)).
 
 ## Using the API

@@ -14,7 +14,9 @@ std::cerr << ErrorCodeName(error.code) << ": " << error.message
 | `not_found`, `not_zarr` | The path exists and names a Zarr group with root metadata |
 | `unsupported_transport` | Use a local filesystem path; remote stores are not implemented |
 | `unsupported_zarr_version` | The dataset uses Zarr v3 |
-| `unsupported_schema`, `unsupported_schema_version` | The data follows the supported XRADIO image profile |
+| `unsupported_schema` | The data follows the XRADIO image profile |
+| `unsupported_schema_version` | The image dataset declares schema 0.0.2 or has no declared version; other declared versions are refused |
+| `unversioned_schema` diagnostic | The reader used older XRADIO rules: no version was declared, or declared 0.0.2 lacks its required version-specific fields |
 | An entry has `openable == false` | Inspect its diagnostics; complex, aperture-plane and unsupported boolean candidates cannot be opened |
 | `invalid_metadata` during `OpenImage` | The image, coordinates and declared flag agree; consolidated metadata matches each array's own document |
 | `invalid_slice` | Ranges fit the descriptor axes and use valid counts and strides |
@@ -26,6 +28,10 @@ std::cerr << ErrorCodeName(error.code) << ": " << error.message
 A diagnostic is different from an error: the dataset or descriptor is still
 returned. For example, an optional observation field may be unavailable while
 the pixels remain readable. `DiagnosticCodeName` provides the diagnostic's name.
+The probe's diagnostics can also explain `kind == invalid`, even though the
+probe call itself succeeded. A 0.0.2 version string with `unversioned_schema`
+means a fallback occurred; consult [schema compatibility](guides/compatibility.md)
+before relying on version-specific fields such as `sub_type` or `channel_width`.
 
 ## Surprising pixel or statistic values
 

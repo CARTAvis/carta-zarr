@@ -41,7 +41,14 @@ int main(int argc, char** argv) {
         return Report(dataset.error());
     }
 
-    const auto& entries = dataset.value().descriptor().images;
+    const auto& descriptor = dataset.value().descriptor();
+    std::cout << "schema=" << descriptor.schema_id
+              << " version=" << (descriptor.schema_version.empty() ? "(unversioned)" : descriptor.schema_version)
+              << '\n';
+    for (const auto& diagnostic : descriptor.diagnostics) {
+        std::cout << "  " << DiagnosticCodeName(diagnostic.code) << ": " << diagnostic.message << '\n';
+    }
+    const auto& entries = descriptor.images;
     for (const auto& entry : entries) {
         std::cout << entry.id << " openable=" << entry.openable << " role=" << entry.image_role << '\n';
         for (const auto& diagnostic : entry.diagnostics) {
@@ -59,7 +66,19 @@ int main(int argc, char** argv) {
     if (!image) {
         return Report(image.error());
     }
-    const auto& axes = image.value().descriptor().axes;
+    const auto& image_descriptor = image.value().descriptor();
+    if (!image_descriptor.sub_type.empty()) {
+        std::cout << "sub_type=" << image_descriptor.sub_type << '\n';
+    }
+    if (image_descriptor.spectral) {
+        const auto& spectral = *image_descriptor.spectral;
+        std::cout << "spectral frame=" << spectral.system;
+        if (spectral.increment) {
+            std::cout << " increment=" << *spectral.increment << ' ' << spectral.unit;
+        }
+        std::cout << '\n';
+    }
+    const auto& axes = image_descriptor.axes;
     const auto x = AxisIndex(axes, AxisRole::spatial_x);
     const auto y = AxisIndex(axes, AxisRole::spatial_y);
     if (!x || !y) {

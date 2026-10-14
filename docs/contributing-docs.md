@@ -67,7 +67,8 @@ stay under the ignored `build-docs/` directory.
   repository-only links in the changelog and storage guide point to GitHub.
 - The quickstart and advanced guides include the [runnable examples](examples.md)
   directly. The package-consumer test builds all four against the installed
-  package, runs them on a committed fixture and checks missing-argument failures.
+  package, runs them on committed unversioned, 0.0.2 and continuum fixtures,
+  and checks missing-argument failures.
   Keep example changes in step with the public API.
 - Keep diagrams as Mermaid text next to their explanation. Rendering uses the
   pinned Mermaid browser module and requires access to its CDN.

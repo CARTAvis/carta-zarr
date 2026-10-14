@@ -39,7 +39,7 @@ first build substantially larger than subsequent builds.
 ## Link from another CMake project
 
 ```cmake
-find_package(CartaZarr 0.1 CONFIG REQUIRED)
+find_package(CartaZarr 0.2 CONFIG REQUIRED)
 target_link_libraries(your_target PRIVATE CARTA::zarr)
 ```
 
@@ -47,9 +47,14 @@ Configure your application with `-DCMAKE_PREFIX_PATH="$HOME/.local"` when that
 prefix is not otherwise searched. Public headers require only the C++ standard
 library; TensorStore is a private library dependency.
 
-Before 1.0, `0.1` accepts 0.1.x rather than another minor version. Record the
+Before 1.0, `0.2` accepts 0.2.x rather than another minor version. Record the
 exact library version used by your application and rebuild when changing minor
 versions. Binary distributions must carry `LICENSE` and the installed
 `THIRD_PARTY_NOTICES`.
+
+The current development version is 0.2.0. Applications built for 0.1 must update
+their CMake version requirement and rebuild against 0.2: public descriptor
+changes affect the ABI. See [schema compatibility and upgrading](guides/compatibility.md)
+for the metadata changes to check in your application.
 
 Continue with [your first image read](quickstart.md).

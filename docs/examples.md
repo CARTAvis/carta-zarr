@@ -52,8 +52,9 @@ scope.
 ## CI validation
 
 The existing package-consumer test compiles all examples using the installed
-`CartaZarr` CMake package. It runs each on the committed `xradio/pixels` fixture
-and checks that missing arguments report failure. The statistics consumer checks
+`CartaZarr` CMake package. It runs each on the committed synthetic pixel fixture,
+XRADIO 1.2.5's 0.0.2 cube and continuum fixtures, and XRADIO 1.2.3's unversioned
+cube. It also checks that missing arguments report failure. The statistics consumer checks
 that every requested channel receives a final block; the read-control consumer
 checks final progress and the expected `cancelled` error. No assertion depends
 on background prefetch timing.

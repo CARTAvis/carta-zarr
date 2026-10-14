@@ -18,6 +18,10 @@ flowchart LR
 The names above are illustrative: use the IDs the actual listing reports.
 An image role such as sky or residual describes a variable's purpose; it is
 not the ID used to open it.
+For variables typed `sky`, a non-base data group's name can determine the role
+(`model`, `residual`, `dirty`). An opened image's `sub_type` instead describes
+what it measures, such as intensity or spectral index. See
+[schema compatibility](guides/compatibility.md) for version-dependent metadata.
 
 | Object | Responsibility |
 |---|---|

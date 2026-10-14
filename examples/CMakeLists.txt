@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.24)
 project(carta_zarr_examples LANGUAGES CXX)
 
-find_package(CartaZarr 0.1 CONFIG REQUIRED)
+find_package(CartaZarr 0.2 CONFIG REQUIRED)
 
 foreach(example first_read statistics read_control animation)
     add_executable(carta_zarr_${example} ${example}.cc)

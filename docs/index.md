@@ -18,7 +18,7 @@ learn how [datasets and images](concepts.md) relate.
 
 | Supported | Scope |
 |---|---|
-| Schema | XRADIO image profile checked against XRADIO 1.2.x |
+| Schema | XRADIO image schema 0.0.2 and older unversioned XRADIO 1.2 stores |
 | Storage | Local filesystem Zarr v3 groups, including consolidated metadata |
 | Images | Real-valued sky-plane variables with time, frequency, polarization, l and m axes |
 | Output | Pixels converted to float32; reductions accumulated in double |
@@ -27,6 +27,8 @@ learn how [datasets and images](concepts.md) relate.
 Writing, remote object stores, complex-valued images and aperture-plane images
 are outside the current supported set. Discovery can list unsupported image
 candidates with diagnostics explaining why they cannot be opened.
+See [schema compatibility](guides/compatibility.md) for version selection,
+fallback diagnostics and upgrading an application to carta-zarr 0.2.
 
 ## Choose your next task
 
@@ -57,6 +59,7 @@ guides/reading
 guides/statistics
 guides/resources
 guides/datasets
+guides/compatibility
 troubleshooting
 storage-tuning
 ```

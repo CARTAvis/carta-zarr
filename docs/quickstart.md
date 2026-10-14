@@ -31,11 +31,15 @@ ready. The [dataset guide](guides/datasets.md) explains how to produce one.
 
 1. `Context::Create` creates shared cache and execution resources.
 2. `Dataset::Open` opens the Zarr hierarchy, recognises the schema and lists
-   image candidates. It does not load every image's pixels.
+   image candidates. The example prints its declared schema version and
+   diagnostics, including any unversioned fallback. It does not load every
+   image's pixels.
 3. `dataset.descriptor().images` exposes a read-only list of `ImageEntry`
    values. Each has an ID, openability, role, axes and diagnostics.
 4. `Dataset::OpenImage(id)` describes the chosen image and verifies the
    metadata needed to read it. Coordinate values may be read at this stage.
+   The example prints an available image subtype and spectral frame/increment;
+   a 0.0.2 continuum image can obtain its increment from `channel_width`.
 5. `Image::Read` reads into the caller's `float` buffer. Axis 0 varies fastest
    in the densely packed output; flagged pixels become NaN by default.
 

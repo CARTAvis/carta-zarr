@@ -42,6 +42,14 @@ int KnownImageRank(std::string_view image_id) {
     return found == known.end() ? static_cast<int>(known.size()) : static_cast<int>(found - known.begin());
 }
 
+// XRADIO names a spectral frame that astropy also has by astropy's name, lowercased, and every other
+// one by casacore's (CASACORE_TO_OBSERVER in XRADIO's image conventions). Uppercasing gives back
+// casacore's name for all of them but the geocentric frame, which astropy calls GCRS and casacore GEO.
+std::string SpectralSystemOf(const std::string& observer) {
+    auto system = Upper(observer);
+    return system == "GCRS" ? std::string{"GEO"} : system;
+}
+
 // The dataset carries a well-formed array for every sky-plane coordinate. Both XRADIO readers write
 // all five unconditionally (xds_from_casacore.py and xds_from_fits.py both assign coords["time"]), so
 // a missing coordinate means the store is malformed.
@@ -119,7 +127,7 @@ std::optional<SpectralCoordinate> DescribeSpectralCoordinate(const Store& store,
     double reference_value = spectral.channel_frequencies.front();
     if (const auto* const reference_frequency = MemberObject(frequency_attributes, "reference_frequency")) {
         if (const auto* const attributes = MemberObject(*reference_frequency, "attrs")) {
-            spectral.system = Upper(AttributeString(*attributes, "observer"));
+            spectral.system = SpectralSystemOf(AttributeString(*attributes, "observer"));
         }
         if (const auto value = MemberNumber(*reference_frequency, "data")) {
             reference_value = *value;

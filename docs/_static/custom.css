@@ -1,0 +1,9 @@
+.content { max-width: 58rem; }
+.mermaid {
+  overflow-x: auto;
+  margin: 1.5rem 0;
+  padding: 1rem;
+  border-radius: 0.5rem;
+  background: #f8fafc;
+}
+.sidebar-brand-text { font-weight: 650; }

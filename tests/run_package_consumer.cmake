@@ -47,3 +47,11 @@ execute_process(
 if(result)
     message(FATAL_ERROR "External consumer execution failed: ${result}")
 endif()
+
+execute_process(
+    COMMAND "${build_dir}/examples/carta_zarr_first_read"
+            "${CARTA_ZARR_SOURCE_DIR}/tests/data/images/zarr/xradio/pixels"
+    RESULT_VARIABLE result)
+if(result)
+    message(FATAL_ERROR "Documented first-read example failed: ${result}")
+endif()

@@ -253,6 +253,9 @@ request and options, `reduce.h` for reductions and histograms, `read_ahead.h` fo
 
 ## Documentation
 
+- [User documentation](docs/index.md) — installation, a complete first-read example, concepts,
+  task guides and generated public API reference. See [docs/contributing-docs.md](docs/contributing-docs.md)
+  to build the website locally or enable its GitHub Pages workflow.
 - [include/carta-zarr](include/carta-zarr) — the API reference, in the headers.
 - [GLOSSARY.md](GLOSSARY.md) — the vocabulary this codebase uses, and the words it avoids.
 - [CHANGELOG.md](CHANGELOG.md) — what each release changed.

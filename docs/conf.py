@@ -62,6 +62,8 @@ def generate_api(app):
     config = (DOCS / "Doxyfile").read_text()
     filter_command = shlex.join([sys.executable, str(DOCS / "header_filter.py")])
     config += f'\nOUTPUT_DIRECTORY = "{XML}"\nINPUT_FILTER = "{filter_command}"\n'
+    # Doxygen creates only the last directory of OUTPUT_DIRECTORY, and a fresh checkout has no build-docs.
+    XML.mkdir(parents=True, exist_ok=True)
     subprocess.run(["doxygen", "-"], input=config, text=True, cwd=ROOT, check=True)
     # Recent Doxygen versions append primary-template members to the explicit
     # Result<void> specialization, even though it does not inherit them. Keep

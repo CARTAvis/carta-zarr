@@ -44,3 +44,5 @@ to choose one, and still check the result of `OpenImage` and `Read`: files can
 be inaccessible or metadata can be inconsistent.
 
 Next, learn the [core concepts](concepts.md) or [read another channel](guides/reading.md).
+For complete statistics, cancellation and animation programs, see
+[the runnable examples](examples.md).

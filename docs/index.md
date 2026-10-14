@@ -33,6 +33,7 @@ candidates with diagnostics explaining why they cannot be opened.
 - [List images and read a channel or ROI](guides/reading.md).
 - [Reduce regions and compute histograms](guides/statistics.md).
 - [Control memory, cancellation and animation read-ahead](guides/resources.md).
+- [Build and run the C++ examples](examples.md).
 - [Diagnose a failed open or read](troubleshooting.md).
 - [Prepare an XRADIO dataset](guides/datasets.md).
 - [Tune storage layouts](storage-tuning.md).
@@ -45,6 +46,7 @@ candidates with diagnostics explaining why they cannot be opened.
 installation
 quickstart
 concepts
+examples
 ```
 
 ```{toctree}

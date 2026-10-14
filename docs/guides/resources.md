@@ -69,3 +69,34 @@ Cancellation stops scheduling promptly but still respects in-flight storage work
 Read operations can share a handle concurrently. Concurrent reductions share
 one worker pool and interleave computation read by read. See the
 [read-ahead API](../api/read-ahead.md) for precise controller lifetimes and policy.
+
+## Complete read-control example
+
+This program opens an image, reads a bounded patch at channel 1 (or 0 for a
+single-channel image), then demonstrates cancellation and a cached prefetch.
+The zero-byte pool is used for the scan; prefetch and the subsequent read use
+the context's explicitly sized shared cache. The cancelled read is deliberately
+started with its stop flag set so the demonstration is deterministic.
+
+Build and run it using the [example commands](../examples.md#build-and-run).
+Its helpers are documented in [shared setup](../examples.md#shared-setup).
+
+```{literalinclude} ../../examples/read_control.cc
+:language: cpp
+```
+
+## Complete animation example
+
+This program reads a cropped preview for at most four channels. After each read,
+it reports the frame and the upcoming requests to `Served`, then calls `Cancel`
+when the sequence ends. It does not measure a display deadline: a real viewer
+must supply its own frame schedule and lateness measurement.
+
+The controller still requires cache capacity for two whole-plane runs; 64 MiB
+may be insufficient for a large dataset. That failure is reported rather than
+silently falling back. Do not interpret the number of background prefetches in
+this fast CLI as a performance measurement.
+
+```{literalinclude} ../../examples/animation.cc
+:language: cpp
+```

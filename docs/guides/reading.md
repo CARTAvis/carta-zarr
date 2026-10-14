@@ -2,6 +2,9 @@
 
 The snippets here assume checked `Context`, `Dataset` and `Image` handles as
 created in the [complete example](../quickstart.md), and use namespace `carta::zarr`.
+The [runnable read-control example](resources.md#complete-read-control-example)
+selects the second channel when available and performs a bounded spatial read
+with progress and error handling.
 
 ## Inspect the listing
 

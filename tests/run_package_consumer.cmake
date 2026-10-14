@@ -48,10 +48,20 @@ if(result)
     message(FATAL_ERROR "External consumer execution failed: ${result}")
 endif()
 
-execute_process(
-    COMMAND "${build_dir}/examples/carta_zarr_first_read"
-            "${CARTA_ZARR_SOURCE_DIR}/tests/data/images/zarr/xradio/pixels"
-    RESULT_VARIABLE result)
-if(result)
-    message(FATAL_ERROR "Documented first-read example failed: ${result}")
-endif()
+foreach(example first_read statistics read_control animation)
+    execute_process(
+        COMMAND "${build_dir}/examples/carta_zarr_${example}"
+                "${CARTA_ZARR_SOURCE_DIR}/tests/data/images/zarr/xradio/pixels"
+        RESULT_VARIABLE result)
+    if(result)
+        message(FATAL_ERROR "Documented ${example} example failed: ${result}")
+    endif()
+
+    # Check the documented command-line contract, including the error path.
+    execute_process(
+        COMMAND "${build_dir}/examples/carta_zarr_${example}"
+        RESULT_VARIABLE result)
+    if(NOT result EQUAL 1)
+        message(FATAL_ERROR "Documented ${example} example accepted missing arguments: ${result}")
+    endif()
+endforeach()

@@ -2,6 +2,47 @@
 
 ## Build locally
 
+### With uv (recommended)
+
+Install uv and Doxygen. On macOS:
+
+```sh
+brew install uv doxygen
+```
+
+On Ubuntu, install Git and Doxygen with `sudo apt-get install git doxygen`, then
+install uv using its [official instructions](https://docs.astral.sh/uv/getting-started/installation/).
+uv can download the requested Python interpreter when needed; you do not need
+to install the documentation packages into your system Python.
+
+On another computer, first clone the repository and select the documentation
+branch before running the commands below. To preview an unmerged change, check
+out that change's branch; after merge, use `dev`.
+
+```sh
+git clone https://github.com/CARTAvis/carta-zarr.git
+cd carta-zarr
+git switch dev
+```
+
+From the repository root, build and serve:
+
+```sh
+uv run --no-project --python 3.12 \
+  --with-requirements docs/requirements.txt \
+  python -m sphinx -b html -W --keep-going docs build-docs/html
+
+uv run --no-project --python 3.12 \
+  python -m http.server 8000 --bind 127.0.0.1 --directory build-docs/html
+```
+
+Open `http://localhost:8000` in a browser **on that computer**. Keep the terminal
+running; press Ctrl+C to stop serving. After updating the checkout with `git pull`,
+rerun the build command and refresh the browser. uv caches the tools between
+invocations; no activation step or `uv init` is needed.
+
+### With venv and pip
+
 Install Doxygen (`brew install doxygen` on macOS or `sudo apt-get install doxygen`
 on Ubuntu), then run from the repository root with Python 3.11 or newer:
 
@@ -9,7 +50,7 @@ on Ubuntu), then run from the repository root with Python 3.11 or newer:
 python3 -m venv build-docs/venv
 build-docs/venv/bin/python -m pip install -r docs/requirements.txt
 build-docs/venv/bin/python -m sphinx -b html -W --keep-going docs build-docs/html
-python3 -m http.server 8000 --directory build-docs/html
+python3 -m http.server 8000 --bind 127.0.0.1 --directory build-docs/html
 ```
 
 Open `http://localhost:8000`. The docs build runs Doxygen automatically and does
@@ -24,9 +65,10 @@ stay under the ignored `build-docs/` directory.
 - Glossary and changelog pages read the root files rather than maintaining
   copies. Storage tuning retains its existing page. During the site build,
   repository-only links in the changelog and storage guide point to GitHub.
-- The quickstart includes `examples/first_read.cc` directly. The package-consumer
-  test builds and runs it against a committed fixture; keep example changes in
-  step with the public API.
+- The quickstart and advanced guides include the [runnable examples](examples.md)
+  directly. The package-consumer test builds all four against the installed
+  package, runs them on a committed fixture and checks missing-argument failures.
+  Keep example changes in step with the public API.
 - Keep diagrams as Mermaid text next to their explanation. Rendering uses the
   pinned Mermaid browser module and requires access to its CDN.
 - Run the strict Sphinx HTML build to catch documentation warnings and broken

@@ -105,7 +105,8 @@ void TestErrorCodeNames() {
     for (const auto& [error, diagnostic] :
          {std::pair{ErrorCode::invalid_metadata, DiagnosticCode::invalid_metadata},
           std::pair{ErrorCode::unsupported_data_type, DiagnosticCode::unsupported_data_type},
-          std::pair{ErrorCode::ambiguous_schema, DiagnosticCode::ambiguous_schema}}) {
+          std::pair{ErrorCode::ambiguous_schema, DiagnosticCode::ambiguous_schema},
+          std::pair{ErrorCode::unsupported_schema_version, DiagnosticCode::unsupported_schema_version}}) {
         Require(std::string(carta::zarr::ErrorCodeName(error)) == carta::zarr::DiagnosticCodeName(diagnostic),
                 "an error and a diagnostic that share a code spell it differently");
     }

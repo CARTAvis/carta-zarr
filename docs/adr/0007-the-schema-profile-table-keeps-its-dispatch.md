@@ -72,11 +72,15 @@ every `invalid_dataset` to `invalid_metadata`. Distinguishing an ambiguity there
 on a diagnostic's code name, which is worse than leaving it; the right time to fix it is when a
 second profile makes the branch reachable, and it should arrive with the test that reaches it.
 
-`ErrorCode::unsupported_schema_version` is unemitted for the same kind of reason: `schema_version` is
-reported but nothing refuses a store for carrying the wrong one. That is a gap in what profiles do,
-not in how they are dispatched, and this ADR does not close it.
+`ErrorCode::unsupported_schema_version` was unemitted for the same kind of reason: `schema_version`
+was reported but nothing refused a store for carrying the wrong one. ADR 0022 closes that gap, in
+what the XRADIO profile does: `RequireOpenableDataset` reports a probe whose first diagnostic is
+`DiagnosticCode::unsupported_schema_version` as that error.
 
 What would reopen this decision is the opposite of what opened it: if the second profile does not
-arrive, or arrives as a version of the XRADIO one that `InspectImages` handles internally rather than
-as a row of its own, then the table has one entry for a reason that has expired, and collapsing it
-becomes the honest move.
+arrive, then the table has one entry for a reason that has expired, and collapsing it becomes the
+honest move. This paragraph said too that a version of the XRADIO profile handled inside it, rather
+than as a row of the table, would do the same. ADR 0022 handles versions inside it, because which
+version a store is is one rule over the store that two entries would each have to state, and a
+version is not a second schema. The table's reason -- a public schema id, and a defined answer for
+one this library does not have -- is untouched by that, so it does not reopen this.

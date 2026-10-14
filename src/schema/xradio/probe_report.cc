@@ -31,13 +31,14 @@ DiagnosticCode DiagnosticCodeFor(ErrorCode code) {
             return DiagnosticCode::unsupported_data_type;
         case ErrorCode::ambiguous_schema:
             return DiagnosticCode::ambiguous_schema;
+        case ErrorCode::unsupported_schema_version:
+            return DiagnosticCode::unsupported_schema_version;
         case ErrorCode::invalid_metadata:
         case ErrorCode::not_found:
         case ErrorCode::not_zarr:
         case ErrorCode::unsupported_transport:
         case ErrorCode::unsupported_zarr_version:
         case ErrorCode::unsupported_schema:
-        case ErrorCode::unsupported_schema_version:
         case ErrorCode::invalid_argument:
         case ErrorCode::unsupported_codec:
         case ErrorCode::invalid_slice:

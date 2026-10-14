@@ -2,7 +2,7 @@
 # /// script
 # requires-python = ">=3.12,<3.13"
 # dependencies = [
-#   "xradio[zarr]==1.2.3",
+#   "xradio[zarr]==1.2.5",
 #   "casatools==6.7.6.14",
 #   "casaconfig",
 #   "astropy==7.1.0",
@@ -23,11 +23,15 @@ to `xradio.image.open_image()` / `write_image()`, so the result is whatever the 
 actually produces. Regenerate it when the pinned XRADIO version is bumped, and let the conformance
 test report which of our assumptions the new version broke.
 
+XRADIO 1.2.5 writes image schema 0.0.2. `conformance_1_2` and `conformance_flagged_1_2` beside them
+are the same conversions by XRADIO 1.2.3, which wrote no schema version; this script no longer
+writes them, and they are kept for the rules that read such stores until those rules are retired.
+
 XRADIO's FITS reader is strict. Every axis needs CTYPE and CUNIT (including the unitless Stokes
 axis), and the header must carry LONPOLE, LATPOLE, the PC matrix, and DATE-OBS.
 
-Note that `open_image()` imports the casacore layer even for FITS input, and XRADIO excludes
-python-casacore on macOS, so casatools is required on every platform here.
+The flagged fixture is converted from CASA images, which are written with casatools, so casatools
+is required on every platform here.
 """
 
 from __future__ import annotations
@@ -127,7 +131,16 @@ def write_flagged(fits_path: Path, scratch: Path) -> None:
         write_masked_casa_image(casa_path, fits_path, masked)
         stores[role] = str(casa_path)
     xds = open_image(stores)
-    write_image(xds, str(fixture), out_format="zarr", overwrite=True)
+    write_store(write_image, xds, fixture)
+
+
+def write_store(write_image, xds, fixture: Path) -> None:
+    """Writes an image store at `fixture`. XRADIO names an image store `<name>.img.zarr`, which the
+    fixture's path is not, so it is written under that name and moved."""
+    written = Path(write_image(xds, str(fixture), out_format="zarr", overwrite=True)[0])
+    if written != fixture:
+        shutil.rmtree(fixture, ignore_errors=True)
+        written.rename(fixture)
 
 
 def main() -> None:
@@ -142,7 +155,7 @@ def main() -> None:
     write_fits(fits_path)
     try:
         xds = open_image(str(fits_path))
-        write_image(xds, str(fixture), out_format="zarr", overwrite=True)
+        write_store(write_image, xds, fixture)
         write_flagged(fits_path, scratch)
     finally:
         shutil.rmtree(scratch, ignore_errors=True)

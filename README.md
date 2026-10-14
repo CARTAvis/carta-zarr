@@ -21,9 +21,13 @@ its public headers, which need only the C++ standard library.
 ## What it reads
 
 - **Image datasets** written by [XRADIO](https://github.com/casangi/xradio) 1.2.x: one Zarr v3 group
-  holding sky-plane image variables and the coordinates they share. Schema id `xradio.image`,
-  schema version `1.2` -- the layout this library was checked against, not a schema version XRADIO
-  publishes. The conformance fixture is written by XRADIO 1.2.3 itself (see
+  holding sky-plane image variables and the coordinates they share, schema id `xradio.image`. A
+  store naming image schema version `0.0.2`, which XRADIO 1.2.5 writes, is read as that schema
+  defines it. A store naming no version, which is what XRADIO 1.2.4 and earlier wrote, or naming
+  0.0.2 without being one, is read as XRADIO 1.2 wrote it, with a diagnostic saying so; any other
+  version is refused with `unsupported_schema_version`
+  ([ADR 0022](docs/adr/0022-a-store-is-read-by-the-schema-version-it-names.md)). The conformance
+  fixtures are written by XRADIO 1.2.5 itself, beside XRADIO 1.2.3's (see
   [tests/data/README.md](tests/data/README.md)), and following a later XRADIO means pinning that
   generator to it and seeing which assumption breaks.
 - **Images**: real-valued variables carrying all five of `time`, `frequency`, `polarization`, `l`
@@ -45,14 +49,13 @@ XRADIO converts FITS and CASA images itself, and what it writes is what this lib
 from xradio.image import open_image, write_image
 
 xds = open_image("cube.fits")      # a FITS or CASA image, or a dict naming several
-write_image(xds, "cube.zarr", out_format="zarr")
+write_image(xds, "cube", out_format="zarr")  # written as cube.img.zarr
 ```
 
 XRADIO's FITS reader is strict: every axis needs `CTYPE` and `CUNIT`, the Stokes axis included, and
-the header must carry `LONPOLE`, `LATPOLE`, the `PC` matrix and `DATE-OBS`. `open_image` imports
-the casacore layer even for FITS, and on macOS that means casatools.
+the header must carry `LONPOLE`, `LATPOLE`, the `PC` matrix and `DATE-OBS`.
 [tests/data/generate_conformance_fixtures.py](tests/data/generate_conformance_fixtures.py) does
-exactly this with XRADIO 1.2.3 pinned, and runs as it is under `uv`.
+exactly this with XRADIO 1.2.5 pinned, and runs as it is under `uv`.
 
 To store a cube in another chunk layout, or to make one of a given size when there is none to hand,
 [tools/zarr-bench/generate.py](tools/zarr-bench/README.md) rewrites a real cube or synthesizes one.

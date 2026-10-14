@@ -28,6 +28,8 @@ namespace {
 
 using carta::zarr::ObservationInfo;
 using carta::zarr::internal::xradio::DescribeObservation;
+using carta::zarr::internal::xradio::SchemaRow;
+using carta::zarr::internal::xradio::SchemaRows;
 using ArrayMetadata = carta::zarr::internal::zarr::ArrayMetadata;
 
 using carta::zarr::testing::Require;
@@ -36,11 +38,20 @@ bool Near(double left, double right) {
     return std::abs(left - right) <= 1.0e-6 * std::max({1.0, std::abs(left), std::abs(right)});
 }
 
-ObservationInfo Describe(nlohmann::json attributes) {
+// The rows, newest first: schema 0.0.2's, then XRADIO 1.2's unversioned stores'.
+const SchemaRow& Row002() {
+    return SchemaRows().front();
+}
+
+const SchemaRow& UnversionedRow() {
+    return SchemaRows().back();
+}
+
+ObservationInfo Describe(nlohmann::json attributes, const SchemaRow& row = Row002()) {
     ArrayMetadata image;
     image.data_type = "float32";
     image.attributes = std::move(attributes);
-    return DescribeObservation(image);
+    return DescribeObservation(image, row);
 }
 
 void TestTheReadableFieldsAreReported() {
@@ -93,52 +104,36 @@ void TestAnIncompletePositionIsNotHalfConverted() {
     Require(!short_direction.observatory_position.has_value(), "a one-element direction produced a position");
 }
 
-// obsdate carries the scale beside the value, and the value is a date or an MJD depending on what
-// was written. The scale is reported upper-cased, because that is what a FITS TIMESYS is. A date is
-// kept as written and is also reported as the MJD it names, in the same scale, so that a consumer
-// building an epoch reads one field whichever way the writer spelled it.
+// obsdate carries the scale beside the value. The scale is reported upper-cased, because that is what
+// a FITS TIMESYS is, and the value as the MJD it names in that scale.
 void TestObsdateSplitsIntoScaleAndValue() {
-    const auto dated =
-        Describe(nlohmann::json{{"obsdate", {{"attrs", {{"scale", "utc"}}}, {"data", "2020-05-31T12:00:00"}}}});
-    Require(dated.timesys == "UTC", "the obsdate scale was not upper-cased");
-    Require(dated.date_obs == "2020-05-31T12:00:00", "a string obsdate was not reported as a date");
-    Require(dated.mjd_obs.has_value() && Near(*dated.mjd_obs, 59000.5),
-            "a string obsdate was not reported as the MJD it names");
-
-    const auto numeric = Describe(nlohmann::json{{"obsdate", {{"attrs", {{"scale", "tai"}}}, {"data", 61000.5}}}});
+    const auto numeric =
+        Describe(nlohmann::json{{"obsdate", {{"attrs", {{"scale", "tai"}, {"format", "mjd"}}}, {"data", 61000.5}}}});
     Require(numeric.timesys == "TAI", "the obsdate scale was not upper-cased");
     Require(numeric.mjd_obs.has_value() && Near(*numeric.mjd_obs, 61000.5),
             "a numeric obsdate was not reported as an MJD");
-    Require(numeric.date_obs.empty(), "a numeric obsdate also produced a date string");
 }
 
-std::optional<double> MjdOf(nlohmann::json obsdate) {
-    return Describe(nlohmann::json{{"obsdate", std::move(obsdate)}}).mjd_obs;
+std::optional<double> MjdOf(nlohmann::json obsdate, const SchemaRow& row = Row002()) {
+    return Describe(nlohmann::json{{"obsdate", std::move(obsdate)}}, row).mjd_obs;
 }
 
-// The ISO 8601 spellings a writer uses for a date, each read as the MJD it names; one that is not a
-// date, or carries a zone offset this would have to apply, is kept as a string with no MJD rather
-// than guessed at. A number is an MJD unless its format says it is something else: XRADIO writes
-// format "mjd", and seconds since 1970 under "unix" are converted, while a format this does not know
-// yields no MJD rather than a wrong one.
+// A number is read by the format written beside it: XRADIO writes "mjd", and seconds since 1970 under
+// "unix" are converted, while a format this does not know yields no MJD rather than a wrong one. A
+// number with no format is an MJD for an XRADIO 1.2 store, as it always was, and nothing for a 0.0.2
+// one, which requires the format. A string is no XRADIO's date, and is not read.
 void TestObsdateSpellings() {
-    const auto mjd = [](const char* date) { return MjdOf({{"data", date}}); };
-    Require(mjd("2020-05-31") && Near(*mjd("2020-05-31"), 59000.0), "a bare date was not read");
-    Require(mjd("2020-05-31 12:00") && Near(*mjd("2020-05-31 12:00"), 59000.5), "a minute date was not read");
-    Require(mjd("2020-05-31T18:00:00.000Z") && Near(*mjd("2020-05-31T18:00:00.000Z"), 59000.75),
-            "a fractional UTC-suffixed date was not read");
-    Require(mjd("1858-11-17T00:00:00") && Near(*mjd("1858-11-17T00:00:00"), 0.0), "the MJD epoch was not day 0");
-    Require(mjd("2016-12-31T23:59:60") && Near(*mjd("2016-12-31T23:59:60"), 57754.0), "a leap second was not read");
-    for (const char* refused : {"", "yesterday", "2020-13-01", "2020-02-30", "2020-05-31T24:00:00",
-                                "2020-05-31T12:00:00+08:00", "2020-05-31T12:00:00junk"}) {
-        Require(!mjd(refused), std::string("an obsdate of '") + refused + "' was read as an MJD");
-    }
-
     Require(MjdOf({{"attrs", {{"format", "MJD"}}}, {"data", 59000.5}}) == 59000.5,
             "an mjd-format number was not an MJD");
     const auto unix_seconds = MjdOf({{"attrs", {{"format", "unix"}}}, {"data", 1590926400.0}});
     Require(unix_seconds && Near(*unix_seconds, 59000.5), "a unix-format number was not converted to an MJD");
     Require(!MjdOf({{"attrs", {{"format", "jyear"}}}, {"data", 2020.4}}), "a number of an unknown format was an MJD");
+
+    Require(MjdOf({{"data", 59000.5}}, UnversionedRow()) == 59000.5,
+            "an XRADIO 1.2 number with no format was not an MJD");
+    Require(!MjdOf({{"data", 59000.5}}), "a 0.0.2 number with no format was read as an MJD");
+    Require(!MjdOf({{"attrs", {{"format", "mjd"}}}, {"data", "2020-05-31T12:00:00"}}), "a string date was read");
+    Require(!MjdOf({{"data", "2020-05-31T12:00:00"}}, UnversionedRow()), "a string date was read for XRADIO 1.2");
 }
 
 // An image carrying none of it is described, not refused.

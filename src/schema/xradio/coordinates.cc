@@ -85,14 +85,14 @@ std::optional<Diagnostic> ExtentDisagreement(const Store& store, const zarr_meta
     return std::nullopt;
 }
 
-std::string CoordinateUnit(const Store& store, const Coordinate& coordinate) {
+std::string CoordinateUnit(const Store& store, const Coordinate& coordinate, const SchemaRow& row) {
     const auto& metadata = store.ReadArrayMetadata(coordinate.name);
     if (!metadata) {
         return {};
     }
     const auto& attributes = metadata.value().attributes;
     auto unit = AttributeString(attributes, "units");
-    if (unit.empty() && coordinate.role == AxisRole::spectral) {
+    if (unit.empty() && coordinate.role == AxisRole::spectral && row.unit_from_reference_frequency) {
         if (const auto* const reference = MemberObject(attributes, "reference_frequency")) {
             if (const auto* const measure = MemberObject(*reference, "attrs")) {
                 unit = AttributeString(*measure, "units");
@@ -102,7 +102,8 @@ std::string CoordinateUnit(const Store& store, const Coordinate& coordinate) {
     return unit;
 }
 
-std::vector<AxisDescriptor> DescribeAxes(const Store& store, const zarr_metadata::ArrayMetadata& image) {
+std::vector<AxisDescriptor> DescribeAxes(const Store& store, const zarr_metadata::ArrayMetadata& image,
+                                         const SchemaRow& row) {
     std::vector<AxisDescriptor> axes;
     axes.reserve(AxisCount(Plane::sky));
     for (const auto& coordinate : kCoordinates) {
@@ -114,7 +115,7 @@ std::vector<AxisDescriptor> DescribeAxes(const Store& store, const zarr_metadata
             continue;
         }
         axes.push_back(AxisDescriptor{std::string(coordinate.name), coordinate.role, image.shape.at(*index),
-                                      CoordinateUnit(store, coordinate), *index});
+                                      CoordinateUnit(store, coordinate, row), *index});
     }
     return axes;
 }

@@ -43,6 +43,8 @@
       }
     },
     "type": "spectral_coord",
+    "units": "Hz",
+    "frame": "LSRK",
     "wave_units": "mm",
     "reference_frequency": {
       "attrs": {
@@ -52,6 +54,14 @@
       },
       "data": 1400000000.0,
       "dims": []
+    },
+    "channel_width": {
+      "data": 1000000.0,
+      "dims": [],
+      "attrs": {
+        "units": "Hz",
+        "type": "quantity"
+      }
     },
     "_FillValue": "AAAAAAAA+H8="
   },

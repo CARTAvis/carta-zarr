@@ -60,19 +60,15 @@ Result<DirectionCoordinate> ReadCoordinateSystem(const nlohmann::json& root_attr
     }
     if (const auto* const attributes = MemberObject(*reference_direction, "attrs")) {
         direction.reference_frame = Upper(AttributeString(*attributes, "frame"));
-        if (const auto* const equinox = Member(*attributes, "equinox"); equinox != nullptr) {
-            if (equinox->is_number()) {
-                direction.equinox = equinox->get<double>();
-            } else if (equinox->is_string()) {
-                const std::string value = equinox->get<std::string>();
-                const std::size_t position = (value.size() > 1 && (value.at(0) == 'J' || value.at(0) == 'B' ||
-                                                                   value.at(0) == 'j' || value.at(0) == 'b'))
-                                               ? 1
-                                               : 0;
-                try {
-                    direction.equinox = std::stod(value.substr(position));
-                } catch (...) {
-                }
+        // As XRADIO writes it, a string naming the epoch: "j2000.0", "b1950.0".
+        if (const std::string value = AttributeString(*attributes, "equinox"); !value.empty()) {
+            const std::size_t position = (value.size() > 1 && (value.at(0) == 'J' || value.at(0) == 'B' ||
+                                                               value.at(0) == 'j' || value.at(0) == 'b'))
+                                           ? 1
+                                           : 0;
+            try {
+                direction.equinox = std::stod(value.substr(position));
+            } catch (...) {
             }
         }
     }

@@ -152,7 +152,7 @@ void TestValidAndTimeAxis(const std::filesystem::path& root) {
     const auto result = carta::zarr::ProbeSchema(root.string(), carta::zarr::kXradioImageSchema);
     Require(result && result.value().kind == SchemaMatchKind::match, "valid XRADIO store did not match");
     Require(result.value().schema_id == carta::zarr::kXradioImageSchema, "unexpected schema id");
-    Require(result.value().schema_version == "1.2", "unexpected schema version");
+    Require(result.value().schema_version.empty(), "a store naming no schema version reported one");
 
     const auto is_xradio = carta::zarr::ProbeSchema(root.string(), carta::zarr::kXradioImageSchema);
     Require(is_xradio && is_xradio.value().kind == SchemaMatchKind::match,

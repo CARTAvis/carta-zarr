@@ -1,5 +1,8 @@
 # Attribute layouts follow the XRADIO implementation, not its schema document
 
+*Superseded by [ADR 0022](0022-a-store-is-read-by-the-schema-version-it-names.md) for stores that name an image schema
+version. It still describes how a store that names none is read.*
+
 Where the XRADIO schema document and the released XRADIO code disagree about how an attribute is
 spelled or where it lives, this library follows the code. The schema document is an unfinished draft
 of a v2 layout; the code is what produced every file we will actually be handed.

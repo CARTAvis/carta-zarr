@@ -43,6 +43,11 @@ struct SchemaRow {
     // Whether an observation date written as a number with no format is an MJD, as XRADIO 1.2 has
     // always been read. Schema 0.0.2 requires the format.
     bool unformatted_date_is_mjd;
+    // Whether a frequency coordinate's channel_width is the increment of an axis of one channel, which
+    // its one channel cannot give.
+    bool increment_from_channel_width;
+    // Whether a sky image's sub_type, what it measures, is read.
+    bool reads_sub_type;
     // XRADIO's names for a dataset's images, in the order they are listed. Any other is listed after
     // them, by name.
     std::vector<std::string_view> known_images;
@@ -55,6 +60,8 @@ inline const std::vector<SchemaRow>& SchemaRows() {
                   SpectralFrameSource::frame_attribute,
                   false,
                   false,
+                  true,
+                  true,
                   {"SKY", "SKY_MODEL", "SKY_RESIDUAL", "SKY_DIRTY", "POINT_SPREAD_FUNCTION", "PRIMARY_BEAM", "MASK"}},
         // XRADIO 1.2 named a deconvolution's products both ways: MODEL and RESIDUAL from a list of
         // tclean's images, SKY_MODEL and SKY_RESIDUAL from a dict of them.
@@ -62,6 +69,8 @@ inline const std::vector<SchemaRow>& SchemaRows() {
                   SpectralFrameSource::reference_observer,
                   true,
                   true,
+                  false,
+                  false,
                   {"SKY", "SKY_MODEL", "SKY_RESIDUAL", "SKY_DIRTY", "MODEL", "RESIDUAL", "DIRTY",
                    "POINT_SPREAD_FUNCTION", "PRIMARY_BEAM", "MASK", "MASK_DECONVOLVE"}},
     };

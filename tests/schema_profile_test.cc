@@ -27,6 +27,7 @@
 
 #include <algorithm>
 #include <chrono>
+#include <cmath>
 #include <cstdint>
 #include <exception>
 #include <iostream>
@@ -1738,6 +1739,65 @@ void TestEachRowReadsAnImagesPartAndListsItsNames() {
             "a dataset of a dirty image and a mask did not open on the dirty image");
 }
 
+// A continuum image has one channel, and one channel has no spacing to fit an increment from. Schema
+// 0.0.2 states the channel's width, which is then the increment, measured from that channel; a store
+// naming no version states none, and its axis has no linear description, as before. An axis of more
+// channels is described by its channels, whatever width it states.
+void TestA002ChannelWidthIsTheIncrementOfOneChannel() {
+    using carta::zarr::internal::xradio::CoordinateValues;
+    using carta::zarr::internal::xradio::DescribeImageFrom;
+
+    const std::string frequency = R"({"units":"Hz","frame":"LSRK","channel_width":{"data":2.5e5,"dims":[],
+        "attrs":{"units":"Hz","type":"quantity"}},"reference_frequency":{"data":1.4e9,"attrs":{"units":"Hz"}}})";
+    const auto describe = [](std::map<std::string, std::string> nodes, std::vector<double> channels) {
+        auto store = Open(std::move(nodes));
+        Require(static_cast<bool>(store), "the in-memory store failed to open");
+        CoordinateValues values;
+        values.frequency = std::move(channels);
+        auto described = DescribeImageFrom(store.value(), "SKY", values);
+        Require(static_cast<bool>(described) && described.value().descriptor.spectral.has_value(),
+                "a channel should make a spectral coordinate");
+        return *described.value().descriptor.spectral;
+    };
+
+    const auto continuum_sky = [](const std::string& attributes) {
+        return NumericArray("[1,1,2,4,5]", R"(["time","frequency","polarization","l","m"])", "float32", attributes);
+    };
+    auto continuum = Store002();
+    continuum["SKY"] = continuum_sky(R"({"units":"Jy/beam","type":"sky"})");
+    continuum["frequency"] = NumericArray("[1]", R"(["frequency"])", "float64", frequency);
+    const auto one = describe(continuum, {1.4e9});
+    Require(one.increment == 2.5e5, "a 0.0.2 channel's width was not its increment");
+    Require(one.reference_pixel == 1.0 && one.reference_value == 1.4e9,
+            "the increment of one channel was not measured from it");
+
+    auto old = CompleteStore();
+    old["SKY"] = continuum_sky(R"({"units":"Jy/beam"})");
+    old["frequency"] = NumericArray("[1]", R"(["frequency"])", "float64", frequency);
+    const auto unversioned = describe(old, {1.4e9});
+    Require(!unversioned.increment && !unversioned.reference_pixel,
+            "a store naming no version was given an increment for its one channel");
+
+    auto cube = Store002();
+    cube["frequency"] = NumericArray("[3]", R"(["frequency"])", "float64", frequency);
+    const auto three = describe(cube, {1.4e9, 1.401e9, 1.402e9});
+    Require(three.increment && std::abs(*three.increment - 1.0e6) < 1.0e-3,
+            "an axis of three channels was not described by its channels");
+}
+
+// What a sky image measures is read from a 0.0.2 store as XRADIO names it, and from no other.
+void TestA002SkyImageSaysWhatItMeasures() {
+    auto nodes = Store002();
+    nodes["SKY"] = SkyArray("float32", R"({"units":"","type":"sky","sub_type":"SpectralIndex"})");
+    Require(DescribeWithChannels(nodes).descriptor.sub_type == "SpectralIndex", "a 0.0.2 sub_type was not read");
+    Require(DescribeWithChannels(Store002()).descriptor.sub_type.empty(),
+            "a 0.0.2 image naming no sub_type reported one");
+
+    auto old = CompleteStore();
+    old["SKY"] = SkyArray("float32", R"({"units":"","type":"sky","sub_type":"SpectralIndex"})");
+    Require(DescribeWithChannels(old).descriptor.sub_type.empty(), "a store naming no version had its sub_type read");
+}
+
 }  // namespace
 
 int main() {
@@ -1794,6 +1854,8 @@ int main() {
         TestAnIntegerSkyImageXradioWroteOpens();
         TestAnotherDatasetNamingAVersionIsNotAnImage();
         TestEachRowReadsAnImagesPartAndListsItsNames();
+        TestA002ChannelWidthIsTheIncrementOfOneChannel();
+        TestA002SkyImageSaysWhatItMeasures();
         std::cout << "carta-zarr schema profile tests passed\n";
         return 0;
     } catch (const std::exception& error) {

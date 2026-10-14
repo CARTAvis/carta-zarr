@@ -19,6 +19,7 @@
 #include "schema_row.h"
 
 #include <algorithm>
+#include <cmath>
 #include <cstddef>
 #include <iterator>
 #include <optional>
@@ -161,6 +162,22 @@ std::optional<SpectralCoordinate> DescribeSpectralCoordinate(const Store& store,
     spectral.reference_value = fit.reference_value;
     spectral.increment = fit.increment;
     AppendDiagnostics(descriptor, std::move(fit.diagnostics));
+
+    // An axis of one channel has no spacing to fit an increment from. Schema 0.0.2 states the width
+    // of every channel, and for the one channel that is the increment, measured from it. An axis of
+    // more channels keeps what its channels say, whatever the width says.
+    if (!spectral.increment && spectral.channel_frequencies.size() == 1 && row.increment_from_channel_width) {
+        if (const auto* const width = MemberObject(frequency_attributes, "channel_width")) {
+            const auto* const attributes = MemberObject(*width, "attrs");
+            const std::string unit = attributes == nullptr ? std::string{} : AttributeString(*attributes, "units");
+            const auto value = MemberNumber(*width, "data");
+            if (value && std::isfinite(*value) && *value != 0.0 && (unit.empty() || unit == spectral.unit)) {
+                spectral.reference_pixel = 1.0;
+                spectral.reference_value = spectral.channel_frequencies.front();
+                spectral.increment = *value;
+            }
+        }
+    }
     return spectral;
 }
 
@@ -380,6 +397,9 @@ Result<DescribedImage> DescribeImageFrom(const Store& store, std::string_view im
     descriptor.unit = AttributeString(image.attributes, "units");
     const auto& root_attrs = store.RootAttributes();
     descriptor.image_role = ImageRoleOf(image, image_id, root_attrs);
+    if (row.reads_sub_type) {
+        descriptor.sub_type = AttributeString(image.attributes, "sub_type");
+    }
     descriptor.data_groups = FindDataGroups(root_attrs, image_id);
     descriptor.axes = DescribeAxes(store, image, row);
 

@@ -21,6 +21,8 @@ name none. A row holds only what differs between versions:
   observer otherwise, upper-cased with astropy's GCRS read as casacore's GEO;
 - whether a frequency with no units takes its reference frequency's;
 - whether an observation date with no format is an MJD;
+- the fields only 0.0.2 writes: a channel's width, the increment of an axis of one channel, and a sky
+  image's `sub_type`;
 - XRADIO's names for a dataset's images, in the order they are listed: XRADIO 1.2 named a
   deconvolution's products both `MODEL` and `SKY_MODEL`, by whether it was handed a list of them or a
   dict, and 0.0.2 only the second.

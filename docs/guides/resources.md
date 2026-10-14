@@ -1,4 +1,4 @@
-# Memory, cancellation and animation
+# Control memory, cancellation and read-ahead
 
 ## Cache and temporary memory
 

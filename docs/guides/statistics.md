@@ -15,8 +15,8 @@ Keep the region array and any rasters alive until the operation returns.
 
 Consume a `SpectralBlock` only during the callback. The example ignores blocks
 where `complete` is false: incomplete blocks are refined and emitted again,
-and final values replace earlier estimates. Copy data if you need to retain it
-past the callback. Returning false cancels the operation.
+and final values replace earlier estimates. Returning false cancels the operation. Blocks are borrowed, as the
+[core concepts](../concepts.md#rules-that-apply-to-every-operation) explain.
 
 `first_channel` is an index into the requested spectral selection. The actual
 image channel is `start + (first_channel + i) * stride`, as the program prints.

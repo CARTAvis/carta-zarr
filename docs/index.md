@@ -1,8 +1,11 @@
 # Read XRADIO images from C++
 
-carta-zarr is a read-only C++17 library for XRADIO images stored as Zarr v3.
-Open a dataset, choose an image, and read pixels or compute statistics without
-exposing TensorStore to your application.
+carta-zarr is a read-only C++17 library for radio-astronomy images stored as
+[Zarr](https://zarr.dev/) v3 in the [XRADIO](https://github.com/casangi/xradio)
+layout, the Python image model of the CASA ecosystem. Open a dataset, choose an
+image, and read pixels or compute statistics without exposing TensorStore, the
+storage engine underneath, to your application. Terms are defined in the
+[glossary](glossary.md).
 
 ```{warning}
 This is **development documentation** for an unreleased library. Before 1.0,
@@ -20,7 +23,7 @@ learn how [datasets and images](concepts.md) relate.
 |---|---|
 | Schema | XRADIO image schema 0.0.2 and older unversioned XRADIO 1.2 stores |
 | Storage | Local filesystem Zarr v3 groups, including consolidated metadata |
-| Images | Real-valued sky-plane variables with time, frequency, polarization, l and m axes |
+| Images | Real-valued sky-plane variables with time, frequency, polarization, and l and m (direction-cosine) axes |
 | Output | Pixels converted to float32; reductions accumulated in double |
 | Flags | Applied by default; flagged pixels become NaN |
 

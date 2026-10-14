@@ -1,13 +1,16 @@
 # Troubleshooting
 
-Check every `Result` before accessing its value. Report the error code name,
-message and node path together:
+Check every `Result` before accessing its value, as the
+[core concepts](concepts.md#rules-that-apply-to-every-operation) require. Report
+the error code name, message and node path together:
 
 ```cpp
 const auto& error = result.error();  // Only after checking !result.
 std::cerr << ErrorCodeName(error.code) << ": " << error.message
           << " [" << error.node_path << "]\n";
 ```
+
+## Error codes
 
 | Symptom or code | What to check |
 |---|---|
@@ -24,6 +27,8 @@ std::cerr << ErrorCodeName(error.code) << ": " << error.message
 | `buffer_too_small` creating read-ahead | Cache capacity can retain two runs of decoded chunks |
 | `io_error`, `decode_error`, `unsupported_codec` | Inspect the exact node and message for permissions, inaccessible chunks or an encoding problem |
 | `cancelled` | A cancellation callback, progress sink or deadline stopped the operation |
+
+## Diagnostics
 
 A diagnostic is different from an error: the dataset or descriptor is still
 returned. For example, an optional observation field may be unavailable while

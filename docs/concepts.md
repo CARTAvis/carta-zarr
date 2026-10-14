@@ -1,4 +1,4 @@
-# Datasets, images and reads
+# Core concepts: datasets, images and reads
 
 ## Dataset versus image
 
@@ -56,6 +56,22 @@ A reduction's **region mask** selects pixels within a bounding box: nonzero
 means included. A deconvolution mask is an ordinary image, rather than a flag.
 These three serve different purposes.
 
+## Rules that apply to every operation
+
+These hold for all reads, reductions and histograms; the guides link here
+rather than repeating them.
+
+- **Check every `Result`** before using its value. Failures carry an error
+  code, message and node path.
+- **A failed or cancelled read leaves the destination undefined.** Discard it,
+  even if progress had already reported a completed prefix.
+- **Flags are applied by default.** A flagged pixel is output as NaN and
+  excluded from reductions; stored NaNs stay NaN either way.
+- **Borrowed views last only for the callback.** A reduction block or histogram
+  `Counts` view is valid inside the sink; copy what you need to keep.
+- **Handles are shared; destinations belong to you.** Keep your buffers and
+  region rasters alive until the operation returns.
+
 ## Results, diagnostics and lifetimes
 
 Public operations return `Result<T>` with an error code, message and node path
@@ -69,6 +85,4 @@ handle. A reference obtained from `descriptor()` must not outlive the object
 that owns the underlying descriptor.
 
 Pixel destinations and region views belong to the caller. Keep them alive
-through the operation. Reduction blocks are borrowed only during the sink
-callback; copy values you need to retain. On a failed read, discard the
-destination even if progress had already reported a completed prefix.
+through the operation.

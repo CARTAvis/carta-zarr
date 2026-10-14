@@ -1,4 +1,4 @@
-# Maintain the documentation
+# Contributing to the documentation
 
 ## Build locally
 

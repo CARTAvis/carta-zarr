@@ -56,13 +56,13 @@ to contain a root `schema_version`.
   single frequency as reference value. The width's unit must be absent or match
   the spectral unit. Multi-channel increments still come from their samples;
   a missing or invalid width does not invent a spacing.
-- **Observation dates:** use `ObservationInfo::mjd_obs` and `timesys`.
+- **Observation dates:** use `ObservationInfo::mjd_obs` (Modified Julian Date, MJD) and `timesys`.
   `date_obs` has been removed; string-valued observation dates and numeric
   equinox forms not written by XRADIO are no longer interpreted. A numeric
   date without a format is treated as MJD only under the unversioned rules.
 
 The tests cover both schema families and a 0.0.2 single-channel continuum image.
-See [ADR 0022](https://github.com/CARTAvis/carta-zarr/blob/dev/docs/adr/0022-a-store-is-read-by-the-schema-version-it-names.md)
+See [ADR 0022 (architecture decision record)](https://github.com/CARTAvis/carta-zarr/blob/dev/docs/adr/0022-a-store-is-read-by-the-schema-version-it-names.md)
 for the compatibility policy and the
 [fixture notes](https://github.com/CARTAvis/carta-zarr/blob/dev/tests/data/README.md)
 for how these datasets were produced.

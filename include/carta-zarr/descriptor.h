@@ -327,6 +327,10 @@ struct DatasetSize {
 struct ImageDescriptor {
     std::string id;
     std::string image_role;
+    // What a sky image measures, as XRADIO image schema 0.0.2 names it from casacore's image type or
+    // FITS BTYPE ("Intensity", "SpectralIndex", "OpticalDepth", ...). Empty when the image names none,
+    // and for a store that names no schema version.
+    std::string sub_type;
     std::vector<std::string> data_groups;
     DataType stored_type = DataType::unknown;
     // In the image's logical order, which a request's ranges follow. Find one with AxisIndex rather

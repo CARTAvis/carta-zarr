@@ -594,6 +594,7 @@ if(CARTA_ZARR_BUILD_TESTS AND BUILD_TESTING)
         SOURCES tests/conformance_test.cc
         DEFINITIONS CARTA_ZARR_CONFORMANCE_FIXTURE="${CARTA_ZARR_FIXTURE_DIR}/xradio/conformance"
                     CARTA_ZARR_CONFORMANCE_FLAGGED_FIXTURE="${CARTA_ZARR_FIXTURE_DIR}/xradio/conformance_flagged"
+                    CARTA_ZARR_CONFORMANCE_CONTINUUM_FIXTURE="${CARTA_ZARR_FIXTURE_DIR}/xradio/conformance_continuum"
                     CARTA_ZARR_CONFORMANCE_SCHEMA_VERSION="0.0.2")
     carta_zarr_add_test(carta_zarr_conformance_1_2_tests PUBLIC
         TEST_NAME carta-zarr-xradio-conformance-1-2

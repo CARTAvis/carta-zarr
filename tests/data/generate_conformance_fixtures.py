@@ -46,6 +46,11 @@ from astropy.io import fits
 OUTPUT_DIR = Path(__file__).parent / "images" / "zarr" / "xradio"
 FIXTURE_NAME = "conformance"
 FLAGGED_FIXTURE_NAME = "conformance_flagged"
+# One channel, as a continuum image has, and an image of something other than intensity: XRADIO 1.2.5
+# writes the channel's width and the BTYPE, and these are the only two things carta-zarr reads that
+# the cube above cannot show.
+CONTINUUM_FIXTURE_NAME = "conformance_continuum"
+CONTINUUM_BTYPE = "Spectral index"
 
 # The pixels each CASA image's mask marks bad, as (x, y, stokes, frequency) -- casacore's axis order.
 # casacore's mask is true for a good pixel and XRADIO's flag is true for a bad one, so these are the
@@ -66,9 +71,9 @@ AXES = [
 ]
 
 
-def write_fits(path: Path) -> None:
+def write_fits(path: Path, channels: int = 2, btype: str = "Intensity") -> None:
     # FITS axis order is the reverse of the numpy shape: NAXIS1 is the fastest-varying axis.
-    values = np.arange(2 * 3 * 4 * 5, dtype=np.float32).reshape(2, 3, 4, 5)
+    values = np.arange(channels * 3 * 4 * 5, dtype=np.float32).reshape(channels, 3, 4, 5)
     hdu = fits.PrimaryHDU(values)
     header = hdu.header
     for index, (ctype, crval, cdelt, cunit) in enumerate(AXES, start=1):
@@ -79,7 +84,7 @@ def write_fits(path: Path) -> None:
         header[f"CUNIT{index}"] = cunit
 
     header["BUNIT"] = "Jy/beam"
-    header["BTYPE"] = "Intensity"
+    header["BTYPE"] = btype
     header["OBJECT"] = "Zarr conformance source"
     header["OBSERVER"] = "CARTA"
     header["TELESCOP"] = "Test scope"
@@ -157,6 +162,10 @@ def main() -> None:
         xds = open_image(str(fits_path))
         write_store(write_image, xds, fixture)
         write_flagged(fits_path, scratch)
+
+        continuum_path = scratch / f"{CONTINUUM_FIXTURE_NAME}.fits"
+        write_fits(continuum_path, channels=1, btype=CONTINUUM_BTYPE)
+        write_store(write_image, open_image(str(continuum_path)), OUTPUT_DIR / CONTINUUM_FIXTURE_NAME)
     finally:
         shutil.rmtree(scratch, ignore_errors=True)
 

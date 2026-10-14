@@ -80,6 +80,9 @@ carta::zarr::Image OpenSky() {
 
 void TestIdentityAndAxes(const carta::zarr::ImageDescriptor& sky) {
     Require(sky.image_role == "sky", "SKY's role is written on its own type attribute");
+    // XRADIO 1.2.5 writes the BTYPE of the FITS image it converted, and a store naming no version is
+    // not asked for it.
+    Require(sky.sub_type == (kSchemaVersion.empty() ? "" : "Intensity"), "SKY's sub_type was '" + sky.sub_type + "'");
     Require(sky.unit == "Jy/beam", "BUNIT did not survive the conversion as the image unit");
     Require(sky.data_groups == std::vector<std::string>{"base"}, "SKY's data group membership changed");
     Require(!sky.has_pixel_mask, "an image converted from a FITS with no mask reported a pixel mask");
@@ -290,6 +293,29 @@ void TestFlaggedConversion() {
     TestFlagsMaskTheirOwnImage(dataset.value(), "SKY_OTHER", "FLAG_SKY_OTHER", kOtherMasked);
 }
 
+#ifdef CARTA_ZARR_CONFORMANCE_CONTINUUM_FIXTURE
+// A continuum image of a spectral index, converted from FITS by XRADIO 1.2.5. Its one channel has no
+// spacing to give an increment, so the channel width XRADIO writes is the increment; and BTYPE is
+// what the image measures.
+void TestContinuumConversion() {
+    const std::filesystem::path fixture{CARTA_ZARR_CONFORMANCE_CONTINUUM_FIXTURE};
+    const auto context = carta::zarr::Context::Create();
+    Require(static_cast<bool>(context), "Context::Create failed");
+    auto dataset = carta::zarr::Dataset::Open(context.value(), fixture.string());
+    Require(static_cast<bool>(dataset), "Dataset::Open failed on XRADIO's continuum image");
+    auto image = dataset.value().OpenImage("SKY");
+    Require(static_cast<bool>(image), "the continuum SKY could not be opened");
+    const auto& sky = image.value().descriptor();
+    Require(sky.sub_type == "SpectralIndex", "BTYPE 'Spectral index' was read as '" + sky.sub_type + "'");
+    Require(sky.spectral.has_value() && sky.spectral->channel_frequencies.size() == 1,
+            "the continuum image did not have one channel");
+    Require(sky.spectral->increment && *sky.spectral->increment == 1.0e6,
+            "the channel width XRADIO wrote was not the increment of the one channel");
+    Require(sky.spectral->reference_pixel == 1.0 && sky.spectral->reference_value == 1.4e9,
+            "the increment was not measured from the one channel");
+}
+#endif
+
 }  // namespace
 
 int main() {
@@ -306,6 +332,9 @@ int main() {
         Require(!beams.value().empty(), "the beam table decoded to no beams");
 
         TestFlaggedConversion();
+#ifdef CARTA_ZARR_CONFORMANCE_CONTINUUM_FIXTURE
+        TestContinuumConversion();
+#endif
 
         std::cout << "carta-zarr XRADIO conformance tests passed\n";
         return 0;

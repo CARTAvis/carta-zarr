@@ -56,6 +56,10 @@ The quickstart bounds its rectangle and checks this product.
 
 ## Flags and non-finite pixels
 
+Flags are applied by default (see the
+[core concepts](../concepts.md#rules-that-apply-to-every-operation)). To read
+the stored values instead:
+
 ```cpp
 ReadOptions options;
 options.apply_pixel_mask = false;  // Do not apply the image's flag.

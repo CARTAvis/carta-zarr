@@ -1,6 +1,6 @@
 # Control memory, cancellation and read-ahead
 
-## Cache and temporary memory
+## Size the cache and temporary memory
 
 `ContextOptions::cache_bytes` controls the shared decoded-chunk cache. An absent
 value keeps TensorStore's default; zero retains no decoded chunks. Choose a
@@ -28,7 +28,7 @@ options.control.cache_pool = pool.value();
 
 This keeps the scan from evicting an interactive session's working set.
 
-## Progress and cooperative cancellation
+## Report progress and cancel
 
 ```cpp
 ReadOptions options;
@@ -51,7 +51,7 @@ progress has a separate callback and can provide a snapshot of what has been
 read so far. Producing that snapshot costs work; request one only when needed.
 A small cube histogram can finish without emitting progress callbacks.
 
-## Animation read-ahead
+## Read ahead during animation
 
 `Image::Prefetch` decodes selected chunks into the selected cache without
 producing a pixel destination. `ReadAhead` adds an animation policy:
@@ -78,6 +78,11 @@ The zero-byte pool is used for the scan; prefetch and the subsequent read use
 the context's explicitly sized shared cache. The cancelled read is deliberately
 started with its stop flag set so the demonstration is deterministic.
 
+1. Creates a context with a 64 MiB cache and reads a bounded patch with
+   progress, a deadline and a zero-byte scan pool.
+2. Sets the stop flag and reads again, checking for the `cancelled` error.
+3. Prefetches the patch into the shared cache, then reads it.
+
 Build and run it using the [example commands](../examples.md#build-and-run).
 Its helpers are documented in [shared setup](../examples.md#shared-setup).
 
@@ -91,6 +96,12 @@ This program reads a cropped preview for at most four channels. After each read,
 it reports the frame and the upcoming requests to `Served`, then calls `Cancel`
 when the sequence ends. It does not measure a display deadline: a real viewer
 must supply its own frame schedule and lateness measurement.
+
+1. Creates a `ReadAhead` controller for the image; creation fails if the cache
+   cannot hold two runs.
+2. Reads each frame, then calls `Served` with that frame and the frames still
+   to come.
+3. Calls `Cancel` and reports how many prefetches ran and whether it stopped.
 
 The controller still requires cache capacity for two whole-plane runs; 64 MiB
 may be insufficient for a large dataset. That failure is reported rather than

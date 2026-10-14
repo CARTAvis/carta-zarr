@@ -5,7 +5,7 @@ up to four channels at the first polarization and time. It reduces a bounded
 spatial patch and a single-pixel region together, then computes per-plane and
 combined cube histograms.
 
-## Statistics for regions over channels
+## Reduce regions over channels
 
 `PlaneSelection` carries a spectral range, one polarization and one time.
 Supply many regions in one request so their shared chunks are visited together.
@@ -26,7 +26,7 @@ one pixel and divide `sum_sq_dev` by `num_pixels - 1`.
 A flux density or world-coordinate operation belongs in the application,
 which has the scientific context needed to interpret the totals.
 
-## Histograms
+## Compute histograms
 
 `ComputeHistogram` uses caller-specified finite bounds and returns a histogram
 for each selected plane. This example uses 64 bins over [-1e6, 1e6], so values
@@ -43,6 +43,15 @@ a chunk may save no decompression.
 
 Both histograms cover **whole planes**, not just the region reduction's patch.
 All three operations apply the image's flag by default and check their `Result`.
+
+## What the program does
+
+1. Opens the first openable image and bounds a patch of at most 64 × 64 pixels.
+2. Reduces that patch and a single-pixel region together over up to four
+   channels, printing each channel's count, mean and variance.
+3. Computes a 64-bin histogram for each of those channels over fixed bounds.
+4. Computes one cube histogram across all of them and prints its range.
+5. Returns nonzero unless every requested channel received a final block.
 
 ## Complete source
 

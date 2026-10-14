@@ -89,6 +89,7 @@
     },
     "description": null,
     "beam_fit_params": "BEAM_FIT_PARAMS_SKY",
+    "sub_type": "Intensity",
     "coordinates": "declination right_ascension velocity",
     "_FillValue": "AAAAAAAA+H8="
   },

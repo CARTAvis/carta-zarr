@@ -34,7 +34,7 @@
     }
   ],
   "attributes": {
-    "note": "m is the angle measured from the reference direction to the north. So m = y*cdelt, where y is the number of pixels from the reference direction. See AIPS Memo #27, Section III.",
+    "note": "m is the projection plane coordinate towards the north, measured from the reference direction: m = y*cdelt, where y is the pixel offset from the reference pixel. For the SIN projection without projection parameters it is the direction cosine m of AIPS Memo #27, Section III.",
     "_FillValue": "AAAAAAAA+H8="
   },
   "dimension_names": [

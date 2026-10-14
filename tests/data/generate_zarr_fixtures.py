@@ -708,10 +708,9 @@ def generate_wide_pixel_fixture(path: Path) -> None:
 
 
 def main() -> None:
-    # Remove only what this script owns. xradio/conformance and xradio/conformance_flagged live under
-    # the same directory but are
-    # written by generate_conformance_fixtures.py against a pinned XRADIO, and wiping the whole tree
-    # here would delete fixtures this script cannot rebuild.
+    # Remove only what this script owns. xradio/conformance*, including XRADIO 1.2.3's _1_2 ones, live
+    # under the same directory but were written by XRADIO itself, and wiping the whole tree here would
+    # delete fixtures this script cannot rebuild.
     for owned in (
         "string",
         "xradio/minimal",

@@ -37,7 +37,7 @@ Two sources of pixels:
                    that varies by channel and rises towards the footprint's edge, faint line
                    sources, NaN outside the footprint and runs of flagged channels; continuum
                    sources on request. The coordinates are built from a template XRADIO wrote (the
-                   conformance fixture by default), stretched to --shape, on ASKAP's frequency axis
+                   conformance_1_2 fixture by default), stretched to --shape, on ASKAP's frequency axis
                    unless --frequency-start and --channel-width say otherwise.
                    Every pixel is a function of its position and --seed alone, so two layouts of
                    the same synthetic cube hold the same pixels, and only the layout differs
@@ -97,7 +97,9 @@ STOKES = ("I", "Q", "U", "V")
 SPEED_OF_LIGHT = 299_792_458.0
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-DEFAULT_TEMPLATE = REPO_ROOT / "tests" / "data" / "images" / "zarr" / "xradio" / "conformance"
+# XRADIO 1.2.3's conversion, whose frequency coordinate carries no channel width for a synthetic
+# cube to inherit from the template; schema 0.0.2's does, and synthesis does not yet rewrite it.
+DEFAULT_TEMPLATE = REPO_ROOT / "tests" / "data" / "images" / "zarr" / "xradio" / "conformance_1_2"
 
 # The square of noise one seed draws at a time. Fixed, and independent of any layout, because it is
 # what makes a synthetic pixel depend on where it is rather than on which block wrote it.

@@ -72,7 +72,8 @@
         "beam_fit_params_sky": "BEAM_FIT_PARAMS_SKY_OTHER",
         "flag": "FLAG_SKY_OTHER"
       }
-    }
+    },
+    "schema_version": "0.0.2"
   },
   "zarr_format": 3,
   "consolidated_metadata": {
@@ -297,7 +298,7 @@
           5,
           4
         ],
-        "data_type": "int8",
+        "data_type": "bool",
         "chunk_grid": {
           "name": "regular",
           "configuration": {
@@ -316,7 +317,7 @@
             "separator": "/"
           }
         },
-        "fill_value": 0,
+        "fill_value": false,
         "codecs": [
           {
             "name": "bytes"
@@ -331,8 +332,7 @@
         ],
         "attributes": {
           "type": "flag",
-          "coordinates": "declination right_ascension velocity",
-          "dtype": "bool"
+          "coordinates": "declination right_ascension velocity"
         },
         "dimension_names": [
           "time",
@@ -353,7 +353,7 @@
           5,
           4
         ],
-        "data_type": "int8",
+        "data_type": "bool",
         "chunk_grid": {
           "name": "regular",
           "configuration": {
@@ -372,7 +372,7 @@
             "separator": "/"
           }
         },
-        "fill_value": 0,
+        "fill_value": false,
         "codecs": [
           {
             "name": "bytes"
@@ -387,8 +387,7 @@
         ],
         "attributes": {
           "type": "flag",
-          "coordinates": "declination right_ascension velocity",
-          "dtype": "bool"
+          "coordinates": "declination right_ascension velocity"
         },
         "dimension_names": [
           "time",
@@ -446,6 +445,8 @@
             }
           },
           "type": "spectral_coord",
+          "units": "Hz",
+          "frame": "LSRK",
           "wave_units": "mm",
           "reference_frequency": {
             "attrs": {
@@ -455,6 +456,14 @@
             },
             "data": 1400000000.0,
             "dims": []
+          },
+          "channel_width": {
+            "data": 1000000.0,
+            "dims": [],
+            "attrs": {
+              "units": "Hz",
+              "type": "quantity"
+            }
           },
           "_FillValue": "AAAAAAAA+H8="
         },
@@ -501,7 +510,7 @@
           }
         ],
         "attributes": {
-          "note": "l is the angle measured from the reference direction to the east. So l = x*cdelt, where x is the number of pixels from the reference direction. See AIPS Memo #27, Section III.",
+          "note": "l is the projection plane coordinate towards the east, measured from the reference direction: l = x*cdelt, where x is the pixel offset from the reference pixel. For the SIN projection without projection parameters it is the direction cosine l of AIPS Memo #27, Section III.",
           "_FillValue": "AAAAAAAA+H8="
         },
         "dimension_names": [
@@ -547,7 +556,7 @@
           }
         ],
         "attributes": {
-          "note": "m is the angle measured from the reference direction to the north. So m = y*cdelt, where y is the number of pixels from the reference direction. See AIPS Memo #27, Section III.",
+          "note": "m is the projection plane coordinate towards the north, measured from the reference direction: m = y*cdelt, where y is the pixel offset from the reference pixel. For the SIN projection without projection parameters it is the direction cosine m of AIPS Memo #27, Section III.",
           "_FillValue": "AAAAAAAA+H8="
         },
         "dimension_names": [
@@ -744,6 +753,7 @@
           },
           "description": null,
           "beam_fit_params": "BEAM_FIT_PARAMS_SKY",
+          "sub_type": "Intensity",
           "coordinates": "declination right_ascension velocity",
           "_FillValue": "AAAAAAAA+H8="
         },
@@ -849,6 +859,7 @@
           },
           "description": null,
           "beam_fit_params": "BEAM_FIT_PARAMS_SKY_OTHER",
+          "sub_type": "Intensity",
           "coordinates": "declination right_ascension velocity",
           "_FillValue": "AAAAAAAA+H8="
         },
@@ -900,8 +911,8 @@
         ],
         "attributes": {
           "type": "time",
-          "scale": "utc",
           "units": "d",
+          "scale": "utc",
           "format": "mjd",
           "_FillValue": "AAAAAAAA+H8="
         },

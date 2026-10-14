@@ -2,7 +2,7 @@
 # /// script
 # requires-python = ">=3.12,<3.13"
 # dependencies = [
-#   "xradio[zarr]==1.2.3",
+#   "xradio[zarr]==1.2.5",
 #   "casatools==6.7.6.14",
 #   "casaconfig",
 #   "astropy==7.1.0",
@@ -23,11 +23,15 @@ to `xradio.image.open_image()` / `write_image()`, so the result is whatever the 
 actually produces. Regenerate it when the pinned XRADIO version is bumped, and let the conformance
 test report which of our assumptions the new version broke.
 
+XRADIO 1.2.5 writes image schema 0.0.2. `conformance_1_2` and `conformance_flagged_1_2` beside them
+are the same conversions by XRADIO 1.2.3, which wrote no schema version; this script no longer
+writes them, and they are kept for the rules that read such stores until those rules are retired.
+
 XRADIO's FITS reader is strict. Every axis needs CTYPE and CUNIT (including the unitless Stokes
 axis), and the header must carry LONPOLE, LATPOLE, the PC matrix, and DATE-OBS.
 
-Note that `open_image()` imports the casacore layer even for FITS input, and XRADIO excludes
-python-casacore on macOS, so casatools is required on every platform here.
+The flagged fixture is converted from CASA images, which are written with casatools, so casatools
+is required on every platform here.
 """
 
 from __future__ import annotations
@@ -42,6 +46,11 @@ from astropy.io import fits
 OUTPUT_DIR = Path(__file__).parent / "images" / "zarr" / "xradio"
 FIXTURE_NAME = "conformance"
 FLAGGED_FIXTURE_NAME = "conformance_flagged"
+# One channel, as a continuum image has, and an image of something other than intensity: XRADIO 1.2.5
+# writes the channel's width and the BTYPE, and these are the only two things carta-zarr reads that
+# the cube above cannot show.
+CONTINUUM_FIXTURE_NAME = "conformance_continuum"
+CONTINUUM_BTYPE = "Spectral index"
 
 # The pixels each CASA image's mask marks bad, as (x, y, stokes, frequency) -- casacore's axis order.
 # casacore's mask is true for a good pixel and XRADIO's flag is true for a bad one, so these are the
@@ -62,9 +71,9 @@ AXES = [
 ]
 
 
-def write_fits(path: Path) -> None:
+def write_fits(path: Path, channels: int = 2, btype: str = "Intensity") -> None:
     # FITS axis order is the reverse of the numpy shape: NAXIS1 is the fastest-varying axis.
-    values = np.arange(2 * 3 * 4 * 5, dtype=np.float32).reshape(2, 3, 4, 5)
+    values = np.arange(channels * 3 * 4 * 5, dtype=np.float32).reshape(channels, 3, 4, 5)
     hdu = fits.PrimaryHDU(values)
     header = hdu.header
     for index, (ctype, crval, cdelt, cunit) in enumerate(AXES, start=1):
@@ -75,7 +84,7 @@ def write_fits(path: Path) -> None:
         header[f"CUNIT{index}"] = cunit
 
     header["BUNIT"] = "Jy/beam"
-    header["BTYPE"] = "Intensity"
+    header["BTYPE"] = btype
     header["OBJECT"] = "Zarr conformance source"
     header["OBSERVER"] = "CARTA"
     header["TELESCOP"] = "Test scope"
@@ -127,7 +136,16 @@ def write_flagged(fits_path: Path, scratch: Path) -> None:
         write_masked_casa_image(casa_path, fits_path, masked)
         stores[role] = str(casa_path)
     xds = open_image(stores)
-    write_image(xds, str(fixture), out_format="zarr", overwrite=True)
+    write_store(write_image, xds, fixture)
+
+
+def write_store(write_image, xds, fixture: Path) -> None:
+    """Writes an image store at `fixture`. XRADIO names an image store `<name>.img.zarr`, which the
+    fixture's path is not, so it is written under that name and moved."""
+    written = Path(write_image(xds, str(fixture), out_format="zarr", overwrite=True)[0])
+    if written != fixture:
+        shutil.rmtree(fixture, ignore_errors=True)
+        written.rename(fixture)
 
 
 def main() -> None:
@@ -142,8 +160,12 @@ def main() -> None:
     write_fits(fits_path)
     try:
         xds = open_image(str(fits_path))
-        write_image(xds, str(fixture), out_format="zarr", overwrite=True)
+        write_store(write_image, xds, fixture)
         write_flagged(fits_path, scratch)
+
+        continuum_path = scratch / f"{CONTINUUM_FIXTURE_NAME}.fits"
+        write_fits(continuum_path, channels=1, btype=CONTINUUM_BTYPE)
+        write_store(write_image, open_image(str(continuum_path)), OUTPUT_DIR / CONTINUUM_FIXTURE_NAME)
     finally:
         shutil.rmtree(scratch, ignore_errors=True)
 

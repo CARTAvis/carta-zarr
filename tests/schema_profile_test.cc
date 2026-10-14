@@ -27,6 +27,7 @@
 
 #include <algorithm>
 #include <chrono>
+#include <cmath>
 #include <cstdint>
 #include <exception>
 #include <iostream>
@@ -182,7 +183,9 @@ carta::zarr::SchemaProbeResult Probe(std::map<std::string, std::string> nodes) {
 void TestCompleteStoreMatches() {
     const auto probe = Probe(CompleteStore());
     Require(probe.kind == SchemaMatchKind::match, "a complete image dataset did not match");
-    Require(probe.schema_version == "1.2", "unexpected schema version");
+    Require(probe.schema_version.empty(), "a store naming no schema version reported one");
+    Require(HasDiagnostic(probe, carta::zarr::DiagnosticCode::unversioned_schema),
+            "a store naming no schema version did not say it was read as XRADIO 1.2's");
 }
 
 void TestDatasetWithoutSkyMatches() {
@@ -1178,9 +1181,38 @@ void TestADescriptionIsBuiltFromTheValuesItIsGiven() {
             "the time's scale and format come from its attributes, uppercased");
 }
 
-// XRADIO writes an image's role on its own "type" attribute. The v2 schema's "image_type" is read
-// only when "type" says nothing -- and "flag" says nothing an image can be.
-void TestARoleNotSpelledAsTypeFallsBackToImageType() {
+// XRADIO writes the spectral frame as the reference frequency's observer, in astropy's name where
+// astropy has the frame and in casacore's otherwise. Each one it writes is reported as the name
+// casacore takes, which for the geocentric frame is GEO rather than astropy's GCRS.
+void TestEveryObserverXradioWritesIsReportedAsCasacoresFrame() {
+    using carta::zarr::internal::xradio::CoordinateValues;
+    using carta::zarr::internal::xradio::DescribeImageFrom;
+
+    const std::vector<std::pair<std::string, std::string>> observers{
+        {"REST", "REST"}, {"lsrk", "LSRK"},       {"lsrd", "LSRD"},     {"BARY", "BARY"}, {"gcrs", "GEO"},
+        {"TOPO", "TOPO"}, {"GALACTO", "GALACTO"}, {"LGROUP", "LGROUP"}, {"CMB", "CMB"}};
+    for (const auto& [observer, system] : observers) {
+        auto nodes = CompleteStore();
+        nodes["frequency"] = NumericArray(
+            "[3]", R"(["frequency"])", "float64",
+            R"({"units":"Hz","reference_frequency":{"data":1.4e9,"attrs":{"observer":")" + observer + R"("}}})");
+        auto store = Open(nodes);
+        Require(static_cast<bool>(store), "the in-memory store failed to open");
+
+        CoordinateValues values;
+        values.frequency = {1.4e9, 1.401e9, 1.402e9};
+        const auto described = DescribeImageFrom(store.value(), "SKY", values);
+        Require(static_cast<bool>(described) && described.value().descriptor.spectral.has_value(),
+                "an image with three channels should have a spectral coordinate");
+        Require(described.value().descriptor.spectral->system == system,
+                "the observer " + observer + " should be reported as " + system + ", got '" +
+                    described.value().descriptor.spectral->system + "'");
+    }
+}
+
+// XRADIO writes an image's role on its own "type" attribute. The v2 draft's "image_type" is no
+// XRADIO's, and is not read in its place.
+void TestImageTypeIsNotARole() {
     using carta::zarr::internal::xradio::CoordinateValues;
     using carta::zarr::internal::xradio::DescribeImageFrom;
 
@@ -1191,8 +1223,8 @@ void TestARoleNotSpelledAsTypeFallsBackToImageType() {
 
     const auto described = DescribeImageFrom(store.value(), "SKY", CoordinateValues{});
     Require(static_cast<bool>(described), "an image with no values handed in is still described");
-    Require(described.value().descriptor.image_role == "residual",
-            "with no type attribute the role is image_type's, got '" + described.value().descriptor.image_role + "'");
+    Require(described.value().descriptor.image_role.empty(),
+            "image_type was read as the role, got '" + described.value().descriptor.image_role + "'");
 }
 
 // A numeric array spelled out field by field, for the cases where the array's own document has to
@@ -1486,6 +1518,286 @@ void TestTheCoordinatesAreOneTable() {
     }
 }
 
+// The root of a store with `attributes` beside the coordinate system every store here carries.
+std::string RootWith(const std::string& attributes) {
+    auto root = RootGroup();
+    root.insert(std::string(R"({"attributes":{)").size(), attributes + ",");
+    return root;
+}
+
+// A store of schema 0.0.2: it names the version, its base data group names SKY, SKY is typed "sky",
+// and its frequency coordinate gives a frame and units. Its reference frequency carries an observer
+// as well, as XRADIO 1.2.5 writes, which the 0.0.2 row does not read.
+std::map<std::string, std::string> Store002() {
+    auto nodes = CompleteStore();
+    nodes[""] = RootWith(R"("schema_version":"0.0.2","data_groups":{"base":{"sky":"SKY"}})");
+    nodes["SKY"] = SkyArray("float32", R"({"units":"Jy/beam","type":"sky"})");
+    nodes["frequency"] = NumericArray("[3]", R"(["frequency"])", "float64",
+                                      R"({"units":"Hz","frame":"GEO",
+                                          "reference_frequency":{"data":1.4e9,"attrs":{"units":"Hz","observer":"lsrk"}}})");
+    return nodes;
+}
+
+carta::zarr::internal::DescribedImage DescribeWithChannels(std::map<std::string, std::string> nodes,
+                                                           const std::string& image_id = "SKY") {
+    auto store = Open(std::move(nodes));
+    Require(static_cast<bool>(store), "the in-memory store failed to open");
+    carta::zarr::internal::xradio::CoordinateValues values;
+    values.frequency = {1.4e9, 1.401e9, 1.402e9};
+    auto described = carta::zarr::internal::xradio::DescribeImageFrom(store.value(), image_id, values);
+    Require(static_cast<bool>(described),
+            image_id + " was not described: " + (described ? "" : described.error().message));
+    return std::move(described.value());
+}
+
+// A store that is what it says, 0.0.2, is read by 0.0.2's row, reports its version and says nothing
+// about which rules read it. Its frame is frequency's own, not the reference frequency's observer.
+void TestAStoreOfSchema002IsReadByItsRow() {
+    const auto probe = Probe(Store002());
+    Require(probe.kind == SchemaMatchKind::match, "a 0.0.2 store did not match");
+    Require(probe.schema_version == "0.0.2", "a 0.0.2 store reported '" + probe.schema_version + "'");
+    Require(!HasDiagnostic(probe, carta::zarr::DiagnosticCode::unversioned_schema),
+            "a 0.0.2 store was said to be read as XRADIO 1.2's");
+
+    const auto described = DescribeWithChannels(Store002());
+    Require(described.descriptor.spectral && described.descriptor.spectral->system == "GEO",
+            "a 0.0.2 store's frame is frequency's own frame");
+    Require(described.descriptor.image_role == "sky", "the base group's sky is the sky");
+}
+
+// A store naming no version is read as XRADIO 1.2 wrote: its frame is the reference frequency's
+// observer, read in casacore's names, whatever frequency's own attributes say, and a frequency with
+// no units takes the reference frequency's.
+void TestAStoreNamingNoVersionIsReadAsXradio12() {
+    auto nodes = CompleteStore();
+    nodes["frequency"] = NumericArray("[3]", R"(["frequency"])", "float64",
+                                      R"({"frame":"LSRK",
+                                          "reference_frequency":{"data":1.4e9,"attrs":{"units":"Hz","observer":"gcrs"}}})");
+    const auto described = DescribeWithChannels(nodes);
+    Require(described.descriptor.spectral && described.descriptor.spectral->system == "GEO",
+            "an unversioned store's frame is its reference frequency's observer");
+    Require(described.descriptor.spectral->unit == "Hz", "an unversioned store's unit falls back to the reference's");
+
+    // Neither is read for 0.0.2, which requires both on frequency itself.
+    auto unitless = Store002();
+    unitless["frequency"] = NumericArray("[3]", R"(["frequency"])", "float64",
+                                         R"({"units":"","frame":"GEO",
+                                             "reference_frequency":{"data":1.4e9,"attrs":{"units":"Hz"}}})");
+    auto store = Open(unitless);
+    Require(static_cast<bool>(store), "the in-memory store failed to open");
+    const auto& row = carta::zarr::internal::xradio::SchemaRows().front();
+    Require(carta::zarr::internal::xradio::CoordinateUnit(
+                store.value(), carta::zarr::internal::xradio::SkyCoordinate(carta::zarr::AxisRole::spectral), row)
+                .empty(),
+            "the 0.0.2 row took the reference frequency's unit");
+}
+
+// A store naming 0.0.2 that is not one -- XRADIO 1.2.5 stamps the version on an older store it
+// upgrades on read whether or not the upgrade reached everything -- is read as XRADIO 1.2's, still
+// reports the version it names, and says which requirement it failed.
+void TestA002StoreThatIsNotOneIsReadAsXradio12() {
+    const auto read_as_12 = [](std::map<std::string, std::string> nodes, const std::string& reason) {
+        const auto probe = Probe(std::move(nodes));
+        Require(probe.kind == SchemaMatchKind::match, "a store naming 0.0.2 that is not one was refused");
+        Require(probe.schema_version == "0.0.2", "the store's own version was not reported");
+        const auto said = std::find_if(probe.diagnostics.begin(), probe.diagnostics.end(), [](const auto& diagnostic) {
+            return diagnostic.code == carta::zarr::DiagnosticCode::unversioned_schema;
+        });
+        Require(said != probe.diagnostics.end(), "it was not said to be read as XRADIO 1.2's");
+        Require(said->message.find(reason) != std::string::npos,
+                "the reason was not '" + reason + "': " + said->message);
+    };
+
+    auto no_groups = Store002();
+    no_groups[""] = RootWith(R"("schema_version":"0.0.2")");
+    read_as_12(no_groups, "it has no data_groups");
+
+    auto no_sky = Store002();
+    no_sky[""] = RootWith(R"("schema_version":"0.0.2","data_groups":{"base":{"flag":"FLAG_SKY"}})");
+    read_as_12(no_sky, "no data group names a sky image");
+
+    auto intensity = Store002();
+    intensity["SKY"] = SkyArray("float32", R"({"units":"Jy/beam","type":"Intensity"})");
+    read_as_12(intensity, "its sky image SKY is not typed \"sky\"");
+
+    auto no_frame = Store002();
+    no_frame["frequency"] = NumericArray("[3]", R"(["frequency"])", "float64", R"({"units":"Hz"})");
+    read_as_12(no_frame, "its frequency coordinate has no frame or no units");
+}
+
+// A version no row reads is refused as that, ahead of anything else wrong with the store, with an
+// error a consumer can tell from a broken file: a newer build may open it.
+void TestAnUnreadSchemaVersionIsRefused() {
+    using carta::zarr::internal::ProbeStore;
+    using carta::zarr::internal::RequireOpenableDataset;
+
+    for (const std::string version : {R"("0.0.3")", "2"}) {
+        auto nodes = Store002();
+        nodes[""] = RootWith(R"("schema_version":)" + version + R"(,"data_groups":{"base":{"sky":"SKY"}})");
+        auto store = Open(nodes);
+        Require(static_cast<bool>(store), "the in-memory store failed to open");
+        const auto probe = ProbeStore(store.value());
+        Require(static_cast<bool>(probe) && probe.value().kind == ProbeKind::invalid_dataset,
+                "schema version " + version + " was not refused");
+        Require(probe.value().diagnostics.front().code == carta::zarr::DiagnosticCode::unsupported_schema_version,
+                "the refusal of schema version " + version + " did not say it was the version");
+        const auto openable = RequireOpenableDataset(probe.value(), "/tmp/store");
+        Require(!openable && openable.error().code == ErrorCode::unsupported_schema_version,
+                "schema version " + version + " was not refused as unsupported_schema_version");
+
+        carta::zarr::internal::xradio::CoordinateValues values;
+        const auto described = carta::zarr::internal::xradio::DescribeImageFrom(store.value(), "SKY", values);
+        Require(!described && described.error().code == ErrorCode::unsupported_schema_version,
+                "an image of schema version " + version + " was described");
+    }
+}
+
+// XRADIO 1.2.5 keeps an integer FITS image's type, BITPIX 16 as int16, and writes it as it is, although
+// schema 0.0.2 allows float32 and float64. What its own conversion wrote opens.
+void TestAnIntegerSkyImageXradioWroteOpens() {
+    auto nodes = Store002();
+    nodes["SKY"] = SkyArray("int16", R"({"units":"Jy/beam","type":"sky"})");
+    const auto probe = Probe(nodes);
+    Require(probe.kind == SchemaMatchKind::match, "an int16 sky image XRADIO converted from FITS was refused");
+    const auto described = DescribeWithChannels(nodes);
+    Require(described.descriptor.stored_type == carta::zarr::DataType::int16, "the int16 sky image was not described");
+}
+
+// XRADIO's measurement sets name a schema_version too. Zarr of something else is not refused for it.
+void TestAnotherDatasetNamingAVersionIsNotAnImage() {
+    auto store = Open({{"", RootWith(R"("schema_version":"4.0.0","type":"visibility")")},
+                       {"VISIBILITY", NumericArray("[2]", R"(["x"])")}});
+    Require(static_cast<bool>(store), "the in-memory store failed to open");
+    const auto probe = carta::zarr::internal::ProbeStore(store.value());
+    Require(static_cast<bool>(probe) && probe.value().kind == ProbeKind::zarr_without_supported_schema,
+            "a dataset that is not an image was refused for its schema version");
+    Require(!HasDiagnostic(probe.value().diagnostics, carta::zarr::DiagnosticCode::unsupported_schema_version),
+            "a dataset that is not an image was said to have an unsupported schema version");
+}
+
+// A sky image's part is the data group whose sky it is when the image is typed "sky", as schema 0.0.2
+// and XRADIO 1.2's conversion of a dict of images both write it, and the image's own type when that
+// says the part, as XRADIO 1.2's conversion of a list of tclean's images did. Each row lists XRADIO's
+// own names first, in its order, and any other after them by name.
+void TestEachRowReadsAnImagesPartAndListsItsNames() {
+    auto nodes = Store002();
+    nodes[""] = RootWith(R"("schema_version":"0.0.2",
+        "data_groups":{"base":{"sky":"SKY"},"model":{"sky":"SKY_MODEL"},"dirty":{"sky":"SKY_DIRTY"}})");
+    nodes["SKY_MODEL"] = SkyArray("float32", R"({"units":"Jy/beam","type":"sky"})");
+    nodes["SKY_DIRTY"] = SkyArray("float32", R"({"units":"Jy/beam","type":"sky"})");
+    auto store = Open(nodes);
+    Require(static_cast<bool>(store), "the in-memory store failed to open");
+    const auto discovery = XradioProfile().Discover(store.value());
+    Require(static_cast<bool>(discovery), "a 0.0.2 store was not listed");
+    const auto& images = discovery.value().images;
+    Require(ImageIds(images) == std::vector<std::string>{"SKY", "SKY_MODEL", "SKY_DIRTY"},
+            "a 0.0.2 store's images were not listed in XRADIO's order");
+    Require(
+        images.at(0).image_role == "sky" && images.at(1).image_role == "model" && images.at(2).image_role == "dirty",
+        "a 0.0.2 sky's part was not its data group's");
+
+    // XRADIO 1.2 wrote both: SKY_RESIDUAL from a dict, typed "sky" in a "residual" group, and MODEL
+    // from a list, typed "model".
+    auto old = CompleteStore();
+    old[""] = RootWith(R"("data_groups":{"base":{"sky":"SKY"},"residual":{"sky":"SKY_RESIDUAL"}})");
+    old["SKY"] = SkyArray("float32", R"({"units":"Jy/beam","type":"sky"})");
+    old["SKY_RESIDUAL"] = SkyArray("float32", R"({"units":"Jy/beam","type":"sky"})");
+    old["MODEL"] = SkyArray("float32", R"({"units":"Jy/beam","type":"model"})");
+    old["POINT_SPREAD_FUNCTION"] = SkyArray("float32", R"({"units":"","type":"point_spread_function"})");
+    old["MASK_DECONVOLVE"] = SkyArray("float32", R"({"units":"","type":"mask"})");
+    old["EXTRA"] = SkyArray("float32", R"({"units":"Jy/beam","type":"sky"})");
+    auto old_store = Open(old);
+    Require(static_cast<bool>(old_store), "the in-memory store failed to open");
+    const auto old_discovery = XradioProfile().Discover(old_store.value());
+    Require(static_cast<bool>(old_discovery), "an XRADIO 1.2 store was not listed");
+    const auto& old_images = old_discovery.value().images;
+    Require(ImageIds(old_images) == std::vector<std::string>{"SKY", "SKY_RESIDUAL", "MODEL", "POINT_SPREAD_FUNCTION",
+                                                             "MASK_DECONVOLVE", "EXTRA"},
+            "an XRADIO 1.2 store's images were not listed in XRADIO 1.2's order");
+    Require(old_images.at(1).image_role == "residual", "an XRADIO 1.2 sky's part was not its data group's");
+    Require(old_images.at(2).image_role == "model", "an XRADIO 1.2 image's part was not its type");
+
+    // Without SKY, the dataset opens on a part of the sky rather than on its point spread function.
+    old.erase("SKY");
+    old[""] = RootWith(R"("data_groups":{"residual":{"sky":"SKY_RESIDUAL"}})");
+    auto skyless = Open(old);
+    Require(static_cast<bool>(skyless), "the in-memory store failed to open");
+    const auto skyless_discovery = XradioProfile().Discover(skyless.value());
+    Require(static_cast<bool>(skyless_discovery) && skyless_discovery.value().default_image_id == "SKY_RESIDUAL",
+            "a dataset with no SKY did not open on its residual");
+
+    // Nor on its deconvolution mask: XRADIO 1.2 wrote a dict of a dirty image and a mask as DIRTY and
+    // MASK.
+    auto dirty = CompleteStore();
+    dirty.erase("SKY");
+    dirty["MASK"] = SkyArray("float32", R"({"units":"","type":"mask"})");
+    dirty["DIRTY"] = SkyArray("float32", R"({"units":"Jy/beam","type":"dirty"})");
+    auto dirty_store = Open(dirty);
+    Require(static_cast<bool>(dirty_store), "the in-memory store failed to open");
+    const auto dirty_discovery = XradioProfile().Discover(dirty_store.value());
+    Require(static_cast<bool>(dirty_discovery) && dirty_discovery.value().default_image_id == "DIRTY",
+            "a dataset of a dirty image and a mask did not open on the dirty image");
+}
+
+// A continuum image has one channel, and one channel has no spacing to fit an increment from. Schema
+// 0.0.2 states the channel's width, which is then the increment, measured from that channel; a store
+// naming no version states none, and its axis has no linear description, as before. An axis of more
+// channels is described by its channels, whatever width it states.
+void TestA002ChannelWidthIsTheIncrementOfOneChannel() {
+    using carta::zarr::internal::xradio::CoordinateValues;
+    using carta::zarr::internal::xradio::DescribeImageFrom;
+
+    const std::string frequency = R"({"units":"Hz","frame":"LSRK","channel_width":{"data":2.5e5,"dims":[],
+        "attrs":{"units":"Hz","type":"quantity"}},"reference_frequency":{"data":1.4e9,"attrs":{"units":"Hz"}}})";
+    const auto describe = [](std::map<std::string, std::string> nodes, std::vector<double> channels) {
+        auto store = Open(std::move(nodes));
+        Require(static_cast<bool>(store), "the in-memory store failed to open");
+        CoordinateValues values;
+        values.frequency = std::move(channels);
+        auto described = DescribeImageFrom(store.value(), "SKY", values);
+        Require(static_cast<bool>(described) && described.value().descriptor.spectral.has_value(),
+                "a channel should make a spectral coordinate");
+        return *described.value().descriptor.spectral;
+    };
+
+    const auto continuum_sky = [](const std::string& attributes) {
+        return NumericArray("[1,1,2,4,5]", R"(["time","frequency","polarization","l","m"])", "float32", attributes);
+    };
+    auto continuum = Store002();
+    continuum["SKY"] = continuum_sky(R"({"units":"Jy/beam","type":"sky"})");
+    continuum["frequency"] = NumericArray("[1]", R"(["frequency"])", "float64", frequency);
+    const auto one = describe(continuum, {1.4e9});
+    Require(one.increment == 2.5e5, "a 0.0.2 channel's width was not its increment");
+    Require(one.reference_pixel == 1.0 && one.reference_value == 1.4e9,
+            "the increment of one channel was not measured from it");
+
+    auto old = CompleteStore();
+    old["SKY"] = continuum_sky(R"({"units":"Jy/beam"})");
+    old["frequency"] = NumericArray("[1]", R"(["frequency"])", "float64", frequency);
+    const auto unversioned = describe(old, {1.4e9});
+    Require(!unversioned.increment && !unversioned.reference_pixel,
+            "a store naming no version was given an increment for its one channel");
+
+    auto cube = Store002();
+    cube["frequency"] = NumericArray("[3]", R"(["frequency"])", "float64", frequency);
+    const auto three = describe(cube, {1.4e9, 1.401e9, 1.402e9});
+    Require(three.increment && std::abs(*three.increment - 1.0e6) < 1.0e-3,
+            "an axis of three channels was not described by its channels");
+}
+
+// What a sky image measures is read from a 0.0.2 store as XRADIO names it, and from no other.
+void TestA002SkyImageSaysWhatItMeasures() {
+    auto nodes = Store002();
+    nodes["SKY"] = SkyArray("float32", R"({"units":"","type":"sky","sub_type":"SpectralIndex"})");
+    Require(DescribeWithChannels(nodes).descriptor.sub_type == "SpectralIndex", "a 0.0.2 sub_type was not read");
+    Require(DescribeWithChannels(Store002()).descriptor.sub_type.empty(),
+            "a 0.0.2 image naming no sub_type reported one");
+
+    auto old = CompleteStore();
+    old["SKY"] = SkyArray("float32", R"({"units":"","type":"sky","sub_type":"SpectralIndex"})");
+    Require(DescribeWithChannels(old).descriptor.sub_type.empty(), "a store naming no version had its sub_type read");
+}
+
 }  // namespace
 
 int main() {
@@ -1526,7 +1838,8 @@ int main() {
         TestSizeFallsBackWhenTheStoreCannotBeMeasured();
         TestSizeRefusesAStoreWithNoArrays();
         TestADescriptionIsBuiltFromTheValuesItIsGiven();
-        TestARoleNotSpelledAsTypeFallsBackToImageType();
+        TestEveryObserverXradioWritesIsReportedAsCasacoresFrame();
+        TestImageTypeIsNotARole();
         TestAnArrayDisagreeingWithTheRootsCopyIsRefused();
         TestAnArrayIsNotHeldToHowItsChunksAreEncoded();
         TestCheckingAnArrayReadsItsOwnDocumentOnce();
@@ -1534,6 +1847,15 @@ int main() {
         TestAPixelReadHoldsItsArrayToItsOwnDocument();
         TestTheCoordinatesAreOneTable();
         TestAnAxisReportsItsCoordinatesUnit();
+        TestAStoreOfSchema002IsReadByItsRow();
+        TestAStoreNamingNoVersionIsReadAsXradio12();
+        TestA002StoreThatIsNotOneIsReadAsXradio12();
+        TestAnUnreadSchemaVersionIsRefused();
+        TestAnIntegerSkyImageXradioWroteOpens();
+        TestAnotherDatasetNamingAVersionIsNotAnImage();
+        TestEachRowReadsAnImagesPartAndListsItsNames();
+        TestA002ChannelWidthIsTheIncrementOfOneChannel();
+        TestA002SkyImageSaysWhatItMeasures();
         std::cout << "carta-zarr schema profile tests passed\n";
         return 0;
     } catch (const std::exception& error) {

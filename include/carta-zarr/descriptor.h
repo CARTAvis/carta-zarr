@@ -48,6 +48,11 @@ enum class DiagnosticCode {
     inexact_reference_pixel,
     // A coordinate with fewer than two distinct samples, which has no linear description at all.
     degenerate_axis,
+    // A store naming a schema version this library does not read.
+    unsupported_schema_version,
+    // A store read by the rules for XRADIO 1.2's unversioned stores: it names no schema version, or
+    // it names one it does not conform to.
+    unversioned_schema,
 };
 
 // The code's name, as it would be spelled in a message or a log.
@@ -73,6 +78,10 @@ inline const char* DiagnosticCodeName(DiagnosticCode code) noexcept {
             return "inexact_reference_pixel";
         case DiagnosticCode::degenerate_axis:
             return "degenerate_axis";
+        case DiagnosticCode::unsupported_schema_version:
+            return "unsupported_schema_version";
+        case DiagnosticCode::unversioned_schema:
+            return "unversioned_schema";
     }
     return "unknown";
 }
@@ -221,7 +230,7 @@ struct DirectionCoordinate {
 
 struct SpectralCoordinate {
     std::string unit;
-    std::string system;  // SPECSYS, e.g. "LSRK", "BARY", "TOPOCENT"
+    std::string system;  // casacore or FITS SPECSYS name, e.g. "LSRK", "BARY", "GEO", "TOPOCENT"; never astropy's
     // CRPIX3, 1-based as DirectionCoordinate::reference_pixel is. Absent, with the two below it,
     // when the channels are not evenly spaced: there is then no linear description to give and a
     // consumer builds a tabular axis from channel_frequencies instead.
@@ -250,10 +259,8 @@ struct ObservationInfo {
     std::string observer;
     std::string telescope_name;
     std::string timesys;
-    // The observation date as the dataset wrote it, when it wrote a string; empty for a number.
-    std::string date_obs;
-    // The observation date as an MJD in `timesys`, whichever way it was written: a number in the
-    // MJD or unix format, or a string date read as ISO 8601. Absent when neither could be read.
+    // The observation date as an MJD in `timesys`, from a number in the MJD or unix format. Absent
+    // when the dataset wrote none, or wrote it in any other form.
     std::optional<double> mjd_obs;
     std::optional<std::array<double, 3>> observatory_position;  // OBSGEO-X, Y, Z (meters)
 };
@@ -320,6 +327,10 @@ struct DatasetSize {
 struct ImageDescriptor {
     std::string id;
     std::string image_role;
+    // What a sky image measures, as XRADIO image schema 0.0.2 names it from casacore's image type or
+    // FITS BTYPE ("Intensity", "SpectralIndex", "OpticalDepth", ...). Empty when the image names none,
+    // and for a store that names no schema version.
+    std::string sub_type;
     std::vector<std::string> data_groups;
     DataType stored_type = DataType::unknown;
     // In the image's logical order, which a request's ranges follow. Find one with AxisIndex rather

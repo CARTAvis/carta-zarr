@@ -34,7 +34,7 @@
     }
   ],
   "attributes": {
-    "note": "l is the angle measured from the reference direction to the east. So l = x*cdelt, where x is the number of pixels from the reference direction. See AIPS Memo #27, Section III.",
+    "note": "l is the projection plane coordinate towards the east, measured from the reference direction: l = x*cdelt, where x is the pixel offset from the reference pixel. For the SIN projection without projection parameters it is the direction cosine l of AIPS Memo #27, Section III.",
     "_FillValue": "AAAAAAAA+H8="
   },
   "dimension_names": [

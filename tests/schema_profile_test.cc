@@ -1178,6 +1178,35 @@ void TestADescriptionIsBuiltFromTheValuesItIsGiven() {
             "the time's scale and format come from its attributes, uppercased");
 }
 
+// XRADIO writes the spectral frame as the reference frequency's observer, in astropy's name where
+// astropy has the frame and in casacore's otherwise. Each one it writes is reported as the name
+// casacore takes, which for the geocentric frame is GEO rather than astropy's GCRS.
+void TestEveryObserverXradioWritesIsReportedAsCasacoresFrame() {
+    using carta::zarr::internal::xradio::CoordinateValues;
+    using carta::zarr::internal::xradio::DescribeImageFrom;
+
+    const std::vector<std::pair<std::string, std::string>> observers{
+        {"REST", "REST"}, {"lsrk", "LSRK"},       {"lsrd", "LSRD"},     {"BARY", "BARY"}, {"gcrs", "GEO"},
+        {"TOPO", "TOPO"}, {"GALACTO", "GALACTO"}, {"LGROUP", "LGROUP"}, {"CMB", "CMB"}};
+    for (const auto& [observer, system] : observers) {
+        auto nodes = CompleteStore();
+        nodes["frequency"] = NumericArray(
+            "[3]", R"(["frequency"])", "float64",
+            R"({"units":"Hz","reference_frequency":{"data":1.4e9,"attrs":{"observer":")" + observer + R"("}}})");
+        auto store = Open(nodes);
+        Require(static_cast<bool>(store), "the in-memory store failed to open");
+
+        CoordinateValues values;
+        values.frequency = {1.4e9, 1.401e9, 1.402e9};
+        const auto described = DescribeImageFrom(store.value(), "SKY", values);
+        Require(static_cast<bool>(described) && described.value().descriptor.spectral.has_value(),
+                "an image with three channels should have a spectral coordinate");
+        Require(described.value().descriptor.spectral->system == system,
+                "the observer " + observer + " should be reported as " + system + ", got '" +
+                    described.value().descriptor.spectral->system + "'");
+    }
+}
+
 // XRADIO writes an image's role on its own "type" attribute. The v2 schema's "image_type" is read
 // only when "type" says nothing -- and "flag" says nothing an image can be.
 void TestARoleNotSpelledAsTypeFallsBackToImageType() {
@@ -1526,6 +1555,7 @@ int main() {
         TestSizeFallsBackWhenTheStoreCannotBeMeasured();
         TestSizeRefusesAStoreWithNoArrays();
         TestADescriptionIsBuiltFromTheValuesItIsGiven();
+        TestEveryObserverXradioWritesIsReportedAsCasacoresFrame();
         TestARoleNotSpelledAsTypeFallsBackToImageType();
         TestAnArrayDisagreeingWithTheRootsCopyIsRefused();
         TestAnArrayIsNotHeldToHowItsChunksAreEncoded();

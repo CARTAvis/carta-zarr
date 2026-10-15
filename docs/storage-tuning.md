@@ -356,7 +356,7 @@ skipped, since it would not be the chunk a full cube has.
 The sweeps behind this page ran on 2026-10-01 and 2026-10-02 with carta-zarr at the commits that
 added each tool, eight users, two or three trials, and every cache emptied as described above. Their
 configurations and full reports were kept on the machines they ran on. The measurements since keep
-theirs in `docs/measurements/`, each beside a report of its method and every number: the
+their medians in `docs/measurements/`, beside a report of the method and every number: the
 chunk-size measurements ran on 2026-10-14 and 2026-10-15, and
 [their report](measurements/chunk-size.md#reproducing) says how to run them again. Either way they
 describe those machines; measure yours rather than reuse them.

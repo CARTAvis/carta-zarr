@@ -4,25 +4,14 @@ How the size of a chunk and its depth in channels decide what a CARTA user waits
 of storage, measured with `carta-zarr-bench` from 2026-10-14 to 2026-10-15
 ([#17](https://github.com/CARTAvis/carta-zarr/issues/17)). [Storage tuning](../storage-tuning.md)
 keeps the advice drawn from it; this report keeps the method and every number, and
-[`chunk-size/`](chunk-size) the scripts and the medians they produced.
+[`chunk-size/`](chunk-size) the medians and the script that makes them.
 
 ## What the measurements say
 
-- **Depth decides how long a channel takes to show; size matters much less.** A cold plane read took
-  the pixels it decoded -- the plane's area times the chunk's depth -- at a rate set by the machine,
-  plus a small cost for each chunk; fitted to every 1-user plane, that model is off by 5 to 10% at the
-  median. 512 × 512 chunks sixteen channels deep made a plane of the 7763 × 4742 pancake 6.5 (Lustre)
-  to 14 (Mac) times slower than chunks one deep; going from 1 to 16 MiB at the same depth changed it
-  by less than a factor of two either way.
-
-  | machine and storage | cold rate | cost per chunk | median error of the fit |
-  |---|---|---|---|
-  | Mac mini, Apple SSD | 2.5 Gpx/s | 0.016 ms | 10%, 37 layouts |
-  | acdc, local NVMe | 0.59 Gpx/s | 0.13 ms | 5%, 37 layouts |
-  | almat3, Lustre | 0.90 Gpx/s | 0.35 ms | 10%, 15 layouts |
-
-  A pixel is a float32 one decoded, the rate is for one user, and Lustre's fit has only the pancake.
-  The error is largest on the cigar's planes, which take a few milliseconds.
+- **Depth decides how long a channel takes to show; size matters much less.** 512 × 512 chunks
+  sixteen channels deep made a plane of the 7763 × 4742 pancake 6.5 (Lustre) to 14 (Mac) times slower
+  than chunks one deep; going from 1 to 16 MiB at the same depth changed it by less than a factor of
+  two either way. A [model of a cold plane](#a-model-of-a-cold-plane) fits every machine.
 
 - **What a plane gains from shallow chunks, a spectrum and a region lose.** The best spectrum is the
   chunk smallest across the sky and deepest in channels; the best region, one small across the sky.
@@ -48,30 +37,42 @@ keeps the advice drawn from it; this report keeps the method and every number, a
 
 - **An animation keeps up for one user if its cache holds two runs of chunks.** With a 5 GiB cache,
   which holds two runs of every pancake layout up to sixteen channels deep, no layout of the pancake
-  had more than 6% of its frames late for one user, on any machine. carta-backend's default 1 GiB holds two runs only for chunks one or two channels deep on a
-  plane this size -- a run is the plane's area times the depth times four bytes -- so in deeper chunks
-  it reads nothing ahead and stalls where each run begins. On acdc that made 22% of frames late in
-  chunks four deep, 9% eight deep, 3% sixteen deep and 97% thirty-two deep, and Lustre was much the
-  same; the Mac decoded fast enough to stay on time in chunks up to eight deep.
+  had more than 6% of its frames late for one user, on any machine. carta-backend's default 1 GiB
+  holds two runs only for chunks one or two channels deep on a plane this size -- a run is the plane's
+  area times the depth times four bytes -- so in deeper chunks it reads nothing ahead and stalls where
+  each run begins. On acdc that made 22% of frames late in chunks four deep, 9% eight deep, 3% sixteen
+  deep and 97% thirty-two deep, and Lustre was much the same; the Mac decoded fast enough to stay on
+  time in chunks up to eight deep.
 
-- **With several users at once, shallow chunks make animations late.** In chunks one channel deep
-  each frame costs every user a cold plane. With a 5 GiB cache, on acdc 71 to 94% of frames were late in chunks one channel deep with four or
-  eight users, and 2 to 3% in chunks sixteen deep, which decode a run once and serve sixteen frames
-  from the cache -- after a first frame of 4 to 5 seconds. On Lustre 14 to 80% were late one deep and
-  0 to 8% sixteen deep.
+- **With several users at once, shallow chunks make animations late.** In chunks one channel deep each
+  frame costs every user a cold plane. With a 5 GiB cache, on acdc 71 to 94% of frames were late in
+  chunks one channel deep with four or eight users, and 2 to 3% in chunks sixteen deep, which decode a
+  run once and serve sixteen frames from the cache -- after a first frame of 4 to 5 seconds. On Lustre
+  14 to 80% were late one deep and 0 to 8% sixteen deep.
 
 - **A 16384 × 16384 plane cannot animate at 5 frames a second on these machines.** A cold plane took
   0.19 s at best on the Mac and 0.52 s on acdc, and deeper chunks multiplied that by roughly their
   depth. One user had 10% of frames late at best on the Mac and 22% on acdc, and several users 89 to
   97%. Its regions took about the same time in every layout.
 
-- **The synthetic cube reads like a real one.** In the same three layouts on acdc, the synthetic
-  pancake and a real ASKAP cube of the same shape differed by 3 to 4% in their cold planes and by at
-  most 12% in any mode.
+- **The synthetic cube reads like a real one,** within 3 to 4% for cold planes on acdc
+  ([check](#synthetic-and-real-pixels)), and **`purge` empties the Mac's caches**
+  ([check](#did-purge-empty-the-macs-caches)).
 
-- **`purge` empties the Mac's caches.** Planes read again without emptying anything were 20 to 41%
-  faster in the pancake's and the wide plane's chunks eight or more channels deep, and as fast
-  elsewhere: the SSD keeps up with decoding there.
+## A model of a cold plane
+
+A cold plane read took the pixels it decoded -- the plane's area times the chunk's depth -- at a rate
+set by the machine, plus a small cost for each chunk. Fitted to every 1-user plane, the model is off
+by 5 to 10% at the median:
+
+| machine and storage | cold rate | cost per chunk | median error of the fit |
+|---|---|---|---|
+| Mac mini, Apple SSD | 2.5 Gpx/s | 0.016 ms | 10%, 37 layouts |
+| acdc, local NVMe | 0.59 Gpx/s | 0.13 ms | 5%, 37 layouts |
+| almat3, Lustre | 0.90 Gpx/s | 0.35 ms | 10%, 15 layouts |
+
+Gpx/s is a billion float32 pixels decoded a second, for one user. Lustre's fit has only the pancake.
+The error is largest on the cigar's planes, which take a few milliseconds.
 
 ## How they were measured
 
@@ -116,10 +117,11 @@ Every mode is measured with a 5 GiB cache, which holds two runs of chunks -- the
 the depth, twice -- of every pancake layout up to sixteen channels deep, and the animation again with
 carta-backend's default 1 GiB. A frame is late when it is not ready by the time it is due.
 
-A plane, spectrum or region counts only if it read no chunk that another operation of the same trial
-read before or alongside it, as `tools/zarr-bench/sweep.py` ranks them; otherwise its time could be
-the page cache's. Where fewer than three operations a cell, one a trial, were first touches -- deep
-chunks with several users, every plane of the wide cube with several -- the tables show "–".
+A plane, spectrum or region counts only if it was a *first touch*: it read no chunk that another
+operation of the same trial read before or alongside it, as `tools/zarr-bench/sweep.py` ranks them;
+otherwise its time could be the page cache's. Where fewer than three operations a cell, one a trial,
+were first touches -- deep chunks with several users, every plane of the wide cube with several --
+the tables show "–".
 
 ### Machines
 
@@ -133,49 +135,14 @@ chunks with several users, every plane of the wide cube with several -- the tabl
 | users | 1 | 1, 4, 8 | 1, 4, 8 |
 
 `carta-zarr-bench` was built in Release from d846091 on the Mac and acdc, and from 81bfbed on almat3,
-which differs from it only in the README.
-
-### Reproducing
-
-Write each layout with `generate.py`, for example:
-
-```sh
-tools/zarr-bench/generate.py --synthetic --shape frequency=256,polarization=1,l=7763,m=4742 --seed 1 \
-    --chunk l=512,m=512,frequency=4 --codec blosc:zstd:5:shuffle --output cube.zarr
-```
-
-and measure it with the machine's thread counts and cache-emptying method (`--cold fadvise` on acdc;
-`--cold command` with `--drop-cache-cmd /usr/sbin/purge` on the Mac, or with
-`tools/zarr-bench/drop-lustre-cache.py` on Lustre), once with each cache, writing every cube's
-results to its own CSV:
-
-```sh
-carta-zarr-bench run cube.zarr --mode plane,spectrum,region,animation --cache-bytes 5G \
-    --processes 4 --io-threads 4 --decode-threads 28 --trials 3 --animation-prefetch --cold fadvise \
-    --label "LAYOUT|users=4|cache=5G" --csv pancake.csv
-carta-zarr-bench run cube.zarr --mode animation --cache-bytes 1G \
-    --processes 4 --io-threads 4 --decode-threads 28 --trials 3 --animation-prefetch --cold fadvise \
-    --label "LAYOUT|users=4|cache=1G" --csv pancake.csv
-```
-
-On the Mac, planes were also read again with `--cold off`, labelled `LAYOUT|users=1|cache=5G|warm`.
-With each machine's CSVs in one directory:
-
-```sh
-docs/measurements/chunk-size/summarize.py mac=RESULTS_MAC acdc=RESULTS_ACDC lustre=RESULTS_LUSTRE > medians.csv
-```
-
-[`medians.csv`](chunk-size/medians.csv) is that file, one row per machine, cube, layout, user count,
-cache and mode. The raw results, about 90 MB, were kept on the machines.
-
-The real-pixel check ran `tools/zarr-bench/sweep.py` on acdc over the pancake's three 4 MiB layouts,
-once on a 7763 × 4742 × 256 ASKAP cube that is not in the repository and once on the synthetic
-pancake, with the same settings as above: 1 and 8 users, three trials, `--cold fadvise`, 4 I/O
-threads, a decode thread per core and a 5 GiB cache.
+which differs from it only in the README. [Reproducing](#reproducing) gives the commands.
 
 ## The pancake, 7763 × 4742 × 256
 
-The median time of one operation. Columns name the mode and the machine.
+Each cell is the median time of one operation over three trials, first touches only; "–" marks a
+cell with fewer than three. Columns name the mode and the machine. Planes slow with depth on every
+machine while spectra speed up, and on Lustre with several users the 4 MiB layouts read planes and
+regions fastest.
 
 ### One user
 
@@ -262,7 +229,9 @@ default 1 GiB, and the median first frame with 5 GiB.
 
 ## The pancake in shards
 
-1 MiB chunks, gathered into shards of 4 MiB (the first of each pair) and 16 MiB.
+1 MiB chunks, each gathered into shards of 4 MiB (the first row of each pair) and of 16 MiB. On
+Lustre, 4 MiB shards bring the planes of 1 MiB chunks near those of 4 MiB chunks; 16 MiB shards lose
+much of that with eight users.
 
 ### One user
 
@@ -298,6 +267,8 @@ default 1 GiB, and the median first frame with 5 GiB.
 | 128 × 128 × 16 in 512 × 512 × 16 | 1 | – | 84 ms | 8.61 s | – | 43 ms | 7.83 s |
 
 ### Animation
+
+Cells as in the pancake's animation table: late with 5 GiB / late with 1 GiB, first frame.
 
 | chunk | MiB | acdc, 1 user | acdc, 4 users | acdc, 8 users | lustre, 1 user | lustre, 4 users | lustre, 8 users |
 |---|---|---|---|---|---|---|---|
@@ -370,10 +341,11 @@ several users no first touches.
 
 ## The wide plane, 16384 × 16384 × 32
 
-With several users every plane read chunks another user read, so planes are shown for one user only.
-With eight users and the default cache the 16-deep layouts' animations ran past the bench's
-600-second limit; 69 of their operations, the only failures in the measurements, are left out of the
-animation table, whose other operations were 97% late.
+No layout keeps up with an animation at 5 frames a second, and regions take about the same time in
+every layout. With several users every plane read chunks another user read, so planes are shown for
+one user only. With eight users and the default cache the 16-deep layouts' animations ran past the
+bench's 600-second limit; 69 of their operations, the only failures in the measurements, are left out
+of the animation table, whose other operations were 97% late.
 
 ### One user
 
@@ -419,6 +391,8 @@ animation table, whose other operations were 97% late.
 
 ### Animation
 
+Cells as in the pancake's animation table: late with 5 GiB / late with 1 GiB, first frame.
+
 | chunk | MiB | mac, 1 user | acdc, 1 user | acdc, 4 users | acdc, 8 users |
 |---|---|---|---|---|---|
 | 512 × 512 × 1 | 1 | 10% / 18%, 209 ms | 47% / 47%, 398 ms | 93% / 93%, 757 ms | 95% / 95%, 1.66 s |
@@ -431,7 +405,9 @@ animation table, whose other operations were 97% late.
 | 1024 × 1024 × 4 | 16 | 22% / 97%, 459 ms | 22% / 97%, 1.21 s | 89% / 97%, 1.88 s | 96% / 97%, 3.52 s |
 | 512 × 512 × 16 | 16 | 97% / 97%, 1.57 s | 97% / 97%, 4.61 s | 97% / 97%, 7.02 s | 97% / 97%, 11.7 s |
 
-## Synthetic and real pixels
+## Checks
+
+### Synthetic and real pixels
 
 The first round of these measurements, on acdc with the same settings but for its sweep's own
 operation counts, read a real 7763 × 4742 × 256 ASKAP cube (compression 1.62) rewritten into three
@@ -445,7 +421,7 @@ layouts, and the synthetic pancake (1.53) in the same ones. One user, medians of
 
 The synthetic cube compresses a little less, so it reads a little more and decodes about as much.
 
-## Did `purge` empty the Mac's caches?
+### Did `purge` empty the Mac's caches?
 
 After its measurements, each layout's planes were read again with nothing emptied: fresh processes,
 so no decoded chunk survived, but the page cache untouched. First touches only:
@@ -503,6 +479,44 @@ The wide plane:
 | 512 × 512 × 16 | 16 | 1.75 s | 1.25 s |
 
 In the pancake's and the wide plane's chunks eight or more channels deep, whose planes read the most,
-the warm read was 20 to 41% faster, which it could not be had `purge` left the page cache full.
+the warm read was 20 to 41% faster, which it could not have been had `purge` left the page cache full.
 Elsewhere the two mostly agree within noise: the SSD delivers chunks about as fast as twelve cores
 decode them.
+
+## Reproducing
+
+Write each layout with `generate.py`, for example:
+
+```sh
+tools/zarr-bench/generate.py --synthetic --shape frequency=256,polarization=1,l=7763,m=4742 --seed 1 \
+    --chunk l=512,m=512,frequency=4 --codec blosc:zstd:5:shuffle --output cube.zarr
+```
+
+and measure it with the machine's thread counts and cache-emptying method (`--cold fadvise` on acdc;
+`--cold command` with `--drop-cache-cmd /usr/sbin/purge` on the Mac, or with
+`tools/zarr-bench/drop-lustre-cache.py` on Lustre), once with each cache, writing every cube's
+results to its own CSV:
+
+```sh
+carta-zarr-bench run cube.zarr --mode plane,spectrum,region,animation --cache-bytes 5G \
+    --processes 4 --io-threads 4 --decode-threads 28 --trials 3 --animation-prefetch --cold fadvise \
+    --label "LAYOUT|users=4|cache=5G" --csv pancake.csv
+carta-zarr-bench run cube.zarr --mode animation --cache-bytes 1G \
+    --processes 4 --io-threads 4 --decode-threads 28 --trials 3 --animation-prefetch --cold fadvise \
+    --label "LAYOUT|users=4|cache=1G" --csv pancake.csv
+```
+
+On the Mac, planes were also read again with `--cold off`, labelled `LAYOUT|users=1|cache=5G|warm`.
+With each machine's CSVs in one directory:
+
+```sh
+docs/measurements/chunk-size/summarize.py mac=RESULTS_MAC acdc=RESULTS_ACDC lustre=RESULTS_LUSTRE > medians.csv
+```
+
+[`medians.csv`](chunk-size/medians.csv) is that file, one row per machine, cube, layout, user count,
+cache and mode. The raw results, about 90 MB, were kept on the machines.
+
+The real-pixel check ran `tools/zarr-bench/sweep.py` on acdc over the pancake's three 4 MiB layouts,
+once on a 7763 × 4742 × 256 ASKAP cube that is not in the repository and once on the synthetic
+pancake, with the same settings as above: 1 and 8 users, three trials, `--cold fadvise`, 4 I/O
+threads, a decode thread per core and a 5 GiB cache.

@@ -5,6 +5,24 @@ system. It says what can be tuned, what measurements on two file systems found, 
 your own. The tools themselves are described in
 [`tools/zarr-bench/README.md`](../tools/zarr-bench/README.md).
 
+## In short
+
+- **Choose the chunk depth by the size of the plane.** The
+  [rule of thumb](#the-best-chunk-depth-depends-on-the-size-of-the-plane) gives a starting point:
+  about 1 to 4 channels deep for a 7763 x 4742 plane, 16 to 32 for 2048 x 2048 with 2048 channels,
+  and over 100 for 512 x 512 with thousands of channels.
+- **Start from 4 MiB chunks on Lustre; on a local disk 1 MiB are as good.** Depth matters more than
+  size: [chunk size matters less than depth](#chunk-size-matters-less-than-depth).
+- **Set `--zarr_file_io_threads 8` on Lustre**, rather than the default of 2:
+  [more file-reading threads](#use-more-file-reading-threads-on-lustre).
+- **For animations, let the cache hold two runs of chunks**, a run being the plane's area times the
+  chunk depth times four bytes. With less, the backend reads nothing ahead and stalls where each run
+  begins: [animations](#animations-stall-where-a-run-of-chunks-begins).
+- **On a busy parallel file system, gather small chunks into shards** to cut the number of files:
+  [striping and shards](#striping-and-shards).
+- **Measure your own system** before rewriting an archive: these numbers describe the machines they
+  came from. [Measuring your own system](#measuring-your-own-system) says how.
+
 ## What can be tuned
 
 Two things, by two different people at two different times:
@@ -32,8 +50,8 @@ explains why, and how they are measured.
 ## What the measurements found
 
 On a server (two Xeon Gold 6134, 32 logical cores, 1 TB RAM) against its Lustre 2.15 and BeeGFS file
-systems, with eight users reading at once and every cache emptied before each trial, and on a
-28-core desktop against a local NVMe disk for comparison. The numbers below are medians per
+systems, with eight users reading at once and every cache emptied before each trial, and on a desktop
+with 28 logical cores against a local NVMe disk for comparison. The numbers below are medians per
 operation; a plane read is what jumping to another channel costs, since carta-backend reads the whole
 plane of a Zarr cube into memory and downsamples it there.
 
@@ -113,10 +131,10 @@ compares every candidate against them.
 
 A later set of measurements, [chunk size and depth](measurements/chunk-size.md), read synthetic cubes
 in chunks of 1 to 16 MiB at several depths, on a Mac's SSD, a local NVMe disk and this Lustre. A cold
-plane took the pixels it decoded -- the plane's area times the chunk's depth -- at a rate the machine
-sets, 2.5, 0.6 and 0.9 billion a second for one user, plus a cost for each chunk of 0.016, 0.13 and
-0.35 ms. So depth decides what a channel change costs; between 1 and 16 MiB at the same depth, size
-changed it by less than a factor of two.
+plane took time in proportion to the pixels it decoded -- the plane's area times the chunk's depth --
+plus a small cost for each chunk; the report gives each machine's rate and cost. So depth decides what
+a channel change costs; between 1 and 16 MiB at the same depth, size changed it by less than a factor
+of two.
 
 - **On local disks 1 MiB chunks are as good as 4 MiB.** Their planes were as fast on the SSD and about
   20% slower on NVMe, and their spectra and regions faster on both.
@@ -137,18 +155,18 @@ CARTA's 5 frames a second, a 7763 x 4742 cube in 512 x 512 x 4 chunks stalled fo
 fourth frame for one user, and in 512 x 512 x 16 chunks for up to 400 ms every sixteenth; 512-square
 cubes barely stalled at all.
 
-carta-zarr's `ReadAhead` is what carta-backend's Zarr support reads ahead with, and the bench's
-`--animation-prefetch` uses the same one. It decodes through `Image::Prefetch`, which puts the chunks
-a read would decode into the cache without reading the pixels out -- one element of each chunk,
-which decodes all of it. After the first frame of each run it prefetches the next, one at a time, and stops for the rest of the animation once a frame is late
-while a prefetch is under way. A frame that catches a prefetch waits for the decode already under way
-rather than starting another, since a cached chunk is not checked again (ADR 0015).
+carta-backend's Zarr support reads ahead, and so does the bench with `--animation-prefetch`:
 
-For one user it hid every stall, at 5 and at 10 frames a second, in every case measured, including
-the 512 x 512 x 4 chunks with the default 1 GiB cache, which holds only 1.8 runs: a run is the plane's
-area times the chunk depth times four bytes, 589 MB for the 512 x 512 x 4 chunks and 2.4 GB for
-512 x 512 x 16. An earlier version that read the next run's first plane, 147 MB to allocate and fill,
-still stalled there at 10 frames a second.
+- after the first frame of each run, it decodes the next run into the cache, one run at a time;
+- once a frame is late while a prefetch is under way, it stops for the rest of the animation;
+- a frame that catches a prefetch waits for it rather than decoding the same chunks again
+  ([ADR 0015](adr/0015-a-cached-chunk-is-not-checked-again.md)).
+
+For one user reading ahead hid every stall, at 5 and at 10 frames a second, in every case measured,
+including the 512 x 512 x 4 chunks with the default 1 GiB cache, which holds only 1.8 runs: a run is
+the plane's area times the chunk depth times four bytes, 589 MB for the 512 x 512 x 4 chunks and 2.4
+GB for 512 x 512 x 16. An earlier version that read the next run's first plane, 147 MB to allocate and
+fill, still stalled there at 10 frames a second.
 
 With eight users animating the same large cube on one machine, frames late out of 496 per setting,
 or 1008 for the 16-deep chunks:
@@ -162,30 +180,32 @@ or 1008 for the 16-deep chunks:
 | 512 x 512 x 4, 4 GiB | 10 | 136 | 155 |
 | 512 x 512 x 16, 8 GiB | 10 | 203 | 343 |
 
-At CARTA's 5 frames a second it helped the 4-deep chunks and cut the longest stall of the 16-deep ones
-from 1.3 s to 1.2 s; at 10 it made things worse, because the one prefetch each animation made before
+At CARTA's 5 frames a second it cut the 4-deep chunks' late frames by more than half. In the 16-deep
+chunks it shortened the longest stall from 1.3 s to 1.2 s but made 11 more frames late. At 10 frames
+a second it made every case worse, because the one prefetch each animation made before
 stopping still decoded a whole run while the machine had no time over. Stopping on the second
 prefetch the animation caught up with, an earlier rule, was worse still: 541 late in the last row.
 So a backend that prefetches should do it only while the cache holds two runs for each cube being
 animated, and the sweep's trade-off table gives the run size of each layout.
 
-The [chunk-size measurements](measurements/chunk-size.md) found the same over 15 layouts of the
-7763 x 4742 x 256 pancake, 32 frames at a time at 5 frames a second. With a 5 GiB cache, which holds
-two runs of every layout up to sixteen channels deep, no layout had more than 6% of its frames late
-for one user, on the SSD, NVMe or Lustre. With the default 1 GiB, which on that plane holds two runs
-only of chunks one or two channels deep, the frames late on NVMe were 22% in chunks four deep, 9% eight deep, 3% sixteen deep and 97% thirty-two deep.
-With four or eight users animating at once and the 5 GiB cache, chunks one channel deep had 71 to 94%
-of their frames late on NVMe and 14 to 80% on Lustre, and chunks sixteen deep 0 to 8% on either,
-after a first frame of several seconds.
+The [chunk-size measurements](measurements/chunk-size.md) found the same over 15 layouts of the 7763 x
+4742 x 256 pancake, 32 frames at a time at 5 frames a second. With a 5 GiB cache, which holds two runs
+of every layout up to sixteen channels deep, no layout had more than 6% of its frames late for one
+user, on the SSD, NVMe or Lustre. With the default 1 GiB, which on that plane holds two runs only of
+chunks one or two channels deep, the frames late on NVMe were 22% in chunks four deep, 9% eight deep,
+3% sixteen deep and 97% thirty-two deep. With four or eight users animating at once and the 5 GiB
+cache, chunks one channel deep had 71 to 94% of their frames late on NVMe and 14 to 80% on Lustre, and
+chunks sixteen deep 0 to 8% on either, after a first frame of several seconds.
 
 ### Through carta-backend, the rule holds for a pancake
 
 The read-path test set (`tools/testset`) holds a synthetic pancake, 7763 x 4742 x 256, made from one
-FITS file in 4 MiB chunks of two shapes: 256 x 256 x 16, which sites have used, and 512 x 512 x 4, which
-the rule of thumb above points to (about 2.7 channels deep). Measured through carta-backend's own read
-paths on a 28-thread machine with local NVMe and a warm page cache, the shallow chunk was the better one
-for planes -- a channel shown, changed or animated -- and the deep one for spectra. A moment's peak is
-how far it raised carta-backend's resident memory above what the session held before it:
+FITS file in 4 MiB chunks of two shapes: 256 x 256 x 16, which sites have used, and 512 x 512 x 4,
+which the rule of thumb above points to (about 2.7 channels deep). Measured through carta-backend's
+own read paths on a machine with 28 logical cores and local NVMe and a warm page cache, the shallow
+chunk was the better one for planes -- a channel shown, changed or animated -- and the deep one for
+spectra. A moment's peak is how far it raised carta-backend's resident memory above what the session
+held before it:
 
 | operation | 256 x 256 x 16 | 512 x 512 x 4 |
 |---|---|---|
@@ -249,15 +269,16 @@ cube's own layout from 6.35 s to 3.33 s; a plane of the 2048-square cube's 512 x
 Striping a dataset's directory across one OST or across eight made no difference beyond 5% for chunks
 of a few megabytes: a chunk file smaller than the stripe size lives on one OST either way. What
 striping cannot change is the number of files, which every open and every stat sends to the metadata
-server that all clients share: a 32 GiB cube in 128-deep chunks is 4,000 files, and a terabyte cube
-in the same chunks would be over 100,000. Shards -- chunks gathered into one file, each still read on
-its own -- are the remedy, and are worth including in a sweep on a busy file system. The sweep
-accepts them relative to the chunk, `frequency*8` or `l*4,m*4`. A sharded layout's first touches are counted by
-chunk, as an unsharded one's are, so a read that finds its shard's index already in the page cache
-still counts; if the file system reads ahead within a shard's file, a sharded layout's planes and
-spectra may look faster than a first touch would be. The
-[chunk-size measurements](measurements/chunk-size.md#the-pancake-in-shards) compare 1 MiB chunks in
-4 and 16 MiB shards with the unsharded layouts.
+server that all clients share: a 32 GiB cube in 128-deep chunks is 4,000 files, and a terabyte cube in
+the same chunks would be over 100,000. Shards -- chunks gathered into one file, each still read on its
+own -- are the remedy, and are worth including in a sweep on a busy file system. The sweep accepts
+them relative to the chunk, `frequency*8` or `l*4,m*4`. The sweep ranks only first touches, operations
+that read no chunk another operation of the same trial read before or alongside them. A sharded
+layout's first touches are counted by chunk, as an unsharded one's are, so a read that finds its
+shard's index already in the page cache still counts; if the file system reads ahead within a shard's
+file, a sharded layout's planes and spectra may look faster than a first touch would be. The
+[chunk-size measurements](measurements/chunk-size.md#the-pancake-in-shards) compare 1 MiB chunks in 4
+and 16 MiB shards with the unsharded layouts.
 
 ## Measuring your own system
 

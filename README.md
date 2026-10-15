@@ -125,18 +125,24 @@ Built and tested with:
 The storage benchmark, `-DCARTA_ZARR_BUILD_BENCH=ON`, also needs [`uv`](https://docs.astral.sh/uv/);
 see [tools/zarr-bench/README.md](tools/zarr-bench/README.md).
 
-## Build, test, install
+## Build and install
 
 ```bash
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
 cmake --build build -j 8
-ctest --test-dir build --output-on-failure
 sudo cmake --install build --prefix /opt/carta-zarr
 ```
 
 `-j 8` builds with eight jobs at once; set it to the number of cores to spare. The first configure
 builds TensorStore, which takes a while; later ones do not. Installing into `/opt` needs `sudo`; a
 prefix you own, such as `$HOME/.local`, does not.
+
+To run the tests as well -- for a new platform or a change to the library, not needed to install --
+run, after building:
+
+```bash
+ctest --test-dir build --output-on-failure
+```
 
 ### Without network access
 

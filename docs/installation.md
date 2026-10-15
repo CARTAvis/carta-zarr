@@ -22,14 +22,13 @@ sudo apt-get install build-essential cmake python3 nasm patch
 For AlmaLinux 8 and offline dependency archives, see the repository's
 [build instructions](https://github.com/CARTAvis/carta-zarr/blob/dev/README.md#requirements).
 
-## Build, test and install into a prefix you own
+## Build and install into a prefix you own
 
 ```sh
 git clone https://github.com/CARTAvis/carta-zarr.git
 cd carta-zarr
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
 cmake --build build -j 8
-ctest --test-dir build --output-on-failure
 cmake --install build --prefix "$HOME/.local"
 ```
 
@@ -37,6 +36,18 @@ The README installs into `/opt/carta-zarr` with `sudo` instead; use whichever
 prefix suits you, and pass it as `CMAKE_PREFIX_PATH` when building against it.
 Choose a parallel job count appropriate to your machine. TensorStore makes the
 first build substantially larger than subsequent builds.
+
+## Run the tests (optional)
+
+The tests are for checking a build on a new platform or a change to the
+library; installing does not need them. The build above already compiled them;
+run them with:
+
+```sh
+ctest --test-dir build --output-on-failure
+```
+
+The tests read the fixtures under `tests/data`, which a clone includes.
 
 ## Link from another CMake project
 

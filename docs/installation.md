@@ -103,6 +103,22 @@ ctest --test-dir build --output-on-failure
 
 The tests read the fixtures under `tests/data`, which a clone includes.
 
+A change to how the library shares anything between threads is worth running
+under ThreadSanitizer as well. It needs a build tree of its own, because
+TensorStore has to be built with it too; `CARTA_ZARR_THREAD_SANITIZER` does
+that:
+
+```sh
+cmake -S . -B build-tsan -DCMAKE_BUILD_TYPE=RelWithDebInfo -DCARTA_ZARR_THREAD_SANITIZER=ON
+cmake --build build-tsan -j 8
+ctest --test-dir build-tsan --output-on-failure -R 'concurrency|pixel-read|work-pool|memo|read-ahead'
+```
+
+These are the tests that share handles between threads. The pool-release and
+allocation-failure tests count allocations by replacing `operator new`, which
+ThreadSanitizer's own allocator replaces in turn, so they fail under it whatever
+the threads do.
+
 ## Link from another CMake project
 
 ```cmake

@@ -81,6 +81,7 @@ guides/resources
 
 guides/datasets
 storage-tuning
+measurements/chunk-size
 ```
 
 ```{toctree}

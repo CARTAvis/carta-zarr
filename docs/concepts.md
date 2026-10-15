@@ -42,9 +42,9 @@ Find an axis with `AxisIndex(axes, AxisRole::spectral)`, for example. The curren
 XRADIO profile reports l, m, frequency, polarization, time in that logical order,
 regardless of the array's stored order. Avoid hard-coding that order.
 
-The output is densely packed with logical axis 0 varying fastest. When only
-the two spatial axes vary, the x coordinate varies fastest for the current
-XRADIO profile. `storage_index` reports where an axis lives in the stored array.
+The output is densely packed with logical axis 0 varying fastest. In the current
+XRADIO profile, `l` (x) is axis 0, so it varies fastest in the output. `storage_index`
+reports where an axis lives in the stored array, which can differ from its logical position.
 
 ## Flag versus region mask
 
@@ -53,8 +53,8 @@ default and output NaN for those pixels. Set `apply_pixel_mask = false` to read
 the image's stored values without applying the flag.
 
 A reduction's **region mask** selects pixels within a bounding box: nonzero
-means included. A deconvolution mask is an ordinary image, rather than a flag.
-These three serve different purposes.
+means included. A deconvolution mask such as `MASK_DECONVOLVE` is an ordinary
+image, not a flag. These three serve different purposes.
 
 ## Rules that apply to every operation
 

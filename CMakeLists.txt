@@ -603,6 +603,16 @@ if(CARTA_ZARR_BUILD_TESTS AND BUILD_TESTING)
         LIBRARIES Threads::Threads
         DEFINITIONS ${CARTA_ZARR_PIXEL_FIXTURES})
 
+    # The threading promises, held through the public API: several threads at once on one Dataset,
+    # one image, two images of one context, and Read beside Prefetch. Run under ThreadSanitizer too;
+    # see the README.
+    carta_zarr_add_test(carta_zarr_concurrency_tests PUBLIC
+        TEST_NAME carta-zarr-concurrency
+        SOURCES tests/concurrency_test.cc
+        LIBRARIES Threads::Threads
+        DEFINITIONS CARTA_ZARR_REFERENCE_FIXTURE="${CARTA_ZARR_FIXTURE_DIR}/xradio/minimal"
+                    ${CARTA_ZARR_PIXEL_FIXTURES} ${CARTA_ZARR_WIDE_FIXTURE})
+
     # The spectral reduction is checked against an oracle recomputed from the fixture's encoding,
     # not against a recorded answer, so that a walk which reads the right pixels but double-counts a
     # region straddling two chunks disagrees with it.

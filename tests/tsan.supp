@@ -1,0 +1,16 @@
+# ThreadSanitizer suppressions for the threading tests; see the README's "Build and install".
+#
+# TensorStore hands a task to another worker through a work-stealing queue that publishes it with
+# std::atomic_thread_fence (tensorstore/internal/container/single_producer_queue.h). ThreadSanitizer
+# does not model a fence on its own, so it sees no ordering between the thread that queued a task and
+# the one that ran it, and reports every object the task touches -- in TensorStore and in the absl it
+# is built on -- as raced.
+#
+# Suppressed by the top frame only: a race whose racing access is in this library's own code is still
+# reported, whatever TensorStore did further down. What this gives up is a race in which this library
+# hands one TensorStore object to two threads and TensorStore is the first to touch it.
+race_top:^tensorstore::
+race_top:^absl::
+# Where a queued task's body starts: the call into the type-erased function TensorStore queued. Its
+# name begins with its return type, so it is matched without the anchor.
+race_top:absl::internal_any_invocable::RemoteInvoker

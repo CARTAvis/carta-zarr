@@ -109,6 +109,25 @@ deep, close to 256 x 256 x 16, and a 512-square, 4096-channel one at about 126, 
 512 x 512 x 4. Put the chunk shapes a site already uses into its sweep's grid, so that the report
 compares every candidate against them.
 
+### Chunk size matters less than depth
+
+A later set of measurements, [chunk size and depth](measurements/chunk-size.md), read synthetic cubes
+in chunks of 1 to 16 MiB at several depths, on a Mac's SSD, a local NVMe disk and this Lustre. A cold
+plane took the pixels it decoded -- the plane's area times the chunk's depth -- at a rate the machine
+sets, 2.5, 0.6 and 0.9 billion a second for one user, plus a cost for each chunk of 0.016, 0.13 and
+0.35 ms. So depth decides what a channel change costs; between 1 and 16 MiB at the same depth, size
+changed it by less than a factor of two.
+
+- **On local disks 1 MiB chunks are as good as 4 MiB.** Their planes were as fast on the SSD and about
+  20% slower on NVMe, and their spectra and regions faster on both.
+- **On Lustre 4 MiB chunks were the best with several users,** for planes and regions alike: with
+  eight users a plane of the 7763 x 4742 pancake took 815 ms in 512 x 512 x 4 chunks, 1.34 s in
+  256 x 256 x 4 and 1.51 s in 1024 x 1024 x 4. 16 MiB chunks gave the slowest regions.
+- **1 MiB chunks in 4 MiB shards read planes on Lustre nearly as fast as 4 MiB chunks** and kept the
+  1 MiB chunks' spectra; 16 MiB shards gave most of that back with eight users.
+
+So 4 MiB remains the size to start a sweep from on Lustre, and on a local disk 1 MiB is as good.
+
 ### Animations stall where a run of chunks begins
 
 An animation reads plane after plane through the backend's cache. Within a run of chunks along the
@@ -149,6 +168,15 @@ stopping still decoded a whole run while the machine had no time over. Stopping 
 prefetch the animation caught up with, an earlier rule, was worse still: 541 late in the last row.
 So a backend that prefetches should do it only while the cache holds two runs for each cube being
 animated, and the sweep's trade-off table gives the run size of each layout.
+
+The [chunk-size measurements](measurements/chunk-size.md) found the same over 15 layouts of the
+7763 x 4742 x 256 pancake, 32 frames at a time at 5 frames a second. With a 5 GiB cache, which holds
+two runs of every layout up to sixteen channels deep, no layout had more than 6% of its frames late
+for one user, on the SSD, NVMe or Lustre. With the default 1 GiB, which on that plane holds two runs
+only of chunks one or two channels deep, the frames late on NVMe were 22% in chunks four deep, 9% eight deep, 3% sixteen deep and 97% thirty-two deep.
+With four or eight users animating at once and the 5 GiB cache, chunks one channel deep had 71 to 94%
+of their frames late on NVMe and 14 to 80% on Lustre, and chunks sixteen deep 0 to 8% on either,
+after a first frame of several seconds.
 
 ### Through carta-backend, the rule holds for a pancake
 
@@ -227,7 +255,9 @@ its own -- are the remedy, and are worth including in a sweep on a busy file sys
 accepts them relative to the chunk, `frequency*8` or `l*4,m*4`. A sharded layout's first touches are counted by
 chunk, as an unsharded one's are, so a read that finds its shard's index already in the page cache
 still counts; if the file system reads ahead within a shard's file, a sharded layout's planes and
-spectra may look faster than a first touch would be.
+spectra may look faster than a first touch would be. The
+[chunk-size measurements](measurements/chunk-size.md#the-pancake-in-shards) compare 1 MiB chunks in
+4 and 16 MiB shards with the unsharded layouts.
 
 ## Measuring your own system
 
@@ -325,8 +355,11 @@ skipped, since it would not be the chunk a full cube has.
 
 The sweeps behind this page ran on 2026-10-01 and 2026-10-02 with carta-zarr at the commits that
 added each tool, eight users, two or three trials, and every cache emptied as described above. Their
-configurations and full reports were kept on the machines they ran on rather than in this
-repository, since they describe those machines; rerun the sweep on yours rather than reuse them.
+configurations and full reports were kept on the machines they ran on. The measurements since keep
+theirs in `docs/measurements/`, each beside a report of its method and every number: the
+chunk-size measurements ran on 2026-10-14 and 2026-10-15, and
+[their report](measurements/chunk-size.md#reproducing) says how to run them again. Either way they
+describe those machines; measure yours rather than reuse them.
 
 The comparison through carta-backend ran on 2026-10-08 and 2026-10-09, on the read-path test set built
 by `tools/testset/build.sh`, with carta-zarr at 21f18a2 and carta-backend's `test_zarr` branch at

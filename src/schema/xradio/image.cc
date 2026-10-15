@@ -16,7 +16,7 @@
 #include "observation.h"
 #include "probe_report.h"
 #include "qualification.h"
-#include "schema_row.h"
+#include "schema_version.h"
 
 #include <algorithm>
 #include <cmath>
@@ -32,22 +32,14 @@ namespace {
 
 namespace zarr_metadata = ::carta::zarr::internal::zarr;
 
-// Where an image is listed: XRADIO's own names in the row's order, then every other name after them.
-std::size_t KnownImageRank(const SchemaRow& row, std::string_view image_id) {
-    const auto& known = row.known_images;
-    return static_cast<std::size_t>(std::find(known.begin(), known.end(), image_id) - known.begin());
+// Where an image is listed: XRADIO's own names in their order, then every other name after them.
+std::size_t KnownImageRank(std::string_view image_id) {
+    return static_cast<std::size_t>(std::find(kKnownImages.begin(), kKnownImages.end(), image_id) -
+                                    kKnownImages.begin());
 }
 
-bool IsKnownImage(const SchemaRow& row, std::string_view image_id) {
-    return KnownImageRank(row, image_id) < row.known_images.size();
-}
-
-// XRADIO names a spectral frame that astropy also has by astropy's name, lowercased, and every other
-// one by casacore's (CASACORE_TO_OBSERVER in XRADIO's image conventions). Uppercasing gives back
-// casacore's name for all of them but the geocentric frame, which astropy calls GCRS and casacore GEO.
-std::string SpectralSystemOf(const std::string& observer) {
-    auto system = Upper(observer);
-    return system == "GCRS" ? std::string{"GEO"} : system;
+bool IsKnownImage(std::string_view image_id) {
+    return KnownImageRank(image_id) < kKnownImages.size();
 }
 
 // The dataset carries a well-formed array for every sky-plane coordinate. Both XRADIO readers write
@@ -88,11 +80,9 @@ std::vector<std::string> FindDataGroups(const nlohmann::json& root_attributes, s
 }
 
 // XRADIO writes the role on the variable's own "type" attribute, lowercased; the same attribute
-// spells "flag" for pixel masks, which are never images. A sky image's part is written two ways. From
-// a list of tclean's images XRADIO 1.2 typed it there ("model", "residual"). From a dict of them, and
-// in every schema 0.0.2 store, each is typed "sky" and its part is the name of the data group whose
-// sky it is, so a sky image another group than "base" names as its sky, and "base" does not, plays
-// that group's part.
+// spells "flag" for pixel masks, which are never images. Every sky image is typed "sky", and its part
+// is the name of the data group whose sky it is, so a sky image another group than "base" names as
+// its sky, and "base" does not, plays that group's part.
 //
 // One rule for the listing and for describing, so that an entry and the image it opens as cannot
 // disagree about which part the image plays.
@@ -121,7 +111,7 @@ std::string ImageRoleOf(const zarr_metadata::ArrayMetadata& image, std::string_v
 
 std::optional<SpectralCoordinate> DescribeSpectralCoordinate(const Store& store,
                                                              const std::vector<double>& frequency_values,
-                                                             const SchemaRow& row, ImageDescriptor& descriptor) {
+                                                             ImageDescriptor& descriptor) {
     if (frequency_values.empty()) {
         return std::nullopt;
     }
@@ -136,19 +126,12 @@ std::optional<SpectralCoordinate> DescribeSpectralCoordinate(const Store& store,
     }
 
     // The axis reports the same unit, from the same rule.
-    spectral.unit = CoordinateUnit(store, SkyCoordinate(AxisRole::spectral), row);
-    if (row.spectral_frame == SpectralFrameSource::frame_attribute) {
-        spectral.system = AttributeString(frequency_attributes, "frame");
-    }
+    spectral.unit = CoordinateUnit(store, SkyCoordinate(AxisRole::spectral));
+    spectral.system = AttributeString(frequency_attributes, "frame");
     // The channel a linear description is measured from, which is the first one unless the
-    // reference frequency names another. What that measure carries -- for an XRADIO 1.2 store its
-    // frame under `attrs`, and its value under `data` -- is read from the one lookup.
+    // reference frequency names another.
     double reference_value = spectral.channel_frequencies.front();
     if (const auto* const reference_frequency = MemberObject(frequency_attributes, "reference_frequency")) {
-        const auto* const attributes = MemberObject(*reference_frequency, "attrs");
-        if (attributes != nullptr && row.spectral_frame == SpectralFrameSource::reference_observer) {
-            spectral.system = SpectralSystemOf(AttributeString(*attributes, "observer"));
-        }
         if (const auto value = MemberNumber(*reference_frequency, "data")) {
             reference_value = *value;
         }
@@ -166,7 +149,7 @@ std::optional<SpectralCoordinate> DescribeSpectralCoordinate(const Store& store,
     // An axis of one channel has no spacing to fit an increment from. Schema 0.0.2 states the width
     // of every channel, and for the one channel that is the increment, measured from it. An axis of
     // more channels keeps what its channels say, whatever the width says.
-    if (!spectral.increment && spectral.channel_frequencies.size() == 1 && row.increment_from_channel_width) {
+    if (!spectral.increment && spectral.channel_frequencies.size() == 1) {
         if (const auto* const width = MemberObject(frequency_attributes, "channel_width")) {
             const auto* const attributes = MemberObject(*width, "attrs");
             const std::string unit = attributes == nullptr ? std::string{} : AttributeString(*attributes, "units");
@@ -217,7 +200,7 @@ struct Discovered {
 // Which variables of this store are images this profile will open. Only InspectImages calls it:
 // deciding whether the store matches means enumerating it, and the answer to both questions comes
 // back together so that nothing has to enumerate twice or cache the result.
-Result<Discovered> DiscoverImages(const Store& store, const SchemaRow& row) {
+Result<Discovered> DiscoverImages(const Store& store) {
     const auto& inventory = store.Inventory();
     if (!inventory) {
         return inventory.error();
@@ -228,7 +211,7 @@ Result<Discovered> DiscoverImages(const Store& store, const SchemaRow& row) {
     const auto& root_attributes = store.RootAttributes();
     for (const auto& entry : inventory.value()) {
         auto qualified = QualifyNode(store, entry);
-        if (qualified.listed || IsKnownImage(row, entry.name)) {
+        if (qualified.listed || IsKnownImage(entry.name)) {
             found.image_evidence = true;
         }
         if (qualified.diagnostic) {
@@ -249,15 +232,15 @@ Result<Discovered> DiscoverImages(const Store& store, const SchemaRow& row) {
         const auto& metadata = entry.array->value();
         // Only for an image that opens: the axes promise what OpenImage would report, and a
         // variable it refuses reports nothing -- an aperture-plane one would have only some of them.
-        auto axes = qualified.openable ? DescribeAxes(store, metadata, row) : std::vector<AxisDescriptor>{};
+        auto axes = qualified.openable ? DescribeAxes(store, metadata) : std::vector<AxisDescriptor>{};
         result.images.push_back(ImageEntry{entry.name, qualified.openable, std::move(said),
                                            ImageRoleOf(metadata, entry.name, root_attributes), std::move(axes)});
     }
 
-    const auto sort_images = [&row](std::vector<ImageEntry>& images) {
-        std::sort(images.begin(), images.end(), [&row](const auto& left, const auto& right) {
-            const auto left_rank = KnownImageRank(row, left.id);
-            const auto right_rank = KnownImageRank(row, right.id);
+    const auto sort_images = [](std::vector<ImageEntry>& images) {
+        std::sort(images.begin(), images.end(), [](const auto& left, const auto& right) {
+            const auto left_rank = KnownImageRank(left.id);
+            const auto right_rank = KnownImageRank(right.id);
             return left_rank == right_rank ? left.id < right.id : left_rank < right_rank;
         });
     };
@@ -276,12 +259,11 @@ Result<SchemaInspection> InspectImages(const Store& store) {
     ProbeReport report(store, "image dataset");
 
     const auto& root_attributes = store.RootAttributes();
-    // A store naming a version no row reads is still enumerated, by the newest row, to tell an image
-    // dataset of that version -- refused for its version -- from Zarr of something else that carries
-    // the attribute too, as XRADIO's measurement sets do.
-    auto chosen = ChooseSchemaRow(store);
-    const auto& row = chosen.row != nullptr ? *chosen.row : SchemaRows().front();
-    auto found = DiscoverImages(store, row);
+    // A store that is not read is still enumerated, to tell an image dataset -- refused for what it
+    // names -- from Zarr of something else that names a version too, as XRADIO's measurement sets do,
+    // or none.
+    auto checked = CheckSchemaVersion(store);
+    auto found = DiscoverImages(store);
     if (!found) {
         return found.error();
     }
@@ -303,21 +285,21 @@ Result<SchemaInspection> InspectImages(const Store& store) {
     }
     // What was found goes back with what was decided from it, whichever way the decision went.
     const auto finish = [&](SchemaMatchKind kind) -> Result<SchemaInspection> {
-        auto probe = report.Finish(kind, chosen.version);
+        auto probe = report.Finish(kind, checked.version);
         if (!probe) {
             return probe.error();
         }
         return SchemaInspection{std::move(probe.value()), std::move(discovery)};
     };
 
-    if (chosen.row == nullptr) {
+    if (checked.refusal) {
         // Refused for its version ahead of anything else wrong with it, which is reported by rules
         // the store may not follow. Something that is not an image dataset is not refused at all.
         if (!image_dataset) {
             report.SetDiagnostics(discovery.diagnostics);
             return finish(SchemaMatchKind::no_match);
         }
-        auto said = std::move(chosen.diagnostics);
+        std::vector<Diagnostic> said{std::move(*checked.refusal)};
         said.insert(said.end(), discovery.diagnostics.begin(), discovery.diagnostics.end());
         report.SetDiagnostics(std::move(said));
         return finish(SchemaMatchKind::invalid);
@@ -348,11 +330,6 @@ Result<SchemaInspection> InspectImages(const Store& store) {
     if (!report.ok()) {
         return finish(SchemaMatchKind::invalid);
     }
-    // Which rules read a dataset that matched, after what discovery said: a refusal is reported as
-    // its first diagnostic, and which row would have read the store is not the reason for one.
-    auto said = report.diagnostics();
-    said.insert(said.end(), chosen.diagnostics.begin(), chosen.diagnostics.end());
-    report.SetDiagnostics(std::move(said));
     return finish(SchemaMatchKind::match);
 }
 
@@ -382,12 +359,13 @@ Result<DescribedImage> DescribeImageFrom(const Store& store, std::string_view im
     if (auto qualified = RequireQualified(store, image_id); !qualified) {
         return qualified.error();
     }
-    const auto chosen = ChooseSchemaRow(store);
-    if (chosen.row == nullptr) {
-        const auto& refusal = chosen.diagnostics.front();
-        return Error{ErrorCode::unsupported_schema_version, refusal.message, refusal.node_path};
+    if (const auto checked = CheckSchemaVersion(store); checked.refusal) {
+        const auto& refusal = *checked.refusal;
+        const auto code = refusal.code == DiagnosticCode::unsupported_schema_version
+                            ? ErrorCode::unsupported_schema_version
+                            : ErrorCode::invalid_metadata;
+        return Error{code, refusal.message, refusal.node_path};
     }
-    const auto& row = *chosen.row;
     // Parsed already, and the qualification just accepted it: the store hands back what it holds.
     const auto& image = store.ReadArrayMetadata(image_id).value();
 
@@ -397,11 +375,9 @@ Result<DescribedImage> DescribeImageFrom(const Store& store, std::string_view im
     descriptor.unit = AttributeString(image.attributes, "units");
     const auto& root_attrs = store.RootAttributes();
     descriptor.image_role = ImageRoleOf(image, image_id, root_attrs);
-    if (row.reads_sub_type) {
-        descriptor.sub_type = AttributeString(image.attributes, "sub_type");
-    }
+    descriptor.sub_type = AttributeString(image.attributes, "sub_type");
     descriptor.data_groups = FindDataGroups(root_attrs, image_id);
-    descriptor.axes = DescribeAxes(store, image, row);
+    descriptor.axes = DescribeAxes(store, image);
 
     // A direction axis is linear by construction, so its increment is reported even when the samples
     // are not evenly spaced; the fit says so in a diagnostic rather than withholding the value.
@@ -413,7 +389,7 @@ Result<DescribedImage> DescribeImageFrom(const Store& store, std::string_view im
 
     // Absent only when no samples were handed in, which reading them never does: every coordinate is
     // required, and the probe refused a dataset missing one. Same for the two below.
-    if (auto spectral = DescribeSpectralCoordinate(store, values.frequency, row, descriptor); spectral) {
+    if (auto spectral = DescribeSpectralCoordinate(store, values.frequency, descriptor); spectral) {
         descriptor.spectral = std::move(spectral);
     }
 
@@ -428,7 +404,7 @@ Result<DescribedImage> DescribeImageFrom(const Store& store, std::string_view im
     }
 
     // Parse Observation & Telescope Metadata from the selected image's attributes.
-    descriptor.observation = DescribeObservation(image, row);
+    descriptor.observation = DescribeObservation(image);
 
     // Read from the metadata already in hand rather than asked of the store again, and assigned
     // unconditionally: every array ParseArrayMetadata accepted has a layout, so there is no failure

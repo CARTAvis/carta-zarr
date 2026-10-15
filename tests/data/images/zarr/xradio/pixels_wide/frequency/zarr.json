@@ -34,6 +34,8 @@
     }
   ],
   "attributes": {
+    "units": "Hz",
+    "frame": "LSRK",
     "rest_frequency": {
       "data": 1420405751.0
     }

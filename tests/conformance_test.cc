@@ -8,9 +8,6 @@
 // produced. The fixtures come from tests/data/generate_conformance_fixtures.py, which converts a
 // FITS image, and two CASA images with internal masks, with a pinned XRADIO. When that pin is bumped and one of these
 // fails, the failure names the assumption the new XRADIO version broke.
-//
-// It runs twice: on the stores XRADIO 1.2.5 writes, of schema 0.0.2, and on the same conversions by
-// XRADIO 1.2.3, which named no schema version and are read by the rules for such stores.
 
 #include "support/check.h"
 
@@ -36,7 +33,7 @@ using carta::zarr::AxisRole;
 
 const std::filesystem::path kFixture{CARTA_ZARR_CONFORMANCE_FIXTURE};
 const std::filesystem::path kFlaggedFixture{CARTA_ZARR_CONFORMANCE_FLAGGED_FIXTURE};
-// The schema version the fixtures name; empty for XRADIO 1.2.3's, which named none.
+// The schema version the fixtures name.
 const std::string kSchemaVersion{CARTA_ZARR_CONFORMANCE_SCHEMA_VERSION};
 
 using carta::zarr::testing::Require;
@@ -55,12 +52,6 @@ carta::zarr::Image OpenSky() {
             "XRADIO's own output was not recognized as an image dataset");
     Require(matched.value().schema_version == kSchemaVersion,
             "XRADIO's own output reported schema version '" + matched.value().schema_version + "'");
-    const bool unversioned = std::any_of(
-        matched.value().diagnostics.begin(), matched.value().diagnostics.end(),
-        [](const auto& diagnostic) { return diagnostic.code == carta::zarr::DiagnosticCode::unversioned_schema; });
-    Require(unversioned == kSchemaVersion.empty(),
-            kSchemaVersion.empty() ? "XRADIO 1.2.3's output was not said to be read by XRADIO 1.2's rules"
-                                   : "XRADIO's own " + kSchemaVersion + " output was not read as one");
 
     const auto context = carta::zarr::Context::Create();
     Require(static_cast<bool>(context), "Context::Create failed");
@@ -80,9 +71,8 @@ carta::zarr::Image OpenSky() {
 
 void TestIdentityAndAxes(const carta::zarr::ImageDescriptor& sky) {
     Require(sky.image_role == "sky", "SKY's role is written on its own type attribute");
-    // XRADIO 1.2.5 writes the BTYPE of the FITS image it converted, and a store naming no version is
-    // not asked for it.
-    Require(sky.sub_type == (kSchemaVersion.empty() ? "" : "Intensity"), "SKY's sub_type was '" + sky.sub_type + "'");
+    // XRADIO 1.2.5 writes the BTYPE of the FITS image it converted.
+    Require(sky.sub_type == "Intensity", "SKY's sub_type was '" + sky.sub_type + "'");
     Require(sky.unit == "Jy/beam", "BUNIT did not survive the conversion as the image unit");
     Require(sky.data_groups == std::vector<std::string>{"base"}, "SKY's data group membership changed");
     Require(!sky.has_pixel_mask, "an image converted from a FITS with no mask reported a pixel mask");
@@ -293,7 +283,6 @@ void TestFlaggedConversion() {
     TestFlagsMaskTheirOwnImage(dataset.value(), "SKY_OTHER", "FLAG_SKY_OTHER", kOtherMasked);
 }
 
-#ifdef CARTA_ZARR_CONFORMANCE_CONTINUUM_FIXTURE
 // A continuum image of a spectral index, converted from FITS by XRADIO 1.2.5. Its one channel has no
 // spacing to give an increment, so the channel width XRADIO writes is the increment; and BTYPE is
 // what the image measures.
@@ -314,7 +303,6 @@ void TestContinuumConversion() {
     Require(sky.spectral->reference_pixel == 1.0 && sky.spectral->reference_value == 1.4e9,
             "the increment was not measured from the one channel");
 }
-#endif
 
 }  // namespace
 
@@ -332,9 +320,7 @@ int main() {
         Require(!beams.value().empty(), "the beam table decoded to no beams");
 
         TestFlaggedConversion();
-#ifdef CARTA_ZARR_CONFORMANCE_CONTINUUM_FIXTURE
         TestContinuumConversion();
-#endif
 
         std::cout << "carta-zarr XRADIO conformance tests passed\n";
         return 0;

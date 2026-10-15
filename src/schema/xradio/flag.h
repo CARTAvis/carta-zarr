@@ -27,8 +27,8 @@
 namespace carta::zarr::internal::xradio {
 
 // A flag is distinguished by its `type` attribute rather than by its name: the XRADIO CASA reader
-// names variables after CASA's internal masks, so MASK_0 is a flag and MASK_DECONVOLVE is an
-// ordinary image. Classification must never be driven by variable names. See ADR 0001.
+// names variables after CASA's internal masks, so MASK_0 is a flag and MASK, a deconvolution's mask,
+// is an ordinary image. Classification must never be driven by variable names. See ADR 0001.
 inline bool IsFlag(const zarr::ArrayMetadata& metadata) {
     return metadata.attributes.contains("type") && metadata.attributes.at("type").is_string() &&
            metadata.attributes.at("type").get<std::string>() == "flag";

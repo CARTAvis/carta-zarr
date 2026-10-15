@@ -14,9 +14,9 @@ XRADIO_CONVERTER=/path/to/fits_to_zarr_xradio.py CARTA_ZARR_BENCH=/path/to/carta
 file or a Zarr appears under its own name only once it is complete, and a Zarr only once `verify.py`
 has found it to be the layout it is named after, holding the FITS file's pixels (the report is left
 beside it as `NAME.verify.txt`). It asks carta-zarr, through `carta-zarr-bench`, as carta-backend
-would read the Zarr: that it opens with the FITS cube's shape, in the chunks (and shards) asked for,
-with a flag carta-zarr applies or none, and that every pixel it decodes is the FITS cube's bit for
-bit, NaN exactly where the FITS cube is once the flag is applied. What the coordinates, unit and
+would read the Zarr: that it opens with the FITS cube's shape, names XRADIO image schema 0.0.2, is in
+the chunks (and shards) asked for, with a flag carta-zarr applies or none, and that every pixel it
+decodes is the FITS cube's bit for bit, NaN exactly where the FITS cube is once the flag is applied. What the coordinates, unit and
 beams mean is not compared: the set is for measuring reads, and whether carta-zarr reads metadata
 right is for its own tests to say.
 
@@ -87,6 +87,9 @@ frequency), the coordinates the synthetic dataset would have, the unit, the spec
 frequency and one beam, which xradio gives every plane. It writes no telescope, observatory or
 observation date: nothing a read costs depends on them. xradio 1.2.2's FITS reader refuses a file
 without `DATE-OBS`, `TIMESYS` and `TELESCOP`, so the converter has to run on xradio 1.2.5 or later.
+carta-zarr reads only XRADIO image schema 0.0.2, so the converter also has to write it: name the
+version, type the sky image `sky`, and give the frequency coordinate its `frame` and `units`, as
+xradio's own `write_image` does.
 
 ## Calibration
 

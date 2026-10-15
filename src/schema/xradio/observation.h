@@ -10,7 +10,6 @@
 #include "carta-zarr/descriptor.h"
 
 #include "../../zarr/array_metadata.h"
-#include "schema_row.h"
 
 namespace carta::zarr::internal::xradio {
 
@@ -23,11 +22,11 @@ namespace carta::zarr::internal::xradio {
  * left empty rather than half converted -- every element is checked before it is converted, because
  * the alternative is an exception out of nlohmann on a path whose caller is holding a Result.
  *
- * Takes one array's metadata and the schema row it is read by, and returns a descriptor field, so
+ * Takes one array's metadata and returns a descriptor field, so
  * the geodetic-to-cartesian conversion and the obsdate scale/value split are checkable without a
  * store, a transport or a directory tree.
  */
-ObservationInfo DescribeObservation(const zarr::ArrayMetadata& image, const SchemaRow& row);
+ObservationInfo DescribeObservation(const zarr::ArrayMetadata& image);
 
 }  // namespace carta::zarr::internal::xradio
 

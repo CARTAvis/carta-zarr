@@ -83,9 +83,12 @@ std::vector<std::string> ImageIds(const std::vector<carta::zarr::ImageEntry>& im
     return ids;
 }
 
-std::string RootMetadata(bool coordinate_system = true) {
+// The root of a store of schema 0.0.2, whose base data group names `sky` as its sky.
+std::string RootMetadata(bool coordinate_system = true, const std::string& sky = "SKY") {
+    const std::string version = R"("schema_version": "0.0.2", "data_groups": {"base": {"sky": ")" + sky + R"("}})";
     return coordinate_system ? R"({
   "attributes": {
+    )" + version + R"(,
     "coordinate_system_info": {
       "projection": "SIN",
       "reference_direction": {"data": [1.0, 0.5]},
@@ -96,7 +99,7 @@ std::string RootMetadata(bool coordinate_system = true) {
   "zarr_format": 3,
   "node_type": "group"
 })"
-                             : R"({"zarr_format": 3, "node_type": "group"})";
+                             : R"({"attributes": {)" + version + R"(}, "zarr_format": 3, "node_type": "group"})";
 }
 
 std::string NumericArray(const std::string& shape, const std::string& dimensions,
@@ -110,18 +113,26 @@ std::string NumericArray(const std::string& shape, const std::string& dimensions
 }
 
 std::string SkyArray(std::uint64_t time_length = 1, bool arbitrary_storage_order = false) {
+    const std::string attributes = R"("attributes":{"units":"Jy/beam","type":"sky"})";
     if (arbitrary_storage_order) {
-        return "{\"shape\":[" + std::to_string(time_length) +
-               ",5,3,4,2],\"data_type\":\"float32\",\"chunk_grid\":{\"name\":\"regular\",\"configuration\":{\"chunk_"
-               "shape\":[1,5,1,2,1]}},\"attributes\":{\"units\":\"Jy/"
-               "beam\"},\"dimension_names\":[\"time\",\"m\",\"frequency\",\"l\",\"polarization\"],\"zarr_format\":3,"
-               "\"node_type\":\"array\"}";
+        return R"({"shape":[)" + std::to_string(time_length) +
+               R"(,5,3,4,2],"data_type":"float32",)"
+               R"("chunk_grid":{"name":"regular","configuration":{"chunk_shape":[1,5,1,2,1]}},)" +
+               attributes +
+               R"(,"dimension_names":["time","m","frequency","l","polarization"],"zarr_format":3,)"
+               R"("node_type":"array"})";
     }
-    return "{\"shape\":[" + std::to_string(time_length) +
-           ",3,2,4,5],\"data_type\":\"float32\",\"chunk_grid\":{\"name\":\"regular\",\"configuration\":{\"chunk_"
-           "shape\":[1,1,1,2,5]}},\"attributes\":{\"units\":\"Jy/"
-           "beam\"},\"dimension_names\":[\"time\",\"frequency\",\"polarization\",\"l\",\"m\"],\"zarr_format\":3,\"node_"
-           "type\":\"array\"}";
+    return R"({"shape":[)" + std::to_string(time_length) +
+           R"(,3,2,4,5],"data_type":"float32",)"
+           R"("chunk_grid":{"name":"regular","configuration":{"chunk_shape":[1,1,1,2,5]}},)" +
+           attributes +
+           R"(,"dimension_names":["time","frequency","polarization","l","m"],"zarr_format":3,)"
+           R"("node_type":"array"})";
+}
+
+// A spectral coordinate as schema 0.0.2 writes it: with its frame and its units.
+std::string FrequencyArray(const std::string& data_type = "float64") {
+    return NumericArray("[3]", R"(["frequency"])", data_type, R"({"units":"Hz","frame":"LSRK"})");
 }
 
 std::string PolarizationArray() {
@@ -141,7 +152,7 @@ void CreateValidStore(const std::filesystem::path& root, std::uint64_t time_leng
     Write(root / "zarr.json", RootMetadata(coordinate_system));
     Write(root / "SKY" / "zarr.json", SkyArray(time_length, arbitrary_storage_order));
     Write(root / "time" / "zarr.json", NumericArray("[" + std::to_string(time_length) + "]", "[\"time\"]"));
-    Write(root / "frequency" / "zarr.json", NumericArray("[3]", "[\"frequency\"]"));
+    Write(root / "frequency" / "zarr.json", FrequencyArray());
     Write(root / "l" / "zarr.json", NumericArray("[4]", "[\"l\"]"));
     Write(root / "m" / "zarr.json", NumericArray("[5]", "[\"m\"]"));
     Write(root / "polarization" / "zarr.json", PolarizationArray());
@@ -152,7 +163,7 @@ void TestValidAndTimeAxis(const std::filesystem::path& root) {
     const auto result = carta::zarr::ProbeSchema(root.string(), carta::zarr::kXradioImageSchema);
     Require(result && result.value().kind == SchemaMatchKind::match, "valid XRADIO store did not match");
     Require(result.value().schema_id == carta::zarr::kXradioImageSchema, "unexpected schema id");
-    Require(result.value().schema_version.empty(), "a store naming no schema version reported one");
+    Require(result.value().schema_version == "0.0.2", "a 0.0.2 store did not report its schema version");
 
     const auto is_xradio = carta::zarr::ProbeSchema(root.string(), carta::zarr::kXradioImageSchema);
     Require(is_xradio && is_xradio.value().kind == SchemaMatchKind::match,
@@ -393,7 +404,7 @@ void TestReferenceFixture() {
 
     const auto& desc = image.value().descriptor();
     const auto image_ids = ImageIds(dataset.value().descriptor().images);
-    Require(image_ids == std::vector<std::string>{"SKY", "MODEL", "RESIDUAL", "MASK_DECONVOLVE", "APERTURE", "COMPLEX"},
+    Require(image_ids == std::vector<std::string>{"SKY", "SKY_MODEL", "SKY_RESIDUAL", "MASK", "APERTURE", "COMPLEX"},
             "discovery did not enumerate the multi-image fixture in display order");
     Require(dataset.value().descriptor().default_image_id == "SKY", "default image was not the first openable image");
     // right_ascension and declination are float64 over (l, m) with no type attribute. Matching only
@@ -417,8 +428,7 @@ void TestReferenceFixture() {
     Require(desc.direction->reference_pixel.at(0) == 2.0 && desc.direction->reference_pixel.at(1) == 3.0,
             "direction reference pixels were not located from the coordinate values");
     Require(desc.image_role == "sky", "image role was not read from the variable's type attribute");
-    Require(desc.data_groups == std::vector<std::string>{"base", "deconvolution"},
-            "data group references were not reported");
+    Require(desc.data_groups == std::vector<std::string>{"base"}, "data group references were not reported");
     Require(desc.has_pixel_mask, "the image's own flag attribute did not localize its pixel mask");
     Require(desc.spectral.has_value(), "SpectralCoordinate missing in reference fixture");
     Require(desc.spectral->channel_frequencies == std::vector<double>{1.4e9, 1.401e9, 1.403e9},
@@ -451,17 +461,17 @@ void TestReferenceFixture() {
         throw std::runtime_error("ReadBeams failed on reference fixture: " + beams.error().message);
     }
 
-    const auto model = dataset.value().OpenImage("MODEL");
-    Require(static_cast<bool>(model), "MODEL image could not be opened");
-    Require(model.value().descriptor().image_role == "model", "MODEL descriptor used the wrong image role");
-    Require(model.value().descriptor().data_groups == std::vector<std::string>{"base"},
-            "MODEL data group metadata was not isolated");
-    Require(model.value().descriptor().has_pixel_mask, "MODEL did not use the unique shape-matching flag");
+    const auto model = dataset.value().OpenImage("SKY_MODEL");
+    Require(static_cast<bool>(model), "SKY_MODEL image could not be opened");
+    Require(model.value().descriptor().image_role == "model", "SKY_MODEL descriptor used the wrong image role");
+    Require(model.value().descriptor().data_groups == std::vector<std::string>{"model"},
+            "SKY_MODEL data group metadata was not isolated");
+    Require(model.value().descriptor().has_pixel_mask, "SKY_MODEL did not use the unique shape-matching flag");
 
-    const auto residual = dataset.value().OpenImage("RESIDUAL");
-    Require(static_cast<bool>(residual), "RESIDUAL image could not be opened");
-    const auto deconvolution_mask = dataset.value().OpenImage("MASK_DECONVOLVE");
-    Require(static_cast<bool>(deconvolution_mask), "MASK_DECONVOLVE was incorrectly treated as a flag");
+    const auto residual = dataset.value().OpenImage("SKY_RESIDUAL");
+    Require(static_cast<bool>(residual), "SKY_RESIDUAL image could not be opened");
+    const auto mask = dataset.value().OpenImage("MASK");
+    Require(static_cast<bool>(mask), "MASK was incorrectly treated as a flag");
     const auto aperture = dataset.value().OpenImage("APERTURE");
     Require(!aperture && aperture.error().code == ErrorCode::unsupported_data_type,
             "aperture-plane variable was openable");
@@ -469,13 +479,6 @@ void TestReferenceFixture() {
     Require(!complex && complex.error().code == ErrorCode::unsupported_data_type, "complex variable was openable");
     const auto flag = dataset.value().OpenImage("MASK_0");
     Require(!flag && flag.error().code == ErrorCode::not_found, "flag variable was exposed as an image");
-}
-
-void TestCompatibilityFixture() {
-    const std::filesystem::path fixture(CARTA_ZARR_LEGACY_FIXTURE);
-    Require(std::filesystem::exists(fixture), "the compatibility fixture is missing");
-    const auto result = carta::zarr::ProbeSchema(fixture.string(), carta::zarr::kXradioImageSchema);
-    Require(result && result.value().kind == SchemaMatchKind::match, "the compatibility fixture did not match");
 }
 
 void TestDiscoveryIgnoresNameAllowlist(const std::filesystem::path& root) {
@@ -532,8 +535,7 @@ void TestDiscoveryDoesNotDescendIntoArrayChunks(const std::filesystem::path& roo
 
 void TestCoordinateCompletion(const std::filesystem::path& root) {
     CreateValidStore(root / "uniform");
-    Write(root / "uniform" / "frequency" / "zarr.json",
-          NumericArray("[3]", R"(["frequency"])", "float64", R"({"units":"Hz"})"));
+    Write(root / "uniform" / "frequency" / "zarr.json", FrequencyArray());
     WriteDoubles(root / "uniform" / "frequency" / "c" / "0", {100.0, 102.0, 104.0});
     Write(root / "uniform" / "l" / "zarr.json", NumericArray("[4]", R"(["l"])", "float64"));
     WriteDoubles(root / "uniform" / "l" / "c" / "0", {-0.003, -0.002, 0.0, 0.001});
@@ -574,7 +576,7 @@ void TestCoordinateCompletion(const std::filesystem::path& root) {
 // set: a float32 coordinate that probes as a match also opens.
 void TestNonDoubleCoordinates(const std::filesystem::path& root) {
     CreateValidStore(root);
-    Write(root / "frequency" / "zarr.json", NumericArray("[3]", R"(["frequency"])", "float32", R"({"units":"Hz"})"));
+    Write(root / "frequency" / "zarr.json", FrequencyArray("float32"));
     WriteFloats(root / "frequency" / "c" / "0", {100.0F, 102.0F, 104.0F});
     Write(root / "l" / "zarr.json", NumericArray("[4]", R"(["l"])", "float32"));
     WriteFloats(root / "l" / "c" / "0", {-0.003F, -0.002F, -0.001F, 0.0F});
@@ -668,7 +670,7 @@ void TestANodeNameSpelledWithADotIsTheSameNode(const std::filesystem::path& root
     const std::string dimensions = R"(["time","frequency","polarization","l","m"])";
     CreateValidStore(root);
     Write(root / "SKY" / "zarr.json",
-          NumericArray("[1,3,2,4,5]", dimensions, "float32", R"({"units":"Jy/beam","flag":"./MASK_0"})"));
+          NumericArray("[1,3,2,4,5]", dimensions, "float32", R"({"units":"Jy/beam","type":"sky","flag":"./MASK_0"})"));
     // Written out rather than through NumericArray, which fills with 0: a boolean array's fill
     // value has to be a boolean, and TensorStore refuses the array outright otherwise.
     Write(root / "MASK_0" / "zarr.json",
@@ -699,6 +701,55 @@ void TestANodeNameSpelledWithADotIsTheSameNode(const std::filesystem::path& root
                 (read ? "" : read.error().message));
 }
 
+// XRADIO's FITS reader keeps an integer FITS image's type, BITPIX 16 as int16, and its writer stores it
+// as it is, although schema 0.0.2 allows only float32 and float64. Such a sky image opens, says what it
+// is stored as, and reads as float32 like any other, every value exact.
+void TestAnIntegerSkyImageReadsAsFloat(const std::filesystem::path& root) {
+    CreateValidStore(root);
+    Write(root / "SKY" / "zarr.json", NumericArray("[1,3,2,4,5]", R"(["time","frequency","polarization","l","m"])",
+                                                   "int16", R"({"units":"Jy/beam","type":"sky"})"));
+    // Stored (time, frequency, polarization, l, m), m fastest; each value its own index less 60, so
+    // some are negative.
+    std::vector<std::int16_t> values(120);
+    for (std::size_t index = 0; index < values.size(); ++index) {
+        values[index] = static_cast<std::int16_t>(static_cast<int>(index) - 60);
+    }
+    const auto chunk = root / "SKY" / "c" / "0" / "0" / "0" / "0" / "0";
+    std::filesystem::create_directories(chunk.parent_path());
+    std::ofstream output(chunk, std::ios::binary);
+    output.write(reinterpret_cast<const char*>(values.data()),
+                 static_cast<std::streamsize>(values.size() * sizeof(std::int16_t)));
+    output.close();
+
+    const auto context = carta::zarr::Context::Create();
+    Require(static_cast<bool>(context), "Context::Create failed for the int16 store");
+    const auto dataset = carta::zarr::Dataset::Open(context.value(), root.string());
+    Require(static_cast<bool>(dataset), "a store of an int16 sky image did not open");
+    const auto image = dataset.value().OpenImage("SKY");
+    Require(static_cast<bool>(image), "an int16 sky image did not open");
+    Require(image.value().descriptor().stored_type == carta::zarr::DataType::int16,
+            "an int16 sky image did not say it is stored as int16");
+
+    for (const auto& [l, m, frequency, polarization] :
+         std::vector<std::array<std::uint64_t, 4>>{{0, 0, 0, 0}, {2, 3, 1, 1}, {3, 4, 2, 1}}) {
+        carta::zarr::ReadRequest request;
+        for (const auto& axis : image.value().descriptor().axes) {
+            const std::uint64_t at = axis.name == "l"            ? l
+                                   : axis.name == "m"            ? m
+                                   : axis.name == "frequency"    ? frequency
+                                   : axis.name == "polarization" ? polarization
+                                                                 : 0;
+            request.axes.push_back(carta::zarr::Range{at, 1, 1});
+        }
+        std::vector<float> destination(1, 0.0F);
+        const auto read = image.value().Read(request, {destination.data(), destination.size()});
+        Require(static_cast<bool>(read), "an int16 sky image could not be read: " + (read ? "" : read.error().message));
+        const auto expected = static_cast<float>(values.at(((frequency * 2 + polarization) * 4 + l) * 5 + m));
+        Require(destination.front() == expected, "an int16 pixel read as " + std::to_string(destination.front()) +
+                                                     " rather than " + std::to_string(expected));
+    }
+}
+
 // A sharding codec whose inner chunk shape describes nothing leaves the array unreadable, and this
 // pins where that is noticed: at the parse, not after it.
 //
@@ -713,13 +764,13 @@ void TestAShardingCodecThatDescribesNoChunks(const std::filesystem::path& root) 
     Write(root / "zarr.json", RootMetadata());
     Write(root / "SKY" / "zarr.json",
           "{\"shape\":[1,3,2,4,5],\"data_type\":\"float32\",\"chunk_grid\":{\"name\":\"regular\","
-          "\"configuration\":{\"chunk_shape\":[1,3,2,4,5]}},\"attributes\":{\"units\":\"Jy/beam\"},"
+          "\"configuration\":{\"chunk_shape\":[1,3,2,4,5]}},\"attributes\":{\"units\":\"Jy/beam\",\"type\":\"sky\"},"
           "\"codecs\":[{\"name\":\"sharding_indexed\",\"configuration\":{\"chunk_shape\":[1,1,1,0,5],"
           "\"codecs\":[{\"name\":\"bytes\"},{\"name\":\"zstd\"}]}}],"
           "\"dimension_names\":[\"time\",\"frequency\",\"polarization\",\"l\",\"m\"],"
           "\"zarr_format\":3,\"node_type\":\"array\"}");
     Write(root / "time" / "zarr.json", NumericArray("[1]", R"(["time"])"));
-    Write(root / "frequency" / "zarr.json", NumericArray("[3]", R"(["frequency"])"));
+    Write(root / "frequency" / "zarr.json", FrequencyArray());
     Write(root / "polarization" / "zarr.json", PolarizationArray());
     Write(root / "l" / "zarr.json", NumericArray("[4]", R"(["l"])"));
     Write(root / "m" / "zarr.json", NumericArray("[5]", R"(["m"])"));
@@ -746,7 +797,7 @@ void TestBeamTableWithUnreadableLabels(const std::filesystem::path& root) {
     const auto sky_with_beam =
         "{\"shape\":[1,3,2,4,5],\"data_type\":\"float32\",\"chunk_grid\":{\"name\":\"regular\","
         "\"configuration\":{\"chunk_shape\":[1,1,1,2,5]}},"
-        "\"attributes\":{\"units\":\"Jy/beam\",\"beam_fit_params\":\"BEAM\"},"
+        "\"attributes\":{\"units\":\"Jy/beam\",\"type\":\"sky\",\"beam_fit_params\":\"BEAM\"},"
         "\"dimension_names\":[\"time\",\"frequency\",\"polarization\",\"l\",\"m\"],"
         "\"zarr_format\":3,\"node_type\":\"array\"}";
 
@@ -867,10 +918,10 @@ void TestABeamTableWhoseUnitDisagreesWithItsCopyIsRefused(const std::filesystem:
 }
 
 void TestImageDatasetWithoutSky(const std::filesystem::path& root) {
-    Write(root / "zarr.json", RootMetadata());
-    Write(root / "RESIDUAL" / "zarr.json", SkyArray());
+    Write(root / "zarr.json", RootMetadata(true, "SKY_RESIDUAL"));
+    Write(root / "SKY_RESIDUAL" / "zarr.json", SkyArray());
     Write(root / "time" / "zarr.json", NumericArray("[1]", R"(["time"])"));
-    Write(root / "frequency" / "zarr.json", NumericArray("[3]", R"(["frequency"])"));
+    Write(root / "frequency" / "zarr.json", FrequencyArray());
     Write(root / "polarization" / "zarr.json", PolarizationArray());
     Write(root / "l" / "zarr.json", NumericArray("[4]", R"(["l"])"));
     Write(root / "m" / "zarr.json", NumericArray("[5]", R"(["m"])"));
@@ -883,9 +934,9 @@ void TestImageDatasetWithoutSky(const std::filesystem::path& root) {
     Require(static_cast<bool>(context), "Context::Create failed for the SKY-less dataset");
     const auto dataset = carta::zarr::Dataset::Open(context.value(), root.string());
     Require(static_cast<bool>(dataset), "Dataset::Open failed for the SKY-less dataset");
-    Require(ImageIds(dataset.value().descriptor().images) == std::vector<std::string>{"RESIDUAL"},
+    Require(ImageIds(dataset.value().descriptor().images) == std::vector<std::string>{"SKY_RESIDUAL"},
             "the SKY-less dataset did not enumerate its only image");
-    Require(static_cast<bool>(dataset.value().OpenImage("RESIDUAL")),
+    Require(static_cast<bool>(dataset.value().OpenImage("SKY_RESIDUAL")),
             "the only image of a SKY-less dataset could not be opened");
 }
 
@@ -895,7 +946,7 @@ void TestImageDatasetWithoutSky(const std::filesystem::path& root) {
 void TestImageDatasetMissingTimeCoordinate(const std::filesystem::path& root) {
     Write(root / "zarr.json", RootMetadata());
     Write(root / "SKY" / "zarr.json", SkyArray());
-    Write(root / "frequency" / "zarr.json", NumericArray("[3]", R"(["frequency"])"));
+    Write(root / "frequency" / "zarr.json", FrequencyArray());
     Write(root / "polarization" / "zarr.json", PolarizationArray());
     Write(root / "l" / "zarr.json", NumericArray("[4]", R"(["l"])"));
     Write(root / "m" / "zarr.json", NumericArray("[5]", R"(["m"])"));
@@ -909,13 +960,13 @@ void TestShardedStorageLayout(const std::filesystem::path& root) {
     Write(root / "zarr.json", RootMetadata());
     Write(root / "SKY" / "zarr.json",
           "{\"shape\":[1,3,2,4,5],\"data_type\":\"float32\",\"chunk_grid\":{\"name\":\"regular\","
-          "\"configuration\":{\"chunk_shape\":[1,3,2,4,5]}},\"attributes\":{\"units\":\"Jy/beam\"},"
+          "\"configuration\":{\"chunk_shape\":[1,3,2,4,5]}},\"attributes\":{\"units\":\"Jy/beam\",\"type\":\"sky\"},"
           "\"codecs\":[{\"name\":\"sharding_indexed\",\"configuration\":{\"chunk_shape\":[1,1,1,2,5],"
           "\"codecs\":[{\"name\":\"bytes\"},{\"name\":\"blosc\"}]}}],"
           "\"dimension_names\":[\"time\",\"frequency\",\"polarization\",\"l\",\"m\"],"
           "\"zarr_format\":3,\"node_type\":\"array\"}");
     Write(root / "time" / "zarr.json", NumericArray("[1]", R"(["time"])"));
-    Write(root / "frequency" / "zarr.json", NumericArray("[3]", R"(["frequency"])"));
+    Write(root / "frequency" / "zarr.json", FrequencyArray());
     Write(root / "polarization" / "zarr.json", PolarizationArray());
     Write(root / "l" / "zarr.json", NumericArray("[4]", R"(["l"])"));
     Write(root / "m" / "zarr.json", NumericArray("[5]", R"(["m"])"));
@@ -1065,9 +1116,9 @@ int main() {
         TestABeamTableWhoseAxesAreReorderedOnDiskIsRefused(root / "beam-axis-order");
         TestABeamTableWhoseUnitDisagreesWithItsCopyIsRefused(root / "beam-unit");
         TestANodeNameSpelledWithADotIsTheSameNode(root / "dotted-node");
+        TestAnIntegerSkyImageReadsAsFloat(root / "int16");
         TestReferenceFixture();
         TestAnEntrySaysWhatOpeningWould();
-        TestCompatibilityFixture();
         std::filesystem::remove_all(root);
         std::cout << "carta-zarr schema probe tests passed\n";
         return 0;

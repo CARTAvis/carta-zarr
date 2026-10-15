@@ -19,10 +19,11 @@
 
 A comparison between FITS and Zarr is only a comparison of the formats if both hold the same pixels,
 in the layout the comparison is named after. So this asks carta-zarr, through carta-zarr-bench, as
-carta-backend would read it: that the dataset opens, as SKY, with the FITS cube's shape; that it is in
-the chunks (and shards) asked for; that it carries a flag carta-zarr applies, or none, as --flag says;
-and that every pixel, as carta-zarr decodes it, is the FITS cube's bit for bit -- with the flag applied,
-NaN exactly where the FITS cube is.
+carta-backend would read it: that the dataset opens, as SKY, with the FITS cube's shape; that it names
+XRADIO image schema 0.0.2, the only one carta-zarr reads; that it is in the chunks (and shards) asked
+for; that it carries a flag carta-zarr applies, or none, as --flag says; and that every pixel, as
+carta-zarr decodes it, is the FITS cube's bit for bit -- with the flag applied, NaN exactly where the
+FITS cube is.
 
 What the coordinates, the unit or the beams mean is not compared: the test set exists to measure
 reads, and whether carta-zarr reads metadata right is for carta-zarr's own tests to say. The flag is,
@@ -89,6 +90,7 @@ def main() -> int:
           bool(report.get("ok")) and image.get("id") == "SKY" and report.get("default_image_id") == "SKY")
     if failures:
         return finish()
+    check("XRADIO image schema 0.0.2", report.get("schema", {}).get("version") == "0.0.2")
     axes = {axis["name"]: axis for axis in image["axes"]}
 
     with fits.open(args.fits, memmap=True) as hdul:

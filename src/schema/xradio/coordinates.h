@@ -26,7 +26,6 @@
 
 #include "../../store.h"
 #include "../../zarr/array_metadata.h"
-#include "schema_row.h"
 
 #include <array>
 #include <cstddef>
@@ -115,15 +114,13 @@ Result<void> CheckCoordinate(const zarr::ArrayMetadata& array, const Coordinate&
 std::optional<Diagnostic> ExtentDisagreement(const Store& store, const zarr::ArrayMetadata& image,
                                              std::string_view node);
 
-// The unit a coordinate's samples are in, or empty when the dataset does not say. Its units
-// attribute; for the spectral coordinate of a row that allows it, failing that, its reference
-// frequency's, which is where XRADIO 1.2 wrote it. Both the axis and the spectral coordinate report
-// this, so they cannot disagree.
-std::string CoordinateUnit(const Store& store, const Coordinate& coordinate, const SchemaRow& row);
+// The unit a coordinate's samples are in, its units attribute, or empty when the dataset does not
+// say. Both the axis and the spectral coordinate report this, so they cannot disagree.
+std::string CoordinateUnit(const Store& store, const Coordinate& coordinate);
 
 // The axes of an image, in logical order, each with its length, its unit and where it sits in the
 // stored order. The same list for the listing and for a descriptor, from metadata alone.
-std::vector<AxisDescriptor> DescribeAxes(const Store& store, const zarr::ArrayMetadata& image, const SchemaRow& row);
+std::vector<AxisDescriptor> DescribeAxes(const Store& store, const zarr::ArrayMetadata& image);
 
 // The samples of the dataset's coordinates, which is everything a description reads besides
 // metadata. Read, every one is there; one left empty is one handed in that way, and describes no

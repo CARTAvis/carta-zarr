@@ -92,9 +92,10 @@ repository's **Settings → Pages**, select **GitHub Actions** as the publishing
 source. Deployment uses the `github-pages` environment and scoped permissions;
 pull requests do not receive deployment permissions.
 
-The expected project URL after enabling and successfully deploying Pages is
-`https://cartavis.github.io/carta-zarr/`. Site settings have to be enabled by a
-repository maintainer; adding the workflow alone does not establish a live site.
+The site is published at <https://cartavis.org/carta-zarr/>, the CARTAvis
+organisation's own domain; `cartavis.github.io/carta-zarr/` redirects there.
+Pages is enabled in the repository settings with GitHub Actions as its source,
+and the `github-pages` environment accepts deployments from `dev` only.
 
 Until the first release, the site explicitly describes development code. At the
 first release, introduce versioned publication of immutable tagged documentation

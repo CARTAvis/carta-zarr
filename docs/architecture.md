@@ -68,10 +68,10 @@ flowchart TB
   Consolidated metadata is checked against the array's own document before its
   values are read.
 - **Schema profile** decides what constitutes an image, maps axes by role and
-  describes flags, coordinates and observation information. It holds a schema
-  row for each XRADIO schema version it reads, and chooses 0.0.2's or the
-  unversioned rules from the dataset's declaration and version-specific checks,
-  recording a fallback or unsupported-version diagnostic.
+  describes flags, coordinates and observation information. It reads XRADIO
+  image schema 0.0.2 only, and refuses an image dataset that declares no
+  version or another one, or that declares 0.0.2 without the fields 0.0.2
+  requires, with a diagnostic saying why.
 - **Piece planner** cuts requests into pieces constrained by the read budget.
   **Pass** traverses chunks for reductions, with occupancy restricting work to
   chunks actually touched by the selected regions.

@@ -21,7 +21,7 @@ learn how [datasets and images](concepts.md) relate.
 
 | Area | Current support |
 |---|---|
-| Schema | XRADIO image schema 0.0.2 and older unversioned XRADIO 1.2 stores |
+| Schema | XRADIO image schema 0.0.2, as XRADIO 1.2.5 and later write it |
 | Storage | Local filesystem Zarr v3 groups, including consolidated metadata |
 | Images | Real-valued sky-plane variables with time, frequency, polarization, and direction-cosine (`l`, `m`) axes |
 | Output | Pixels converted to float32; reductions accumulated in double |

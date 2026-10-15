@@ -21,7 +21,7 @@ std::cerr << '\n';
 | `unsupported_transport` | Use a local filesystem path; remote stores are not implemented |
 | `unsupported_zarr_version` | Check that the dataset is Zarr v3, not v2 |
 | `unsupported_schema` | Check that the data is an XRADIO image dataset |
-| `unsupported_schema_version` | Check the dataset's root `schema_version`: only 0.0.2, or none, can be read |
+| `unsupported_schema_version` | Check the dataset's root `schema_version`: only 0.0.2 can be read; write an older store again with XRADIO 1.2.5 or later |
 | An entry has `openable == false` | Inspect its diagnostics; complex, aperture-plane and unsupported boolean candidates cannot be opened |
 | `invalid_metadata` during `OpenImage` | Check that the image, its coordinates and its declared flag agree, and that consolidated metadata matches each array's own document |
 | `invalid_slice` | Check that the ranges fit the descriptor axes and use valid counts and strides |
@@ -36,11 +36,12 @@ A diagnostic is different from an error: the dataset or descriptor is still
 returned. For example, an optional observation field may be unavailable while
 the pixels remain readable. `DiagnosticCodeName` provides the diagnostic's name.
 The probe's diagnostics can also explain `kind == invalid`, even though the
-probe call itself succeeded. An `unversioned_schema` diagnostic means the
-dataset was read by the older XRADIO rules: it declares no version, or declares
-0.0.2 without the fields 0.0.2 requires. Consult
-[schema versions](reference/schema-versions.md) before relying on
-version-specific fields such as `sub_type` or `channel_width`.
+probe call itself succeeded. An `unsupported_schema_version` diagnostic means
+the dataset declares no XRADIO image schema version, as XRADIO 1.2.4 and
+earlier wrote, or one this library does not read; write it again with XRADIO
+1.2.5 or later. A store that declares 0.0.2 without the fields 0.0.2 requires
+is refused with `invalid_metadata`, and the message names the missing field.
+See [schema versions](reference/schema-versions.md).
 
 ## Surprising pixel or statistic values
 

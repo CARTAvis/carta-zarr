@@ -68,7 +68,7 @@ stay under the ignored `build-docs/` directory.
   point to GitHub.
 - The quickstart and advanced guides include the [runnable examples](examples.md)
   directly. The package-consumer test builds all four against the installed
-  package, runs them on committed unversioned, 0.0.2 and continuum fixtures,
+  package, runs them on committed synthetic, XRADIO-written and continuum fixtures,
   and checks missing-argument failures; its assertions are in
   `tests/run_package_consumer.cmake`. Run it after building the library with
   `ctest --test-dir build -R '^carta-zarr-package-consumer$' --output-on-failure`.

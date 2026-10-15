@@ -85,3 +85,26 @@ factories. Copies share their resources, and moving one preserves the source
 handle too. Use `std::optional` when your own object needs a not-yet-created
 handle. A reference obtained from `descriptor()` must not outlive the object
 that owns the underlying descriptor.
+
+## Threads
+
+- **Handles may be shared across threads.** Several threads may call a
+  `Context`, `Dataset`, `Image` or `CachePool` at once, including `Read`,
+  `Prefetch`, `OpenImage`, reductions and histograms on one handle.
+- **Concurrent reductions take turns.** Reductions running at once share the
+  context's worker pool, which computes one read at a time, so they interleave
+  read by read rather than run side by side.
+- **Do not assign to a handle another thread is using.** A handle is a value
+  holding a shared pointer: give each thread its own copy, or synchronise
+  assignment to one variable yourself.
+- **Call `ReadAhead::Served` from one thread at a time,** the one that serves
+  the frames, even through copies of the controller. `Cancel` and `stats` may be
+  called from any thread.
+- **Callbacks run on known threads.** Progress callbacks, reduction sinks and
+  `cancellation_requested` run on the thread that called the operation. A read
+  started by `ReadAhead` runs on the controller's own thread, so a
+  `cancellation_requested` given to `ReadAhead` must be safe to call from
+  another thread, for example by reading a `std::atomic<bool>`.
+- **Your data stays yours to guard.** Do not change a destination buffer or
+  region mask while an operation uses it, and copy anything you keep from a
+  borrowed view before its callback returns.

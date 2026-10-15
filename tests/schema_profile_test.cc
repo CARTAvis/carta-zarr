@@ -1197,9 +1197,6 @@ void TestADescriptionIsBuiltFromTheValuesItIsGiven() {
             "the time's scale and format come from its attributes, uppercased");
 }
 
-// XRADIO writes the spectral frame as the reference frequency's observer, in astropy's name where
-// astropy has the frame and in casacore's otherwise. Each one it writes is reported as the name
-// casacore takes, which for the geocentric frame is GEO rather than astropy's GCRS.
 // XRADIO writes an image's role on its own "type" attribute. The v2 draft's "image_type" is no
 // XRADIO's, and is not read in its place.
 void TestImageTypeIsNotARole() {
@@ -1422,10 +1419,10 @@ void TestAPixelReadHoldsItsArrayToItsOwnDocument() {
     RequireRefusedAs(mask.error(), ErrorCode::invalid_metadata, "MASK_0", "a rewritten flag");
 }
 
-// An axis reports the unit its coordinate has, and there is one rule for what that is. XRADIO writes a
-// frequency's unit on its reference_frequency's attrs and nowhere else; the spectral coordinate read
-// it there while the axis read only a units attribute, so one image reported its spectral axis
-// unitless and its spectral coordinate in Hz. The listing reports the same axes as describing does.
+// An axis reports the unit its coordinate has, and there is one rule for what that is: its units
+// attribute. When the spectral coordinate and the axis read the unit by different rules, one image
+// reported its spectral axis unitless and its spectral coordinate in Hz. The listing reports the same
+// axes as describing does.
 void TestAnAxisReportsItsCoordinatesUnit() {
     using carta::zarr::AxisRole;
     using carta::zarr::internal::xradio::CoordinateValues;

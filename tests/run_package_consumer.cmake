@@ -47,3 +47,25 @@ execute_process(
 if(result)
     message(FATAL_ERROR "External consumer execution failed: ${result}")
 endif()
+
+foreach(example first_read statistics read_control animation)
+    # Cover a synthetic unversioned store, both XRADIO writer generations and
+    # the single-channel 0.0.2 image whose width supplies the spectral increment.
+    foreach(fixture pixels conformance conformance_1_2 conformance_continuum)
+        execute_process(
+            COMMAND "${build_dir}/examples/carta_zarr_${example}"
+                    "${CARTA_ZARR_SOURCE_DIR}/tests/data/images/zarr/xradio/${fixture}"
+            RESULT_VARIABLE result)
+        if(result)
+            message(FATAL_ERROR "Documented ${example} example failed on ${fixture}: ${result}")
+        endif()
+    endforeach()
+
+    # Check the documented command-line contract, including the error path.
+    execute_process(
+        COMMAND "${build_dir}/examples/carta_zarr_${example}"
+        RESULT_VARIABLE result)
+    if(NOT result EQUAL 1)
+        message(FATAL_ERROR "Documented ${example} example accepted missing arguments: ${result}")
+    endif()
+endforeach()

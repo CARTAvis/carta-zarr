@@ -7,3 +7,6 @@ find_package(CartaZarr 0.2 CONFIG REQUIRED)
 add_executable(carta_zarr_consumer main.cc)
 target_compile_features(carta_zarr_consumer PRIVATE cxx_std_17)
 target_link_libraries(carta_zarr_consumer PRIVATE CARTA::zarr)
+
+# Build the documented standalone example against the installed package too.
+add_subdirectory("${CMAKE_CURRENT_SOURCE_DIR}/../../examples" examples)

@@ -125,18 +125,24 @@ Built and tested with:
 The storage benchmark, `-DCARTA_ZARR_BUILD_BENCH=ON`, also needs [`uv`](https://docs.astral.sh/uv/);
 see [tools/zarr-bench/README.md](tools/zarr-bench/README.md).
 
-## Build, test, install
+## Build and install
 
 ```bash
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
 cmake --build build -j 8
-ctest --test-dir build --output-on-failure
 sudo cmake --install build --prefix /opt/carta-zarr
 ```
 
 `-j 8` builds with eight jobs at once; set it to the number of cores to spare. The first configure
 builds TensorStore, which takes a while; later ones do not. Installing into `/opt` needs `sudo`; a
 prefix you own, such as `$HOME/.local`, does not.
+
+To run the tests as well -- for a new platform or a change to the library, not needed to install --
+run, after building:
+
+```bash
+ctest --test-dir build --output-on-failure
+```
 
 ### Without network access
 
@@ -256,6 +262,9 @@ request and options, `reduce.h` for reductions and histograms, `read_ahead.h` fo
 
 ## Documentation
 
+- [User documentation](https://cartavis.org/carta-zarr/) ([sources](docs/index.md)) — installation,
+  a complete first-read example, concepts, task guides and generated public API reference. See
+  [docs/contributing-docs.md](docs/contributing-docs.md) to build the website locally.
 - [include/carta-zarr](include/carta-zarr) — the API reference, in the headers.
 - [GLOSSARY.md](GLOSSARY.md) — the vocabulary this codebase uses, and the words it avoids.
 - [CHANGELOG.md](CHANGELOG.md) — what each release changed.

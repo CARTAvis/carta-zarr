@@ -8,8 +8,8 @@ storage engine underneath, to your application. Terms are defined in the
 [glossary](glossary.md).
 
 ```{warning}
-This is **development documentation** for an unreleased library. Before 1.0,
-minor versions may change both the source API and ABI. The intended integration
+This documentation follows the `dev` branch of a library before its 1.0 release.
+Before 1.0, minor versions may change both the source API and ABI. The intended integration
 with carta-backend is also under development.
 ```
 

@@ -5,8 +5,8 @@ and reads up to 64 × 64 pixels from its first channel, polarization and time.
 It checks each `Result` before accessing its value and finds spatial axes by
 role rather than by position.
 
-The example's source is also its documentation: CI compiles and runs the file
-included below against a committed Zarr fixture.
+The source below is the complete example. CI builds it and runs it against a
+committed Zarr fixture, so the code on this page is tested.
 
 ## Build the example
 
@@ -18,8 +18,20 @@ cmake --build build-examples
 ./build-examples/carta_zarr_first_read tests/data/images/zarr/xradio/pixels
 ```
 
-Use a path to your own supported XRADIO dataset instead of the fixture when
-ready. The [dataset guide](guides/datasets.md) explains how to produce one.
+The output for that fixture looks like this:
+
+```text
+schema=xradio.image version=(unversioned)
+  unversioned_schema: The store names no schema version, so it is read as XRADIO 1.2 wrote image stores
+SKY openable=1 role=sky
+spectral frame= increment=1e+06
+Read 20 pixels from SKY; 13 are finite
+```
+
+The fixture names no schema version, so the output includes the
+`unversioned_schema` diagnostic. To read your own supported XRADIO dataset,
+pass its path instead of the fixture. The [dataset guide](guides/datasets.md)
+explains how to produce one.
 
 ## Complete source
 
@@ -38,8 +50,10 @@ ready. The [dataset guide](guides/datasets.md) explains how to produce one.
    values. Each has an ID, openability, role, axes and diagnostics.
 4. `Dataset::OpenImage(id)` describes the chosen image and verifies the
    metadata needed to read it. Coordinate values may be read at this stage.
-   The example prints an available image subtype and spectral frame/increment;
-   a 0.0.2 continuum image can obtain its increment from `channel_width`.
+   The example prints an available image subtype and spectral frame/increment.
+   The increment is fitted from the channels' frequencies; an image of one
+   channel has no spacing to fit, so in a 0.0.2 store its `channel_width`
+   supplies it.
 5. `Image::Read` reads into the caller's `float` buffer. Axis 0 varies fastest
    in the densely packed output; flagged pixels become NaN by default.
 

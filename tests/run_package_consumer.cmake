@@ -49,9 +49,9 @@ if(result)
 endif()
 
 foreach(example first_read statistics read_control animation)
-    # Cover a synthetic unversioned store, both XRADIO writer generations and
-    # the single-channel 0.0.2 image whose width supplies the spectral increment.
-    foreach(fixture pixels conformance conformance_1_2 conformance_continuum)
+    # Cover a synthetic store, XRADIO's own conversion and the single-channel
+    # image whose width supplies the spectral increment.
+    foreach(fixture pixels conformance conformance_continuum)
         execute_process(
             COMMAND "${build_dir}/examples/carta_zarr_${example}"
                     "${CARTA_ZARR_SOURCE_DIR}/tests/data/images/zarr/xradio/${fixture}"

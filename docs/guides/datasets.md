@@ -36,9 +36,11 @@ fixture with a flag is converted from a CASA image, so it also needs casatools.
 `ProbeSchema(path, kXradioImageSchema)` tells whether a path holds a dataset
 carta-zarr reads. A successful `Result` alone is not a match: inspect its `kind`,
 which is `match`, `no_match` or `invalid`, and its diagnostics.
-`schema_version` is the version the dataset declares, or empty. Opening the
-dataset then lists its image candidates. How a declared version is read, and
-when it falls back, is in [schema versions](../reference/schema-versions.md).
+`schema_version` is the version the dataset declares, or empty. Only 0.0.2 is
+read: a dataset that declares none, as XRADIO 1.2.4 and earlier wrote, is
+refused, and has to be written again with XRADIO 1.2.5 or later. Opening the
+dataset then lists its image candidates. What is refused, and why, is in
+[schema versions](../reference/schema-versions.md).
 
 ## Next steps
 

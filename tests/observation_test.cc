@@ -28,8 +28,6 @@ namespace {
 
 using carta::zarr::ObservationInfo;
 using carta::zarr::internal::xradio::DescribeObservation;
-using carta::zarr::internal::xradio::SchemaRow;
-using carta::zarr::internal::xradio::SchemaRows;
 using ArrayMetadata = carta::zarr::internal::zarr::ArrayMetadata;
 
 using carta::zarr::testing::Require;
@@ -38,20 +36,11 @@ bool Near(double left, double right) {
     return std::abs(left - right) <= 1.0e-6 * std::max({1.0, std::abs(left), std::abs(right)});
 }
 
-// The rows, newest first: schema 0.0.2's, then XRADIO 1.2's unversioned stores'.
-const SchemaRow& Row002() {
-    return SchemaRows().front();
-}
-
-const SchemaRow& UnversionedRow() {
-    return SchemaRows().back();
-}
-
-ObservationInfo Describe(nlohmann::json attributes, const SchemaRow& row = Row002()) {
+ObservationInfo Describe(nlohmann::json attributes) {
     ArrayMetadata image;
     image.data_type = "float32";
     image.attributes = std::move(attributes);
-    return DescribeObservation(image, row);
+    return DescribeObservation(image);
 }
 
 void TestTheReadableFieldsAreReported() {
@@ -114,14 +103,14 @@ void TestObsdateSplitsIntoScaleAndValue() {
             "a numeric obsdate was not reported as an MJD");
 }
 
-std::optional<double> MjdOf(nlohmann::json obsdate, const SchemaRow& row = Row002()) {
-    return Describe(nlohmann::json{{"obsdate", std::move(obsdate)}}, row).mjd_obs;
+std::optional<double> MjdOf(nlohmann::json obsdate) {
+    return Describe(nlohmann::json{{"obsdate", std::move(obsdate)}}).mjd_obs;
 }
 
 // A number is read by the format written beside it: XRADIO writes "mjd", and seconds since 1970 under
 // "unix" are converted, while a format this does not know yields no MJD rather than a wrong one. A
-// number with no format is an MJD for an XRADIO 1.2 store, as it always was, and nothing for a 0.0.2
-// one, which requires the format. A string is no XRADIO's date, and is not read.
+// number with no format is nothing, as schema 0.0.2 requires the format. A string is no XRADIO's date,
+// and is not read.
 void TestObsdateSpellings() {
     Require(MjdOf({{"attrs", {{"format", "MJD"}}}, {"data", 59000.5}}) == 59000.5,
             "an mjd-format number was not an MJD");
@@ -129,11 +118,8 @@ void TestObsdateSpellings() {
     Require(unix_seconds && Near(*unix_seconds, 59000.5), "a unix-format number was not converted to an MJD");
     Require(!MjdOf({{"attrs", {{"format", "jyear"}}}, {"data", 2020.4}}), "a number of an unknown format was an MJD");
 
-    Require(MjdOf({{"data", 59000.5}}, UnversionedRow()) == 59000.5,
-            "an XRADIO 1.2 number with no format was not an MJD");
-    Require(!MjdOf({{"data", 59000.5}}), "a 0.0.2 number with no format was read as an MJD");
+    Require(!MjdOf({{"data", 59000.5}}), "a number with no format was read as an MJD");
     Require(!MjdOf({{"attrs", {{"format", "mjd"}}}, {"data", "2020-05-31T12:00:00"}}), "a string date was read");
-    Require(!MjdOf({{"data", "2020-05-31T12:00:00"}}, UnversionedRow()), "a string date was read for XRADIO 1.2");
 }
 
 // An image carrying none of it is described, not refused.

@@ -48,11 +48,8 @@ enum class DiagnosticCode {
     inexact_reference_pixel,
     // A coordinate with fewer than two distinct samples, which has no linear description at all.
     degenerate_axis,
-    // A store naming a schema version this library does not read.
+    // A store naming no schema version, or one this library does not read.
     unsupported_schema_version,
-    // A store read by the rules for XRADIO 1.2's unversioned stores: it names no schema version, or
-    // it names one it does not conform to.
-    unversioned_schema,
 };
 
 // The code's name, as it would be spelled in a message or a log.
@@ -80,8 +77,6 @@ inline const char* DiagnosticCodeName(DiagnosticCode code) noexcept {
             return "degenerate_axis";
         case DiagnosticCode::unsupported_schema_version:
             return "unsupported_schema_version";
-        case DiagnosticCode::unversioned_schema:
-            return "unversioned_schema";
     }
     return "unknown";
 }
@@ -328,8 +323,7 @@ struct ImageDescriptor {
     std::string id;
     std::string image_role;
     // What a sky image measures, as XRADIO image schema 0.0.2 names it from casacore's image type or
-    // FITS BTYPE ("Intensity", "SpectralIndex", "OpticalDepth", ...). Empty when the image names none,
-    // and for a store that names no schema version.
+    // FITS BTYPE ("Intensity", "SpectralIndex", "OpticalDepth", ...). Empty when the image names none.
     std::string sub_type;
     std::vector<std::string> data_groups;
     DataType stored_type = DataType::unknown;

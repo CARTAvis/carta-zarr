@@ -16,14 +16,13 @@ must handle: valid zstd/gzip/blosc/crc32c chains and big-endian `bytes`, plus de
 checksum, truncated-chunk, and invalid-Unicode variants, a missing chunk, and the `v2` and `.`
 separator chunk key encodings.
 
-`images/zarr/xradio/minimal` is the XRADIO v1.2 multi-image reference dataset used by the schema
-probe and descriptor tests. It carries shared coordinate, Stokes, storage, beam, mask, and
+`images/zarr/xradio/minimal` is the multi-image reference dataset, of XRADIO image schema 0.0.2,
+used by the schema probe and descriptor tests. It carries shared coordinate, Stokes, storage, beam, mask, and
 consolidated-metadata examples. Its spectrum is intentionally nonuniform. `SKY` itself has no
 chunk files, because all of its values equal the fill value; the pixel fixtures below are the ones
 with pixels to read. `images/zarr/xradio/uniform_beam` is the same dataset with one beam on every
 plane, which the backend reports as a single beam rather than one per plane.
-`images/zarr/xradio/legacy` retains an earlier XRADIO layout to verify image
-discovery and validation across the compatibility baseline. `images/zarr/xradio/time_axis` is the
+`images/zarr/xradio/time_axis` is the
 same dataset with two times rather than one: valid, and every image in it openable here, but not
 something CARTA displays, so the backend uses it to check that it does not list an image it would
 refuse to open. This library's own time > 1 case is a store its tests write.
@@ -40,9 +39,10 @@ a prefetch that must decode the flag's chunks by the flag's own layout.
 plane or a chunk between workers, which the small ones never are; it has no absent chunk and no
 flag, since the small ones cover those.
 
-These fixtures were moved from `carta-backend` (`test/data/`) and must keep the same layouts so the
-extracted library preserves the backend's compatibility baseline. zarr-python emits its expected
-unstable-extension warning for fixed-length UTF-32 arrays.
+These fixtures were moved from `carta-backend` (`test/data/`). carta-backend-test-data keeps copies
+of `minimal`, `pixels`, `time_axis`, `uniform_beam` and `conformance_flagged`, so a change to one of
+them is copied there too. zarr-python emits its expected unstable-extension warning for fixed-length
+UTF-32 arrays.
 
 ## Conformance fixture
 
@@ -64,10 +64,8 @@ candidates for each image. Importing casatools downloads CASA's runtime data (ab
 "Spectral index"`: a continuum image of something other than intensity, whose channel width and
 `sub_type` are what the cube cannot show.
 
-XRADIO 1.2.5 writes them as image schema 0.0.2. `conformance_1_2` and `conformance_flagged_1_2` are
-the same two conversions by XRADIO 1.2.3, which named no schema version. The script no longer writes
-them; they stay, and the conformance test runs over them too, for as long as this library reads
-stores that name no version ([ADR 0022](../../docs/adr/0022-a-store-is-read-by-the-schema-version-it-names.md)).
+XRADIO 1.2.5 writes them as image schema 0.0.2, the only schema this library reads
+([ADR 0023](../../docs/adr/0023-only-xradio-image-schema-0-0-2-is-read.md)).
 
 ```sh
 ./generate_conformance_fixtures.py

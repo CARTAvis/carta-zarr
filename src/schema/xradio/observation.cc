@@ -21,11 +21,10 @@ constexpr double kSecondsPerDay = 86400.0;
 // MJD of 1970-01-01, where unix time starts.
 constexpr double kUnixEpochMjd = 40587.0;
 
-// The MJD a number names, by the format written beside it: XRADIO writes "mjd", and a number with no
-// format was read as one for XRADIO 1.2, whose stores did not always write it. Seconds since 1970 are
-// what XRADIO's time coordinate holds.
-std::optional<double> MjdOfNumber(double value, const std::string& format, const SchemaRow& row) {
-    if (format == "MJD" || (format.empty() && row.unformatted_date_is_mjd)) {
+// The MJD a number names, by the format written beside it: XRADIO writes "mjd", and schema 0.0.2
+// requires the format. Seconds since 1970 are what XRADIO's time coordinate holds.
+std::optional<double> MjdOfNumber(double value, const std::string& format) {
+    if (format == "MJD") {
         return value;
     }
     if (format == "UNIX") {
@@ -36,7 +35,7 @@ std::optional<double> MjdOfNumber(double value, const std::string& format, const
 
 }  // namespace
 
-ObservationInfo DescribeObservation(const zarr::ArrayMetadata& image, const SchemaRow& row) {
+ObservationInfo DescribeObservation(const zarr::ArrayMetadata& image) {
     ObservationInfo observation;
     observation.object_name = AttributeString(image.attributes, "object_name");
     observation.observer = AttributeString(image.attributes, "observer");
@@ -69,7 +68,7 @@ ObservationInfo DescribeObservation(const zarr::ArrayMetadata& image, const Sche
         }
         // A number, as every XRADIO writes it. A string date is no XRADIO's, and is not read.
         if (const auto value = MemberNumber(*obsdate, "data")) {
-            observation.mjd_obs = MjdOfNumber(*value, format, row);
+            observation.mjd_obs = MjdOfNumber(*value, format);
         }
     }
     return observation;

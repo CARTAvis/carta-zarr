@@ -59,7 +59,7 @@ void TestAWellFormedFlagIsAccepted() {
 }
 
 // A variable is a flag because of its type attribute, never because of its name. MASK_0 is a flag
-// and MASK_DECONVOLVE is an ordinary image, and the two are told apart here and nowhere else.
+// and MASK is an ordinary image, and the two are told apart here and nowhere else.
 void TestClassificationIsNotByName() {
     Require(IsFlag(Flag()), "a variable marked type: flag was not recognised as one");
     Require(!IsFlag(Flag("bool", kSkyShape, kSkyDimensions, false)),

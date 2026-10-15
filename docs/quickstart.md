@@ -21,16 +21,15 @@ cmake --build build-examples
 The output for that fixture looks like this:
 
 ```text
-schema=xradio.image version=(unversioned)
-  unversioned_schema: The store names no schema version, so it is read as XRADIO 1.2 wrote image stores
+schema=xradio.image version=0.0.2
 SKY openable=1 role=sky
-spectral frame= increment=1e+06
+spectral frame=LSRK increment=1e+06 Hz
 Read 20 pixels from SKY; 13 are finite
 ```
 
-The fixture names no schema version, so the output includes the
-`unversioned_schema` diagnostic. To read your own supported XRADIO dataset,
-pass its path instead of the fixture. The [dataset guide](guides/datasets.md)
+To read your own XRADIO dataset, pass its path instead of the fixture. It must
+be XRADIO image schema 0.0.2, which XRADIO 1.2.5 and later write; an older
+store is refused with `unsupported_schema_version`. The [dataset guide](guides/datasets.md)
 explains how to produce one.
 
 ## Complete source
@@ -44,7 +43,7 @@ explains how to produce one.
 1. `Context::Create` creates shared cache and execution resources.
 2. `Dataset::Open` opens the Zarr hierarchy, recognises the schema and lists
    image candidates. The example prints its declared schema version and
-   diagnostics, including any unversioned fallback. It does not load every
+   diagnostics. It does not load every
    image's pixels.
 3. `dataset.descriptor().images` exposes a read-only list of `ImageEntry`
    values. Each has an ID, openability, role, axes and diagnostics.

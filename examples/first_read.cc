@@ -42,9 +42,7 @@ int main(int argc, char** argv) {
     }
 
     const auto& descriptor = dataset.value().descriptor();
-    std::cout << "schema=" << descriptor.schema_id
-              << " version=" << (descriptor.schema_version.empty() ? "(unversioned)" : descriptor.schema_version)
-              << '\n';
+    std::cout << "schema=" << descriptor.schema_id << " version=" << descriptor.schema_version << '\n';
     for (const auto& diagnostic : descriptor.diagnostics) {
         std::cout << "  " << DiagnosticCodeName(diagnostic.code) << ": " << diagnostic.message << '\n';
     }

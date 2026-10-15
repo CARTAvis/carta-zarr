@@ -34,6 +34,8 @@
     }
   ],
   "attributes": {
+    "units": "Hz",
+    "frame": "LSRK",
     "reference_frequency": {
       "data": 1401000000.0,
       "attrs": {

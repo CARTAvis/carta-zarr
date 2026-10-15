@@ -1,5 +1,9 @@
 # A store is read by the schema version it names
 
+*Its two rows are superseded by [ADR 0023](0023-only-xradio-image-schema-0-0-2-is-read.md): only
+schema 0.0.2 is read, and a store naming no version is refused. Its checks, its refusal of an unknown
+version and what the schema is held to stand.*
+
 XRADIO 1.2.5 gives its image format a version. `IMAGE_SCHEMA_VERSION = "0.0.2"` in
 `xradio/image/schema.py` is written to every store's root as `schema_version`, `schema.py` defines
 the format, and `check_image` validates a dataset against it. XRADIO 1.2.4 and earlier wrote no

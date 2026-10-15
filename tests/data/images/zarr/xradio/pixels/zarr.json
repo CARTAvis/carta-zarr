@@ -1,6 +1,7 @@
 {
   "attributes": {
     "type": "image_dataset",
+    "schema_version": "0.0.2",
     "data_groups": {
       "base": {
         "sky": "SKY"

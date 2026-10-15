@@ -37,7 +37,7 @@ Two sources of pixels:
                    that varies by channel and rises towards the footprint's edge, faint line
                    sources, NaN outside the footprint and runs of flagged channels; continuum
                    sources on request. The coordinates are built from a template XRADIO wrote (the
-                   conformance_1_2 fixture by default), stretched to --shape, on ASKAP's frequency axis
+                   conformance fixture by default), stretched to --shape, on ASKAP's frequency axis
                    unless --frequency-start and --channel-width say otherwise.
                    Every pixel is a function of its position and --seed alone, so two layouts of
                    the same synthetic cube hold the same pixels, and only the layout differs
@@ -97,9 +97,8 @@ STOKES = ("I", "Q", "U", "V")
 SPEED_OF_LIGHT = 299_792_458.0
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-# XRADIO 1.2.3's conversion, whose frequency coordinate carries no channel width for a synthetic
-# cube to inherit from the template; schema 0.0.2's does, and synthesis does not yet rewrite it.
-DEFAULT_TEMPLATE = REPO_ROOT / "tests" / "data" / "images" / "zarr" / "xradio" / "conformance_1_2"
+# XRADIO's own conversion, of image schema 0.0.2: the only schema carta-zarr reads.
+DEFAULT_TEMPLATE = REPO_ROOT / "tests" / "data" / "images" / "zarr" / "xradio" / "conformance"
 
 # The square of noise one seed draws at a time. Fixed, and independent of any layout, because it is
 # what makes a synthetic pixel depend on where it is rather than on which block wrote it.
@@ -1045,6 +1044,8 @@ def synthesize(args: argparse.Namespace, out: Path) -> dict[str, Any]:
                 attributes["rest_frequency"]["data"] = rest
             if "reference_frequency" in attributes:
                 attributes["reference_frequency"]["data"] = float(frequencies[0])
+            if "channel_width" in attributes:
+                attributes["channel_width"]["data"] = float(args.channel_width)
         # Coordinates over l and m are as large as a plane, so they are chunked like the image's
         # planes; the rest are small enough to be one chunk, which is what XRADIO writes.
         chunk = [layout.chunk[AXES.index(d)] if d in ("l", "m") else n for d, n in zip(array_dims, data_shape)]
@@ -1117,8 +1118,8 @@ def synthesize(args: argparse.Namespace, out: Path) -> dict[str, Any]:
 # A FITS file is a header of 80-character cards in blocks of this many bytes, then the data, padded
 # to a whole block.
 FITS_BLOCK = 2880
-# The FITS SPECSYS of each frame XRADIO's frequency observer names.
-SPECSYS = {"lsrk": "LSRK", "lsrd": "LSRD", "bary": "BARYCENT", "topo": "TOPOCENT", "geo": "GEOCENTR"}
+# The FITS SPECSYS of each frame XRADIO's frequency coordinate names, in casacore's names.
+SPECSYS = {"LSRK": "LSRK", "LSRD": "LSRD", "BARY": "BARYCENT", "TOPO": "TOPOCENT", "GEO": "GEOCENTR"}
 
 
 def fits_card(key: str, value: Any) -> str:
@@ -1145,7 +1146,7 @@ def fits_header(args: argparse.Namespace, shape: list[int]) -> bytes:
     info = read_metadata(template)["attributes"]["coordinate_system_info"]
     reference = info["reference_direction"]
     pole = info["native_pole_direction"]["data"]
-    observer = read_metadata(template / "frequency")["attributes"]["reference_frequency"]["attrs"]["observer"]
+    frame = read_metadata(template / "frequency")["attributes"]["frame"]
     unit = read_metadata(template / default_image(read_metadata(template)))["attributes"]["units"]
     l_values, m_values = template_values(template, "l"), template_values(template, "m")
     beam = template_values(template, "BEAM_FIT_PARAMS_SKY")[0, 0, 0]
@@ -1167,7 +1168,7 @@ def fits_header(args: argparse.Namespace, shape: list[int]) -> bytes:
     if equinox := reference["attrs"].get("equinox"):
         cards.append(("EQUINOX", float(equinox.lower().lstrip("bj"))))
     cards += [
-        ("SPECSYS", SPECSYS[observer.lower()]), ("RESTFRQ", args.rest_frequency),
+        ("SPECSYS", SPECSYS[frame.upper()]), ("RESTFRQ", args.rest_frequency),
         ("BMAJ", math.degrees(beam[0])), ("BMIN", math.degrees(beam[1])), ("BPA", math.degrees(beam[2])),
         ("ORIGIN", "carta-zarr tools/zarr-bench/generate.py"),
     ]

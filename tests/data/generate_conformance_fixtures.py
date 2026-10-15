@@ -23,9 +23,7 @@ to `xradio.image.open_image()` / `write_image()`, so the result is whatever the 
 actually produces. Regenerate it when the pinned XRADIO version is bumped, and let the conformance
 test report which of our assumptions the new version broke.
 
-XRADIO 1.2.5 writes image schema 0.0.2. `conformance_1_2` and `conformance_flagged_1_2` beside them
-are the same conversions by XRADIO 1.2.3, which wrote no schema version; this script no longer
-writes them, and they are kept for the rules that read such stores until those rules are retired.
+XRADIO 1.2.5 writes image schema 0.0.2, the only schema carta-zarr reads.
 
 XRADIO's FITS reader is strict. Every axis needs CTYPE and CUNIT (including the unitless Stokes
 axis), and the header must carry LONPOLE, LATPOLE, the PC matrix, and DATE-OBS.

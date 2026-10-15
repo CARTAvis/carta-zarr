@@ -94,7 +94,10 @@ int Probe(const ProbeOptions& options) {
                         {"version", probe->schema_version},
                         {"diagnostics", Diagnostics(probe->diagnostics)}};
     if (probe->kind != SchemaMatchKind::match) {
-        return finish("not an XRADIO image dataset");
+        // The first diagnostic is why, which for a store of another schema version says how to read it.
+        return finish(probe->diagnostics.empty()
+                          ? std::string("not an XRADIO image dataset")
+                          : "not an XRADIO image dataset: " + probe->diagnostics.front().message);
     }
 
     const auto context = Context::Create();

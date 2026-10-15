@@ -1,5 +1,9 @@
 # Images are identified by variable name and discovered by inspection, not by data group
 
+*Amended by [ADR 0023](0023-only-xradio-image-schema-0-0-2-is-read.md): a dataset is read only when
+its `data_groups` name a sky image, as schema 0.0.2 requires. Which variables are images is still
+decided by inspecting every variable, as below.*
+
 An XRADIO image dataset declares its images twice: implicitly, as data variables carrying the `l`
 and `m` coordinates, and explicitly, in the optional root attribute `data_groups`, which maps roles
 such as `sky` and `residual` to variable names. We identify an image by its data-variable name

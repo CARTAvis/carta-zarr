@@ -20,16 +20,14 @@ its public headers, which need only the C++ standard library.
 
 ## What it reads
 
-- **Image datasets** written by [XRADIO](https://github.com/casangi/xradio) 1.2.x: one Zarr v3 group
-  holding sky-plane image variables and the coordinates they share, schema id `xradio.image`. A
-  store naming image schema version `0.0.2`, which XRADIO 1.2.5 writes, is read as that schema
-  defines it. A store naming no version, which is what XRADIO 1.2.4 and earlier wrote, or naming
-  0.0.2 without being one, is read as XRADIO 1.2 wrote it, with a diagnostic saying so; any other
-  version is refused with `unsupported_schema_version`
-  ([ADR 0022](docs/adr/0022-a-store-is-read-by-the-schema-version-it-names.md)). The conformance
-  fixtures are written by XRADIO 1.2.5 itself, beside XRADIO 1.2.3's (see
-  [tests/data/README.md](tests/data/README.md)), and following a later XRADIO means pinning that
-  generator to it and seeing which assumption breaks.
+- **Image datasets** of [XRADIO](https://github.com/casangi/xradio) image schema `0.0.2`, which
+  XRADIO 1.2.5 and later write: one Zarr v3 group holding sky-plane image variables and the
+  coordinates they share, schema id `xradio.image`. A store naming no version, which is what XRADIO
+  1.2.4 and earlier wrote, or any other version, is refused with `unsupported_schema_version`, and
+  one naming 0.0.2 without being one with `invalid_metadata`
+  ([ADR 0023](docs/adr/0023-only-xradio-image-schema-0-0-2-is-read.md)). The conformance fixtures
+  are written by XRADIO 1.2.5 itself (see [tests/data/README.md](tests/data/README.md)), and
+  following a later XRADIO means pinning that generator to it and seeing which assumption breaks.
 - **Images**: real-valued variables carrying all five of `time`, `frequency`, `polarization`, `l`
   and `m`. Complex and aperture-plane (`u`, `v`) variables are listed with a diagnostic saying why
   they cannot be opened.

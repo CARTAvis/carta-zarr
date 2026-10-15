@@ -4,18 +4,31 @@ carta-zarr is a library in its caller's process. The intended carta-backend
 integration is under development; this repository does not contain a running
 image server or frontend.
 
+## System context
+
+Where carta-zarr sits in a CARTA deployment, and where its datasets come from:
+
 ```{mermaid}
 flowchart LR
-    Input["FITS / CASA"] -->|"convert"| XR["XRADIO"]
-    XR -->|"write"| Disk[("Local Zarr v3 dataset")]
-    Caller["carta-backend / C++ application"] -->|"public API"| Lib["carta-zarr"]
+    User(["Astronomer"]) -->|"web browser"| FE["carta-frontend"]
+    FE <-->|"WebSocket, protobuf"| BE
+    subgraph BE["carta-backend process"]
+        Lib["carta-zarr"]
+    end
+    Input["FITS / CASA image"] -->|"convert"| XR["XRADIO"]
+    XR -->|"write"| Disk[("Zarr v3 image dataset")]
     Lib -->|"read"| Disk
-    Lib -->|"pixels, descriptors, totals"| Caller
 ```
+
+carta-zarr runs inside each backend process rather than as a service of its
+own; any other C++ application links it the same way.
+
+## Components
 
 The application owns world coordinates, region definitions, scientific derived
 quantities and its protocol. This library owns storage access and operations
 expressible in pixel coordinates: counts, sums, spread, extrema and histograms.
+Inside it:
 
 ```{mermaid}
 flowchart TB

@@ -9,7 +9,7 @@ An **image** is one supported data variable opened by its variable name.
 ```{mermaid}
 flowchart LR
     D["Dataset: cube.zarr"] --> S["ImageEntry: SKY"]
-    D --> R["ImageEntry: RESIDUAL"]
+    D --> R["ImageEntry: SKY_RESIDUAL"]
     D --> C["Shared coordinates"]
     S -->|"OpenImage(id)"| I["Image handle"]
     I -->|"Read(request, buffer)"| P["float32 pixels"]
@@ -18,8 +18,8 @@ flowchart LR
 The names above are illustrative: use the IDs the actual listing reports.
 An image role such as sky or residual describes a variable's purpose; it is
 not the ID used to open it.
-For variables typed `sky`, a non-base data group's name can determine the role
-(`model`, `residual`, `dirty`). An opened image's `sub_type` instead describes
+For variables typed `sky`, a non-base data group's name can determine the role,
+for example `model`, `residual` or `dirty`. An opened image's `sub_type` instead describes
 what it measures, such as intensity or spectral index. See
 [schema versions](reference/schema-versions.md) for version-dependent metadata.
 
@@ -53,8 +53,10 @@ default and output NaN for those pixels. Set `apply_pixel_mask = false` to read
 the image's stored values without applying the flag.
 
 A reduction's **region mask** selects pixels within a bounding box: nonzero
-means included. A deconvolution mask such as `MASK_DECONVOLVE` is an ordinary
-image, not a flag. These three serve different purposes.
+means included. A deconvolution mask, `MASK`, is neither: it is an image of
+its own, not a flag. A float-valued one opens like any other image; one
+stored as booleans is listed but not openable. These three serve different
+purposes.
 
 ## Rules that apply to every operation
 

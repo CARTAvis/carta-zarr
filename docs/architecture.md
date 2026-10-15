@@ -32,15 +32,31 @@ Inside it:
 
 ```{mermaid}
 flowchart TB
-    API["Context / Dataset / Image"] -->|"recognise and describe"| Profile["XRADIO schema profile"]
-    Profile -->|"inspect metadata and coordinates"| Store["Store: hierarchy, metadata, verification"]
-    API -->|"Read / Prefetch"| Pieces["Piece planner: bounded reads"]
-    API -->|"statistics / histograms"| Pass["Pass: chunk traversal and reduction"]
-    Pieces -->|"pixels and flags"| Source["PixelSource / StorePixelSource"]
+    subgraph G_api["Public API"]
+        API["Context / Dataset / Image"]
+    end
+    subgraph G_schema["XRADIO schema"]
+        Profile["XRADIO schema profile"]
+    end
+    subgraph G_compute["Reads and reductions"]
+        Pieces["Piece planner: bounded reads"]
+        Pass["Pass: chunk traversal and reduction"]
+        Source["PixelSource / StorePixelSource"]
+    end
+    subgraph G_storage["Zarr storage"]
+        Store["Store: hierarchy, metadata, verification"]
+        Transport["Filesystem Transport"]
+        Reader["Zarr readers / TensorStore"]
+    end
+    API -->|"recognise and describe"| Profile
+    Profile -->|"inspect metadata and coordinates"| Store
+    API -->|"Read / Prefetch"| Pieces
+    API -->|"statistics / histograms"| Pass
+    Pieces -->|"pixels and flags"| Source
     Pass -->|"pixels and flags"| Source
     Source -->|"read selected values"| Store
-    Store -->|"metadata, listing, array paths"| Transport["Filesystem Transport"]
-    Store -->|"numeric reads"| Reader["Zarr readers / TensorStore"]
+    Store -->|"metadata, listing, array paths"| Transport
+    Store -->|"numeric reads"| Reader
     Transport -->|"filesystem access"| Disk[("Zarr metadata and chunks")]
     Reader -->|"decode chunks and cache"| Disk
 ```

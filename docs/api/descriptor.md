@@ -25,6 +25,9 @@
 :undoc-members:
 ```
 
+```{doxygenfunction} carta::zarr::ProbeSchema
+```
+
 ```{doxygenstruct} carta::zarr::ContextOptions
 :members:
 :undoc-members:

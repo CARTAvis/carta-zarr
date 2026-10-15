@@ -1,9 +1,18 @@
 # Prepare an XRADIO dataset
 
-carta-zarr reads datasets written by XRADIO. Which schema versions it accepts,
-and how the schema, XRADIO package and library versions differ, is set out in
-[schema versions](../reference/schema-versions.md); this page covers producing a
-dataset.
+carta-zarr reads datasets written by XRADIO. This page covers producing one and
+checking it; which schema versions the library accepts, and how the schema,
+XRADIO package and library versions differ, is set out in
+[schema versions](../reference/schema-versions.md).
+
+## Write a dataset
+
+Install the XRADIO version you mean to produce datasets with, and keep it
+pinned for a reproducible workflow; this page follows 1.2.5:
+
+```sh
+pip install "xradio==1.2.5"
+```
 
 XRADIO converts a FITS or CASA image:
 
@@ -11,26 +20,29 @@ XRADIO converts a FITS or CASA image:
 from xradio.image import open_image, write_image
 
 xds = open_image("cube.fits")
-write_image(xds, "cube", out_format="zarr")  # XRADIO 1.2.5 writes cube.img.zarr
+write_image(xds, "cube", out_format="zarr")  # writes cube.img.zarr
 ```
 
-Open the resulting `cube.img.zarr` with carta-zarr. Pin XRADIO when producing
-datasets for a reproducible workflow; the example above follows 1.2.5.
+Open the resulting `cube.img.zarr` with carta-zarr. XRADIO's FITS reader needs
+both celestial axes in the header and refuses axis types it does not support.
 
-XRADIO's FITS reader requires complete coordinate metadata. The repository's
-[pinned fixture generator](https://github.com/CARTAvis/carta-zarr/blob/dev/tests/data/generate_conformance_fixtures.py)
-is a reproducible example of producing conforming data, pinned to XRADIO 1.2.5.
-Its flagged fixture uses CASA images and requires casatools; this is separate
-from the dependencies needed to build the C++ reader or the documentation site.
+The repository's
+[fixture generator](https://github.com/CARTAvis/carta-zarr/blob/dev/tests/data/generate_conformance_fixtures.py)
+is a reproducible example of producing conforming data with XRADIO 1.2.5. Its
+fixture with a flag is converted from a CASA image, so it also needs casatools.
 
-Use `ProbeSchema(path, kXradioImageSchema)` to distinguish `match`, `no_match`
-and `invalid`. A successful `Result` alone is not evidence of a match: inspect
-its `kind`. Opening the dataset then provides the list of image candidates.
-The returned `schema_version` is the version declared by the store, or empty
-when absent. Check diagnostics too: a store declaring 0.0.2 may be read using
-the unversioned rules if its required version-specific fields are missing.
+## Check the dataset
 
-For layout experiments, the
-[benchmark generator](https://github.com/CARTAvis/carta-zarr/blob/dev/tools/zarr-bench/README.md)
-can rewrite a real cube or synthesise one. Consult [storage tuning](../storage-tuning.md)
-before choosing chunk and shard sizes for a particular workload.
+`ProbeSchema(path, kXradioImageSchema)` tells a dataset carta-zarr reads from
+one it does not. A successful `Result` alone is not a match: inspect its `kind`,
+which is `match`, `no_match` or `invalid`, and its diagnostics.
+`schema_version` is the version the dataset declares, or empty. Opening the
+dataset then lists its image candidates. How a declared version is read, and
+when it falls back, is in [schema versions](../reference/schema-versions.md).
+
+## Next steps
+
+- [List images and read a channel](reading.md) from the dataset.
+- Rewrite a real cube or synthesise one in other layouts with the
+  [benchmark generator](https://github.com/CARTAvis/carta-zarr/blob/dev/tools/zarr-bench/README.md).
+- Choose chunk and shard sizes for a workload with [storage tuning](../storage-tuning.md).

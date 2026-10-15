@@ -22,16 +22,19 @@ for (const auto& entry : dataset.descriptor().images) {
 
 Choose an `openable` entry and pass its `id` to `OpenImage`. A
 `default_image_id`, when present, is a suggested choice rather than the only
-image. Flags and coordinates do not need to be opened as images to read a sky
-variable.
+image. Open only the image you read: its flag and coordinates come with it and
+are not opened as images of their own.
 
 ## Select a channel
 
-Start with one element on every axis, then expand the spatial axes as in the
-quickstart. Select a spectral channel by role:
+A `ReadRequest` holds one `Range {start, count, stride}` per axis. Start with
+one element on every axis, then select a spectral channel by role; `channel` is
+the index your application wants:
 
 ```cpp
 const auto& axes = image.descriptor().axes;
+ReadRequest request;
+request.axes.assign(axes.size(), {0, 1, 1});
 const auto spectral = AxisIndex(axes, AxisRole::spectral);
 if (!spectral || channel >= axes[*spectral].length) {
     // Report an invalid channel to your application's caller.
@@ -40,8 +43,9 @@ if (!spectral || channel >= axes[*spectral].length) {
 request.axes[*spectral] = {channel, 1, 1};
 ```
 
-Select polarization and time the same way. Their default indices are zero;
-a spectral channel's index is distinct from its frequency coordinate value.
+Select polarization and time the same way; the request above leaves them at
+index 0. An index picks a sample along the axis; it is not a frequency, which
+the descriptor's spectral coordinate gives for each index.
 
 ## Select a spatial rectangle
 

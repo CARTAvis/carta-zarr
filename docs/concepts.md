@@ -48,12 +48,12 @@ reports where an axis lives in the stored array, which can differ from its logic
 
 ## Flag versus region mask
 
-An image's **flag** marks bad pixels: true means excluded. Reads apply it by
-default and output NaN for those pixels. Set `apply_pixel_mask = false` to read
-the image's stored values without applying the flag.
+An image's **flag** marks bad pixels: true means excluded. How reads apply it
+is one of the [rules below](#rules-that-apply-to-every-operation); set
+`apply_pixel_mask = false` to read the stored values without it.
 
-A reduction's **region mask** selects pixels within a bounding box: nonzero
-means included. A deconvolution mask, `MASK`, is neither: it is an image of
+A reduction's **region mask** (`RegionMask`) selects pixels within a bounding
+box: nonzero means included. A deconvolution mask, `MASK`, is neither: it is an image of
 its own, not a flag. A float-valued one opens like any other image; one
 stored as booleans is listed but not openable. These three serve different
 purposes.
@@ -72,19 +72,16 @@ rather than repeating them.
 - **Borrowed views last only for the callback.** A reduction block or histogram
   `Counts` view is valid inside the sink; copy what you need to keep.
 - **Handles are shared; destinations belong to you.** Keep your buffers and
-  region rasters alive until the operation returns.
+  region masks alive until the operation returns.
 
 ## Results, diagnostics and lifetimes
 
-Public operations return `Result<T>` with an error code, message and node path
-on failure. A diagnostic accompanies a successful listing or descriptor and
-explains an unsupported candidate or missing optional information.
+A `Result<T>` holds either a value or an error. A diagnostic is different: it
+accompanies a successful listing or descriptor and explains an unsupported
+candidate or missing optional information.
 
 `Context`, `Dataset`, `Image` and `CachePool` are shared handles created by
 factories. Copies share their resources, and moving one preserves the source
 handle too. Use `std::optional` when your own object needs a not-yet-created
 handle. A reference obtained from `descriptor()` must not outlive the object
 that owns the underlying descriptor.
-
-Pixel destinations and region views belong to the caller. Keep them alive
-through the operation.

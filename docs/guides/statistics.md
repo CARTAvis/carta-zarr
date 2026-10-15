@@ -1,27 +1,27 @@
 # Reduce regions and compute histograms
 
-The [runnable statistics example](../examples.md) opens an image and works on
-up to four channels at the first polarization and time. It reduces a bounded
-spatial patch and a single-pixel region together, then computes per-plane and
-combined cube histograms.
+This guide follows the statistics example, whose steps are listed under
+[what the program does](#what-the-program-does).
 
 ## Reduce regions over channels
 
 `PlaneSelection` carries a spectral range, one polarization and one time.
 Supply many regions in one request so their shared chunks are visited together.
-The example uses two unmasked `RegionMask` rectangles; a nonzero raster value
-would include a pixel, while an absent raster includes the whole rectangle.
-Keep the region array and any rasters alive until the operation returns.
+Each region is a `RegionMask`: a bounding box and an optional `mask` with one
+byte per pixel of the box, nonzero to include it. The example's two regions
+have no `mask`, so each includes its whole box.
 
-Consume a `SpectralBlock` only during the callback. The example ignores blocks
-where `complete` is false: incomplete blocks are refined and emitted again,
-and final values replace earlier estimates. Returning false cancels the operation. Blocks are borrowed, as the
-[core concepts](../concepts.md#rules-that-apply-to-every-operation) explain.
+The sink receives `SpectralBlock`s. A block with `complete == false` is an
+estimate over the pixels visited so far, and a final block with
+`complete == true` replaces it later; the example skips estimates. Returning
+false from the sink cancels the operation.
 
-`first_channel` is an index into the requested spectral selection. The actual
+`first_channel` is an index into the requested spectral selection, so the
 image channel is `start + (first_channel + i) * stride`, as the program prints.
-For a mean, check that `num_pixels > 0`; for sample variance, require more than
-one pixel and divide `sum_sq_dev` by `num_pixels - 1`.
+
+`sum_sq_dev` is the sum of squared deviations from the mean. For a mean, check
+that `num_pixels > 0`; for a sample variance, require more than one pixel and
+divide `sum_sq_dev` by `num_pixels - 1`.
 
 A flux density or world-coordinate operation belongs in the application,
 which has the scientific context needed to interpret the totals.
@@ -37,12 +37,14 @@ within the sink; the example consumes it immediately with `std::accumulate`.
 `ComputeCubeHistogram` instead finds the range and returns one histogram for
 all selected planes. Its provisional bins are re-aggregated onto the final
 range, so individual bin counts are approximate and can depend on thread count.
-The example checks for finite pixels before printing extrema. Setting
-`spatial_sample > 1` samples spatial pixels and sets `sampled`; sampling within
-a chunk may save no decompression.
+The example checks for finite pixels before printing extrema. It does not
+sample; `spatial_sample = n` takes every nth pixel along both spatial axes and
+sets `sampled`, but saves decoding only when n is large enough to skip whole
+chunks.
 
 Both histograms cover **whole planes**, not just the region reduction's patch.
-All three operations apply the image's flag by default and check their `Result`.
+The [rules shared by every operation](../concepts.md#rules-that-apply-to-every-operation)
+apply to all three: flags, borrowed views and checking each `Result`.
 
 ## What the program does
 
@@ -51,7 +53,9 @@ All three operations apply the image's flag by default and check their `Result`.
    channels, printing each channel's count, mean and variance.
 3. Computes a 64-bin histogram for each of those channels over fixed bounds.
 4. Computes one cube histogram across all of them and prints its range.
-5. Returns nonzero unless every requested channel received a final block.
+5. Returns zero only if the reduction and the plane histograms delivered a
+   final block for every requested channel, and the cube histogram has all
+   its bins.
 
 ## Complete source
 

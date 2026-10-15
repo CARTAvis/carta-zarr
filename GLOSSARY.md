@@ -11,8 +11,9 @@ without depending on TensorStore. It depends on neither casacore nor CARTA's pro
 **Image dataset**:
 One Zarr v3 group holding a complete XRADIO image, marked by the root attribute `type:
 "image_dataset"`.
-It is the unit a consumer opens by path.
-_Avoid_: file, store, image (on its own), group
+It is the unit a consumer opens by path. Where the subject is the schema version it declares,
+"store" is the usual word for it, as ADR 0022 and the changelog use it.
+_Avoid_: file, image (on its own), group; "store" elsewhere
 
 **Data variable**:
 One named array inside an image dataset. Some are images, others are flags, beam tables, or

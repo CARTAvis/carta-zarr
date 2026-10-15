@@ -39,20 +39,17 @@ flowchart TB
   Consolidated metadata is checked against the array's own document before its
   values are read.
 - **Schema profile** decides what constitutes an image, maps axes by role and
-  describes flags, coordinates and observation information. Its XRADIO version
-  table chooses 0.0.2 or unversioned rules from the store's declaration and
-  version-specific checks, recording a fallback or unsupported-version diagnostic.
-- **Read planning** cuts requests into pieces constrained by the read budget.
+  describes flags, coordinates and observation information. It holds a schema
+  row for each XRADIO schema version it reads, and chooses 0.0.2's or the
+  unversioned rules from the dataset's declaration and version-specific checks,
+  recording a fallback or unsupported-version diagnostic.
+- **Piece planner** cuts requests into pieces constrained by the read budget.
   **Pass** traverses chunks for reductions, with occupancy restricting work to
   chunks actually touched by the selected regions.
 - **TensorStore** decodes numeric arrays, transforms selections and provides
   decoded-chunk caching. It is absent from public headers.
 - **Context** shares execution resources. `ReadAhead` schedules background
   `Prefetch` calls for an animation's next distinct run of chunks.
-
-Tests can replace `PixelSource` with synthetic pixels and Transport with an
-in-memory implementation, exercising traversal and metadata without production
-storage. The in-memory metadata transport cannot serve filesystem pixel reads.
 
 See the [glossary](glossary.md) for domain terminology and the repository's
 [architecture decisions](https://github.com/CARTAvis/carta-zarr/tree/dev/docs/adr)

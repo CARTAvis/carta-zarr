@@ -50,12 +50,12 @@ explains how to produce one.
    values. Each has an ID, openability, role, axes and diagnostics.
 4. `Dataset::OpenImage(id)` describes the chosen image and verifies the
    metadata needed to read it. Coordinate values may be read at this stage.
-   The example prints an available image subtype and spectral frame/increment.
-   The increment is fitted from the channels' frequencies; an image of one
-   channel has no spacing to fit, so in a 0.0.2 store its `channel_width`
-   supplies it.
-5. `Image::Read` reads into the caller's `float` buffer. Axis 0 varies fastest
-   in the densely packed output; flagged pixels become NaN by default.
+   The example prints the image's subtype and spectral frame and increment
+   when they are available; [schema versions](reference/schema-versions.md#metadata-differences-that-matter-to-applications)
+   says where each comes from.
+5. `Image::Read` reads into the caller's `float` buffer, with axis 0 varying
+   fastest (see [axes and output order](concepts.md#axes-and-output-order));
+   flagged pixels become NaN by default.
 
 Successful `Open` does not mean every candidate is openable. Use the listing
 to choose one, and still check the result of `OpenImage` and `Read`: files can

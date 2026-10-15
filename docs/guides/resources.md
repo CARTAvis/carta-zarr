@@ -2,19 +2,22 @@
 
 ## Size the cache and temporary memory
 
-`ContextOptions::cache_bytes` controls the shared decoded-chunk cache. An absent
-value keeps TensorStore's default; zero retains no decoded chunks. Choose a
-cache from the chunks your application will revisit, not just its output pixels:
-chunks are cached in their stored type, with flag chunks counted separately.
+`ContextOptions::cache_bytes` sizes the context's cache of decoded chunks,
+which every operation shares unless it names a cache pool of its own. An absent
+value keeps TensorStore's default; zero retains no decoded chunks. Size it from
+the chunks your application will revisit, not from its output pixels: a chunk
+is cached as it decodes, in the image's stored type, and the image's flag
+takes cache space of its own. `Image::DecodedChunkBytes` gives a chunk's size.
 
-`ReadOptions::read_budget_bytes` controls temporary work beyond the caller's
-destination, separately from retained cache capacity. Zero uses the library's
-default budget. It is not a strict process-memory cap: at least one chunk must
-fit logically, concurrent reads each have a budget, and single-plane reads
-without progress have a documented whole-plane exception.
+`ReadOptions::read_budget_bytes` bounds the memory one read holds beyond the
+caller's destination while it works, separately from what the cache retains.
+Zero uses the library's default. It is not a process-memory cap: a read holds
+at least one chunk however small the budget, reads running at once each have
+their own, and a single plane read with no progress callback may hold the
+whole plane (see [`ReadOptions`](../api/read.md)).
 
-Use `Image::DecodedChunkBytes` to estimate decoded chunk storage. For a scan
-that will not revisit chunks, create a separate zero-byte pool:
+A scan that will not revisit its chunks can use a cache pool of its own that
+holds nothing:
 
 ```cpp
 auto pool = context.NewCachePool(0);
@@ -26,7 +29,7 @@ ReadOptions options;
 options.control.cache_pool = pool.value();
 ```
 
-This keeps the scan from evicting an interactive session's working set.
+This keeps the scan from evicting the chunks an interactive session reuses.
 
 ## Report progress and cancel
 
@@ -46,40 +49,45 @@ at storage-operation boundaries; an in-flight decode is not forcibly interrupted
 On failure, including cancellation, discard the destination. During progress
 callbacks, the reported prefix is complete.
 
-Spectral and plane-histogram sinks cancel by returning false. Cube histogram
-progress has a separate callback and can provide a snapshot of what has been
-read so far. Producing that snapshot costs work; request one only when needed.
-A small cube histogram can finish without emitting progress callbacks.
+`ReduceSpectral` and `ComputeHistogram` deliver results to a callback, their
+sink, which cancels the operation by returning false. A cube histogram reports
+progress through a separate callback that can also provide a snapshot of what
+has been read so far. Producing that snapshot costs work; request one only when
+needed. A small cube histogram can finish without emitting progress callbacks.
+
+## Run operations at once
+
+`Image::Read` and `Image::Prefetch` can run on one handle from several threads
+at once. Concurrent reductions share the context's worker pool and interleave
+their computation read by read.
 
 ## Read ahead during animation
 
-`Image::Prefetch` decodes selected chunks into the selected cache without
-producing a pixel destination. `ReadAhead` adds an animation policy:
+`Image::Prefetch` decodes selected chunks into the cache without producing
+pixels. `ReadAhead` uses it to decode the frames an animation will show next:
 
 1. Create it with `ReadAhead::For({{image, options}})` and check the result.
 2. After each displayed frame, call `Served` with the frame's start time,
    whether it was late, the shown planes and upcoming frames, nearest first.
 3. Keep the controller alive while playing and call `Cancel` when stopping.
 
-The controller prefetches the next distinct run of chunks on its own thread.
-The caches must hold at least two runs; creation reports `buffer_too_small`
-otherwise. A late frame while a prefetch is running disables further read-ahead.
-Cancellation stops scheduling promptly but still respects in-flight storage work.
-
-Read operations can share a handle concurrently. Concurrent reductions share
-one worker pool and interleave computation read by read. See the
+A **run** is the chunks one plane's read decodes: the plane's area times the
+chunk depth. The controller decodes the next run on its own thread while the
+frames of the current one are shown. Each cache an animated image reads through
+must hold two runs of every image that reads through it, the one playing and
+the one decoded ahead; otherwise creation reports `buffer_too_small`. A late
+frame while a prefetch is running stops further read-ahead. Cancellation stops
+scheduling promptly but still waits for storage work already under way. See the
 [read-ahead API](../api/read-ahead.md) for precise controller lifetimes and policy.
 
 ## Complete read-control example
 
-This program opens an image, reads a bounded patch at channel 1 (or 0 for a
-single-channel image), then demonstrates cancellation and a cached prefetch.
-The zero-byte pool is used for the scan; prefetch and the subsequent read use
-the context's explicitly sized shared cache. The cancelled read is deliberately
-started with its stop flag set so the demonstration is deterministic.
+The scan uses a cache pool that holds nothing; the prefetch and the read after
+it use the context's 64 MiB cache. The cancelled read starts with its stop flag
+already set, so the demonstration does not depend on timing.
 
-1. Creates a context with a 64 MiB cache and reads a bounded patch with
-   progress, a deadline and a zero-byte scan pool.
+1. Creates a context with a 64 MiB cache and reads a bounded patch at channel 1
+   (0 for a single-channel image) with progress, a deadline and the empty pool.
 2. Sets the stop flag and reads again, checking for the `cancelled` error.
 3. Prefetches the patch into the shared cache, then reads it.
 
@@ -92,21 +100,14 @@ Its helpers are documented in [shared setup](../examples.md#shared-setup).
 
 ## Complete animation example
 
-This program reads a cropped preview for at most four channels. After each read,
-it reports the frame and the upcoming requests to `Served`, then calls `Cancel`
-when the sequence ends. It does not measure a display deadline: a real viewer
-must supply its own frame schedule and lateness measurement.
+This program follows the steps [above](#read-ahead-during-animation) over a
+cropped patch of at most four channels, then reports how many prefetches ran
+and whether the controller stopped. It does not measure a display deadline: a
+real viewer supplies its own frame schedule and lateness.
 
-1. Creates a `ReadAhead` controller for the image; creation fails if the cache
-   cannot hold two runs.
-2. Reads each frame, then calls `Served` with that frame and the frames still
-   to come.
-3. Calls `Cancel` and reports how many prefetches ran and whether it stopped.
-
-The controller still requires cache capacity for two whole-plane runs; 64 MiB
-may be insufficient for a large dataset. That failure is reported rather than
-silently falling back. Do not interpret the number of background prefetches in
-this fast CLI as a performance measurement.
+Its 64 MiB cache may not hold two runs of a large dataset; creation then fails
+with the capacity it needs rather than silently reading nothing ahead. The
+number of prefetches in this fast CLI is not a performance measurement.
 
 ```{literalinclude} ../../examples/animation.cc
 :language: cpp

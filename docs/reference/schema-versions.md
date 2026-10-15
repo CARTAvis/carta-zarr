@@ -8,22 +8,24 @@ Three version numbers describe different things:
 | XRADIO 1.2.5 | The Python package used to write the current conformance fixtures |
 | Image schema 0.0.2 | The layout declared in the dataset's root `schema_version` attribute |
 
-The profile identifier remains `xradio.image`. Do not compare the dataset's
-schema version to the installed C++ library's version.
+Every version is read by the same schema profile, `kXradioImageSchema`
+(`xradio.image`). Do not compare the dataset's schema version to the installed
+C++ library's version.
 
 ## How a store is read
 
 | Dataset metadata | Reading rules | Reported diagnostic |
 |---|---|---|
 | Declares 0.0.2 and meets the version-specific checks | Schema 0.0.2 | No fallback diagnostic |
-| Declares no schema version | Unversioned XRADIO 1.2 | `unversioned_schema` |
-| Declares 0.0.2 but fails the version-specific checks | Unversioned XRADIO 1.2 | `unversioned_schema`, with the reason |
+| Declares no schema version | Unversioned, as XRADIO 1.2.4 and earlier wrote | `unversioned_schema` |
+| Declares 0.0.2 but fails the version-specific checks | Unversioned, as XRADIO 1.2.4 and earlier wrote | `unversioned_schema`, with the reason |
 | An image dataset declares another version, an empty string or a non-string value | Refused | `unsupported_schema_version` |
 
 The 0.0.2 checks require data groups naming a sky array typed `sky` and, when
 the frequency coordinate is readable, its `frame` and `units`. These select
 the version-specific rules; ordinary image and coordinate validation still
-applies. A fallback does not promise malformed data can be opened.
+applies: falling back to the unversioned rules does not make malformed data
+readable.
 
 `SchemaProbeResult::schema_version` and `DatasetDescriptor::schema_version`
 report **what the store declares**, even when 0.0.2 falls back to older rules.
@@ -38,11 +40,14 @@ to contain a root `schema_version`.
 
 ## Metadata differences that matter to applications
 
-- **Image roles:** a variable typed `sky` can play `model`, `residual` or `dirty`
-  when it is the sky of a data group with that name and is not the base sky.
-  Other image roles come from the variable's `type`. Use the reported role
-  instead of inferring it from the ID. XRADIO's known sky-image names are listed
-  ahead of other variables, so the default may be `SKY_MODEL` when `SKY` is absent.
+- **Image roles:** a variable typed `sky` that a data group other than `base`
+  names as its sky reports that group's name as its role, such as `model`,
+  `residual` or `dirty`. Other images take their role from their `type`. Use
+  the reported role instead of inferring it from the ID.
+- **Default image:** the listing puts XRADIO's own image names first (`SKY`,
+  `SKY_MODEL`, `SKY_RESIDUAL`, `SKY_DIRTY`, …), and the default is the first
+  openable one, so a dataset without `SKY` defaults to, for example,
+  `SKY_MODEL`.
 - **Image subtype:** `ImageDescriptor::sub_type` describes what is measured,
   for example `Intensity`, `SpectralIndex` or `OpticalDepth`. It is separate
   from `image_role`, is read under 0.0.2 rules and is empty when not available.

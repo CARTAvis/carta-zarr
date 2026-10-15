@@ -14,6 +14,3 @@
 :members:
 :undoc-members:
 ```
-
-```{doxygenfunction} carta::zarr::ProbeSchema
-```

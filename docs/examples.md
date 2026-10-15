@@ -18,16 +18,14 @@ cmake --build build-examples
 ./build-examples/carta_zarr_animation tests/data/images/zarr/xradio/pixels
 ```
 
-Replace the fixture path with your own supported dataset when ready. The C++
-examples require the library; the [documentation website build](contributing-docs.md)
-requires only documentation tools.
+Replace the fixture path with your own supported dataset when ready.
 
-| Example | What it demonstrates | Source and explanation |
+| Example | What it demonstrates | Explanation |
 |---|---|---|
 | `first_read` | Discover candidates, find axes by role and read a bounded spatial patch | [Quickstart](quickstart.md) |
 | `statistics` | Reduce two regions in one pass, consume final blocks and compute plane/cube histograms | [Statistics](guides/statistics.md) |
-| `read_control` | Select a channel, use progress and cancellation, isolate a scan's cache and prefetch | [Read controls](guides/resources.md#complete-read-control-example) |
-| `animation` | Create a ReadAhead controller, read frames, report upcoming frames and cancel | [Animation](guides/resources.md#complete-animation-example) |
+| `read_control` | Select a channel, report progress, cancel, give a scan its own cache pool and prefetch | [Read controls](guides/resources.md#complete-read-control-example) |
+| `animation` | Read ahead during an animation with `ReadAhead`: read frames, report upcoming ones and cancel | [Animation](guides/resources.md#complete-animation-example) |
 
 Each linked page explains what its program does and its limits. All of them
 bound the destination to a 64 × 64 patch, but decoding still operates on whole
@@ -38,22 +36,12 @@ chunks.
 The advanced programs use `support.h` to open the first openable image, validate
 required axes, create a bounded patch and calculate its destination size. The
 quickstart remains self-contained so it can be copied into a new application.
-An image retains its storage resources after the helper's Dataset goes out of
-scope.
+The `Image` the helper returns keeps the dataset's resources alive after the
+helper's `Dataset` goes out of scope.
 
 ```{literalinclude} ../examples/support.h
 :language: cpp
 ```
 
-## CI validation
-
-The package-consumer test compiles every example against the installed
-`CartaZarr` package, runs each on the committed fixtures and checks that a
-missing argument fails. Its assertions are in `tests/run_package_consumer.cmake`
-and the consumer sources.
-
-To run this check after building the library:
-
-```sh
-ctest --test-dir build -R '^carta-zarr-package-consumer$' --output-on-failure
-```
+CI builds and runs every example; see
+[contributing to the documentation](contributing-docs.md#sources-and-checks).

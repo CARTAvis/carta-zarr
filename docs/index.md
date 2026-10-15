@@ -39,7 +39,7 @@ selection and fallback diagnostics. Changes since 0.1 are listed in the [changel
 
 - [List images and read a channel or region](guides/reading.md).
 - [Reduce regions and compute histograms](guides/statistics.md).
-- [Control memory, cancellation and animation read-ahead](guides/resources.md).
+- [Control memory, cancellation and read-ahead](guides/resources.md).
 - [Build and run the C++ examples](examples.md).
 
 **Data and storage**
@@ -50,7 +50,11 @@ selection and fallback diagnostics. Changes since 0.1 are listed in the [changel
 **When something goes wrong**
 
 - [Diagnose a failed open or read](troubleshooting.md).
-- [Understand the architecture](architecture.md).
+
+**Background**
+
+- [Understand the architecture](architecture.md): what the library does and
+  what it leaves to the application.
 
 ```{toctree}
 :hidden:
@@ -85,6 +89,7 @@ storage-tuning
 
 api/index
 reference/schema-versions
+architecture
 glossary
 changelog
 ```
@@ -100,6 +105,5 @@ troubleshooting
 :hidden:
 :caption: Project
 
-architecture
 contributing-docs
 ```

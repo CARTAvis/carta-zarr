@@ -64,18 +64,6 @@ To install into a system prefix such as `/opt/carta-zarr`, run
 `sudo cmake --install build --prefix /opt/carta-zarr`, then pass
 `-DCMAKE_PREFIX_PATH=/opt/carta-zarr` when building against it.
 
-## Run the tests (optional)
-
-The tests are for checking a build on a new platform or a change to the
-library; installing does not need them. The build above already compiled them;
-run them with:
-
-```sh
-ctest --test-dir build --output-on-failure
-```
-
-The tests read the fixtures under `tests/data`, which a clone includes.
-
 ## Build without network access
 
 Some build systems, such as Launchpad, have no network access during builds.
@@ -102,6 +90,18 @@ were made for. Copying another tree's `_deps`, or setting
 The archives match the dependency versions pinned in this version of the
 repository. After a change that updates them, configure again on a machine with
 network access and pack a new archive.
+
+## Run the tests (optional)
+
+The tests are for checking a build on a new platform or a change to the
+library; installing does not need them. A build from source compiles them by
+default; run them with:
+
+```sh
+ctest --test-dir build --output-on-failure
+```
+
+The tests read the fixtures under `tests/data`, which a clone includes.
 
 ## Link from another CMake project
 

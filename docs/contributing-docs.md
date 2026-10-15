@@ -2,23 +2,26 @@
 
 ## Build locally
 
+### Prerequisites
+
+You need Git, Doxygen 1.18 and, for the recommended build, uv. CI pins Doxygen
+1.18 because other releases may change the XML that `docs/conf.py`
+post-processes.
+
+- **macOS:** `brew install git uv doxygen`.
+- **Ubuntu:** `sudo apt-get install git`, then install uv using its
+  [official instructions](https://docs.astral.sh/uv/getting-started/installation/).
+  The packaged Doxygen is older: download `doxygen-1.18.0.linux.bin.tar.gz` from
+  [Doxygen's releases](https://github.com/doxygen/doxygen/releases/tag/Release_1_18_0)
+  and put its `bin` directory on `PATH`.
+
+Check that `doxygen --version` prints 1.18.0. If Homebrew installed another
+version, use the release download as on Ubuntu.
+
 ### With uv (recommended)
 
-Install uv and Doxygen 1.18, the version CI pins: other releases may change the
-XML that `docs/conf.py` post-processes. On macOS:
-
-```sh
-brew install uv doxygen
-```
-
-On Ubuntu, the packaged Doxygen is older. Install Git with
-`sudo apt-get install git`, download `doxygen-1.18.0.linux.bin.tar.gz` from
-[Doxygen's releases](https://github.com/doxygen/doxygen/releases/tag/Release_1_18_0)
-and put its `bin` directory on `PATH`, then install uv using its
-[official instructions](https://docs.astral.sh/uv/getting-started/installation/).
-Either way, check that `doxygen --version` prints 1.18.0.
-uv can download the requested Python interpreter when needed; you do not need
-to install the documentation packages into your system Python.
+uv downloads the Python it needs, so the documentation packages stay out of
+your system Python.
 
 Run the commands below from the root of the checkout you want to preview.
 
@@ -40,8 +43,8 @@ invocations; no activation step or `uv init` is needed.
 
 ### With venv and pip
 
-Install Doxygen 1.18 as above, then run from the repository root with Python
-3.11 or newer:
+With the [prerequisites](#prerequisites) other than uv, run from the
+repository root with Python 3.11 or newer, which Sphinx requires (CI uses 3.12):
 
 ```sh
 python3 -m venv build-docs/venv
@@ -60,12 +63,15 @@ stay under the ignored `build-docs/` directory.
 - Edit public header comments for API contracts. A small Doxygen input filter
   recognises the existing `//` prose without changing the installed headers.
 - Glossary and changelog pages read the root files rather than maintaining
-  copies. Storage tuning retains its existing page. During the site build,
-  repository-only links in the changelog and storage guide point to GitHub.
+  copies. The storage-tuning page is edited in place, like any guide. During
+  the site build, repository-only links in the changelog and storage guide
+  point to GitHub.
 - The quickstart and advanced guides include the [runnable examples](examples.md)
   directly. The package-consumer test builds all four against the installed
   package, runs them on committed unversioned, 0.0.2 and continuum fixtures,
-  and checks missing-argument failures.
+  and checks missing-argument failures; its assertions are in
+  `tests/run_package_consumer.cmake`. Run it after building the library with
+  `ctest --test-dir build -R '^carta-zarr-package-consumer$' --output-on-failure`.
   Keep example changes in step with the public API.
 - Keep diagrams as Mermaid text next to their explanation. CI renders them to SVG
   while building, so a syntax error fails the build. Locally, `npm install

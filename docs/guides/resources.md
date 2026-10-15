@@ -55,7 +55,7 @@ progress through a separate callback that can also provide a snapshot of what
 has been read so far. Producing that snapshot costs work; request one only when
 needed. A small cube histogram can finish without emitting progress callbacks.
 
-## Run operations at once
+## Use one handle from several threads
 
 `Image::Read` and `Image::Prefetch` can run on one handle from several threads
 at once. Concurrent reductions share the context's worker pool and interleave
@@ -71,13 +71,14 @@ pixels. `ReadAhead` uses it to decode the frames an animation will show next:
    whether it was late, the shown planes and upcoming frames, nearest first.
 3. Keep the controller alive while playing and call `Cancel` when stopping.
 
-A **run** is the chunks one plane's read decodes: the plane's area times the
-chunk depth. The controller decodes the next run on its own thread while the
+A **run** is the chunks one plane decodes: the plane rounded out to whole
+chunks, a chunk deep along the other axes. Every plane in those chunks decodes
+the same run. The controller decodes the next run on its own thread while the
 frames of the current one are shown. Each cache an animated image reads through
-must hold two runs of every image that reads through it, the one playing and
-the one decoded ahead; otherwise creation reports `buffer_too_small`. A late
-frame while a prefetch is running stops further read-ahead. Cancellation stops
-scheduling promptly but still waits for storage work already under way. See the
+must hold two runs for every image read through it, the one playing and the
+one decoded ahead; otherwise creation reports `buffer_too_small`. A late
+frame while a prefetch is running stops further read-ahead. `Cancel` stops the
+prefetch under way without waiting for it and starts nothing more. See the
 [read-ahead API](../api/read-ahead.md) for precise controller lifetimes and policy.
 
 ## Complete read-control example

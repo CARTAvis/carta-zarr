@@ -13,7 +13,7 @@ One Zarr v3 group holding a complete XRADIO image, marked by the root attribute 
 "image_dataset"`.
 It is the unit a consumer opens by path. Where the subject is the schema version it declares,
 "store" is the usual word for it, as ADR 0022 and the changelog use it.
-_Avoid_: file, image (on its own), group; "store" elsewhere
+_Avoid_: file, image (on its own), group; "store" for it outside talk of its schema version
 
 **Data variable**:
 One named array inside an image dataset. Some are images, others are flags, beam tables, or

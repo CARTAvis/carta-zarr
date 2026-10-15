@@ -33,8 +33,8 @@ fixture with a flag is converted from a CASA image, so it also needs casatools.
 
 ## Check the dataset
 
-`ProbeSchema(path, kXradioImageSchema)` tells a dataset carta-zarr reads from
-one it does not. A successful `Result` alone is not a match: inspect its `kind`,
+`ProbeSchema(path, kXradioImageSchema)` tells whether a path holds a dataset
+carta-zarr reads. A successful `Result` alone is not a match: inspect its `kind`,
 which is `match`, `no_match` or `invalid`, and its diagnostics.
 `schema_version` is the version the dataset declares, or empty. Opening the
 dataset then lists its image candidates. How a declared version is read, and

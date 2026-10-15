@@ -44,8 +44,8 @@ request.axes[*spectral] = {channel, 1, 1};
 ```
 
 Select polarization and time the same way; the request above leaves them at
-index 0. An index picks a sample along the axis; it is not a frequency, which
-the descriptor's spectral coordinate gives for each index.
+index 0. An index is not a frequency; the descriptor's spectral coordinate gives
+each channel's frequency.
 
 ## Select a spatial rectangle
 

@@ -16,7 +16,7 @@ estimate over the pixels visited so far, and a final block with
 `complete == true` replaces it later; the example skips estimates. Returning
 false from the sink cancels the operation.
 
-`first_channel` is an index into the requested spectral selection, so the
+`first_channel` is an index into the requested spectral selection, and the
 image channel is `start + (first_channel + i) * stride`, as the program prints.
 
 `sum_sq_dev` is the sum of squared deviations from the mean. For a mean, check

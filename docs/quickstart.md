@@ -50,8 +50,8 @@ explains how to produce one.
    values. Each has an ID, openability, role, axes and diagnostics.
 4. `Dataset::OpenImage(id)` describes the chosen image and verifies the
    metadata needed to read it. Coordinate values may be read at this stage.
-   The example prints the image's subtype and spectral frame and increment
-   when they are available; [schema versions](reference/schema-versions.md#metadata-differences-that-matter-to-applications)
+   The example prints the image's subtype when it has one, its spectral frame,
+   and its increment when there is one; [schema versions](reference/schema-versions.md#metadata-differences-that-matter-to-applications)
    says where each comes from.
 5. `Image::Read` reads into the caller's `float` buffer, with axis 0 varying
    fastest (see [axes and output order](concepts.md#axes-and-output-order));

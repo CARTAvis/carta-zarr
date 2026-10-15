@@ -81,13 +81,9 @@ _Avoid_: schema, format, flavor
 
 **Schema version**:
 The version of XRADIO's image schema a store names in its root's `schema_version`, `0.0.2` from
-XRADIO 1.2.5. A store naming none was written by XRADIO 1.2.4 or earlier.
+XRADIO 1.2.5. A store naming none was written by XRADIO 1.2.4 or earlier. Only 0.0.2 is read
+(ADR 0023).
 _Avoid_: XRADIO version, format version
-
-**Schema row**:
-Where the fields that differ between schema versions live, for one version the XRADIO profile reads,
-and the row a store is read by is chosen by the version it names (ADR 0022).
-_Avoid_: profile (for a version), layout
 
 **Probe**:
 A cheap, read-only inspection that decides whether a path is a supported image dataset, without

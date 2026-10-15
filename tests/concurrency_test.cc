@@ -14,11 +14,12 @@
 // then computed under contention, which is where a race would be.
 //
 // Agreement with the serial answer is what this can check. That no two threads touched the same
-// memory unsynchronised is what ThreadSanitizer checks, and this test is written to be run under it:
-// see the README's "Build and install".
+// memory unsynchronised is what ThreadSanitizer checks, and this test is written to be run under it,
+// configured with CARTA_ZARR_THREAD_SANITIZER: see the README's "Build and install".
 
 #include "support/check.h"
 
+#include <algorithm>
 #include <atomic>
 #include <cmath>
 #include <cstdint>
@@ -27,6 +28,7 @@
 #include <functional>
 #include <iomanip>
 #include <iostream>
+#include <iterator>
 #include <map>
 #include <mutex>
 #include <sstream>
@@ -272,6 +274,9 @@ Statistics Reduce(const carta::zarr::Image& image) {
     });
     Require(static_cast<bool>(result),
             std::string("ReduceSpectral failed: ") + (result.has_value() ? "" : result.error().message));
+    // Checked here so that two reductions which both lost their blocks cannot agree with each other.
+    Require(collected.size() == regions.size() * std::size(kStatistics) * request.planes.spectral.count,
+            "ReduceSpectral should report every region, statistic and channel once complete");
     return collected;
 }
 
@@ -306,11 +311,16 @@ void RequireSame(const Statistics& actual, const Statistics& expected, const std
     }
 }
 
+// Fine enough that each channel's pixels spread over many bins. Over the range of the whole cube, as
+// these are, a coarse grid gives each channel of the wide fixture one bin, and a comparison of those
+// counts checks only how many pixels each channel has.
+constexpr std::uint32_t kHistogramBins = 4096;
+
 // Plane histograms over every channel, as channel -> counts, over the range a cube histogram found.
 std::vector<std::vector<std::uint64_t>> Histogram(const carta::zarr::Image& image, double lower, double upper) {
     carta::zarr::HistogramRequest request;
     request.planes = EveryChannel(image, 0);
-    request.bins = 64;
+    request.bins = kHistogramBins;
     request.lower = lower;
     request.upper = upper;
     std::vector<std::vector<std::uint64_t>> counts(request.planes.spectral.count);
@@ -326,6 +336,9 @@ std::vector<std::vector<std::uint64_t>> Histogram(const carta::zarr::Image& imag
     });
     Require(static_cast<bool>(result),
             std::string("ComputeHistogram failed: ") + (result.has_value() ? "" : result.error().message));
+    for (const auto& row : counts) {
+        Require(row.size() == kHistogramBins, "ComputeHistogram should report every channel once complete");
+    }
     return counts;
 }
 
@@ -352,6 +365,8 @@ void RequireSame(const carta::zarr::CubeHistogramResult& actual, const carta::za
     Require(Agree(a.sum, e.sum, false) && Agree(a.sum_sq, e.sum_sq, false) && Agree(a.sum_sq_dev, e.sum_sq_dev, false),
             what + ": the cube histogram's sums differ from a run alone by more than a rounding");
     Require(actual.counts == expected.counts, what + ": the cube histogram's bins differ from a run alone");
+    Require(actual.sampled == expected.sampled,
+            what + ": the cube histogram says it was sampled when alone it was not");
 }
 
 // What each image answers alone, computed on a context of its own.
@@ -365,6 +380,11 @@ Answers Alone(const char* fixture) {
     const auto image = OpenSky(NewContext(), fixture);
     Answers answers{Reduce(image), CubeHistogram(image), {}};
     answers.histogram = Histogram(image, answers.cube.totals.min, answers.cube.totals.max);
+    for (const auto& row : answers.histogram) {
+        const auto filled = std::count_if(row.begin(), row.end(), [](std::uint64_t count) { return count > 0; });
+        Require(filled >= 4, std::string("a channel of ") + fixture + " fills " + std::to_string(filled) +
+                                 " bins, too few for its counts to say where its pixels are");
+    }
     return answers;
 }
 

@@ -144,21 +144,19 @@ ctest --test-dir build --output-on-failure
 
 A change to how the library shares anything between threads is also worth running under
 ThreadSanitizer. TensorStore has to be built with it too, or the locks it takes inside are invisible
-and every handover through them reads as a race, so this is a build tree of its own. Even built with
-it, TensorStore hands tasks between its threads in a way ThreadSanitizer cannot follow;
-`tests/tsan.supp` says how, and silences only reports whose racing access is TensorStore's own. The
-tests below are the ones that share handles between threads; the pool-release and allocation-failure
-tests replace `operator new`, which ThreadSanitizer's own allocator takes the place of, and fail
-under it whatever the threads do:
+and every handover through them reads as a race, so this is a build tree of its own, configured with
+`CARTA_ZARR_THREAD_SANITIZER`. That also patches one line of TensorStore, a memory order
+ThreadSanitizer cannot follow; `cmake/TensorStoreForThreadSanitizer.cmake` says why.
 
 ```bash
-cmake -S . -B build-tsan -DCMAKE_BUILD_TYPE=RelWithDebInfo \
-    -DCMAKE_C_FLAGS=-fsanitize=thread -DCMAKE_CXX_FLAGS=-fsanitize=thread \
-    -DCMAKE_EXE_LINKER_FLAGS=-fsanitize=thread -DCMAKE_SHARED_LINKER_FLAGS=-fsanitize=thread
+cmake -S . -B build-tsan -DCMAKE_BUILD_TYPE=RelWithDebInfo -DCARTA_ZARR_THREAD_SANITIZER=ON
 cmake --build build-tsan -j 8
-TSAN_OPTIONS=suppressions=$PWD/tests/tsan.supp \
-    ctest --test-dir build-tsan --output-on-failure -R 'concurrency|pixel-read|work-pool|memo|read-ahead'
+ctest --test-dir build-tsan --output-on-failure -R 'concurrency|pixel-read|work-pool|memo|read-ahead'
 ```
+
+Those are the tests that share handles between threads. The pool-release and allocation-failure tests
+replace `operator new`, which ThreadSanitizer's own allocator takes the place of, and fail under it
+whatever the threads do.
 
 ### Without network access
 

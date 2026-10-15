@@ -2,7 +2,7 @@
 
 carta-zarr is a read-only C++17 library for radio-astronomy images stored as
 [Zarr](https://zarr.dev/) v3 in the [XRADIO](https://github.com/casangi/xradio)
-layout, the Python image model of the CASA ecosystem. Open a dataset, choose an
+layout, the image schema defined by the XRADIO Python package. Open a dataset, choose an
 image, and read pixels or compute statistics without exposing TensorStore, the
 storage engine underneath, to your application. Terms are defined in the
 [glossary](glossary.md).
@@ -19,19 +19,19 @@ learn how [datasets and images](concepts.md) relate.
 
 ## What can I read?
 
-| Supported | Scope |
+| Area | Current support |
 |---|---|
 | Schema | XRADIO image schema 0.0.2 and older unversioned XRADIO 1.2 stores |
 | Storage | Local filesystem Zarr v3 groups, including consolidated metadata |
-| Images | Real-valued sky-plane variables with time, frequency, polarization, and l and m (direction-cosine) axes |
+| Images | Real-valued sky-plane variables with time, frequency, polarization, and direction-cosine (`l`, `m`) axes |
 | Output | Pixels converted to float32; reductions accumulated in double |
 | Flags | Applied by default; flagged pixels become NaN |
 
 Writing, remote object stores, complex-valued images and aperture-plane images
-are outside the current supported set. Discovery can list unsupported image
-candidates with diagnostics explaining why they cannot be opened.
+are outside the current supported set. Listing the images in a dataset can show
+unsupported candidates, with diagnostics explaining why each cannot be opened.
 See [schema versions and reading rules](reference/schema-versions.md) for version
-selection and fallback diagnostics, or [upgrade to 0.2](upgrading/0.2.md) from 0.1.
+selection and fallback diagnostics. Changes since 0.1 are listed in the [changelog](changelog.md).
 
 ## Choose your next task
 
@@ -47,10 +47,9 @@ selection and fallback diagnostics, or [upgrade to 0.2](upgrading/0.2.md) from 0
 - [Prepare an XRADIO dataset](guides/datasets.md).
 - [Tune storage layouts](storage-tuning.md).
 
-**When something goes wrong, or changes**
+**When something goes wrong**
 
 - [Diagnose a failed open or read](troubleshooting.md).
-- [Upgrade from 0.1 to 0.2](upgrading/0.2.md).
 - [Understand the architecture](architecture.md).
 
 ```{toctree}
@@ -95,7 +94,6 @@ changelog
 :caption: Help
 
 troubleshooting
-upgrading/0.2
 ```
 
 ```{toctree}

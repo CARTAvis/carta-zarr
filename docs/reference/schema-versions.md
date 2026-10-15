@@ -67,4 +67,4 @@ for the compatibility policy and the
 [fixture notes](https://github.com/CARTAvis/carta-zarr/blob/dev/tests/data/README.md)
 for how these datasets were produced.
 
-To move an application from carta-zarr 0.1, see [upgrading to 0.2](../upgrading/0.2.md).
+To move an application from carta-zarr 0.1, see the [changelog](../changelog.md).

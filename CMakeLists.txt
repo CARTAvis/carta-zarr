@@ -25,6 +25,19 @@ option(CARTA_ZARR_BUILD_BENCH "Build the storage benchmark tools and their tests
 set(CARTA_ZARR_TUNING_OVERRIDES "" CACHE STRING
     "For measuring only: NAME=VALUE replacements for the machine-dependent constants of src/reduce/tuning.h (ADR 0014)")
 
+# For the threading tests only: builds this library and everything it links, TensorStore included,
+# with ThreadSanitizer, which has to see inside TensorStore to see its locks. TensorStore is patched
+# for it in one line; cmake/TensorStoreForThreadSanitizer.cmake says why. See the README.
+option(CARTA_ZARR_THREAD_SANITIZER "Build everything with ThreadSanitizer, for the threading tests" OFF)
+set(CARTA_ZARR_TENSORSTORE_PATCH "")
+if(CARTA_ZARR_THREAD_SANITIZER)
+    foreach(flags IN ITEMS CMAKE_C_FLAGS CMAKE_CXX_FLAGS CMAKE_EXE_LINKER_FLAGS CMAKE_SHARED_LINKER_FLAGS)
+        string(APPEND ${flags} " -fsanitize=thread")
+    endforeach()
+    set(CARTA_ZARR_TENSORSTORE_PATCH
+        PATCH_COMMAND "${CMAKE_COMMAND}" -P "${CMAKE_CURRENT_SOURCE_DIR}/cmake/TensorStoreForThreadSanitizer.cmake")
+endif()
+
 # TensorStore is a required private dependency: it is the storage backend of this library,
 # not an optional feature. Building without it would produce a library that cannot read
 # pixel data, so there is no supported configuration that omits it.
@@ -41,7 +54,8 @@ set(TENSORSTORE_USE_SYSTEM_ZSTD OFF CACHE BOOL "" FORCE)
 FetchContent_Declare(
     tensorstore
     URL "https://github.com/google/tensorstore/archive/refs/tags/v0.1.84.tar.gz"
-    URL_HASH SHA256=d86fe9dca4b69e5c8b488562351dc654bce1400f5981f922e4be9ba4fafc95ce)
+    URL_HASH SHA256=d86fe9dca4b69e5c8b488562351dc654bce1400f5981f922e4be9ba4fafc95ce
+    ${CARTA_ZARR_TENSORSTORE_PATCH})
 FetchContent_MakeAvailable(tensorstore)
 
 # The custom fixed_length_utf32 decoder needs the same compression libraries as the Zarr v3 codec
@@ -602,6 +616,16 @@ if(CARTA_ZARR_BUILD_TESTS AND BUILD_TESTING)
         SOURCES tests/pixel_read_test.cc
         LIBRARIES Threads::Threads
         DEFINITIONS ${CARTA_ZARR_PIXEL_FIXTURES})
+
+    # The threading promises, held through the public API: several threads at once on one Dataset,
+    # one image, two images of one context, and Read beside Prefetch. Run under ThreadSanitizer too,
+    # with CARTA_ZARR_THREAD_SANITIZER; see the README.
+    carta_zarr_add_test(carta_zarr_concurrency_tests PUBLIC
+        TEST_NAME carta-zarr-concurrency
+        SOURCES tests/concurrency_test.cc
+        LIBRARIES Threads::Threads
+        DEFINITIONS CARTA_ZARR_REFERENCE_FIXTURE="${CARTA_ZARR_FIXTURE_DIR}/xradio/minimal"
+                    ${CARTA_ZARR_PIXEL_FIXTURES} ${CARTA_ZARR_WIDE_FIXTURE})
 
     # The spectral reduction is checked against an oracle recomputed from the fixture's encoding,
     # not against a recorded answer, so that a walk which reads the right pixels but double-counts a

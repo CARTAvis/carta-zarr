@@ -142,6 +142,22 @@ run, after building:
 ctest --test-dir build --output-on-failure
 ```
 
+A change to how the library shares anything between threads is also worth running under
+ThreadSanitizer. TensorStore has to be built with it too, or the locks it takes inside are invisible
+and every handover through them reads as a race, so this is a build tree of its own, configured with
+`CARTA_ZARR_THREAD_SANITIZER`. That also patches one line of TensorStore, a memory order
+ThreadSanitizer cannot follow; `cmake/TensorStoreForThreadSanitizer.cmake` says why.
+
+```bash
+cmake -S . -B build-tsan -DCMAKE_BUILD_TYPE=RelWithDebInfo -DCARTA_ZARR_THREAD_SANITIZER=ON
+cmake --build build-tsan -j 8
+ctest --test-dir build-tsan --output-on-failure -R 'concurrency|pixel-read|work-pool|memo|read-ahead'
+```
+
+Those are the tests that share handles between threads. The pool-release and allocation-failure tests
+replace `operator new`, which ThreadSanitizer's own allocator takes the place of, and fail under it
+whatever the threads do.
+
 ### Without network access
 
 Build farms such as Launchpad and most RPM builders have no network. Configure once on a machine

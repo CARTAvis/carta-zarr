@@ -279,6 +279,9 @@ struct ObservationInfo {
 
 // A keyword the dataset carries that this library does not interpret: a FITS card XRADIO's reader
 // left alone, lower-cased, or an entry of a CASA image's miscinfo.
+//
+// An integer is one JSON wrote as one and a signed 64-bit integer holds. JSON's parser reads an
+// integer beyond 64 bits either way as a number, so such a one arrives as the nearest double.
 struct UserKeyword {
     std::string name;
     std::variant<bool, std::int64_t, double, std::string> value;

@@ -11,7 +11,7 @@ minor release may change the ABI, and the soname says so ([ADR 0020](docs/adr/00
 * `CARTA_ZARR_THREAD_SANITIZER` builds the library and everything it links, TensorStore included, with ThreadSanitizer, for running the threading tests under it. It patches one memory order in TensorStore's task queue that ThreadSanitizer cannot follow; no other build is patched ([#26](https://github.com/CARTAvis/carta-zarr/issues/26)).
 
 ### Fixed
-* A store naming schema 0.0.2 whose data groups name no sky image is no longer refused as malformed. The schema does not require one, and XRADIO writes such stores: an aperture plane alone (`APERTURE`, `FLAG_APERTURE`), or a point spread function alone. A store of aperture-plane variables now answers `no_match`, saying they are not openable, and one with an image this library opens matches. The sky's checks, `type` `"sky"` and a frequency coordinate with `frame` and `units`, still apply when a data group names a sky ([#40](https://github.com/CARTAvis/carta-zarr/issues/40)).
+* A store naming schema 0.0.2 whose data groups name no sky image is no longer refused as malformed. The schema does not require one, and XRADIO writes such stores: an aperture plane alone (`APERTURE`, `FLAG_APERTURE`), or a point spread function alone. A store of aperture-plane variables now answers `no_match`, saying they are not openable, and one with an image this library opens matches. A sky a data group names must still be typed `"sky"`, and a frequency coordinate must still have `frame` and `units` whatever the groups name ([#40](https://github.com/CARTAvis/carta-zarr/issues/40)).
 
 ## [0.2.0]
 

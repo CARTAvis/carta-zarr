@@ -35,8 +35,8 @@ struct SchemaVersionCheck {
     std::optional<Diagnostic> refusal;
 };
 
-// A store is read when it names 0.0.2 and is one: it has data groups, and when they name a sky image,
-// that image is typed "sky" and its frequency coordinate, if it has one, gives a frame and units. One naming no
+// A store is read when it names 0.0.2 and is one: it has data groups, the sky image they name, if they
+// name one, is typed "sky", and its frequency coordinate, if it has one, gives a frame and units. One naming no
 // version or another is refused with unsupported_schema_version, and one naming 0.0.2 that is not one
 // with invalid_metadata.
 SchemaVersionCheck CheckSchemaVersion(const Store& store);

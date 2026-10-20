@@ -1611,8 +1611,8 @@ void TestA002StoreThatIsNotOneIsInvalid() {
 
 // Schema 0.0.2 does not require a sky image, and XRADIO writes stores without one: an aperture plane
 // alone, or a point spread function alone. Such a store is not malformed for it, and is decided by
-// what it holds, as any other store is (#40). The sky's own checks still apply to a store that names
-// one, which TestA002StoreThatIsNotOneIsInvalid holds.
+// what it holds, as any other store is (#40). The sky's own check still applies to a store that names
+// one, which TestA002StoreThatIsNotOneIsInvalid holds, and the frequency's to every store.
 void TestA002StoreNamingNoSkyIsDecidedByWhatItHolds() {
     using carta::zarr::internal::ProbeStore;
     using carta::zarr::internal::RequireOpenableDataset;
@@ -1681,6 +1681,23 @@ void TestA002StoreNamingNoSkyIsDecidedByWhatItHolds() {
     Require(static_cast<bool>(carta::zarr::internal::xradio::DescribeImageFrom(
                 psf_store.value(), "POINT_SPREAD_FUNCTION", carta::zarr::internal::xradio::CoordinateValues{})),
             "a point spread function in a store naming no sky was not described");
+
+    // An older store with no sky, as XRADIO 1.2.3's empty-image factory wrote it, is stamped 0.0.2 by
+    // the upgrade as readily as one with a sky, and its frequency is held to 0.0.2 all the same.
+    auto no_frame = psf;
+    no_frame["frequency"] = FrequencyArray("[3]", R"({"units":"Hz"})");
+    const auto unframed = probe_of(no_frame);
+    Require(unframed.kind == ProbeKind::invalid_dataset &&
+                unframed.diagnostics.front().code == carta::zarr::DiagnosticCode::invalid_metadata &&
+                unframed.diagnostics.front().message.find("its frequency coordinate has no frame or no units") !=
+                    std::string::npos,
+            "a store naming no sky whose frequency has no frame was not refused for it");
+    auto unframed_store = Open(no_frame);
+    Require(static_cast<bool>(unframed_store), "the in-memory store failed to open");
+    const auto unframed_psf = carta::zarr::internal::xradio::DescribeImageFrom(
+        unframed_store.value(), "POINT_SPREAD_FUNCTION", carta::zarr::internal::xradio::CoordinateValues{});
+    Require(!unframed_psf && unframed_psf.error().code == ErrorCode::invalid_metadata,
+            "an image of a store naming no sky whose frequency has no frame was described");
 }
 
 // Another version is refused as that, ahead of anything else wrong with the store, with an

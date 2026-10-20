@@ -1764,8 +1764,8 @@ void TestAnUnreadSchemaVersionIsRefused() {
     }
 }
 
-// XRADIO 1.2.5 keeps an integer FITS image's type, BITPIX 16 as int16, and writes it as it is, although
-// schema 0.0.2 allows float32 and float64. What its own conversion wrote opens.
+// XRADIO 1.2.5 and 1.3.0 keep an integer FITS image's type, BITPIX 16 as int16, and write it as it
+// is, although schema 0.0.2 allows float32 and float64. What XRADIO's own conversion wrote opens.
 void TestAnIntegerSkyImageXradioWroteOpens() {
     auto nodes = Store002();
     nodes["SKY"] = SkyArray("int16", R"({"units":"Jy/beam","type":"sky"})");

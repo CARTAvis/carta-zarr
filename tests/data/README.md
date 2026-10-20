@@ -75,19 +75,18 @@ two direction axes, as CASA's `ia.fft` makes it, with a mask over two known pixe
 the aperture plane, like CARTA's `UVamp.image`. XRADIO writes it as `APERTURE` on `u` and `v` in
 wavelengths, with `FLAG_APERTURE` that no data group names and no `coordinate_system_info`.
 
-XRADIO 1.2.5 writes them as image schema 0.0.2, the only schema this library reads
+XRADIO 1.3.0 writes them as image schema 0.0.2, the only schema this library reads
 ([ADR 0023](../../docs/adr/0023-only-xradio-image-schema-0-0-2-is-read.md)).
 
 ```sh
 ./generate_conformance_fixtures.py
 ```
 
-This generator is heavier than the other one. XRADIO's `open_image()` imports its casacore layer
-even for FITS input, and XRADIO excludes python-casacore on macOS, so `casatools` is required on
-every platform. Its FITS reader is also strict: every axis needs `CTYPE` and `CUNIT` (including the
-unitless Stokes axis), and the header must carry `LONPOLE`, `LATPOLE`, the `PC` matrix, and
-`DATE-OBS`. Both generators are deterministic, so regenerating produces no diff unless a pinned
-dependency changed.
+This generator is heavier than the other one. The flagged and aperture fixtures are converted from
+CASA images, which `casatools` writes and XRADIO reads through arcae, its `casacore` extra. XRADIO's
+FITS reader needs a `CTYPE` on every axis, and without `DATE-OBS` or `MJD-OBS` the image's time is
+MJD 0. Both generators are deterministic, so regenerating produces no diff unless a pinned dependency
+changed.
 
 Cases XRADIO cannot or will not produce — malformed metadata, an ambiguous flag, sharded storage,
 and corrupted string chunks — stay in the synthetic fixtures.

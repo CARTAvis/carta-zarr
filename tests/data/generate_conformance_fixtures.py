@@ -2,7 +2,7 @@
 # /// script
 # requires-python = ">=3.12,<3.13"
 # dependencies = [
-#   "xradio[zarr]==1.2.5",
+#   "xradio[zarr,casacore]==1.3.0",
 #   "casatools==6.7.6.14",
 #   "casaconfig",
 #   "astropy==7.1.0",
@@ -23,13 +23,14 @@ to `xradio.image.open_image()` / `write_image()`, so the result is whatever the 
 actually produces. Regenerate it when the pinned XRADIO version is bumped, and let the conformance
 test report which of our assumptions the new version broke.
 
-XRADIO 1.2.5 writes image schema 0.0.2, the only schema carta-zarr reads.
+XRADIO 1.3.0 writes image schema 0.0.2, the only schema carta-zarr reads. It is the release after
+1.2.5, and it writes the same fixtures apart from the compressor.
 
-XRADIO's FITS reader is strict. Every axis needs CTYPE and CUNIT (including the unitless Stokes
-axis), and the header must carry LONPOLE, LATPOLE, the PC matrix, and DATE-OBS.
+XRADIO's FITS reader needs a CTYPE on every axis and refuses an axis type it does not support. The
+header written here also carries DATE-OBS; without it or MJD-OBS, the time is MJD 0.
 
-The flagged fixture is converted from CASA images, which are written with casatools, so casatools
-is required on every platform here.
+The flagged and aperture fixtures are converted from CASA images, which are written with casatools
+and read by XRADIO through arcae, its casacore extra.
 """
 
 from __future__ import annotations
@@ -44,13 +45,13 @@ from astropy.io import fits
 OUTPUT_DIR = Path(__file__).parent / "images" / "zarr" / "xradio"
 FIXTURE_NAME = "conformance"
 FLAGGED_FIXTURE_NAME = "conformance_flagged"
-# One channel, as a continuum image has, and an image of something other than intensity: XRADIO 1.2.5
+# One channel, as a continuum image has, and an image of something other than intensity: XRADIO 1.3.0
 # writes the channel's width and the BTYPE, and these are the only two things carta-zarr reads that
 # the cube above cannot show.
 CONTINUUM_FIXTURE_NAME = "conformance_continuum"
 CONTINUUM_BTYPE = "Spectral index"
 # The same cube with a pointing centre apart from its reference direction, and FITS cards XRADIO
-# carries along uninterpreted, one of each kind of value it keeps: XRADIO 1.2.5 writes the first as
+# carries along uninterpreted, one of each kind of value it keeps: XRADIO 1.3.0 writes the first as
 # the image's `pointing_center` and the rest, lower-cased, as its `user`. The cube above has neither,
 # so its pointing centre is its reference direction and its `user` is empty.
 KEYWORDS_FIXTURE_NAME = "conformance_keywords"
@@ -65,7 +66,7 @@ KEYWORD_CARDS = {
 
 # The amplitude of the cube's Fourier transform, a real image of the aperture plane as CASA's
 # `ia.fft` makes one (UVamp in CARTA's test images is another), with a mask over a few known pixels.
-# XRADIO 1.2.5 writes it as APERTURE on (u, v) in wavelengths, its mask as FLAG_APERTURE that no data
+# XRADIO 1.3.0 writes it as APERTURE on (u, v) in wavelengths, its mask as FLAG_APERTURE that no data
 # group names, and no coordinate_system_info.
 APERTURE_FIXTURE_NAME = "conformance_aperture"
 APERTURE_MASKED_PIXELS = [(0, 0, 0, 0), (2, 1, 1, 1)]

@@ -24,6 +24,7 @@ minor release may change the ABI, and the soname says so ([ADR 0020](docs/adr/00
   * `Context::NewCachePool` is `CreateCachePool`, as every other factory is `Create` or `Open`.
   * `CubeHistogramProgress::progress` is `completeness`, as the blocks report a fraction done.
   * `Dataset::Size`'s parameter is `measure_timeout`, after `SizeBasis::measured`; a parameter name, with no effect on the ABI.
+* The conformance fixtures are written with XRADIO 1.3.0, the release after 1.2.5. They hold the same metadata and values as before; only the compressor changed, from zstd to blosc with zstd inside, which is read as before. The data-writing guide follows 1.3.0 and says what its FITS reader needs ([#54](https://github.com/CARTAvis/carta-zarr/issues/54)).
 
 ### Removed
 * Public fields that repeated what another field already says, or that nothing set any more. This changes the API and the ABI ([#38](https://github.com/CARTAvis/carta-zarr/issues/38)):

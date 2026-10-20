@@ -31,10 +31,13 @@
       }
     },
     {
-      "name": "zstd",
+      "name": "blosc",
       "configuration": {
-        "level": 0,
-        "checksum": false
+        "typesize": 20,
+        "cname": "zstd",
+        "clevel": 5,
+        "shuffle": "shuffle",
+        "blocksize": 0
       }
     }
   ],

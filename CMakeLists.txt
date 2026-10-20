@@ -409,12 +409,18 @@ if(CARTA_ZARR_BUILD_TESTS AND BUILD_TESTING)
         TEST_NAME carta-zarr-linear-axis
         SOURCES tests/linear_axis_test.cc src/schema/xradio/linear_axis.cc)
 
-    # What an image's own attributes say about the observation. A pure JSON-to-struct function, so
-    # this links nothing: the geodetic conversion and the obsdate split used to be reachable only by
-    # opening a store, and the conversion was asserted nowhere at all.
+    # What an image's own attributes say about the observation, and its user keywords. Pure
+    # JSON-to-struct functions, so this links no store, only the direction reader the pointing centre
+    # shares with the coordinate system: the geodetic conversion and the obsdate split used to be
+    # reachable only by opening a store, and the conversion was asserted nowhere at all.
     carta_zarr_add_test(carta_zarr_observation_tests INTERNAL
         TEST_NAME carta-zarr-observation
-        SOURCES tests/observation_test.cc src/schema/xradio/observation.cc
+        SOURCES
+            tests/observation_test.cc
+            src/schema/xradio/observation.cc
+            src/schema/xradio/direction.cc
+            src/schema/xradio/linear_axis.cc
+            ${CARTA_ZARR_METADATA_SOURCES}
         LIBRARIES nlohmann_json::nlohmann_json)
 
     # What a variable has to be before it can mask an image. RequireUsableFlag is inline, so this
@@ -606,6 +612,7 @@ if(CARTA_ZARR_BUILD_TESTS AND BUILD_TESTING)
         DEFINITIONS CARTA_ZARR_CONFORMANCE_FIXTURE="${CARTA_ZARR_FIXTURE_DIR}/xradio/conformance"
                     CARTA_ZARR_CONFORMANCE_FLAGGED_FIXTURE="${CARTA_ZARR_FIXTURE_DIR}/xradio/conformance_flagged"
                     CARTA_ZARR_CONFORMANCE_CONTINUUM_FIXTURE="${CARTA_ZARR_FIXTURE_DIR}/xradio/conformance_continuum"
+                    CARTA_ZARR_CONFORMANCE_KEYWORDS_FIXTURE="${CARTA_ZARR_FIXTURE_DIR}/xradio/conformance_keywords"
                     CARTA_ZARR_CONFORMANCE_SCHEMA_VERSION="0.0.2")
 
     # Pixel reads run against a fixture whose values encode their own logical coordinates, so the

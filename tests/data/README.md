@@ -64,6 +64,12 @@ candidates for each image. Importing casatools downloads CASA's runtime data (ab
 "Spectral index"`: a continuum image of something other than intensity, whose channel width and
 `sub_type` are what the cube cannot show.
 
+`images/zarr/xradio/conformance_keywords` is the cube with `OBSRA`/`OBSDEC` apart from its reference
+direction and four cards XRADIO keeps uninterpreted, a string, a number, an integer and a boolean
+(`INSTRUME`, `DISTANCE`, `NCOMBINE`, `PBCOR`). XRADIO writes the first as the image's
+`pointing_center` and the rest, lower-cased, as its `user`; the cube has neither, so its pointing
+centre is its reference direction and its `user` is empty.
+
 XRADIO 1.2.5 writes them as image schema 0.0.2, the only schema this library reads
 ([ADR 0023](../../docs/adr/0023-only-xradio-image-schema-0-0-2-is-read.md)).
 

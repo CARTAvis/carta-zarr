@@ -19,6 +19,7 @@
 #include <optional>
 #include <string>
 #include <string_view>
+#include <variant>
 #include <vector>
 
 namespace carta::zarr {
@@ -253,6 +254,14 @@ struct PolarizationCoordinate {
     std::vector<std::string> labels;
 };
 
+// A direction on the sky given outside the coordinate system, as a measure: its two angles and the
+// frame they are in, each as DirectionCoordinate gives its own.
+struct SkyDirection {
+    std::string reference_frame;  // as DirectionCoordinate::reference_frame, e.g. "FK5", "ICRS"
+    std::optional<double> equinox;
+    std::array<double, 2> value{0.0, 0.0};  // longitude and latitude in degrees
+};
+
 struct ObservationInfo {
     std::string object_name;
     std::string observer;
@@ -262,6 +271,17 @@ struct ObservationInfo {
     // when the dataset wrote none, or wrote it in any other form.
     std::optional<double> observation_mjd;
     std::optional<std::array<double, 3>> observatory_position;  // OBSGEO-X, Y, Z (meters)
+    // Where the telescope pointed: FITS OBSRA and OBSDEC. Reported whenever the store has one, even
+    // when it equals the reference direction, which is what XRADIO's FITS reader writes for a file
+    // with no OBSRA: the store does not say which it was.
+    std::optional<SkyDirection> pointing_center;
+};
+
+// A keyword the dataset carries that this library does not interpret: a FITS card XRADIO's reader
+// left alone, lower-cased, or an entry of a CASA image's miscinfo.
+struct UserKeyword {
+    std::string name;
+    std::variant<bool, std::int64_t, double, std::string> value;
 };
 
 // The read geometry of one image, reported in the logical axis order of ImageDescriptor::axes so
@@ -344,6 +364,10 @@ struct ImageDescriptor {
     std::optional<PolarizationCoordinate> polarization;
     std::optional<TemporalCoordinate> temporal;
     std::optional<ObservationInfo> observation;
+    // The dataset's `user` keywords and the image's own, the image's winning where both name one, by
+    // name. A value that is not a boolean, an integer, a number or a string -- a dictionary or a list,
+    // as a CASA image's miscinfo can hold -- is left out, and a diagnostic names it.
+    std::vector<UserKeyword> user_keywords;
     std::vector<Diagnostic> diagnostics;
 };
 

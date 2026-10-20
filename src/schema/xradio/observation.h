@@ -11,6 +11,11 @@
 
 #include "../../zarr/array_metadata.h"
 
+#include <nlohmann/json.hpp>
+
+#include <string_view>
+#include <vector>
+
 namespace carta::zarr::internal::xradio {
 
 /**
@@ -27,6 +32,12 @@ namespace carta::zarr::internal::xradio {
  * store, a transport or a directory tree.
  */
 ObservationInfo DescribeObservation(const zarr::ArrayMetadata& image);
+
+// The `user` keywords of the dataset and of `image`, merged, the image's winning: what XRADIO's writer
+// would write back. Sorted by name, as a JSON object holds them. A value that is not a boolean, an
+// integer, a number or a string is left out, and a diagnostic naming it is added to `diagnostics`.
+std::vector<UserKeyword> DescribeUserKeywords(const nlohmann::json& root_attributes, const zarr::ArrayMetadata& image,
+                                              std::string_view image_id, std::vector<Diagnostic>& diagnostics);
 
 }  // namespace carta::zarr::internal::xradio
 

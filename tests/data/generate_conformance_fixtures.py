@@ -49,6 +49,19 @@ FLAGGED_FIXTURE_NAME = "conformance_flagged"
 # the cube above cannot show.
 CONTINUUM_FIXTURE_NAME = "conformance_continuum"
 CONTINUUM_BTYPE = "Spectral index"
+# The same cube with a pointing centre apart from its reference direction, and FITS cards XRADIO
+# carries along uninterpreted, one of each kind of value it keeps: XRADIO 1.2.5 writes the first as
+# the image's `pointing_center` and the rest, lower-cased, as its `user`. The cube above has neither,
+# so its pointing centre is its reference direction and its `user` is empty.
+KEYWORDS_FIXTURE_NAME = "conformance_keywords"
+KEYWORD_CARDS = {
+    "OBSRA": 45.5,
+    "OBSDEC": 30.25,
+    "INSTRUME": "Test instrument",
+    "DISTANCE": 101.5,
+    "NCOMBINE": 3,
+    "PBCOR": True,
+}
 
 # The pixels each CASA image's mask marks bad, as (x, y, stokes, frequency) -- casacore's axis order.
 # casacore's mask is true for a good pixel and XRADIO's flag is true for a bad one, so these are the
@@ -69,7 +82,7 @@ AXES = [
 ]
 
 
-def write_fits(path: Path, channels: int = 2, btype: str = "Intensity") -> None:
+def write_fits(path: Path, channels: int = 2, btype: str = "Intensity", cards: dict | None = None) -> None:
     # FITS axis order is the reverse of the numpy shape: NAXIS1 is the fastest-varying axis.
     values = np.arange(channels * 3 * 4 * 5, dtype=np.float32).reshape(channels, 3, 4, 5)
     hdu = fits.PrimaryHDU(values)
@@ -97,6 +110,8 @@ def write_fits(path: Path, channels: int = 2, btype: str = "Intensity") -> None:
     header["PC1_1"], header["PC1_2"] = 1.0, 0.0
     header["PC2_1"], header["PC2_2"] = 0.0, 1.0
     header["BMAJ"], header["BMIN"], header["BPA"] = 2.0e-5, 1.0e-5, 0.1
+    for keyword, value in (cards or {}).items():
+        header[keyword] = value
 
     hdu.writeto(path, overwrite=True)
 
@@ -146,6 +161,14 @@ def write_store(write_image, xds, fixture: Path) -> None:
         written.rename(fixture)
 
 
+def write_keywords(scratch: Path) -> None:
+    from xradio.image import open_image, write_image
+
+    keywords_path = scratch / f"{KEYWORDS_FIXTURE_NAME}.fits"
+    write_fits(keywords_path, cards=KEYWORD_CARDS)
+    write_store(write_image, open_image(str(keywords_path)), OUTPUT_DIR / KEYWORDS_FIXTURE_NAME)
+
+
 def main() -> None:
     from xradio.image import open_image, write_image
 
@@ -164,6 +187,8 @@ def main() -> None:
         continuum_path = scratch / f"{CONTINUUM_FIXTURE_NAME}.fits"
         write_fits(continuum_path, channels=1, btype=CONTINUUM_BTYPE)
         write_store(write_image, open_image(str(continuum_path)), OUTPUT_DIR / CONTINUUM_FIXTURE_NAME)
+
+        write_keywords(scratch)
     finally:
         shutil.rmtree(scratch, ignore_errors=True)
 

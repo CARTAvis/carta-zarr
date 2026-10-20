@@ -1700,6 +1700,22 @@ void TestA002StoreNamingNoSkyIsDecidedByWhatItHolds() {
             "an image of a store naming no sky whose frequency has no frame was described");
 }
 
+// A user keyword that cannot be reported -- a dictionary, as a CASA image's miscinfo can hold -- is
+// left out with a diagnostic, and the image still opens with the keywords that can.
+void TestAnUnreportableUserKeywordDoesNotCloseTheImage() {
+    auto nodes = Store002();
+    nodes["SKY"] = SkyArray("float32", R"({"units":"Jy/beam","type":"sky",
+        "user":{"instrume":"ALMA","miscinfo":{"nested":1}}})");
+    const auto probe = Probe(nodes);
+    Require(probe.kind == SchemaMatchKind::match, "an image with a dictionary among its user keywords did not match");
+    const auto described = DescribeWithChannels(nodes);
+    const auto& descriptor = described.descriptor;
+    Require(descriptor.user_keywords.size() == 1 && descriptor.user_keywords.front().name == "instrume",
+            "the reportable user keyword was not the one reported");
+    Require(HasDiagnostic(descriptor.diagnostics, carta::zarr::DiagnosticCode::unsupported_data_type),
+            "the dictionary was left out without a diagnostic");
+}
+
 // Another version is refused as that, ahead of anything else wrong with the store, with an
 // error a consumer can tell from a broken file: a newer build may open it.
 void TestAnUnreadSchemaVersionIsRefused() {
@@ -1884,6 +1900,7 @@ int main() {
         TestAStoreNamingNoVersionIsRefused();
         TestA002StoreThatIsNotOneIsInvalid();
         TestA002StoreNamingNoSkyIsDecidedByWhatItHolds();
+        TestAnUnreportableUserKeywordDoesNotCloseTheImage();
         TestAnUnreadSchemaVersionIsRefused();
         TestAnIntegerSkyImageXradioWroteOpens();
         TestAnotherDatasetNamingAVersionIsNotAnImage();

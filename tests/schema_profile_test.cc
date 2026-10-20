@@ -1181,7 +1181,7 @@ void TestADescriptionIsBuiltFromTheValuesItIsGiven() {
     Require(descriptor.direction && descriptor.direction->projection == "SIN", "the direction comes from the root");
     Require(descriptor.spectral.has_value(), "three channels make a spectral coordinate");
     const auto& spectral = *descriptor.spectral;
-    Require(spectral.channel_frequencies == values.frequency, "the channels are the values handed in");
+    Require(spectral.values == values.frequency, "the channels are the values handed in");
     Require(spectral.system == "LSRK", "the frame is frequency's own");
     Require(spectral.reference_value && *spectral.reference_value == 1.402e9,
             "the reference is the frequency named, not the first channel");

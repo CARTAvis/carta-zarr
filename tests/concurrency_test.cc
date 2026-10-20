@@ -152,7 +152,7 @@ std::string Fingerprint(const carta::zarr::ImageDescriptor& image) {
         out << "spectral " << spectral->unit << " " << spectral->system << " "
             << spectral->reference_pixel.value_or(-1.0) << " " << spectral->reference_value.value_or(-1.0) << " "
             << spectral->increment.value_or(-1.0) << " " << spectral->rest_frequency.value_or(-1.0) << "\n";
-        Write(out, spectral->channel_frequencies);
+        Write(out, spectral->values);
     }
     if (const auto& polarization = image.polarization) {
         for (const auto& label : polarization->labels) {

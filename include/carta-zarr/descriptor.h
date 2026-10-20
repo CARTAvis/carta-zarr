@@ -228,12 +228,15 @@ struct SpectralCoordinate {
     std::string system;  // casacore or FITS SPECSYS name, e.g. "LSRK", "BARY", "GEO", "TOPOCENT"; never astropy's
     // CRPIX3, 1-based as DirectionCoordinate::reference_pixel is. Absent, with the two below it,
     // when the channels are not evenly spaced: there is then no linear description to give and a
-    // consumer builds a tabular axis from channel_frequencies instead.
+    // consumer builds a tabular axis from values instead.
     std::optional<double> reference_pixel;
     std::optional<double> reference_value;  // CRVAL3
     std::optional<double> increment;        // CDELT3
     std::optional<double> rest_frequency;
-    std::vector<double> channel_frequencies;
+    // One a channel, in `unit`, as TemporalCoordinate::values are in theirs. Named for what is
+    // checked of them: the unit is the frequency coordinate's own, which the schema holds only to
+    // being given, so nothing here promises Hz.
+    std::vector<double> values;
 };
 
 struct TemporalCoordinate {

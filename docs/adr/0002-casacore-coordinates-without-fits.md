@@ -16,8 +16,8 @@ spaced, so the same defect applies to the spectral axis, where the correct targe
 
 ## Consequences
 
-Coordinate descriptors are tabular first. `SpectralCoordinate::channel_frequencies` is always
-populated and is the authoritative value; the linear triple of reference pixel, reference value, and
+Coordinate descriptors are tabular first. `SpectralCoordinate::values` (named `channel_frequencies`
+before 0.3.0) is always populated and is the authoritative value; the linear triple of reference pixel, reference value, and
 increment is optional and is filled only when the channels are uniformly spaced within tolerance. A
 consumer that receives no linear description cannot silently assume one — it has to build a
 `TabularCoordinate`, which is the correct outcome. The same reasoning is why time coordinate values

@@ -438,7 +438,7 @@ void TestReferenceFixture() {
     Require(desc.data_groups == std::vector<std::string>{"base"}, "data group references were not reported");
     Require(desc.has_pixel_mask, "the image's own flag attribute did not localize its pixel mask");
     Require(desc.spectral.has_value(), "SpectralCoordinate missing in reference fixture");
-    Require(desc.spectral->channel_frequencies == std::vector<double>{1.4e9, 1.401e9, 1.403e9},
+    Require(desc.spectral->values == std::vector<double>{1.4e9, 1.401e9, 1.403e9},
             "spectral channel table was not preserved");
     Require(!desc.spectral->reference_pixel.has_value() && !desc.spectral->reference_value.has_value() &&
                 !desc.spectral->increment.has_value(),

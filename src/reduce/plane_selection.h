@@ -37,7 +37,7 @@ namespace carta::zarr::internal {
  */
 class CheckedPlanes {
 public:
-    // Reports invalid_argument for a spectral range that does not fit, for a polarization or time
+    // Reports invalid_slice for a spectral range that does not fit, for a polarization or time
     // index outside its axis, and for a non-zero index on an axis the image does not have.
     static Result<CheckedPlanes> Of(const ImageDescriptor& descriptor, const AxisMap& map,
                                     const PlaneSelection& planes) {
@@ -48,22 +48,21 @@ public:
         const auto channels = descriptor.axes.at(map.spectral).length;
         if (planes.spectral.stride == 0 || planes.spectral.count == 0 || planes.spectral.start >= channels ||
             planes.spectral.count - 1 > (channels - 1 - planes.spectral.start) / planes.spectral.stride) {
-            return Error{ErrorCode::invalid_argument, "The spectral range falls outside the image", node};
+            return Error{ErrorCode::invalid_slice, "The spectral range falls outside the image", node};
         }
 
         if (!map.has_polarization && planes.polarization != 0) {
-            return Error{ErrorCode::invalid_argument,
+            return Error{ErrorCode::invalid_slice,
                          "The image has no polarization axis, so only polarization 0 selects a plane", node};
         }
         if (map.has_polarization && planes.polarization >= descriptor.axes.at(map.polarization).length) {
-            return Error{ErrorCode::invalid_argument, "The polarization index falls outside the image", node};
+            return Error{ErrorCode::invalid_slice, "The polarization index falls outside the image", node};
         }
         if (!map.has_time && planes.time != 0) {
-            return Error{ErrorCode::invalid_argument, "The image has no time axis, so only time 0 selects a plane",
-                         node};
+            return Error{ErrorCode::invalid_slice, "The image has no time axis, so only time 0 selects a plane", node};
         }
         if (map.has_time && planes.time >= descriptor.axes.at(map.time).length) {
-            return Error{ErrorCode::invalid_argument, "The time index falls outside the image", node};
+            return Error{ErrorCode::invalid_slice, "The time index falls outside the image", node};
         }
 
         return CheckedPlanes(planes);

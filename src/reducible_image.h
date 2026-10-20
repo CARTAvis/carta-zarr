@@ -73,7 +73,7 @@ public:
     // the answer is the one value a reduction needs afterwards. `sample` takes every nth pixel along
     // both spatial axes; one reads them all.
     //
-    // Reports invalid_argument for planes this image cannot serve; see CheckedPlanes::Of. What a
+    // Reports invalid_slice for planes this image cannot serve; see CheckedPlanes::Of. What a
     // request asks beyond its planes -- bins, bounds, regions, a sink -- stays with the reduction
     // that understands it.
     Result<PassPlan> Plan(const PlaneSelection& planes, std::uint64_t sample, const ReadOptions& options) const {

@@ -483,7 +483,7 @@ void TestAPrefetchIsMaskedAndCheckedAsAReadIs() {
     beyond.axes.at(2) = Range{4, 3, 1};
     SyntheticPixelSource refused(image, geometry, Value);
     const auto past = PrefetchChunks(refused, image, geometry, geometry, beyond, ReadOptions{}, kDecodeThreads);
-    Require(!past && past.error().code == ErrorCode::invalid_argument,
+    Require(!past && past.error().code == ErrorCode::invalid_slice,
             "a prefetch past the end of an axis was not refused");
     Require(refused.pixel_reads() == 0 && refused.mask_reads() == 0, "a refused prefetch read something");
 }

@@ -480,11 +480,12 @@ void TestSinkCancels(const carta::zarr::Image& sky) {
 void TestRejectedRequests(const carta::zarr::Image& sky) {
     const std::vector<carta::zarr::RegionMask> regions{{0, 0, kL, kM}};
     const auto sink = [](const carta::zarr::SpectralBlock&) { return true; };
-    const auto rejects = [&](carta::zarr::SpectralReduceRequest request, const std::string& what) {
+    const auto rejects = [&](carta::zarr::SpectralReduceRequest request, const std::string& what,
+                             carta::zarr::ErrorCode code = carta::zarr::ErrorCode::invalid_argument) {
         const auto result = sky.ReduceSpectral(request, sink);
         Require(!result, what + " should be rejected");
-        Require(result.error().code == carta::zarr::ErrorCode::invalid_argument,
-                what + " should be an invalid argument");
+        Require(result.error().code == code,
+                what + " should be refused as " + std::string(carta::zarr::ErrorCodeName(code)));
     };
 
     auto no_regions = WholeSpectrum(regions, 0);
@@ -501,10 +502,10 @@ void TestRejectedRequests(const carta::zarr::Image& sky) {
 
     const std::vector<carta::zarr::RegionMask> outside{{kL - 1, 0, 2, kM}};
     auto past_the_edge = WholeSpectrum(outside, 0);
-    rejects(past_the_edge, "a region hanging off the image");
+    rejects(past_the_edge, "a region hanging off the image", carta::zarr::ErrorCode::invalid_slice);
 
     const std::vector<carta::zarr::RegionMask> empty{{0, 0, 0, kM}};
-    rejects(WholeSpectrum(empty, 0), "a region with no width");
+    rejects(WholeSpectrum(empty, 0), "a region with no width", carta::zarr::ErrorCode::invalid_slice);
 
     // A raster is width * height bytes, and one of any other length was cut for another box: read as
     // this one it runs past its end, or stops short of the box it claims to cover.
@@ -517,10 +518,10 @@ void TestRejectedRequests(const carta::zarr::Image& sky) {
 
     auto past_the_last_channel = WholeSpectrum(regions, 0);
     past_the_last_channel.planes.spectral = {0, kFrequency + 1, 1};
-    rejects(past_the_last_channel, "a spectral range past the last channel");
+    rejects(past_the_last_channel, "a spectral range past the last channel", carta::zarr::ErrorCode::invalid_slice);
 
     auto past_the_last_polarization = WholeSpectrum(regions, kPolarization);
-    rejects(past_the_last_polarization, "a polarization past the last one");
+    rejects(past_the_last_polarization, "a polarization past the last one", carta::zarr::ErrorCode::invalid_slice);
 }
 
 }  // namespace

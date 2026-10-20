@@ -357,10 +357,14 @@ void TestRegionsThatCannotBePlacedAreRefused() {
     const PlaneExtent plane{8, 6};
     // Refused for the reason given, rather than for whatever a region let through runs into later:
     // an empty box, for one, goes on to wrap its extent around zero and comes back as too many chunks.
+    // A region that does not fit the plane is a slice that does not fit, as a read range past an axis
+    // is; one that cannot be placed for any other reason is an invalid argument.
     const auto refuses = [&](BufferView<const RegionMask> regions, const std::string& why, const std::string& what) {
         const auto refused = Occupancy::Of(regions, plane, 4, 4, AxisRole::spatial_x, "TEST");
         Require(!refused, what + " was placed");
-        Require(refused.error().code == ErrorCode::invalid_argument && refused.error().node_path == "TEST" &&
+        const auto code = why == "falls outside the image" || why == "is empty" ? ErrorCode::invalid_slice
+                                                                                : ErrorCode::invalid_argument;
+        Require(refused.error().code == code && refused.error().node_path == "TEST" &&
                     refused.error().message.find(why) != std::string::npos,
                 what + " was refused for another reason: " + refused.error().message);
     };

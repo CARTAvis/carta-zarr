@@ -92,7 +92,7 @@ std::vector<Piece> PlanPieces(const ImageDescriptor& descriptor, const ChunkGeom
  * cannot be read must not leave a piece of it updated. A piece read in segments keeps that for each
  * segment; the segments of it already put in place stay there, past the finished prefix.
  *
- * Reports invalid_argument when the destination cannot hold the selection.
+ * Reports buffer_too_small when the destination cannot hold the selection.
  */
 Result<std::size_t> ReadInPieces(const PixelSource& source, const ImageDescriptor& descriptor,
                                  const ChunkGeometry& geometry, const ChunkGeometry& flag_geometry,

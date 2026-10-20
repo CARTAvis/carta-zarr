@@ -42,7 +42,7 @@ class PixelSelection;
 // Translate a request over the logical axes into the stored axis order the array is written in,
 // checking it against the descriptor on the way, with its destination laid out in `order`. Ranges are
 // validated here rather than left to TensorStore so that an out-of-range request is an
-// invalid_argument naming the axis, instead of an I/O error naming a domain.
+// invalid_slice naming the axis, instead of an I/O error naming a domain.
 //
 // The only way to make a PixelSelection, so every one that exists is one this accepted.
 Result<PixelSelection> BuildSelection(const ImageDescriptor& descriptor, const ReadRequest& request,

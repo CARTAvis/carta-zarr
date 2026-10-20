@@ -24,7 +24,7 @@ std::cerr << '\n';
 | `unsupported_schema_version` | Check the dataset's root `schema_version`: only 0.0.2 can be read; write an older store again with XRADIO 1.2.5 or later |
 | An entry has `openable == false` | Inspect its diagnostics; complex, aperture-plane and unsupported boolean candidates cannot be opened |
 | `invalid_metadata` during `OpenImage` | Check that the image, its coordinates and its declared flag agree, and that consolidated metadata matches each array's own document |
-| `invalid_slice` | Check that the ranges fit the descriptor axes and use valid counts and strides |
+| `invalid_slice` | Check that the ranges, plane indices and regions fit the descriptor axes and use valid counts and strides |
 | `buffer_too_small` during a read | Check that the destination's size, in elements, covers the product of the selected counts |
 | `buffer_too_small` creating read-ahead | Give each cache room for two runs of decoded chunks |
 | `io_error`, `decode_error`, `unsupported_codec` | Inspect the node and message for permissions, inaccessible chunks or an encoding problem |

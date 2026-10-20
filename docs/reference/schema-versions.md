@@ -19,7 +19,7 @@ write.
 | Dataset metadata | Result | First diagnostic, error code |
 |---|---|---|
 | Declares 0.0.2 and meets the 0.0.2 checks | Read | None |
-| Declares 0.0.2 but fails the 0.0.2 checks | Refused | `invalid_metadata`, with the reason |
+| Declares 0.0.2 but fails the 0.0.2 checks | Refused | `invalid_metadata` diagnostic with the reason; `invalid_schema` error |
 | An image dataset that declares no version, as XRADIO 1.2.4 and earlier wrote | Refused | `unsupported_schema_version` |
 | An image dataset that declares another version, an empty string or a non-string value | Refused | `unsupported_schema_version` |
 
@@ -36,7 +36,7 @@ validation applies after them.
 For a refused image dataset, `ProbeSchema` returns `kind == invalid` with the
 reason as its first diagnostic, and `Dataset::Open` returns an error with the
 code above. `unsupported_schema_version` means a different build, or a store
-written again with XRADIO 1.2.5 or later, may open it; `invalid_metadata` means
+written again with XRADIO 1.2.5 or later, may open it; `invalid_schema` means
 the store is malformed. A non-image Zarr dataset is a non-match whether or not
 it has a root `schema_version`.
 

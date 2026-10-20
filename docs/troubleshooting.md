@@ -21,6 +21,8 @@ std::cerr << '\n';
 | `unsupported_transport` | Use a local filesystem path; remote stores are not implemented |
 | `unsupported_zarr_version` | Check that the dataset is Zarr v3, not v2 |
 | `unsupported_schema` | Check that the data is an XRADIO image dataset |
+| `invalid_schema` from `Dataset::Open` | The dataset is an XRADIO image dataset that does not conform to its schema; the message is the probe's first diagnostic |
+| `invalid_metadata` from `Dataset::Open` | Check that the root `zarr.json` can be read and parses as JSON |
 | `unsupported_schema_version` | Check the dataset's root `schema_version`: only 0.0.2 can be read; write an older store again with XRADIO 1.2.5 or later |
 | An entry has `openable == false` | Inspect its diagnostics; complex, aperture-plane and unsupported boolean candidates cannot be opened |
 | `invalid_metadata` during `OpenImage` | Check that the image, its coordinates and its declared flag agree, and that consolidated metadata matches each array's own document |
@@ -40,7 +42,8 @@ probe call itself succeeded. An `unsupported_schema_version` diagnostic means
 the dataset declares no XRADIO image schema version, as XRADIO 1.2.4 and
 earlier wrote, or one this library does not read; write it again with XRADIO
 1.2.5 or later. A store that declares 0.0.2 without the fields 0.0.2 requires
-is refused with `invalid_metadata`, and the message names the missing field.
+is refused with an `invalid_metadata` diagnostic, and `Dataset::Open` with
+`invalid_schema`; the message names the missing field.
 See [schema versions](reference/schema-versions.md).
 
 ## Surprising pixel or statistic values

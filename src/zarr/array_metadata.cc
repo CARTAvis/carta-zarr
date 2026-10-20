@@ -204,6 +204,8 @@ const char* ErrorCodeName(ErrorCode code) noexcept {
             return "unsupported_schema_version";
         case ErrorCode::ambiguous_schema:
             return "ambiguous_schema";
+        case ErrorCode::invalid_schema:
+            return "invalid_schema";
         case ErrorCode::invalid_argument:
             return "invalid_argument";
         case ErrorCode::invalid_metadata:

@@ -363,7 +363,7 @@ Result<DescribedImage> DescribeImageFrom(const Store& store, std::string_view im
         const auto& refusal = *checked.refusal;
         const auto code = refusal.code == DiagnosticCode::unsupported_schema_version
                             ? ErrorCode::unsupported_schema_version
-                            : ErrorCode::invalid_metadata;
+                            : ErrorCode::invalid_schema;
         return Error{code, refusal.message, refusal.node_path};
     }
     // Parsed already, and the qualification just accepted it: the store hands back what it holds.

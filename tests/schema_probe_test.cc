@@ -335,8 +335,8 @@ void TestOpenSaysWhyItRefused(const std::filesystem::path& root) {
     Require(probe && probe.value().kind == SchemaMatchKind::invalid && !probe.value().diagnostics.empty(),
             "the malformed store did not probe as invalid with a diagnostic");
     const auto opened = carta::zarr::Dataset::Open(context.value(), malformed.string());
-    Require(!opened && opened.error().code == ErrorCode::invalid_metadata,
-            "a malformed store was not reported as invalid metadata");
+    Require(!opened && opened.error().code == ErrorCode::invalid_schema,
+            "a malformed store was not reported as not conforming to its schema");
     Require(opened.error().message == probe.value().diagnostics.front().message,
             "Dataset::Open replaced the probe's diagnostic with a message of its own: " + opened.error().message);
 }
@@ -364,6 +364,13 @@ void TestEmptyAndOversizedMetadata(const std::filesystem::path& root) {
     const auto empty_root = carta::zarr::ProbeSchema((root / "empty-root").string(), carta::zarr::kXradioImageSchema);
     Require(!empty_root && empty_root.error().code == ErrorCode::invalid_metadata,
             "an empty root zarr.json should be invalid metadata, not an I/O failure");
+    // And Dataset::Open says the same, which is not what it says of a dataset a schema found
+    // malformed: a root that will not parse was never shown to a schema at all.
+    const auto context = carta::zarr::Context::Create();
+    Require(static_cast<bool>(context), "Context::Create failed");
+    const auto opened_root = carta::zarr::Dataset::Open(context.value(), (root / "empty-root").string());
+    Require(!opened_root && opened_root.error().code == ErrorCode::invalid_metadata,
+            "Dataset::Open did not report a root zarr.json that will not parse as invalid metadata");
 
     // The same one node down, where it is reached through the node metadata table instead.
     CreateValidStore(root / "empty-child");

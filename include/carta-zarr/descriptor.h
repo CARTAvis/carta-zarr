@@ -292,13 +292,20 @@ struct UserKeyword {
     std::variant<bool, std::int64_t, double, std::string> value;
 };
 
-// The read geometry of one image, reported in the logical axis order of ImageDescriptor::axes so
-// that a consumer never has to undo the stored order itself.
-//
-// Two granularities, deliberately separate: an inner chunk is what must be decoded to reach any
-// byte inside it, while a shard is what one I/O request fetches. They are equal when the array is
-// not sharded, and can differ by a large factor when it is, so a consumer sizing a cache reasons
-// about chunk_shape and one predicting request count reasons about shard_shape.
+/// The read geometry of one image, reported in the logical axis order of ImageDescriptor::axes so
+/// that a consumer never has to undo the stored order itself.
+///
+/// Two granularities, deliberately separate. An inner chunk is what must be decoded to reach any byte
+/// inside it, so a consumer sizing a cache reasons about chunk_shape. A shard is one file, holding an
+/// index and the inner chunks, so a consumer counting files -- and the opens and stats a shared
+/// metadata server answers for them -- reasons about shard_shape. They are equal when the array is not
+/// sharded, and can differ by a large factor when it is.
+///
+/// A shard is not one request. From a local store, the inner chunks one storage read needs from a
+/// shard are read as byte ranges of its file, after its index, which is cached: ranges at most a few
+/// hundred bytes apart are read as one, and a storage read that needs every inner chunk of a shard
+/// reads the whole file at once. Image::Read and the reductions cut what they read into several
+/// storage reads (see ReadOptions::read_budget_bytes), and each is its own.
 struct ChunkGeometry {
     // The spatial axis the store varies fastest, which is the one a reduction walks along.
     //

@@ -63,8 +63,9 @@ rather than repeating them.
 
 - **Check every `Result`** before using its value. Failures carry an error
   code, message and node path.
-- **A failed or cancelled read leaves the destination undefined.** Discard it,
-  even if progress had already reported a completed prefix.
+- **A failed or cancelled read keeps only its reported prefix.** The elements
+  a progress callback last reported as written are final; discard the rest of
+  the destination. Without a progress callback, discard all of it.
 - **Flags are applied by default.** A flagged pixel is output as NaN and
   excluded from reductions; stored NaNs stay NaN either way.
 - **Borrowed views last only for the callback.** A reduction block or histogram

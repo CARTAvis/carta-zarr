@@ -87,7 +87,7 @@ private:
 /// decode threads as on few. The destination is dense in logical order with axis 0 fastest, which
 /// is what makes the finished part a prefix rather than a scatter -- a caller can render or forward
 /// it as it arrives. A piece too large to read whole is read in parts and reported when all of them
-/// are in, so the prefix holds.
+/// are in, so the prefix holds -- after a read fails as well as while it runs; see Image::Read.
 ///
 /// An argument of Image::Read rather than a field of ReadOptions, because it is the only operation
 /// that has anywhere to report from in these terms -- a reduction reports through its sink, and a

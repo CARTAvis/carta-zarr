@@ -102,9 +102,9 @@ void TestAxesAndGeometry(const carta::zarr::Image& sky) {
     const auto& geometry = sky.chunk_geometry();
     Require(geometry.chunk_shape == std::vector<std::uint64_t>{2, 5, 1, 1, 1},
             "chunk shape should be reported in logical order");
-    // Nothing in this fixture is sharded, so one I/O request still fetches one chunk.
+    // Nothing in this fixture is sharded, so each chunk is a file of its own.
     Require(!geometry.sharded && geometry.shard_shape == geometry.chunk_shape,
-            "an unsharded array should report its chunk shape as the I/O granularity");
+            "an unsharded array should report its chunk shape as its shard shape");
     Require(geometry.compressor == "zstd", "the fixture is written with zstd");
 }
 

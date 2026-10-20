@@ -2,8 +2,12 @@
 
 Tools for finding which Zarr layout, and which carta-zarr settings, read fastest on a given storage
 system -- Lustre and BeeGFS in particular, where the answer differs from a local disk.
-[`docs/storage-tuning.md`](../../docs/storage-tuning.md) says what they have found so far and how to
-read what they report; this page is how to run them.
+
+**New to these tools?** Start with
+[Measure your own storage](https://cartavis.org/carta-zarr/guides/measure-storage.html), which goes
+from a clone to a first `summary.md` and defines the words the report uses. This page is the
+reference for every option. [Storage tuning](https://cartavis.org/carta-zarr/storage-tuning.html)
+says what the tools have found so far.
 
 ## generate.py
 
@@ -31,15 +35,20 @@ Or synthesize one, when there is no real cube to hand:
 - **Codecs:** `none`, `zstd[:level]`, `gzip[:level]`, `blosc[:cname[:level[:shuffle]]]`.
   `--keep-bits N` rounds pixels to N mantissa bits before compressing them.
 - **Real pixels are the better source.** What a layout costs depends on how well the pixels
-  compress. The synthetic cube is a continuum-subtracted HI cube from a mosaic, calibrated against
-  ASKAP's: noise varying by channel and rising towards the footprint's edge, faint line sources
-  (`--line-sources`), NaN outside an irregular footprint (`--footprint-fill`), runs of flagged
-  channels (`--flagged-channels`), on ASKAP's frequency axis (`--frequency-start`,
-  `--channel-width`, `--rest-frequency`); `--point-sources` and `--extended-sources` add continuum.
+  compress.
+- **The synthetic cube** is a continuum-subtracted HI cube from a mosaic, calibrated against
+  ASKAP's (`tools/testset/README.md` has the calibration):
+  - noise varying by channel and rising towards the footprint's edge;
+  - faint line sources (`--line-sources`);
+  - NaN outside an irregular footprint (`--footprint-fill`);
+  - runs of flagged channels (`--flagged-channels`);
+  - ASKAP's frequency axis (`--frequency-start`, `--channel-width`, `--rest-frequency`);
+  - continuum, when `--point-sources` or `--extended-sources` adds it.
+
   It compresses about 10 % worse than the real cube (1.25 against ASKAP Hydra's 1.39), its noise
-  being independent from pixel to pixel, and it is still not a real image. It is
-  deterministic: two layouts of the same options hold the same pixels, and `--fits PATH` writes them
-  as a FITS file instead. `tools/testset/README.md` has the calibration.
+  being independent from pixel to pixel, and it is still not a real image. It is deterministic: two
+  layouts of the same options hold the same pixels, and `--fits PATH` writes them as a FITS file
+  instead.
 - **`--stripe`** sets Lustre (`lfs setstripe`) or BeeGFS (`beegfs-ctl --setpattern`, or
   `beegfs entry set` on BeeGFS 8) striping on the output directory before anything is written,
   since striping applies only to files created after it. BeeGFS normally reserves this for root;
@@ -93,9 +102,9 @@ open. `run` writes one CSV row per operation; `--help` lists its options.
 - **`shares_chunks`** marks an operation that reads a chunk an earlier operation of its process read,
   or one any other process reads. Its time may be the page cache's, so it is not a first touch however
   fresh its cache pool; sweep.py ranks `plane`, `spectrum` and `region` without such operations.
-  It is counted by chunk, not by shard. Two operations reading different chunks of one shard share
-  the shard's index, a few bytes a chunk, and whether reading ahead in the shard's file brought the
-  later one's chunks in is up to the file system; counting by shard would leave a layout sharded
+- **Sharing is counted by chunk, not by shard.** Two operations reading different chunks of one shard
+  share the shard's index, a few bytes a chunk, and whether reading ahead in the shard's file brought
+  the later one's chunks in is up to the file system. Counting by shard would leave a layout sharded
   across every channel with one first touch a trial to rank.
 - **Cube histograms** are computed as carta-backend computes them by default
   (`--zarr_histogram_method exact`): a reduction over whole planes for the range, then every plane
@@ -120,13 +129,16 @@ open. `run` writes one CSV row per operation; `--help` lists its options.
 - **Deadline.** `--trial-timeout` becomes each read's `ReadControl::deadline`. An operation it stops,
   and any not yet started, is a `timeout` row; a process still running 30 s past it is killed.
 - **Resuming.** Rows are written a trial at a time, so an interrupted run loses at most the trial it
-  was in. `--resume` skips the trials the CSV already holds for the same settings and the same
-  build -- the `run_key` column, which hashes the bench's bytes and those of the carta-zarr it loads
-  as `carta-zarr-bench identity` prints them -- whose rows cover every operation of every process and
-  hold no error. A trial run again
-  replaces the rows its earlier attempt left, so the CSV holds one attempt at each trial. A last line
-  cut short -- one without its newline, which the bench always writes -- is dropped before anything
-  is appended; any other line that is not a row stops the run rather than being written after.
+  was in.
+  - `--resume` skips the trials the CSV already holds for the same settings and the same build, whose
+    rows cover every operation of every process and hold no error. The `run_key` column says which:
+    it hashes the bench's bytes and those of the carta-zarr it loads, as `carta-zarr-bench identity`
+    prints them.
+  - A trial run again replaces the rows its earlier attempt left, so the CSV holds one attempt at each
+    trial.
+  - A last line cut short -- one without its newline, which the bench always writes -- is dropped
+    before anything is appended. Any other line that is not a row stops the run rather than being
+    written after.
 - **`checksum`** fingerprints what each operation returned, taken after the clock stops: the pixels
   for a read, the pixel counts and extremes for a reduction or a histogram, and an exact histogram's
   counts, which every layout of the same pixels must agree on exactly. Sums are left out, because
@@ -138,7 +150,7 @@ open. `run` writes one CSV row per operation; `--help` lists its options.
 ## sweep.py
 
 Runs the other two over every layout and setting worth trying, and says which to use. Copy
-[`example-sweep.toml`](example-sweep.toml), whose every field is explained, and:
+[`example-sweep.toml`](https://github.com/CARTAvis/carta-zarr/blob/dev/tools/zarr-bench/example-sweep.toml), whose every field is explained, and:
 
 ```sh
 ./sweep.py my-sweep.toml --dry-run     # what would run, the disk it needs, and whether it can
@@ -146,7 +158,8 @@ Runs the other two over every layout and setting worth trying, and says which to
 ./sweep.py my-sweep.toml --set users.target=32 --output results-32
 ```
 
-It works in four stages, each written into one `results.csv` under its own label:
+It works in five stages, the last only when asked for, each written into one `results.csv` under its
+own label:
 
 1. **stage1** writes each layout in turn -- the grid of `[stage1]` and the source's own, `current` --
    measures it at the baseline settings with one user and with `users.target`, and deletes it.
@@ -193,11 +206,13 @@ that did not survive validation. The tables behind it follow.
 - **The read budget** has no backend setting, so a setting with one is never recommended. The report
   says when one would make a mode at least 10% faster, which is the case for adding the setting.
 - **Resuming.** `sweep-state.json` records each finished run, so a rerun skips it without writing its
-  layout again; a run cut short resumes from the CSV. Runs that failed are tried again. The state
-  holds only runs of one workload -- the source, what it holds (each file's path, size and
-  modification time), the build of the bench and of each warm variant (`carta-zarr-bench identity`),
-  the generator (its bytes and those of the modules beside it that it imports), and the measure settings a run key does not say -- and a sweep of another is refused rather than
-  mixed in with it.
+  layout again; a run cut short resumes from the CSV. Runs that failed are tried again.
+- **One workload an output directory.** The state holds only runs of one workload, and a sweep of
+  another is refused rather than mixed in with it. A workload is:
+  - the source, and what it holds: each file's path, size and modification time;
+  - the build of the bench and of each warm variant, as `carta-zarr-bench identity` prints it;
+  - the generator: its bytes and those of the modules beside it that it imports;
+  - the measure settings a run key does not say.
 - **`--report-only`** rewrites `summary.md` from what there is, mid-sweep or after.
 
 The output directory, `zarr-bench-results` beside the config unless `--output` says otherwise, holds
@@ -240,7 +255,7 @@ anywhere a C++17 compiler and CMake 3.24 are (on an old distribution, a conda-fo
 root buys is emptying caches, and on a parallel file system the caches that matter most are on the
 servers.
 
-- **Lustre.** [`drop-lustre-cache.py`](drop-lustre-cache.py) `DIR` empties this client's page cache
+- **Lustre.** [`drop-lustre-cache.py`](https://github.com/CARTAvis/carta-zarr/blob/dev/tools/zarr-bench/drop-lustre-cache.py) `DIR` empties this client's page cache
   for every file under `DIR`, as `--cold fadvise` would, and then asks the servers to drop theirs
   with `lfs ladvise -a dontneed`, which Lustre 2.9 and later accept from a file's owner. Give it the
   sweep's work directory, which holds one dataset at a time:

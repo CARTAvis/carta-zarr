@@ -47,6 +47,7 @@ selection and fallback diagnostics. Changes since 0.1 are listed in the [changel
 
 - [Prepare an XRADIO dataset](guides/datasets.md).
 - [Tune storage layouts](storage-tuning.md).
+- [Measure your own storage](guides/measure-storage.md) with the benchmark tools.
 
 **When something goes wrong**
 
@@ -82,6 +83,7 @@ guides/resources
 
 guides/datasets
 storage-tuning
+guides/measure-storage
 measurements/chunk-size
 ```
 
@@ -91,6 +93,7 @@ measurements/chunk-size
 
 api/index
 reference/schema-versions
+reference/zarr-bench
 architecture
 glossary
 changelog

@@ -285,20 +285,10 @@ and 16 MiB shards with the unsharded layouts.
 The answer on another file system, another cube size or another number of users can differ, and the
 tools exist so that it can be measured rather than assumed.
 
-1. **Build** carta-zarr in Release with `-DCARTA_ZARR_BUILD_BENCH=ON`; a Debug build is several times
-   slower and the report says so.
-2. **Write a configuration** from [`example-sweep.toml`](../tools/zarr-bench/example-sweep.toml):
-   the bench, a work directory on the file system to measure, a real cube to rewrite (or a synthetic
-   shape), the number of users at the busiest time and on an ordinary day, the layouts to try, and the
-   reader settings to try on the best of them. If the site holds cubes of very different sizes, list
-   each as a `[[source.shape]]`.
-3. **Check it:** `./sweep.py my-sweep.toml --dry-run` says what would run, how much space it needs,
-   how caches will be emptied, and whether striping can be set, and writes nothing.
-4. **Run it:** `./sweep.py my-sweep.toml`. It writes, measures and deletes one layout at a time, and
-   the same command resumes it after an interruption. A sweep of four layouts of a 32 GiB cube took
-   about two hours on that server's Lustre.
-5. **Read `summary.md`**: the layout and the flags to use, as they would be pasted into the backend's
-   command line or `settings.json`, then every warning, then the tables behind them.
+[Measure your own storage](guides/measure-storage.md) takes you from a clone to a `summary.md`:
+building the bench, writing a configuration, checking it with `--dry-run`, running it, and reading
+what it reports. A sweep of four layouts of a 32 GiB cube took about two hours on that server's
+Lustre. What follows is what the measurements so far taught about measuring.
 
 ### Empty the right caches
 

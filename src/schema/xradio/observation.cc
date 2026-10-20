@@ -98,7 +98,10 @@ std::vector<UserKeyword> DescribeUserKeywords(const nlohmann::json& root_attribu
     merge(image.attributes, std::string(image_id));
 
     std::vector<UserKeyword> keywords;
-    for (const auto& [name, value] : merged.items()) {
+    for (const auto& item : merged.items()) {
+        // Named rather than bound: a lambda capturing a structured binding is C++20.
+        const std::string& name = item.key();
+        const auto& value = item.value();
         const auto left_out = [&](const std::string& why) {
             diagnostics.push_back(Diagnostic{DiagnosticCode::unsupported_data_type,
                                              "User keyword '" + name + "' " + why + ", and is not reported",

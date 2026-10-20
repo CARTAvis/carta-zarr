@@ -1722,8 +1722,8 @@ void TestA002StoreNamingNoSkyIsDecidedByWhatItHolds() {
 // images alone needs the aperture plane's coordinates and no coordinate system; an aperture-plane
 // variable written without its own coordinates does not open, and the sky images beside it do.
 void TestAnApertureImageIsDescribedOnItsPlane() {
-    using carta::zarr::internal::xradio::CoordinateValues;
     using carta::zarr::AxisRole;
+    using carta::zarr::internal::xradio::CoordinateValues;
     using carta::zarr::internal::xradio::DescribeImageFrom;
     const auto aperture_plane = R"(["time","frequency","polarization","u","v"])";
     std::map<std::string, std::string> nodes{

@@ -51,8 +51,8 @@ destination, which is dense in the same logical order.
 
 Removing `kXradioImageAxisOrder` breaks a consumer that used it. carta-backend did not.
 
-The README says axes are found by role, names the XRADIO order as the profile's rather than as a
-promise, and its example sets its two spatial ranges through `AxisIndex` instead of writing five
+The documentation says axes are found by role (`docs/concepts.md`), names the XRADIO order as the
+profile's rather than as a promise, and the README's example sets its two spatial ranges through `AxisIndex` instead of writing five
 ranges by position. `conformance_test` pins the profile's order directly, as a statement about what
 the profile does, and checks that `AxisIndex` finds each role where it is and finds nothing for
 `other`.

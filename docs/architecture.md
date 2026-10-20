@@ -28,6 +28,12 @@ own; any other C++ application links it the same way.
 The application owns world coordinates, region definitions, scientific derived
 quantities and its protocol. This library owns storage access and operations
 expressible in pixel coordinates: counts, sums, spread, extrema and histograms.
+A reduction belongs here only if it can be stated without the application's
+terms: a flux density needs the beam, and a position-velocity image needs world
+coordinates, so both stay with the application. carta-backend, for example,
+builds casacore coordinates and the `ImageInterface` CARTA reads from what the
+descriptor reports.
+
 Inside it:
 
 ```{mermaid}

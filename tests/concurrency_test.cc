@@ -4,7 +4,7 @@
    SPDX-License-Identifier: GPL-3.0-or-later
 */
 
-// The threading promises the README and carta_zarr.h make, held through the public API: a Dataset
+// The threading promises docs/concepts.md and carta_zarr.h make, held through the public API: a Dataset
 // opened from several threads at once, reductions and histograms running at once on one image and on
 // two images of one context, and Read beside Prefetch on one handle.
 //
@@ -15,7 +15,7 @@
 //
 // Agreement with the serial answer is what this can check. That no two threads touched the same
 // memory unsynchronised is what ThreadSanitizer checks, and this test is written to be run under it,
-// configured with CARTA_ZARR_THREAD_SANITIZER: see the README's "Build and install".
+// configured with CARTA_ZARR_THREAD_SANITIZER: see "Run the tests" in docs/installation.md.
 
 #include "support/check.h"
 

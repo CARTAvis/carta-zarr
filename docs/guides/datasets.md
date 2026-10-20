@@ -23,8 +23,10 @@ xds = open_image("cube.fits")
 write_image(xds, "cube", out_format="zarr")  # writes cube.img.zarr
 ```
 
-Open the resulting `cube.img.zarr` with carta-zarr. XRADIO's FITS reader needs
-both celestial axes in the header and refuses axis types it does not support.
+Open the resulting `cube.img.zarr` with carta-zarr. XRADIO's FITS reader is
+strict: it needs both celestial axes and refuses axis types it does not
+support, every axis needs `CTYPE` and `CUNIT`, the Stokes axis included, and
+the header must carry `LONPOLE`, `LATPOLE`, the `PC` matrix and `DATE-OBS`.
 
 The repository's
 [fixture generator](https://github.com/CARTAvis/carta-zarr/blob/dev/tests/data/generate_conformance_fixtures.py)
@@ -41,6 +43,14 @@ read: a dataset that declares none, as XRADIO 1.2.4 and earlier wrote, is
 refused, and has to be written again with XRADIO 1.2.5 or later. Opening the
 dataset then lists its image candidates. What is refused, and why, is in
 [schema versions](../reference/schema-versions.md).
+
+`Dataset::Size(timeout)` reports how large the dataset is, and which of two
+answers it gives: `SizeBasis::measured`, the files under the store added up, or
+`SizeBasis::declared`, every array's shape times its element size, uncompressed,
+when the store cannot be measured: the timeout passed part-way through, a
+directory could not be listed, or the total overflowed. The second is not a
+bound on the first, since compression makes a store smaller and metadata makes
+it larger, so show which one you got.
 
 ## Next steps
 

@@ -3,7 +3,7 @@
 # Associated Universities, Inc. (AUI) and the Inter-University Institute for Data Intensive Astronomy (IDIA)
 # SPDX-License-Identifier: GPL-3.0-or-later
 
-# Builds the library and runs its tests on the platforms the README says it is built and tested on.
+# Builds the library and runs its tests on the platforms docs/installation.md names.
 #
 # The first configure downloads TensorStore and the libraries it declares, and building them is most
 # of the time a job takes. The downloaded archives are cached by what pins them -- the TensorStore

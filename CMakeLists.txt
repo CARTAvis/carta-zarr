@@ -27,7 +27,7 @@ set(CARTA_ZARR_TUNING_OVERRIDES "" CACHE STRING
 
 # For the threading tests only: builds this library and everything it links, TensorStore included,
 # with ThreadSanitizer, which has to see inside TensorStore to see its locks. TensorStore is patched
-# for it in one line; cmake/TensorStoreForThreadSanitizer.cmake says why. See the README.
+# for it in one line; cmake/TensorStoreForThreadSanitizer.cmake says why. See docs/installation.md.
 option(CARTA_ZARR_THREAD_SANITIZER "Build everything with ThreadSanitizer, for the threading tests" OFF)
 set(CARTA_ZARR_TENSORSTORE_PATCH "")
 if(CARTA_ZARR_THREAD_SANITIZER)
@@ -627,7 +627,7 @@ if(CARTA_ZARR_BUILD_TESTS AND BUILD_TESTING)
 
     # The threading promises, held through the public API: several threads at once on one Dataset,
     # one image, two images of one context, and Read beside Prefetch. Run under ThreadSanitizer too,
-    # with CARTA_ZARR_THREAD_SANITIZER; see the README.
+    # with CARTA_ZARR_THREAD_SANITIZER; see docs/installation.md.
     carta_zarr_add_test(carta_zarr_concurrency_tests PUBLIC
         TEST_NAME carta-zarr-concurrency
         SOURCES tests/concurrency_test.cc

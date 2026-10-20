@@ -149,7 +149,7 @@ std::string Fingerprint(const carta::zarr::ImageDescriptor& image) {
         Write(out, direction->projection_parameters);
     }
     if (const auto& spectral = image.spectral) {
-        out << "spectral " << spectral->unit << " " << spectral->system << " "
+        out << "spectral " << spectral->unit << " " << spectral->reference_frame << " "
             << spectral->reference_pixel.value_or(-1.0) << " " << spectral->reference_value.value_or(-1.0) << " "
             << spectral->increment.value_or(-1.0) << " " << spectral->rest_frequency.value_or(-1.0) << "\n";
         Write(out, spectral->values);
@@ -165,7 +165,8 @@ std::string Fingerprint(const carta::zarr::ImageDescriptor& image) {
     }
     if (const auto& observation = image.observation) {
         out << "observation " << observation->object_name << " " << observation->observer << " "
-            << observation->telescope_name << " " << observation->timesys << " " << observation->mjd_obs.value_or(-1.0);
+            << observation->telescope_name << " " << observation->time_scale << " "
+            << observation->observation_mjd.value_or(-1.0);
         if (const auto& position = observation->observatory_position) {
             out << " " << (*position)[0] << " " << (*position)[1] << " " << (*position)[2];
         }
@@ -320,7 +321,7 @@ constexpr std::uint32_t kHistogramBins = 4096;
 std::vector<std::vector<std::uint64_t>> Histogram(const carta::zarr::Image& image, double lower, double upper) {
     carta::zarr::HistogramRequest request;
     request.planes = EveryChannel(image, 0);
-    request.bins = kHistogramBins;
+    request.bin_count = kHistogramBins;
     request.lower = lower;
     request.upper = upper;
     std::vector<std::vector<std::uint64_t>> counts(request.planes.spectral.count);
@@ -345,7 +346,7 @@ std::vector<std::vector<std::uint64_t>> Histogram(const carta::zarr::Image& imag
 carta::zarr::CubeHistogramResult CubeHistogram(const carta::zarr::Image& image) {
     carta::zarr::CubeHistogramRequest request;
     request.planes = EveryChannel(image, 0);
-    request.bins = 128;
+    request.bin_count = 128;
     auto result = image.ComputeCubeHistogram(request);
     Require(static_cast<bool>(result),
             std::string("ComputeCubeHistogram failed: ") + (result.has_value() ? "" : result.error().message));

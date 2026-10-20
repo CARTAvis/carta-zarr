@@ -59,7 +59,7 @@ for every store that opens, and empty for one that declares nothing.
   from `image_role`, and is empty when the image does not name one.
   This field is on the opened image descriptor, not `ImageEntry`.
 - **Spectral frame and units:** read from `frequency`'s `frame` and `units`.
-  `SpectralCoordinate::system` is the frame in casacore's names, as 0.0.2
+  `SpectralCoordinate::reference_frame` is the frame in casacore's names, as 0.0.2
   writes it, such as `LSRK` or `GEO`. The reference frequency's `observer` is
   not read.
 - **Single-channel images:** a finite, nonzero `channel_width`
@@ -67,7 +67,7 @@ for every store that opens, and empty for one that declares nothing.
   single frequency as reference value. The width's unit must be absent or match
   the spectral unit. Multi-channel increments still come from their samples;
   a missing or invalid width does not invent a spacing.
-- **Observation dates:** use `ObservationInfo::mjd_obs` (Modified Julian Date, MJD) and `timesys`.
+- **Observation dates:** use `ObservationInfo::observation_mjd` (Modified Julian Date, MJD) and `time_scale`.
   `date_obs` has been removed; string-valued observation dates and numeric
   equinox forms not written by XRADIO are not interpreted, and neither is a
   numeric date without a format.

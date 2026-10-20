@@ -266,7 +266,7 @@ request and options, `reduce.h` for reductions and histograms, `read_ahead.h` fo
   carry the image's own dimensions in order, or the image does not open.
 - **Reads are cancellable.** `ReadOptions::control` carries a cancellation callback, a deadline and
   the cache pool the read keeps what it decodes in -- the context's shared one unless it brings its
-  own from `Context::NewCachePool` -- which every read and reduction honours; `ReadOptions` adds a
+  own from `Context::CreateCachePool` -- which every read and reduction honours; `ReadOptions` adds a
   ceiling on the temporary memory a request may hold. Progress is an argument of `Image::Read` and of
   `Image::ComputeCubeHistogram`, and a reduction's arrives with its blocks; a request is only ever
   data.

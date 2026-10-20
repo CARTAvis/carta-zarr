@@ -225,7 +225,8 @@ struct DirectionCoordinate {
 
 struct SpectralCoordinate {
     std::string unit;
-    std::string system;  // casacore or FITS SPECSYS name, e.g. "LSRK", "BARY", "GEO", "TOPOCENT"; never astropy's
+    std::string
+        reference_frame;  // casacore or FITS SPECSYS name, e.g. "LSRK", "BARY", "GEO", "TOPOCENT"; never astropy's
     // CRPIX3, 1-based as DirectionCoordinate::reference_pixel is. Absent, with the two below it,
     // when the channels are not evenly spaced: there is then no linear description to give and a
     // consumer builds a tabular axis from values instead.
@@ -256,10 +257,10 @@ struct ObservationInfo {
     std::string object_name;
     std::string observer;
     std::string telescope_name;
-    std::string timesys;
-    // The observation date as an MJD in `timesys`, from a number in the MJD or unix format. Absent
+    std::string time_scale;  // FITS TIMESYS, e.g. "UTC", "TAI"
+    // The observation date as an MJD in `time_scale`, from a number in the MJD or unix format. Absent
     // when the dataset wrote none, or wrote it in any other form.
-    std::optional<double> mjd_obs;
+    std::optional<double> observation_mjd;
     std::optional<std::array<double, 3>> observatory_position;  // OBSGEO-X, Y, Z (meters)
 };
 

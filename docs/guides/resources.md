@@ -20,7 +20,7 @@ A scan that will not revisit its chunks can use a cache pool of its own that
 holds nothing:
 
 ```cpp
-auto pool = context.NewCachePool(0);
+auto pool = context.CreateCachePool(0);
 if (!pool) {
     // Report pool.error().
     return;

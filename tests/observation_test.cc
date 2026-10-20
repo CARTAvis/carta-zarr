@@ -98,13 +98,13 @@ void TestAnIncompletePositionIsNotHalfConverted() {
 void TestObsdateSplitsIntoScaleAndValue() {
     const auto numeric =
         Describe(nlohmann::json{{"obsdate", {{"attrs", {{"scale", "tai"}, {"format", "mjd"}}}, {"data", 61000.5}}}});
-    Require(numeric.timesys == "TAI", "the obsdate scale was not upper-cased");
-    Require(numeric.mjd_obs.has_value() && Near(*numeric.mjd_obs, 61000.5),
+    Require(numeric.time_scale == "TAI", "the obsdate scale was not upper-cased");
+    Require(numeric.observation_mjd.has_value() && Near(*numeric.observation_mjd, 61000.5),
             "a numeric obsdate was not reported as an MJD");
 }
 
 std::optional<double> MjdOf(nlohmann::json obsdate) {
-    return Describe(nlohmann::json{{"obsdate", std::move(obsdate)}}).mjd_obs;
+    return Describe(nlohmann::json{{"obsdate", std::move(obsdate)}}).observation_mjd;
 }
 
 // A number is read by the format written beside it: XRADIO writes "mjd", and seconds since 1970 under
@@ -125,9 +125,9 @@ void TestObsdateSpellings() {
 // An image carrying none of it is described, not refused.
 void TestNothingToDescribe() {
     const auto observation = Describe(nlohmann::json::object());
-    Require(observation.object_name.empty() && observation.telescope_name.empty() && observation.timesys.empty(),
+    Require(observation.object_name.empty() && observation.telescope_name.empty() && observation.time_scale.empty(),
             "an image with no observation attributes reported some");
-    Require(!observation.observatory_position.has_value() && !observation.mjd_obs.has_value(),
+    Require(!observation.observatory_position.has_value() && !observation.observation_mjd.has_value(),
             "an image with no observation attributes reported a position or a date");
 }
 

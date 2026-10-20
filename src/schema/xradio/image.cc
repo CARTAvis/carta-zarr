@@ -127,7 +127,7 @@ std::optional<SpectralCoordinate> DescribeSpectralCoordinate(const Store& store,
 
     // The axis reports the same unit, from the same rule.
     spectral.unit = CoordinateUnit(store, SkyCoordinate(AxisRole::spectral));
-    spectral.system = AttributeString(frequency_attributes, "frame");
+    spectral.reference_frame = AttributeString(frequency_attributes, "frame");
     // The channel a linear description is measured from, which is the first one unless the
     // reference frequency names another.
     double reference_value = spectral.values.front();

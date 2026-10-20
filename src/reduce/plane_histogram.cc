@@ -74,7 +74,7 @@ Result<void> ComputeHistogram(const ReducibleImage& image, const HistogramReques
     if (!sink) {
         return Error{ErrorCode::invalid_argument, "A histogram needs a sink", node};
     }
-    if (auto valid = ValidateBins(node, request.bins); !valid) {
+    if (auto valid = ValidateBins(node, request.bin_count); !valid) {
         return valid.error();
     }
     if (auto valid = ValidateRange(node, request); !valid) {
@@ -90,7 +90,7 @@ Result<void> ComputeHistogram(const ReducibleImage& image, const HistogramReques
 
     // The caller's own sequence: divide in double, narrow the width, compare against the narrowed
     // bounds. Doing any one of those in the other type moves pixels across bin edges.
-    const float width = static_cast<float>((request.upper - request.lower) / request.bins);
+    const float width = static_cast<float>((request.upper - request.lower) / request.bin_count);
     const float lower = static_cast<float>(request.lower);
     const float upper = static_cast<float>(request.upper);
     // Over a range whose span and width are positive and finite in float, every offset is finite and
@@ -103,9 +103,9 @@ Result<void> ComputeHistogram(const ReducibleImage& image, const HistogramReques
     const float span = upper - lower;
     const bool finite_offsets = span > 0.0F && std::isfinite(span) && width > 0.0F && std::isfinite(width);
     const double wide_lower = lower;
-    const double wide_width = (static_cast<double>(upper) - wide_lower) / request.bins;
-    const double wide_last = static_cast<double>(request.bins - 1);
-    const auto bins = static_cast<std::size_t>(request.bins);
+    const double wide_width = (static_cast<double>(upper) - wide_lower) / request.bin_count;
+    const double wide_last = static_cast<double>(request.bin_count - 1);
+    const auto bins = static_cast<std::size_t>(request.bin_count);
     std::vector<std::uint64_t> counts;
 
     // How many private histograms the binning may split a plane into. Capped three ways: by the
@@ -256,7 +256,7 @@ Result<CubeHistogramResult> ComputeCubeHistogram(const ReducibleImage& image, co
     const auto& descriptor = image.descriptor();
     const auto& source = image.source();
     const auto& node = descriptor.id;
-    if (auto valid = ValidateBins(node, request.bins); !valid) {
+    if (auto valid = ValidateBins(node, request.bin_count); !valid) {
         return valid.error();
     }
     if (request.spatial_sample == 0) {
@@ -277,7 +277,7 @@ Result<CubeHistogramResult> ComputeCubeHistogram(const ReducibleImage& image, co
                 return true;
             }
             CubeHistogramProgress update;
-            update.progress = fraction;
+            update.completeness = fraction;
             // By reference and lazily: re-aggregating on every read would cost more than the
             // binning does on a cube with thousands of them, and a caller that only draws a bar
             // never asks. Safe because the pass reports between reads, with no Add under way.

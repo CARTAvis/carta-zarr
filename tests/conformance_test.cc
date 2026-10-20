@@ -127,7 +127,7 @@ void TestSpectralAndPolarization(const carta::zarr::ImageDescriptor& sky) {
     const auto spectral_axis = carta::zarr::AxisIndex(sky.axes, carta::zarr::AxisRole::spectral);
     Require(spectral_axis && sky.axes.at(*spectral_axis).unit == spectral.unit,
             "the spectral axis reported a unit other than its coordinate's");
-    Require(spectral.system == "LSRK", "SPECSYS was not normalized to the canonical spectral system");
+    Require(spectral.reference_frame == "LSRK", "SPECSYS was not normalized to the canonical spectral system");
     Require(spectral.rest_frequency.has_value(), "RESTFRQ was dropped");
     RequireClose(*spectral.rest_frequency, 1.420405751e9, 1.0, "rest frequency");
     // These channels are evenly spaced, so the optional linear description must be present.

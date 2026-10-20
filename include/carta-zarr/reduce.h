@@ -158,7 +158,7 @@ struct RegionMask {
 // the same rule: NaN fails both comparisons.
 struct HistogramRequest {
     PlaneSelection planes;
-    std::uint32_t bins = 0;
+    std::uint32_t bin_count = 0;
     double lower = 0.0;
     double upper = 0.0;
     // How often to hand results back; zero lets the library choose, as in SpectralReduceRequest.
@@ -227,7 +227,7 @@ struct CubeHistogramResult {
     // whatever the bin edges did, and NaN when nothing finite was read. All seven statistics are
     // there, sum_sq_dev included.
     SpectralTotals totals;
-    // `bins` counts over [totals.min, totals.max].
+    // `bin_count` counts over [totals.min, totals.max].
     std::vector<std::uint64_t> counts;
     // Whether spatial_sample kept this from being every pixel.
     bool sampled = false;
@@ -244,7 +244,7 @@ struct CubeHistogramResult {
 // timer should call it only when it reports, not on every update.
 struct CubeHistogramProgress {
     // The fraction of the walk's chunks that are done.
-    double progress = 0.0;
+    double completeness = 0.0;
     std::function<CubeHistogramResult()> snapshot;
 };
 
@@ -286,9 +286,9 @@ using CubeHistogramProgressCallback = std::function<bool(const CubeHistogramProg
 struct CubeHistogramRequest {
     PlaneSelection planes;
     // The bins the caller wants back.
-    std::uint32_t bins = 0;
+    std::uint32_t bin_count = 0;
     // The resolution the walk bins at: how many bins each of its provisional histograms holds before
-    // they are re-aggregated onto `bins`. Larger is more faithful and costs eight bytes a bin for
+    // they are re-aggregated onto `bin_count`. Larger is more faithful and costs eight bytes a bin for
     // every task the walk is split into.
     //
     // Zero takes the library's default, which is sixteen times the bins asked for, held between
@@ -296,7 +296,7 @@ struct CubeHistogramRequest {
     // value stated here is taken as given, up to kMaxHistogramBins, so a caller can ask for coarser
     // than the default as well as finer. Either way it is rounded up to a power of two, and to at
     // least two, so that merging in pairs leaves nothing behind.
-    std::uint32_t provisional_bins = 0;
+    std::uint32_t provisional_bin_count = 0;
     // Take every nth pixel along both spatial axes. One reads every pixel.
     //
     // Worth knowing before reaching for it: a stride below the chunk width saves no decompression,

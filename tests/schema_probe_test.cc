@@ -1038,8 +1038,8 @@ void TestAHandleMovedFromStillWorks() {
             "an image moved from did not read" + (read ? std::string{} : ": " + read.error().message));
     Require(static_cast<bool>(moved_image.Read(request, {&pixel, 1})), "an image moved to did not read");
 
-    auto pool = context->NewCachePool(std::size_t{1} << 20);
-    Require(static_cast<bool>(pool), "NewCachePool failed");
+    auto pool = context->CreateCachePool(std::size_t{1} << 20);
+    Require(static_cast<bool>(pool), "CreateCachePool failed");
     const carta::zarr::CachePool moved_pool = std::move(*pool);
     Require(pool->bytes() == (std::size_t{1} << 20), "a pool moved from forgot its size");
     carta::zarr::ReadOptions through_moved_from;

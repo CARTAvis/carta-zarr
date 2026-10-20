@@ -209,7 +209,7 @@ What one task of a cube histogram's walk bins its pixels into, before anything i
 range: fine, starting around the first pixel it sees and doubling to fit whatever arrives after.
 Each task keeps its own and none is ever merged with another. At the end -- or whenever a caller asks
 for a snapshot -- each is re-aggregated onto the caller's bins over the extremes, which are exact,
-and the counts are added. How fine it is, is what `provisional_bins` says.
+and the counts are added. How fine it is, is what `provisional_bin_count` says.
 _Avoid_: partial, accumulator, tile histogram, intermediate histogram
 
 **Spread**:

@@ -21,7 +21,7 @@ enum class ErrorCode {
     ambiguous_schema,
     // A schema profile recognised the dataset, and it does not conform to that schema: a file to
     // complain about, where unsupported_schema is one this library is not for. invalid_metadata is
-    // Zarr's own: a root that will not read or parse, before any profile is asked.
+    // Zarr's own: a root that will not parse, before any profile is asked.
     invalid_schema,
     invalid_argument,
     invalid_metadata,

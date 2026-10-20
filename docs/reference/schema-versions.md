@@ -23,11 +23,15 @@ write.
 | An image dataset that declares no version, as XRADIO 1.2.4 and earlier wrote | Refused | `unsupported_schema_version` |
 | An image dataset that declares another version, an empty string or a non-string value | Refused | `unsupported_schema_version` |
 
-The 0.0.2 checks require data groups naming a sky array typed `sky` and, when
-the frequency coordinate is readable, its `frame` and `units`. They apply even
-to a store that declares 0.0.2: XRADIO 1.2.5 stamps 0.0.2 on an older store it
-upgrades on read, whether or not the upgrade reached those fields. Ordinary
-image and coordinate validation applies after them.
+The 0.0.2 checks require data groups; when they name a sky, a sky array typed
+`sky`; and, when the frequency coordinate is readable, its `frame` and `units`.
+They apply even to a store that declares 0.0.2: XRADIO 1.2.5 stamps 0.0.2 on an
+older store it upgrades on read, whether or not the upgrade reached those
+fields. A store whose data groups name no sky, such as an aperture plane or a
+point spread function alone, is not refused for that: it is decided by what it
+holds, so an aperture-only store is a non-match whose diagnostic says
+aperture-plane variables are not openable. Ordinary image and coordinate
+validation applies after them.
 
 For a refused image dataset, `ProbeSchema` returns `kind == invalid` with the
 reason as its first diagnostic, and `Dataset::Open` returns an error with the

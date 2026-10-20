@@ -41,7 +41,6 @@ inline ChunkGeometry BuildChunkGeometry(const ImageDescriptor& descriptor, const
     const auto rank = descriptor.axes.size();
     geometry.chunk_shape.resize(rank);
     geometry.shard_shape.resize(rank);
-    geometry.grid_shape.resize(rank);
     for (std::size_t logical = 0; logical < rank; ++logical) {
         const auto& axis = descriptor.axes.at(logical);
         const auto stored = axis.storage_index;
@@ -49,8 +48,6 @@ inline ChunkGeometry BuildChunkGeometry(const ImageDescriptor& descriptor, const
         const auto shard = layout.sharded ? layout.shard_shape.at(stored) : chunk;
         geometry.chunk_shape.at(logical) = chunk;
         geometry.shard_shape.at(logical) = shard;
-        // Both extents are positive by the same guarantee, so no zero reaches this division.
-        geometry.grid_shape.at(logical) = (axis.length + chunk - 1) / chunk;
     }
 
     // The last stored dimension varies fastest, so of the two spatial axes the one with the larger

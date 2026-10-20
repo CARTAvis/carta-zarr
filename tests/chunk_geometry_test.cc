@@ -65,8 +65,6 @@ void TestTheLayoutIsReadThroughThePermutation() {
 
     Require(geometry.chunk_shape == std::vector<std::uint64_t>{256, 260, 2, 1, 1},
             "the chunk shape should come back in logical order");
-    Require(geometry.grid_shape == std::vector<std::uint64_t>{2, 2, 16, 4, 2},
-            "and the grid should be each axis's length over its own chunk");
     Require(geometry.fastest_spatial_axis == AxisRole::spatial_y, "m is stored last, so a plane is contiguous along m");
     Require(!geometry.sharded && geometry.shard_shape == geometry.chunk_shape,
             "an unsharded array's shard is its chunk");
@@ -116,8 +114,6 @@ void TestASharedArrayKeepsBothGranularities() {
     Require(geometry.chunk_shape == std::vector<std::uint64_t>{64, 65, 1, 1, 1}, "the inner chunk in logical order");
     Require(geometry.shard_shape == std::vector<std::uint64_t>{256, 260, 4, 1, 1},
             "and the shard in logical order, permuted the same way");
-    Require(geometry.grid_shape == std::vector<std::uint64_t>{8, 8, 32, 4, 2},
-            "the grid counts inner chunks, not shards");
 }
 
 // An axis the layout does not describe is refused rather than filled in.

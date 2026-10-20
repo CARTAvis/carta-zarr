@@ -111,7 +111,7 @@ int Probe(const ProbeOptions& options) {
     }
     auto images = nlohmann::json::array();
     for (const auto& entry : dataset->descriptor().images) {
-        images.push_back({{"id", entry.id}, {"openable", entry.openable}, {"role", entry.image_role}});
+        images.push_back({{"id", entry.id}, {"openable", entry.openable}});
     }
     report["images"] = images;
     const auto& default_id = dataset->descriptor().default_image_id;
@@ -140,7 +140,7 @@ int Probe(const ProbeOptions& options) {
                        {"axes", axes},
                        {"sharded", geometry.sharded},
                        {"compressor", geometry.compressor},
-                       {"has_pixel_mask", descriptor.has_pixel_mask},
+                       {"has_pixel_mask", !descriptor.pixel_mask_id.empty()},
                        {"diagnostics", Diagnostics(descriptor.diagnostics)}};
     if (const auto cube = CubeAxes::Of(descriptor); !cube) {
         return finish(cube.error().message);

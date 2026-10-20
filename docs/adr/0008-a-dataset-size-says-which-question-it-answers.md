@@ -33,7 +33,7 @@ order of magnitude *below* the store.
 
 The obvious repair is to add what is missing: the metadata bytes (the fallback already reads every
 `zarr.json`, so they are nearly in hand), an allowance for compression expansion, and the shard
-index, which is derivable from `grid_shape`.
+index, which is derivable from the shard and chunk shapes.
 
 That still fails, and not by a margin that can be closed. A store is a directory, and a directory
 can hold files that are not Zarr's: an editor's leftovers, a sibling README, a half-written chunk.

@@ -72,12 +72,11 @@ carta::zarr::Image OpenSky() {
 }
 
 void TestIdentityAndAxes(const carta::zarr::ImageDescriptor& sky) {
-    Require(sky.image_role == "sky", "SKY's role is written on its own type attribute");
     // XRADIO 1.2.5 writes the BTYPE of the FITS image it converted.
     Require(sky.sub_type == "Intensity", "SKY's sub_type was '" + sky.sub_type + "'");
     Require(sky.unit == "Jy/beam", "BUNIT did not survive the conversion as the image unit");
     Require(sky.data_groups == std::vector<std::string>{"base"}, "SKY's data group membership changed");
-    Require(!sky.has_pixel_mask, "an image converted from a FITS with no mask reported a pixel mask");
+    Require(sky.pixel_mask_id.empty(), "an image converted from a FITS with no mask reported a pixel mask");
 
     // The FITS was (RA 5, DEC 4, STOKES 3, FREQ 2); the XRADIO profile reports its own logical order.
     // That order is the profile's rather than a promise of the public API, which reaches an axis by
@@ -136,10 +135,6 @@ void TestSpectralAndPolarization(const carta::zarr::ImageDescriptor& sky) {
     RequireClose(spectral.values.at(0), 1.4e9, 1.0, "first channel frequency");
     RequireClose(spectral.values.at(1), 1.401e9, 1.0, "second channel frequency");
     Require(spectral.unit == "Hz", "the frequency unit was not taken from frequency's units");
-    // The spectral axis reports the unit its coordinate does, from the same units attribute.
-    const auto spectral_axis = carta::zarr::AxisIndex(sky.axes, carta::zarr::AxisRole::spectral);
-    Require(spectral_axis && sky.axes.at(*spectral_axis).unit == spectral.unit,
-            "the spectral axis reported a unit other than its coordinate's");
     Require(spectral.reference_frame == "LSRK", "SPECSYS was not normalized to the canonical spectral system");
     Require(spectral.rest_frequency.has_value(), "RESTFRQ was dropped");
     RequireClose(*spectral.rest_frequency, 1.420405751e9, 1.0, "rest frequency");
@@ -233,9 +228,9 @@ void TestFlagsMaskTheirOwnImage(const carta::zarr::Dataset& dataset, const std::
     Require(static_cast<bool>(opened), image_id + " could not be opened");
     const auto& image = opened.value();
     const auto& descriptor = image.descriptor();
-    Require(descriptor.has_pixel_mask && descriptor.pixel_mask_id == flag_id,
-            image_id + " should take " + flag_id + ", which data_groups names as its flag, and took '" +
-                descriptor.pixel_mask_id + "'");
+    Require(descriptor.pixel_mask_id == flag_id, image_id + " should take " + flag_id +
+                                                     ", which data_groups names as its flag, and took '" +
+                                                     descriptor.pixel_mask_id + "'");
     Require(std::none_of(descriptor.diagnostics.begin(), descriptor.diagnostics.end(),
                          [](const carta::zarr::Diagnostic& diagnostic) {
                              return diagnostic.code == carta::zarr::DiagnosticCode::ambiguous_pixel_mask;
@@ -369,8 +364,8 @@ void TestApertureConversion() {
     Require(aperture.axes.size() == 5 && aperture.axes.at(0).name == "u" &&
                 aperture.axes.at(0).role == AxisRole::spatial_x && aperture.axes.at(0).length == 5 &&
                 aperture.axes.at(1).name == "v" && aperture.axes.at(1).role == AxisRole::spatial_y &&
-                aperture.axes.at(1).length == 4 && aperture.axes.at(0).unit == "lambda",
-            "u and v were not the spatial axes, first, in wavelengths");
+                aperture.axes.at(1).length == 4,
+            "u and v were not the spatial axes, first");
     Require(!aperture.direction.has_value(), "an aperture-plane image reported a direction");
     Require(aperture.aperture.has_value(), "an aperture-plane image reported no aperture coordinate");
     const auto& plane = *aperture.aperture;
@@ -386,8 +381,7 @@ void TestApertureConversion() {
     Require(aperture.spectral.has_value() && aperture.polarization.has_value(),
             "the aperture-plane image lost its spectral or polarization coordinate");
 
-    Require(aperture.has_pixel_mask && aperture.pixel_mask_id == "FLAG_APERTURE",
-            "FLAG_APERTURE was not found as the image's mask");
+    Require(aperture.pixel_mask_id == "FLAG_APERTURE", "FLAG_APERTURE was not found as the image's mask");
     // Two pixels are masked: (u 0, v 0) at the first channel and polarization, (u 2, v 1) at the second
     // of each. A plane is read with u fastest.
     const auto unmasked = ReadPlane(image, 0, 0, false);

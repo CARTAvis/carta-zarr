@@ -439,9 +439,8 @@ void TestReferenceFixture() {
             "native pole direction was not preserved in degrees");
     Require(desc.direction->reference_pixel.at(0) == 2.0 && desc.direction->reference_pixel.at(1) == 3.0,
             "direction reference pixels were not located from the coordinate values");
-    Require(desc.image_role == "sky", "image role was not read from the variable's type attribute");
     Require(desc.data_groups == std::vector<std::string>{"base"}, "data group references were not reported");
-    Require(desc.has_pixel_mask, "the image's own flag attribute did not localize its pixel mask");
+    Require(!desc.pixel_mask_id.empty(), "the image's own flag attribute did not localize its pixel mask");
     Require(desc.spectral.has_value(), "SpectralCoordinate missing in reference fixture");
     Require(desc.spectral->values == std::vector<double>{1.4e9, 1.401e9, 1.403e9},
             "spectral channel table was not preserved");
@@ -475,10 +474,9 @@ void TestReferenceFixture() {
 
     const auto model = dataset.value().OpenImage("SKY_MODEL");
     Require(static_cast<bool>(model), "SKY_MODEL image could not be opened");
-    Require(model.value().descriptor().image_role == "model", "SKY_MODEL descriptor used the wrong image role");
     Require(model.value().descriptor().data_groups == std::vector<std::string>{"model"},
             "SKY_MODEL data group metadata was not isolated");
-    Require(model.value().descriptor().has_pixel_mask, "SKY_MODEL did not use the unique shape-matching flag");
+    Require(!model.value().descriptor().pixel_mask_id.empty(), "SKY_MODEL did not use the unique shape-matching flag");
 
     const auto residual = dataset.value().OpenImage("SKY_RESIDUAL");
     Require(static_cast<bool>(residual), "SKY_RESIDUAL image could not be opened");
@@ -699,7 +697,7 @@ void TestANodeNameSpelledWithADotIsTheSameNode(const std::filesystem::path& root
     Require(static_cast<bool>(dataset), "the dotted-flag dataset did not open");
     const auto image = dataset.value().OpenImage("SKY");
     Require(static_cast<bool>(image), "SKY did not open in the dotted-flag dataset");
-    Require(image.value().descriptor().has_pixel_mask,
+    Require(!image.value().descriptor().pixel_mask_id.empty(),
             "a flag spelled with a leading ./ was not accepted while describing the image");
 
     // One pixel on every axis, so this says nothing about order and only asks whether the read
@@ -1080,24 +1078,20 @@ void TestAnEntrySaysWhatOpeningWould() {
         const auto image = dataset->OpenImage(entry.id);
         Require(static_cast<bool>(image), "entry " + entry.id + " is openable and did not open");
         const auto& described = image->descriptor();
-        Require(entry.image_role == described.image_role, "entry " + entry.id + " says its role is '" +
-                                                              entry.image_role + "' and opens as '" +
-                                                              described.image_role + "'");
         Require(entry.axes.size() == described.axes.size(),
                 "entry " + entry.id + " reports a different number of axes than it opens with");
         for (std::size_t axis = 0; axis < entry.axes.size(); ++axis) {
             const auto& listed = entry.axes.at(axis);
             const auto& actual = described.axes.at(axis);
             Require(listed.name == actual.name && listed.role == actual.role && listed.length == actual.length &&
-                        listed.unit == actual.unit && listed.storage_index == actual.storage_index,
+                        listed.storage_index == actual.storage_index,
                     "entry " + entry.id + " reports axis " + std::to_string(axis) + " as '" + listed.name +
-                        "' and opens with '" + actual.name + "' there, or differs in its length, unit or storage");
+                        "' and opens with '" + actual.name + "' there, or differs in its length or storage");
         }
     }
     Require(opened > 1 && refused > 0,
             "the reference fixture should list both images that open and images that do not, or this "
             "compares too little");
-    Require(dataset->descriptor().images.front().image_role == "sky", "SKY should list its role");
 }
 
 int main() {

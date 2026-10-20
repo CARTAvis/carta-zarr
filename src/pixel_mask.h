@@ -23,7 +23,7 @@ namespace carta::zarr::internal {
 // the pass both ask it, and a read that disagreed with a reduction about which pixels exist is the
 // one failure neither reports. They asked it in two places, each writing out the same conjunction.
 inline bool AppliesPixelMask(const ReadOptions& options, const ImageDescriptor& descriptor) noexcept {
-    return options.apply_pixel_mask && descriptor.has_pixel_mask;
+    return options.apply_pixel_mask && !descriptor.pixel_mask_id.empty();
 }
 
 /**

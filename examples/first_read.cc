@@ -48,7 +48,7 @@ int main(int argc, char** argv) {
     }
     const auto& entries = descriptor.images;
     for (const auto& entry : entries) {
-        std::cout << entry.id << " openable=" << entry.openable << " role=" << entry.image_role << '\n';
+        std::cout << entry.id << " openable=" << entry.openable << '\n';
         for (const auto& diagnostic : entry.diagnostics) {
             std::cout << "  " << DiagnosticCodeName(diagnostic.code) << ": " << diagnostic.message << '\n';
         }

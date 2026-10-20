@@ -38,9 +38,6 @@ enum class DiagnosticCode {
     unrecognised_node,
     // An array whose metadata would not parse.
     unreadable_array,
-    // No longer emitted: a real image of the aperture plane opens, and a complex one on either plane
-    // is unsupported_data_type (ADR 0024). Kept so that the codes after it keep their values.
-    unsupported_coordinate_plane,
     // More than one flag variable claims the same image.
     ambiguous_pixel_mask,
     // A coordinate whose samples are not evenly spaced, so it has no linear description.
@@ -67,8 +64,6 @@ inline const char* DiagnosticCodeName(DiagnosticCode code) noexcept {
             return "unrecognised_node";
         case DiagnosticCode::unreadable_array:
             return "unreadable_array";
-        case DiagnosticCode::unsupported_coordinate_plane:
-            return "unsupported_coordinate_plane";
         case DiagnosticCode::ambiguous_pixel_mask:
             return "ambiguous_pixel_mask";
         case DiagnosticCode::nonuniform_axis:
@@ -134,7 +129,6 @@ struct AxisDescriptor {
     std::string name;
     AxisRole role = AxisRole::other;
     std::uint64_t length = 0;
-    std::string unit;
     std::size_t storage_index = 0;
 };
 
@@ -163,9 +157,6 @@ struct ImageEntry {
     std::string id;
     bool openable = false;
     std::vector<Diagnostic> diagnostics;
-    // The part the image plays in its data group, as ImageDescriptor::image_role reports it. Empty
-    // when the variable does not say.
-    std::string image_role;
     // The axes Dataset::OpenImage would report for this image -- ImageDescriptor::axes, element for
     // element -- and empty when it is not openable.
     //
@@ -320,8 +311,6 @@ struct ChunkGeometry {
     AxisRole fastest_spatial_axis = AxisRole::spatial_x;
     std::vector<std::uint64_t> chunk_shape;
     std::vector<std::uint64_t> shard_shape;
-    // Number of inner chunks along each axis.
-    std::vector<std::uint64_t> grid_shape;
     bool sharded = false;
     std::string compressor;
 };
@@ -362,7 +351,6 @@ struct DatasetSize {
 
 struct ImageDescriptor {
     std::string id;
-    std::string image_role;
     // What a sky image measures, as XRADIO image schema 0.0.2 names it from casacore's image type or
     // FITS BTYPE ("Intensity", "SpectralIndex", "OpticalDepth", ...). Empty when the image names none.
     std::string sub_type;
@@ -372,7 +360,6 @@ struct ImageDescriptor {
     // than by position; storage_index says where each one lives on disk.
     std::vector<AxisDescriptor> axes;
     std::string unit;
-    bool has_pixel_mask = false;
     // The flag variable supplying this image's pixel mask, empty when it has none. Reported for the
     // same reason `id` is: it names a data variable the consumer may want to see in diagnostics.
     std::string pixel_mask_id;

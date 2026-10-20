@@ -11,8 +11,8 @@
 // holds, what makes one well formed, whether an image agrees with them, what unit each is in, and
 // reading their values.
 //
-// Said once so that an axis and its coordinate cannot disagree, about the unit above all: one rule
-// for it, so that no image reports its spectral axis unitless and its spectral coordinate in Hz.
+// Said once so that the listing and a descriptor cannot disagree about an image's axes, nor two
+// places about what a coordinate's unit is.
 //
 // Who asks what is ADR 0009's division: the probe asks whether each coordinate is
 // well formed, which is a fact about the dataset; qualification asks whether an image agrees with
@@ -128,12 +128,12 @@ std::optional<Diagnostic> ExtentDisagreement(const Store& store, const zarr::Arr
                                              std::string_view node);
 
 // The unit a coordinate's samples are in, its units attribute, or empty when the dataset does not
-// say. Both the axis and the spectral coordinate report this, so they cannot disagree.
+// say. The coordinate a descriptor reports it in is the only place it is said.
 std::string CoordinateUnit(const Store& store, const Coordinate& coordinate);
 
-// The axes of an image, in logical order, each with its length, its unit and where it sits in the
-// stored order. The same list for the listing and for a descriptor, from metadata alone.
-std::vector<AxisDescriptor> DescribeAxes(const Store& store, const zarr::ArrayMetadata& image);
+// The axes of an image, in logical order, each with its length and where it sits in the stored order.
+// The same list for the listing and for a descriptor, from the image's metadata alone.
+std::vector<AxisDescriptor> DescribeAxes(const zarr::ArrayMetadata& image);
 
 // The samples of the dataset's coordinates, which is everything a description reads besides
 // metadata. Read, every one is there; one left empty is one handed in that way, and describes no

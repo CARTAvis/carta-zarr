@@ -102,7 +102,6 @@ void TestAxesAndGeometry(const carta::zarr::Image& sky) {
     const auto& geometry = sky.chunk_geometry();
     Require(geometry.chunk_shape == std::vector<std::uint64_t>{2, 5, 1, 1, 1},
             "chunk shape should be reported in logical order");
-    Require(geometry.grid_shape == std::vector<std::uint64_t>{2, 1, 2, 3, 1}, "chunk grid shape is wrong");
     // Nothing in this fixture is sharded, so one I/O request still fetches one chunk.
     Require(!geometry.sharded && geometry.shard_shape == geometry.chunk_shape,
             "an unsharded array should report its chunk shape as the I/O granularity");
@@ -183,7 +182,6 @@ void TestAStrideOverOneElementIsNoStride(const carta::zarr::Image& sky) {
 // The flag is not read on its own: it reaches a caller as NaN in the pixels it marks, which is how
 // CARTA reports a masked pixel anyway. The descriptor still says there is one, and which it is.
 void TestMaskFusion(const carta::zarr::Image& sky) {
-    Require(sky.descriptor().has_pixel_mask, "the fixture image declares a flag variable");
     Require(sky.descriptor().pixel_mask_id == "FLAG", "the pixel mask should name the flag variable");
 
     const auto request = WholeImage(sky.descriptor());

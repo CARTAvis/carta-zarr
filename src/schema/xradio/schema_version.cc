@@ -15,7 +15,9 @@ namespace {
 // Why a store naming 0.0.2 is not one, or nothing when it is. Three things schema 0.0.2 requires,
 // checked rather than the whole schema, because they are what this library reads that older stores
 // lack: a store XRADIO 1.2.5 upgraded on read is stamped 0.0.2 whether or not the upgrade could
-// reach them.
+// reach them. The sky's two apply to a store whose data groups name a sky. The schema does not
+// require one: an aperture-plane store or a point spread function alone is well formed without it,
+// and is left to the profile, which opens what it can and says why it will not open the rest.
 std::optional<Diagnostic> WhyNot002(const Store& store) {
     const auto not_002 = [](const std::string& why, std::string node_path) {
         return Diagnostic{DiagnosticCode::invalid_metadata,
@@ -35,7 +37,7 @@ std::optional<Diagnostic> WhyNot002(const Store& store) {
         sky = AttributeString(group.value(), "sky");
     }
     if (sky.empty()) {
-        return not_002("no data group names a sky image", "/attributes/data_groups");
+        return std::nullopt;
     }
     const auto& image = store.ReadArrayMetadata(sky);
     if (!image) {

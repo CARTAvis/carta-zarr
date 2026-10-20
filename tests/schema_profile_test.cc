@@ -1594,10 +1594,6 @@ void TestA002StoreThatIsNotOneIsInvalid() {
     no_groups[""] = RootWith(R"("schema_version":"0.0.2")");
     invalid(no_groups, "it has no data_groups");
 
-    auto no_sky = Store002();
-    no_sky[""] = RootWith(R"("schema_version":"0.0.2","data_groups":{"base":{"flag":"FLAG_SKY"}})");
-    invalid(no_sky, "no data group names a sky image");
-
     auto intensity = Store002();
     intensity["SKY"] = SkyArray("float32", R"({"units":"Jy/beam","type":"Intensity"})");
     invalid(intensity, "its sky image SKY is not typed \"sky\"");
@@ -1611,6 +1607,80 @@ void TestA002StoreThatIsNotOneIsInvalid() {
     no_units["frequency"] =
         FrequencyArray("[3]", R"({"frame":"GEO","reference_frequency":{"data":1.4e9,"attrs":{"units":"Hz"}}})");
     invalid(no_units, "its frequency coordinate has no frame or no units");
+}
+
+// Schema 0.0.2 does not require a sky image, and XRADIO writes stores without one: an aperture plane
+// alone, or a point spread function alone. Such a store is not malformed for it, and is decided by
+// what it holds, as any other store is (#40). The sky's own checks still apply to a store that names
+// one, which TestA002StoreThatIsNotOneIsInvalid holds.
+void TestA002StoreNamingNoSkyIsDecidedByWhatItHolds() {
+    using carta::zarr::internal::ProbeStore;
+    using carta::zarr::internal::RequireOpenableDataset;
+
+    const auto probe_of = [](const std::map<std::string, std::string>& nodes) {
+        auto store = Open(nodes);
+        Require(static_cast<bool>(store), "the in-memory store failed to open");
+        auto probe = ProbeStore(store.value());
+        Require(static_cast<bool>(probe), "ProbeStore reported an error for a well-formed store");
+        return std::move(probe.value());
+    };
+    const auto aperture_plane = R"(["time","frequency","polarization","u","v"])";
+
+    // What XRADIO 1.3.0 writes from a CASA image of the aperture plane: its data group names the
+    // aperture, its flag is named by nothing, and it has no coordinate system, having no direction.
+    std::map<std::string, std::string> aperture{
+        {"", RootWith(R"("type":"image_dataset","schema_version":"0.0.2",
+                         "data_groups":{"base":{"aperture":"APERTURE"}})",
+                      false)},
+        {"APERTURE", SkyArray("float32", R"({"units":"Jy/beam","type":"aperture"})", aperture_plane)},
+        {"FLAG_APERTURE", SkyArray("bool", R"({"type":"flag"})", aperture_plane)},
+        {"time", NumericArray("[1]", R"(["time"])")},
+        {"frequency", FrequencyArray()},
+        {"polarization", PolarizationArray()},
+        {"u", NumericArray("[4]", R"(["u"])", "float64", R"({"units":"lambda"})")},
+        {"v", NumericArray("[5]", R"(["v"])", "float64", R"({"units":"lambda"})")},
+    };
+    const auto aperture_only = probe_of(aperture);
+    Require(aperture_only.kind == ProbeKind::zarr_without_supported_schema,
+            "a store of aperture-plane variables alone was not reported as one this library does not open");
+    Require(!HasDiagnostic(aperture_only.diagnostics, carta::zarr::DiagnosticCode::invalid_metadata),
+            "a store of aperture-plane variables alone was called malformed");
+    Require(HasDiagnostic(aperture_only.diagnostics, carta::zarr::DiagnosticCode::unsupported_coordinate_plane) &&
+                aperture_only.diagnostics.front().node_path == "APERTURE",
+            "a store of aperture-plane variables alone did not say why it is not opened");
+    const auto refused = RequireOpenableDataset(aperture_only, "/tmp/store");
+    Require(!refused && refused.error().code == ErrorCode::unsupported_schema &&
+                refused.error().message == "Aperture-plane variables are not openable",
+            "a store of aperture-plane variables alone was not refused as one this library is not for");
+
+    // Next to a sky, the aperture is listed as not openable and the sky opens.
+    auto both = Store002();
+    both[""] = RootWith(R"("schema_version":"0.0.2",
+        "data_groups":{"base":{"sky":"SKY"},"aperture":{"aperture":"APERTURE"}})");
+    both["APERTURE"] = SkyArray("float32", R"({"units":"Jy/beam","type":"aperture"})", aperture_plane);
+    both["u"] = NumericArray("[4]", R"(["u"])", "float64", R"({"units":"lambda"})");
+    both["v"] = NumericArray("[5]", R"(["v"])", "float64", R"({"units":"lambda"})");
+    const auto mixed = probe_of(both);
+    Require(mixed.kind == ProbeKind::supported_dataset && mixed.default_image_id == "SKY",
+            "a store with a sky and an aperture did not open on the sky");
+    Require(ImageIds(mixed.images) == std::vector<std::string>{"SKY", "APERTURE"} &&
+                OpenableImageIds(mixed.images) == std::vector<std::string>{"SKY"},
+            "a store with a sky and an aperture did not list the aperture as not openable");
+
+    // A point spread function alone, whose data group XRADIO's factory writes with no sky, opens.
+    auto psf = Store002();
+    psf.erase("SKY");
+    psf[""] = RootWith(
+        R"("schema_version":"0.0.2","data_groups":{"base":{"point_spread_function":"POINT_SPREAD_FUNCTION"}})");
+    psf["POINT_SPREAD_FUNCTION"] = SkyArray("float32", R"({"units":"","type":"point_spread_function"})");
+    const auto psf_only = probe_of(psf);
+    Require(psf_only.kind == ProbeKind::supported_dataset && psf_only.default_image_id == "POINT_SPREAD_FUNCTION",
+            "a store of a point spread function alone did not open on it");
+    auto psf_store = Open(psf);
+    Require(static_cast<bool>(psf_store), "the in-memory store failed to open");
+    Require(static_cast<bool>(carta::zarr::internal::xradio::DescribeImageFrom(
+                psf_store.value(), "POINT_SPREAD_FUNCTION", carta::zarr::internal::xradio::CoordinateValues{})),
+            "a point spread function in a store naming no sky was not described");
 }
 
 // Another version is refused as that, ahead of anything else wrong with the store, with an
@@ -1796,6 +1866,7 @@ int main() {
         TestAStoreOfSchema002IsRead();
         TestAStoreNamingNoVersionIsRefused();
         TestA002StoreThatIsNotOneIsInvalid();
+        TestA002StoreNamingNoSkyIsDecidedByWhatItHolds();
         TestAnUnreadSchemaVersionIsRefused();
         TestAnIntegerSkyImageXradioWroteOpens();
         TestAnotherDatasetNamingAVersionIsNotAnImage();

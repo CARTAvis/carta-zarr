@@ -70,6 +70,11 @@ direction and four cards XRADIO keeps uninterpreted, a string, a number, an inte
 `pointing_center` and the rest, lower-cased, as its `user`; the cube has neither, so its pointing
 centre is its reference direction and its `user` is empty.
 
+`images/zarr/xradio/conformance_aperture` is the amplitude of the cube's Fourier transform over its
+two direction axes, as CASA's `ia.fft` makes it, with a mask over two known pixels: a real image of
+the aperture plane, like CARTA's `UVamp.image`. XRADIO writes it as `APERTURE` on `u` and `v` in
+wavelengths, with `FLAG_APERTURE` that no data group names and no `coordinate_system_info`.
+
 XRADIO 1.2.5 writes them as image schema 0.0.2, the only schema this library reads
 ([ADR 0023](../../docs/adr/0023-only-xradio-image-schema-0-0-2-is-read.md)).
 

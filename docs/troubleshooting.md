@@ -24,7 +24,7 @@ std::cerr << '\n';
 | `invalid_schema` from `Dataset::Open` | The dataset is an XRADIO image dataset that does not conform to its schema; the message is the probe's first diagnostic |
 | `invalid_metadata` from `Dataset::Open` | Check that the root `zarr.json` parses as JSON and describes a Zarr v3 group |
 | `unsupported_schema_version` | Check the dataset's root `schema_version`: only 0.0.2 can be read; write an older store again with XRADIO 1.2.5 or later |
-| An entry has `openable == false` | Inspect its diagnostics; complex, aperture-plane and unsupported boolean candidates cannot be opened |
+| An entry has `openable == false` | Inspect its diagnostics; complex and unsupported boolean candidates cannot be opened, nor an aperture-plane variable whose `u` or `v` coordinate is missing |
 | `invalid_metadata` during `OpenImage` | Check that the image, its coordinates and its declared flag agree, and that consolidated metadata matches each array's own document |
 | `invalid_slice` | Check that the ranges, plane indices and regions fit the descriptor axes and use valid counts and strides |
 | `buffer_too_small` during a read | Check that the destination's size, in elements, covers the product of the selected counts |

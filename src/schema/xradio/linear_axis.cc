@@ -109,11 +109,15 @@ LinearAxisFit FitLinearAxis(const std::vector<double>& values, std::optional<dou
     return fit;
 }
 
-DirectionAxisFit FitDirectionAxis(const std::vector<double>& cosines, std::string_view axis_name) {
-    auto fit = FitLinearAxis(cosines, std::nullopt, axis_name);
+namespace {
+
+// The fit of an axis that is linear by construction, its increment scaled by `scale`.
+DirectionAxisFit FitConstructedAxis(const std::vector<double>& values, std::optional<double> reference, double scale,
+                                    std::string_view axis_name) {
+    auto fit = FitLinearAxis(values, reference, axis_name);
     DirectionAxisFit direction;
     if (fit.increment) {
-        direction.increment = *fit.increment * kRadToDeg;
+        direction.increment = *fit.increment * scale;
     }
     direction.reference_pixel = fit.reference_pixel;
     direction.diagnostics = std::move(fit.diagnostics);
@@ -134,6 +138,17 @@ DirectionAxisFit FitDirectionAxis(const std::vector<double>& cosines, std::strin
                            axis_name));
     }
     return direction;
+}
+
+}  // namespace
+
+DirectionAxisFit FitDirectionAxis(const std::vector<double>& cosines, std::string_view axis_name) {
+    return FitConstructedAxis(cosines, std::nullopt, kRadToDeg, axis_name);
+}
+
+DirectionAxisFit FitApertureAxis(const std::vector<double>& values, std::optional<double> reference,
+                                 std::string_view axis_name) {
+    return FitConstructedAxis(values, reference, 1.0, axis_name);
 }
 
 SpectralAxisFit FitSpectralAxis(const std::vector<double>& channels, double reference, std::string_view axis_name) {

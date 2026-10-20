@@ -17,13 +17,14 @@ namespace {
 
 namespace zarr_metadata = ::carta::zarr::internal::zarr;
 
-// Where a numeric coordinate's samples go, by the axis it is.
-std::vector<double>* NumericValuesOf(CoordinateValues& values, AxisRole role) {
-    switch (role) {
+// Where a numeric coordinate's samples go, by the axis it is on its plane.
+std::vector<double>* NumericValuesOf(CoordinateValues& values, const Coordinate& coordinate) {
+    const bool sky = coordinate.plane == Plane::sky;
+    switch (coordinate.role) {
         case AxisRole::spatial_x:
-            return &values.l;
+            return sky ? &values.l : &values.u;
         case AxisRole::spatial_y:
-            return &values.m;
+            return sky ? &values.m : &values.v;
         case AxisRole::spectral:
             return &values.frequency;
         case AxisRole::time:
@@ -47,6 +48,16 @@ bool CarriesPlane(const zarr_metadata::ArrayMetadata& variable, Plane plane) {
     return std::all_of(kCoordinates.begin(), kCoordinates.end(), [&](const Coordinate& coordinate) {
         return !OnPlane(coordinate, plane) || zarr_metadata::FindDimensionIndex(variable, coordinate.name).has_value();
     });
+}
+
+std::optional<Plane> PlaneOf(const zarr_metadata::ArrayMetadata& variable) {
+    if (CarriesPlane(variable, Plane::sky)) {
+        return Plane::sky;
+    }
+    if (CarriesPlane(variable, Plane::aperture)) {
+        return Plane::aperture;
+    }
+    return std::nullopt;
 }
 
 Result<void> CheckCoordinate(const zarr_metadata::ArrayMetadata& array, const Coordinate& coordinate) {
@@ -94,10 +105,11 @@ std::string CoordinateUnit(const Store& store, const Coordinate& coordinate) {
 }
 
 std::vector<AxisDescriptor> DescribeAxes(const Store& store, const zarr_metadata::ArrayMetadata& image) {
+    const auto plane = PlaneOf(image).value_or(Plane::sky);
     std::vector<AxisDescriptor> axes;
-    axes.reserve(AxisCount(Plane::sky));
+    axes.reserve(AxisCount(plane));
     for (const auto& coordinate : kCoordinates) {
-        if (!OnPlane(coordinate, Plane::sky)) {
+        if (!OnPlane(coordinate, plane)) {
             continue;
         }
         const auto index = zarr_metadata::FindDimensionIndex(image, coordinate.name);
@@ -110,13 +122,13 @@ std::vector<AxisDescriptor> DescribeAxes(const Store& store, const zarr_metadata
     return axes;
 }
 
-Result<CoordinateValues> ReadCoordinateValues(const Store& store) {
-    // Every one of them, because every one is required: the probe refused a dataset missing one
+Result<CoordinateValues> ReadCoordinateValues(const Store& store, Plane plane) {
+    // Every one of the plane's, because every one is required: the probe refused a dataset missing one
     // before an image of it could be described. A coordinate that cannot be read fails describing
     // rather than leaving a hole, the polarization labels included, whatever the reason.
     CoordinateValues values;
     for (const auto& coordinate : kCoordinates) {
-        if (!OnPlane(coordinate, Plane::sky)) {
+        if (!OnPlane(coordinate, plane)) {
             continue;
         }
         if (coordinate.kind == CoordinateKind::labels) {
@@ -131,7 +143,7 @@ Result<CoordinateValues> ReadCoordinateValues(const Store& store) {
         if (!samples) {
             return samples.error();
         }
-        *NumericValuesOf(values, coordinate.role) = samples.value().values();
+        *NumericValuesOf(values, coordinate) = samples.value().values();
     }
     return values;
 }

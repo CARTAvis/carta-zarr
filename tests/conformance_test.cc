@@ -348,6 +348,61 @@ void TestKeywordsConversion() {
     Require(sky.user_keywords.size() == 4, "a card XRADIO interprets was reported as a user keyword");
 }
 
+// The amplitude of the cube's transform, an image of the aperture plane as CASA's ia.fft makes one,
+// converted by XRADIO 1.2.5. u and v play the spatial roles, so the reads and reductions reach them
+// as they reach l and m; it has an aperture coordinate and no direction; its mask is FLAG_APERTURE,
+// found by its shape since no data group names it; and it has no beams.
+void TestApertureConversion() {
+    const std::filesystem::path fixture{CARTA_ZARR_CONFORMANCE_APERTURE_FIXTURE};
+    const auto context = carta::zarr::Context::Create();
+    Require(static_cast<bool>(context), "Context::Create failed");
+    auto dataset = carta::zarr::Dataset::Open(context.value(), fixture.string());
+    Require(static_cast<bool>(dataset),
+            "Dataset::Open failed on XRADIO's aperture-plane image: " + (dataset ? "" : dataset.error().message));
+    Require(dataset.value().descriptor().default_image_id == "APERTURE",
+            "the aperture-plane image was not the one the dataset opens on");
+    auto opened = dataset.value().OpenImage("APERTURE");
+    Require(static_cast<bool>(opened), "APERTURE could not be opened");
+    const auto& image = opened.value();
+    const auto& aperture = image.descriptor();
+
+    Require(aperture.axes.size() == 5 && aperture.axes.at(0).name == "u" &&
+                aperture.axes.at(0).role == AxisRole::spatial_x && aperture.axes.at(0).length == 5 &&
+                aperture.axes.at(1).name == "v" && aperture.axes.at(1).role == AxisRole::spatial_y &&
+                aperture.axes.at(1).length == 4 && aperture.axes.at(0).unit == "lambda",
+            "u and v were not the spatial axes, first, in wavelengths");
+    Require(!aperture.direction.has_value(), "an aperture-plane image reported a direction");
+    Require(aperture.aperture.has_value(), "an aperture-plane image reported no aperture coordinate");
+    const auto& plane = *aperture.aperture;
+    Require(plane.unit == "lambda", "the aperture coordinate's unit was '" + plane.unit + "'");
+    // u runs from +2 cells to -2 through zero at its third sample, v from -2 to +1 through zero at its
+    // third; XRADIO writes zero as each one's crval.
+    RequireClose(plane.reference_pixel.at(0), 3.0, 1.0e-9, "u reference pixel");
+    RequireClose(plane.reference_pixel.at(1), 3.0, 1.0e-9, "v reference pixel");
+    RequireClose(plane.reference_value.at(0), 0.0, 1.0e-9, "u reference value");
+    RequireClose(plane.reference_value.at(1), 0.0, 1.0e-9, "v reference value");
+    RequireClose(plane.increment.at(0), -11459.155902616463, 1.0e-6, "u increment");
+    RequireClose(plane.increment.at(1), 14323.94487827058, 1.0e-6, "v increment");
+    Require(aperture.spectral.has_value() && aperture.polarization.has_value(),
+            "the aperture-plane image lost its spectral or polarization coordinate");
+
+    Require(aperture.has_pixel_mask && aperture.pixel_mask_id == "FLAG_APERTURE",
+            "FLAG_APERTURE was not found as the image's mask");
+    // Two pixels are masked: (u 0, v 0) at the first channel and polarization, (u 2, v 1) at the second
+    // of each. A plane is read with u fastest.
+    const auto unmasked = ReadPlane(image, 0, 0, false);
+    const auto masked = ReadPlane(image, 0, 0, true);
+    Require(std::isfinite(unmasked.at(0)) && std::isnan(masked.at(0)), "the masked pixel was not masked");
+    RequireClose(masked.at(2 + (5 * 2)), 190.0, 1.0e-3, "the amplitude at the centre of the plane");
+    const auto first = CountedPerChannel(image, 0);
+    const auto second = CountedPerChannel(image, 1);
+    Require(first.at(0) == 19.0 && first.at(1) == 20.0 && second.at(0) == 20.0 && second.at(1) == 19.0,
+            "a reduction over the aperture plane did not count its masked pixels out");
+
+    const auto beams = image.ReadBeams();
+    Require(beams && beams.value().empty(), "an aperture-plane image reported beams");
+}
+
 }  // namespace
 
 int main() {
@@ -367,6 +422,7 @@ int main() {
         TestFlaggedConversion();
         TestContinuumConversion();
         TestKeywordsConversion();
+        TestApertureConversion();
 
         std::cout << "carta-zarr XRADIO conformance tests passed\n";
         return 0;

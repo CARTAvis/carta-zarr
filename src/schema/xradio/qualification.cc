@@ -72,7 +72,10 @@ NodeQualification QualifyNode(const Store& store, const NodeEntry& entry) {
         return NodeQualification{};
     }
 
-    if (CarriesPlane(array, Plane::sky)) {
+    const auto plane = PlaneOf(array);
+    if (plane) {
+        const bool sky = *plane == Plane::sky;
+        const std::string on_plane = sky ? "sky-plane" : "aperture-plane";
         // A boolean here is a flag that was not typed one, which XRADIO 1.2.2's FITS reader writes. It is
         // not an image, and was called complex for being not real; xarray's int8 encoding of a bool is
         // real and was offered as an image of zeroes and ones. Listed, so that the store says why its
@@ -81,24 +84,53 @@ NodeQualification QualifyNode(const Store& store, const NodeEntry& entry) {
             return NodeQualification{
                 true, false,
                 Diagnostic{DiagnosticCode::unsupported_data_type,
-                           "Boolean sky-plane variables are not openable; a flag is typed 'flag'", std::string(node)},
+                           "Boolean " + on_plane + " variables are not openable; a flag is typed 'flag'",
+                           std::string(node)},
                 false};
         }
+        // On either plane: a complex image, a visibility grid above all, is not one this library
+        // opens (ADR 0024).
         if (!zarr_metadata::IsRealDataType(array.data_type)) {
-            return NodeQualification{true, false,
-                                     Diagnostic{DiagnosticCode::unsupported_data_type,
-                                                "Complex sky-plane variables are not openable", std::string(node)},
-                                     false};
+            return NodeQualification{
+                true, false,
+                Diagnostic{DiagnosticCode::unsupported_data_type, "Complex " + on_plane + " variables are not openable",
+                           std::string(node)},
+                false};
         }
         // The five axes are the whole of what an image is described by, so a sixth would be read with
         // a selection one rank short -- every read refused, from an image listed as openable.
-        if (array.dimension_names.size() != AxisCount(Plane::sky)) {
+        if (array.dimension_names.size() != AxisCount(*plane)) {
             return NodeQualification{true, false,
                                      Diagnostic{DiagnosticCode::invalid_metadata,
-                                                "Sky-plane variable has dimensions beyond time, frequency, "
-                                                "polarization, l and m",
+                                                std::string(sky ? "Sky" : "Aperture") +
+                                                    "-plane variable has dimensions beyond time, frequency, "
+                                                    "polarization, " +
+                                                    (sky ? "l and m" : "u and v"),
                                                 std::string(node)},
                                      true};
+        }
+        // The sky plane's coordinates are the dataset's: the probe closes a dataset missing one. The
+        // aperture plane's belong to its images alone, and an aperture-plane variable written without
+        // them -- a hand-written store's, not XRADIO's -- cannot be described, so it does not open
+        // rather than closing the sky images beside it.
+        if (!sky) {
+            for (const auto& coordinate : kCoordinates) {
+                if (coordinate.plane != Plane::aperture) {
+                    continue;
+                }
+                const auto& metadata = store.ReadArrayMetadata(coordinate.name);
+                const auto checked =
+                    metadata ? CheckCoordinate(metadata.value(), coordinate) : Result<void>{metadata.error()};
+                if (!checked) {
+                    return NodeQualification{
+                        true, false,
+                        Diagnostic{DiagnosticCode::invalid_metadata,
+                                   "Aperture-plane variable's coordinate '" + std::string(coordinate.name) +
+                                       "' is missing or malformed: " + checked.error().message,
+                                   std::string(node)},
+                        true};
+                }
+            }
         }
         if (auto disagreement = ExtentDisagreement(store, array, node); disagreement) {
             return NodeQualification{true, false, std::move(disagreement), true};
@@ -109,15 +141,6 @@ NodeQualification QualifyNode(const Store& store, const NodeEntry& entry) {
             return NodeQualification{true, false, std::move(unusable), true};
         }
         return NodeQualification{true, true, std::nullopt, false};
-    }
-
-    // The Fourier-conjugate plane. Variables on it are images in every other respect, which is why
-    // they are listed with a reason rather than passed over in silence.
-    if (CarriesPlane(array, Plane::aperture)) {
-        return NodeQualification{true, false,
-                                 Diagnostic{DiagnosticCode::unsupported_coordinate_plane,
-                                            "Aperture-plane variables are not openable", std::string(node)},
-                                 false};
     }
 
     // A coordinate array, a normalization variable, a beam table: not an image, and nothing to say.

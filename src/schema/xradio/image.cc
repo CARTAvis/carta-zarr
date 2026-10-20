@@ -42,15 +42,43 @@ bool IsKnownImage(std::string_view image_id) {
     return KnownImageRank(image_id) < kKnownImages.size();
 }
 
-// The dataset carries a well-formed array for every sky-plane coordinate. Both XRADIO readers write
-// all five unconditionally (xds_from_casacore.py and xds_from_fits.py both assign coords["time"]), so
-// a missing coordinate means the store is malformed.
-void RequirePresentCoordinates(ProbeReport& report) {
+// The dataset carries a well-formed array for every coordinate of each plane it has an image of. Both
+// XRADIO readers write all of a plane's unconditionally (xds_from_casacore.py and xds_from_fits.py
+// both assign coords["time"]), so a missing coordinate means the store is malformed.
+void RequirePresentCoordinates(ProbeReport& report, bool sky, bool aperture) {
     for (const auto& coordinate : kCoordinates) {
-        if (OnPlane(coordinate, Plane::sky)) {
+        if ((sky && OnPlane(coordinate, Plane::sky)) || (aperture && OnPlane(coordinate, Plane::aperture))) {
             report.RequireCoordinate(coordinate);
         }
     }
+}
+
+// The aperture plane's linear coordinate, from u's and v's samples and the `crval` XRADIO writes
+// beside them. A degenerate axis leaves its reference pixel and increment at zero, as a direction
+// axis does, and says so.
+ApertureCoordinate DescribeAperture(const Store& store, const std::vector<double>& u_values,
+                                    const std::vector<double>& v_values, std::vector<Diagnostic>& diagnostics) {
+    ApertureCoordinate aperture;
+    aperture.unit = CoordinateUnit(store, PlaneCoordinate(AxisRole::spatial_x, Plane::aperture));
+    const auto set_axis = [&](const std::vector<double>& values, std::size_t axis, std::string_view name) {
+        std::optional<double> reference;
+        if (const auto& metadata = store.ReadArrayMetadata(name); metadata) {
+            reference = MemberNumber(metadata.value().attributes, "crval");
+        }
+        auto fit = FitApertureAxis(values, reference, name);
+        aperture.reference_value.at(axis) = reference.value_or(0.0);
+        if (fit.increment) {
+            aperture.increment.at(axis) = *fit.increment;
+        }
+        if (fit.reference_pixel) {
+            aperture.reference_pixel.at(axis) = *fit.reference_pixel;
+        }
+        diagnostics.insert(diagnostics.end(), std::make_move_iterator(fit.diagnostics.begin()),
+                           std::make_move_iterator(fit.diagnostics.end()));
+    };
+    set_axis(u_values, 0, "u");
+    set_axis(v_values, 1, "v");
+    return aperture;
 }
 
 void AppendDiagnostics(ImageDescriptor& descriptor, std::vector<Diagnostic> diagnostics) {
@@ -322,10 +350,25 @@ Result<SchemaInspection> InspectImages(const Store& store) {
     const auto& first_image = *discovery.default_image_id;
     const auto& array_result = store.ReadArrayMetadata(first_image);
     if (report.RequireArrayMetadata(array_result, first_image)) {
-        RequirePresentCoordinates(report);
-        // Unconditionally: every XRADIO writes it, so a store without it is malformed rather than a
-        // store with no direction to report.
-        report.RequireCoordinateSystem(root_attributes);
+        // The planes of every image that opens, whichever opens first: each needs its own coordinates.
+        bool sky = false;
+        bool aperture = false;
+        for (const auto& entry : discovery.images) {
+            if (!entry.openable) {
+                continue;
+            }
+            const auto& metadata = store.ReadArrayMetadata(entry.id);
+            const auto plane = metadata ? PlaneOf(metadata.value()) : std::nullopt;
+            sky = sky || plane == Plane::sky;
+            aperture = aperture || plane == Plane::aperture;
+        }
+        RequirePresentCoordinates(report, sky, aperture);
+        // Whenever an image of the sky opens: every XRADIO writes it then, so a store without it is
+        // malformed rather than a store with no direction to report. An aperture-plane image has no
+        // direction, and XRADIO writes none for a dataset of them alone.
+        if (sky) {
+            report.RequireCoordinateSystem(root_attributes);
+        }
     }
     if (!report.ok()) {
         return finish(SchemaMatchKind::invalid);
@@ -345,7 +388,9 @@ Result<DescribedImage> DescribeImage(const Store& store, std::string_view image_
     if (const auto& verified = store.VerifyArray(image_id); !verified) {
         return verified.error();
     }
-    auto values = ReadCoordinateValues(store);
+    // Qualified, so on a plane; the store's listing holds its metadata.
+    const auto plane = PlaneOf(store.ReadArrayMetadata(image_id).value()).value_or(Plane::sky);
+    auto values = ReadCoordinateValues(store, plane);
     if (!values) {
         return values.error();
     }
@@ -380,12 +425,17 @@ Result<DescribedImage> DescribeImageFrom(const Store& store, std::string_view im
     descriptor.axes = DescribeAxes(store, image);
 
     // A direction axis is linear by construction, so its increment is reported even when the samples
-    // are not evenly spaced; the fit says so in a diagnostic rather than withholding the value.
-    auto direction = DescribeDirection(root_attrs, values.l, values.m, descriptor.diagnostics);
-    if (!direction) {
-        return direction.error();
+    // are not evenly spaced; the fit says so in a diagnostic rather than withholding the value. So is
+    // an aperture-plane axis, and an image is on one plane or the other (ADR 0024).
+    if (PlaneOf(image).value_or(Plane::sky) == Plane::aperture) {
+        descriptor.aperture = DescribeAperture(store, values.u, values.v, descriptor.diagnostics);
+    } else {
+        auto direction = DescribeDirection(root_attrs, values.l, values.m, descriptor.diagnostics);
+        if (!direction) {
+            return direction.error();
+        }
+        descriptor.direction = std::move(direction.value());
     }
-    descriptor.direction = std::move(direction.value());
 
     // Absent only when no samples were handed in, which reading them never does: every coordinate is
     // required, and the probe refused a dataset missing one. Same for the two below.
@@ -434,6 +484,11 @@ Result<DescribedImage> DescribeImageFrom(const Store& store, std::string_view im
 }
 
 Result<std::vector<Beam>> ReadBeams(const Store& store, std::string_view image_id) {
+    // A beam is the sky's: the aperture plane has none. XRADIO 1.2.5 and 1.3.0 name a
+    // BEAM_FIT_PARAMS_APERTURE on an aperture-plane image all the same, and write no such array.
+    if (const auto& image = store.ReadArrayMetadata(image_id); image && PlaneOf(image.value()) == Plane::aperture) {
+        return std::vector<Beam>{};
+    }
     const auto& sky_meta = store.ReadNodeMetadata(image_id);
     if (!sky_meta) {
         return sky_meta.error();

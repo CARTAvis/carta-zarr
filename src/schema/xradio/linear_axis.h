@@ -70,6 +70,17 @@ struct DirectionAxisFit {
  */
 DirectionAxisFit FitDirectionAxis(const std::vector<double>& cosines, std::string_view axis_name);
 
+/**
+ * The linear description of one aperture-plane axis, u or v, from its samples in wavelengths.
+ *
+ * Linear by construction, as a direction axis is -- a Fourier transform's grid -- so the increment is
+ * kept whether or not the samples came back evenly spaced, and a degenerate axis is said to be one.
+ * `reference` is the value the reference pixel lands on, XRADIO's `crval`; nothing asks for 0.0, the
+ * centre of the plane. Nothing is scaled: the unit is the coordinate's own.
+ */
+DirectionAxisFit FitApertureAxis(const std::vector<double>& values, std::optional<double> reference,
+                                 std::string_view axis_name);
+
 // What a spectral axis makes of a fit. Every field is absent unless the channels are evenly spaced.
 struct SpectralAxisFit {
     std::optional<double> reference_pixel;

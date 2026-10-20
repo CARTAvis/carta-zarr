@@ -38,12 +38,13 @@ namespace carta::zarr::internal::xradio {
 
 // What a coordinate's samples are.
 enum class CoordinateKind {
-    numeric,  // real numbers, read as doubles: l, m, frequency, time
+    numeric,  // real numbers, read as doubles: l, m, u, v, frequency, time
     labels,   // fixed-length UTF-32 strings, decoded by this library: polarization
 };
 
 // Which plane's variables carry a coordinate. A variable carrying every coordinate of a plane is on
-// that plane: the sky plane's are images, the aperture plane's are listed and not opened.
+// that plane, and a real-valued one is an image of it: the sky's, or the aperture plane's, its
+// Fourier conjugate (ADR 0024).
 enum class Plane {
     both,
     sky,
@@ -57,36 +58,44 @@ struct Coordinate {
     Plane plane;
 };
 
-// Every coordinate this profile knows. Those of the sky plane come first, in the order this profile
-// reports an image's axes in, whatever order the store holds them in -- the profile's choice rather
-// than the library's promise, which is only that an axis can be found by its role (ADR 0012).
+// Every coordinate this profile knows, in the order this profile reports an image's axes in: its
+// plane's spatial pair, then the three every plane shares, whatever order the store holds them in --
+// the profile's choice rather than the library's promise, which is only that an axis can be found by
+// its role (ADR 0012). u and v play the spatial roles on the aperture plane as l and m do on the sky
+// (ADR 0024).
 //
-// Every sky-plane coordinate is required. XRADIO writes optional coordinate arrays over the spatial
-// pair alone -- right_ascension and declination are float64 over (l, m) and carry no type attribute
-// -- so a rule keyed on "has l and m" offers those to a consumer as openable images (ADR 0001). Both
-// XRADIO readers write all five unconditionally, so a dataset missing one is malformed.
+// Every coordinate of a plane is required of a dataset with an image of it. XRADIO writes optional
+// coordinate arrays over the spatial pair alone -- right_ascension and declination are float64 over
+// (l, m) and carry no type attribute -- so a rule keyed on "has l and m" offers those to a consumer as
+// openable images (ADR 0001). Both XRADIO readers write all of a plane's unconditionally, so a dataset
+// missing one is malformed.
 inline constexpr std::array<Coordinate, 7> kCoordinates{{
     {"l", AxisRole::spatial_x, CoordinateKind::numeric, Plane::sky},
     {"m", AxisRole::spatial_y, CoordinateKind::numeric, Plane::sky},
+    {"u", AxisRole::spatial_x, CoordinateKind::numeric, Plane::aperture},
+    {"v", AxisRole::spatial_y, CoordinateKind::numeric, Plane::aperture},
     {"frequency", AxisRole::spectral, CoordinateKind::numeric, Plane::both},
     {"polarization", AxisRole::polarization, CoordinateKind::labels, Plane::both},
     {"time", AxisRole::time, CoordinateKind::numeric, Plane::both},
-    {"u", AxisRole::other, CoordinateKind::numeric, Plane::aperture},
-    {"v", AxisRole::other, CoordinateKind::numeric, Plane::aperture},
 }};
 
 constexpr bool OnPlane(const Coordinate& coordinate, Plane plane) noexcept {
     return coordinate.plane == Plane::both || coordinate.plane == plane;
 }
 
-// The sky-plane coordinate playing `role`. Every role but `other` has exactly one.
-constexpr const Coordinate& SkyCoordinate(AxisRole role) noexcept {
+// The coordinate of `plane` playing `role`. Every role but `other` has exactly one on each plane.
+constexpr const Coordinate& PlaneCoordinate(AxisRole role, Plane plane) noexcept {
     for (const auto& coordinate : kCoordinates) {
-        if (coordinate.role == role && OnPlane(coordinate, Plane::sky)) {
+        if (coordinate.role == role && OnPlane(coordinate, plane)) {
             return coordinate;
         }
     }
     return kCoordinates.front();
+}
+
+// The sky-plane coordinate playing `role`.
+constexpr const Coordinate& SkyCoordinate(AxisRole role) noexcept {
+    return PlaneCoordinate(role, Plane::sky);
 }
 
 // How many coordinates a variable on `plane` carries: the whole of what it is described by, so a
@@ -95,6 +104,10 @@ std::size_t AxisCount(Plane plane) noexcept;
 
 // Whether a variable names every coordinate of `plane` among its dimensions.
 bool CarriesPlane(const zarr::ArrayMetadata& variable, Plane plane);
+
+// The plane a variable is on: the sky when it carries the sky's coordinates, the aperture plane when
+// it carries that plane's and not the sky's, and nothing when it carries neither whole.
+std::optional<Plane> PlaneOf(const zarr::ArrayMetadata& variable);
 
 // Whether a coordinate array is well formed in itself: one-dimensional, over an axis of its own name,
 // holding what its kind says -- a real type, or labels in a layout this library can decode. Asked of
@@ -128,14 +141,16 @@ std::vector<AxisDescriptor> DescribeAxes(const Store& store, const zarr::ArrayMe
 struct CoordinateValues {
     std::vector<double> l;
     std::vector<double> m;
+    std::vector<double> u;
+    std::vector<double> v;
     std::vector<double> frequency;
     std::vector<double> time;
     std::vector<std::string> polarization;
 };
 
-// Every sky-plane coordinate's samples, each read through the store and so held to its own document
-// (Store::VerifyArray).
-Result<CoordinateValues> ReadCoordinateValues(const Store& store);
+// The samples of every coordinate of `plane`, each read through the store and so held to its own
+// document (Store::VerifyArray). Those of the other plane are left empty: a dataset need not have them.
+Result<CoordinateValues> ReadCoordinateValues(const Store& store, Plane plane);
 
 }  // namespace carta::zarr::internal::xradio
 

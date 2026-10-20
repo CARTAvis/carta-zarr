@@ -26,6 +26,7 @@
 #include "zarr/pixel_selection.h"
 
 #include <algorithm>
+#include <array>
 #include <chrono>
 #include <cmath>
 #include <cstdint>
@@ -270,10 +271,11 @@ void TestNothingOpenableSaysWhy() {
     refused(encoded, carta::zarr::DiagnosticCode::unsupported_data_type,
             "Boolean sky-plane variables are not openable; a flag is typed 'flag'");
 
+    // A real aperture-plane variable is an image (ADR 0024); a complex one is not, on either plane.
     auto aperture = CompleteStore();
-    aperture["SKY"] = SkyArray("float32", R"({"type":"sky"})", R"(["time","frequency","polarization","u","v"])");
-    refused(aperture, carta::zarr::DiagnosticCode::unsupported_coordinate_plane,
-            "Aperture-plane variables are not openable");
+    aperture["SKY"] = SkyArray("complex64", R"({"type":"sky"})", R"(["time","frequency","polarization","u","v"])");
+    refused(aperture, carta::zarr::DiagnosticCode::unsupported_data_type,
+            "Complex aperture-plane variables are not openable");
 }
 
 void TestMissingCoordinateIsInvalid() {
@@ -370,6 +372,7 @@ void TestDiscoveryClassifiesVariables() {
     nodes["SKY_MODEL"] = SkyArray();
     nodes["COMPLEX"] = SkyArray("complex64");
     nodes["APERTURE"] = SkyArray("float32", "{}", R"(["time","frequency","polarization","u","v"])");
+    nodes["VISIBILITY"] = SkyArray("complex64", "{}", R"(["time","frequency","polarization","u","v"])");
     nodes["MASK_0"] = SkyArray("bool", R"({"type":"flag"})");
     nodes["right_ascension"] = NumericArray("[4,5]", R"(["l","m"])");
     nodes["u"] = NumericArray("[4]", R"(["u"])");
@@ -380,15 +383,20 @@ void TestDiscoveryClassifiesVariables() {
     auto discovery = XradioProfile().Discover(store.value());
     Require(static_cast<bool>(discovery), "profile discovery reported an error");
 
-    Require(ImageIds(discovery.value().images) == std::vector<std::string>{"SKY", "SKY_MODEL", "APERTURE", "COMPLEX"},
+    Require(ImageIds(discovery.value().images) ==
+                std::vector<std::string>{"SKY", "SKY_MODEL", "APERTURE", "COMPLEX", "VISIBILITY"},
             "discovery did not enumerate the images in display order");
-    Require(OpenableImageIds(discovery.value().images) == std::vector<std::string>{"SKY", "SKY_MODEL"},
-            "discovery did not restrict the openable images to real sky-plane variables");
+    Require(OpenableImageIds(discovery.value().images) == std::vector<std::string>{"SKY", "SKY_MODEL", "APERTURE"},
+            "discovery did not restrict the openable images to real variables of either plane");
     Require(discovery.value().default_image_id == "SKY", "discovery did not select the default openable image");
-    Require(HasDiagnostic(discovery.value().diagnostics, carta::zarr::DiagnosticCode::unsupported_coordinate_plane),
-            "the aperture-plane variable produced no diagnostic");
-    Require(HasDiagnostic(discovery.value().diagnostics, carta::zarr::DiagnosticCode::unsupported_data_type),
-            "the complex variable produced no diagnostic");
+    for (const auto& id : {"COMPLEX", "VISIBILITY"}) {
+        const auto& images = discovery.value().images;
+        const auto entry =
+            std::find_if(images.begin(), images.end(), [&](const auto& image) { return image.id == id; });
+        Require(entry != images.end() &&
+                    HasDiagnostic(entry->diagnostics, carta::zarr::DiagnosticCode::unsupported_data_type),
+                std::string("the complex variable ") + id + " produced no diagnostic");
+    }
 }
 
 // The openable gate sits on the profile handle, ahead of any descriptor work.
@@ -454,7 +462,7 @@ void TestNothingOpenableIsInvalidOnlyWhenSomethingIsMalformed() {
                                     R"({"units":"Jy/beam","type":"sky"})");
     // Enumerated before SKY, and a limitation rather than a defect: without the reason for the
     // refusal being put first, this is the diagnostic a consumer would be shown.
-    malformed["APERTURE"] = NumericArray("[1,3,2,4,5]", R"(["time","frequency","polarization","u","v"])", "float32");
+    malformed["APERTURE"] = NumericArray("[1,3,2,4,5]", R"(["time","frequency","polarization","u","v"])", "complex64");
 
     const auto broken = Probe(malformed);
     Require(broken.kind == SchemaMatchKind::invalid,
@@ -1456,9 +1464,9 @@ void TestAnAxisReportsItsCoordinatesUnit() {
             "the spectral axis and the spectral coordinate disagree about the unit");
 }
 
-// The coordinates are said once, and every list the profile keeps is read off that table. The sky
-// plane's are the five an image carries, in the order its axes are reported; the aperture plane
-// shares three of them and has its own two.
+// The coordinates are said once, and every list the profile keeps is read off that table. Each
+// plane's are the five an image of it carries, in the order its axes are reported: its own spatial
+// pair, then the three both planes share. u and v play the spatial roles as l and m do (ADR 0024).
 void TestTheCoordinatesAreOneTable() {
     using carta::zarr::internal::xradio::AxisCount;
     using carta::zarr::internal::xradio::CoordinateKind;
@@ -1476,8 +1484,12 @@ void TestTheCoordinatesAreOneTable() {
     };
     Require(on(Plane::sky) == std::vector<std::string>{"l", "m", "frequency", "polarization", "time"},
             "the sky plane's coordinates are not the five, in the logical order");
-    Require(on(Plane::aperture) == std::vector<std::string>{"frequency", "polarization", "time", "u", "v"},
-            "the aperture plane's coordinates are not the three shared and u and v");
+    Require(on(Plane::aperture) == std::vector<std::string>{"u", "v", "frequency", "polarization", "time"},
+            "the aperture plane's coordinates are not u and v and the three shared, in the logical order");
+    using carta::zarr::internal::xradio::PlaneCoordinate;
+    Require(PlaneCoordinate(carta::zarr::AxisRole::spatial_x, Plane::aperture).name == "u" &&
+                PlaneCoordinate(carta::zarr::AxisRole::spatial_y, Plane::aperture).name == "v",
+            "u and v do not play the spatial roles on the aperture plane");
     Require(AxisCount(Plane::sky) == 5 && AxisCount(Plane::aperture) == 5, "a plane is not five axes");
 
     // What a coordinate array has to be, asked of its metadata alone. A two-dimensional one never
@@ -1626,8 +1638,9 @@ void TestA002StoreNamingNoSkyIsDecidedByWhatItHolds() {
     };
     const auto aperture_plane = R"(["time","frequency","polarization","u","v"])";
 
-    // What XRADIO 1.3.0 writes from a CASA image of the aperture plane: its data group names the
-    // aperture, its flag is named by nothing, and it has no coordinate system, having no direction.
+    // What XRADIO writes from a CASA image of the aperture plane: its data group names the aperture,
+    // its flag is named by nothing, and it has no coordinate system, having no direction. A real one
+    // is an image, and opens (ADR 0024).
     std::map<std::string, std::string> aperture{
         {"", RootWith(R"("type":"image_dataset","schema_version":"0.0.2",
                          "data_groups":{"base":{"aperture":"APERTURE"}})",
@@ -1641,19 +1654,24 @@ void TestA002StoreNamingNoSkyIsDecidedByWhatItHolds() {
         {"v", NumericArray("[5]", R"(["v"])", "float64", R"({"units":"lambda"})")},
     };
     const auto aperture_only = probe_of(aperture);
-    Require(aperture_only.kind == ProbeKind::zarr_without_supported_schema,
-            "a store of aperture-plane variables alone was not reported as one this library does not open");
-    Require(!HasDiagnostic(aperture_only.diagnostics, carta::zarr::DiagnosticCode::invalid_metadata),
-            "a store of aperture-plane variables alone was called malformed");
-    Require(HasDiagnostic(aperture_only.diagnostics, carta::zarr::DiagnosticCode::unsupported_coordinate_plane) &&
-                aperture_only.diagnostics.front().node_path == "APERTURE",
-            "a store of aperture-plane variables alone did not say why it is not opened");
-    const auto refused = RequireOpenableDataset(aperture_only, "/tmp/store");
-    Require(!refused && refused.error().code == ErrorCode::unsupported_schema &&
-                refused.error().message == "Aperture-plane variables are not openable",
-            "a store of aperture-plane variables alone was not refused as one this library is not for");
+    Require(aperture_only.kind == ProbeKind::supported_dataset && aperture_only.default_image_id == "APERTURE",
+            "a store of a real aperture-plane image alone did not open on it");
 
-    // Next to a sky, the aperture is listed as not openable and the sky opens.
+    // A complex one is not, and a store of nothing else is one this library is not for, not a
+    // malformed one: it names no sky, and the schema does not require one.
+    auto complex = aperture;
+    complex["APERTURE"] = SkyArray("complex64", R"({"units":"Jy/beam","type":"aperture"})", aperture_plane);
+    const auto complex_only = probe_of(complex);
+    Require(complex_only.kind == ProbeKind::zarr_without_supported_schema,
+            "a store of complex aperture-plane variables alone was not reported as one this library does not open");
+    Require(!HasDiagnostic(complex_only.diagnostics, carta::zarr::DiagnosticCode::invalid_metadata),
+            "a store of complex aperture-plane variables alone was called malformed");
+    const auto refused = RequireOpenableDataset(complex_only, "/tmp/store");
+    Require(!refused && refused.error().code == ErrorCode::unsupported_schema &&
+                refused.error().message == "Complex aperture-plane variables are not openable",
+            "a store of complex aperture-plane variables alone was not refused as one this library is not for");
+
+    // Next to a sky, both open, the sky first.
     auto both = Store002();
     both[""] = RootWith(R"("schema_version":"0.0.2",
         "data_groups":{"base":{"sky":"SKY"},"aperture":{"aperture":"APERTURE"}})");
@@ -1663,9 +1681,8 @@ void TestA002StoreNamingNoSkyIsDecidedByWhatItHolds() {
     const auto mixed = probe_of(both);
     Require(mixed.kind == ProbeKind::supported_dataset && mixed.default_image_id == "SKY",
             "a store with a sky and an aperture did not open on the sky");
-    Require(ImageIds(mixed.images) == std::vector<std::string>{"SKY", "APERTURE"} &&
-                OpenableImageIds(mixed.images) == std::vector<std::string>{"SKY"},
-            "a store with a sky and an aperture did not list the aperture as not openable");
+    Require(OpenableImageIds(mixed.images) == std::vector<std::string>{"SKY", "APERTURE"},
+            "a store with a sky and an aperture did not offer both");
 
     // A point spread function alone, whose data group XRADIO's factory writes with no sky, opens.
     auto psf = Store002();
@@ -1698,6 +1715,65 @@ void TestA002StoreNamingNoSkyIsDecidedByWhatItHolds() {
         unframed_store.value(), "POINT_SPREAD_FUNCTION", carta::zarr::internal::xradio::CoordinateValues{});
     Require(!unframed_psf && unframed_psf.error().code == ErrorCode::invalid_schema,
             "an image of a store naming no sky whose frequency has no frame was described");
+}
+
+// An image of the aperture plane (ADR 0024): u and v are its spatial axes, first, and it has an
+// aperture coordinate measured from u's and v's crval rather than a direction. A dataset of such
+// images alone needs the aperture plane's coordinates and no coordinate system; an aperture-plane
+// variable written without its own coordinates does not open, and the sky images beside it do.
+void TestAnApertureImageIsDescribedOnItsPlane() {
+    using carta::zarr::internal::xradio::CoordinateValues;
+    using carta::zarr::AxisRole;
+    using carta::zarr::internal::xradio::DescribeImageFrom;
+    const auto aperture_plane = R"(["time","frequency","polarization","u","v"])";
+    std::map<std::string, std::string> nodes{
+        {"", RootWith(R"("schema_version":"0.0.2","data_groups":{"base":{"aperture":"APERTURE"}})", false)},
+        {"APERTURE", SkyArray("float32", R"({"units":"Jy","type":"aperture"})", aperture_plane)},
+        {"time", NumericArray("[1]", R"(["time"])")},
+        {"frequency", FrequencyArray()},
+        {"polarization", PolarizationArray()},
+        {"u", NumericArray("[4]", R"(["u"])", "float64", R"({"units":"lambda","crval":100.0})")},
+        {"v", NumericArray("[5]", R"(["v"])", "float64", R"({"units":"lambda","crval":0.0})")},
+    };
+    Require(Probe(nodes).kind == SchemaMatchKind::match, "a dataset of an aperture-plane image alone did not match");
+
+    auto store = Open(nodes);
+    Require(static_cast<bool>(store), "the in-memory store failed to open");
+    CoordinateValues values;
+    values.u = {300.0, 200.0, 100.0, 0.0};
+    values.v = {-20.0, -10.0, 0.0, 10.0, 20.0};
+    values.frequency = {1.4e9, 1.401e9, 1.402e9};
+    const auto described = DescribeImageFrom(store.value(), "APERTURE", values);
+    Require(static_cast<bool>(described),
+            "an aperture-plane image was not described: " + (described ? "" : described.error().message));
+    const auto& descriptor = described.value().descriptor;
+    Require(descriptor.axes.at(0).name == "u" && descriptor.axes.at(0).role == AxisRole::spatial_x &&
+                descriptor.axes.at(1).name == "v" && descriptor.axes.at(1).role == AxisRole::spatial_y,
+            "u and v were not the first two axes, playing the spatial roles");
+    Require(!descriptor.direction && descriptor.aperture, "an aperture-plane image was given a direction");
+    const auto& aperture = *descriptor.aperture;
+    Require(aperture.unit == "lambda" && aperture.reference_value == std::array<double, 2>{100.0, 0.0} &&
+                aperture.reference_pixel == std::array<double, 2>{3.0, 3.0} &&
+                aperture.increment == std::array<double, 2>{-100.0, 10.0},
+            "the aperture coordinate was not measured from u's and v's crval");
+
+    // Its plane's coordinates are the dataset's to carry.
+    auto no_frequency = nodes;
+    no_frequency.erase("frequency");
+    Require(Probe(no_frequency).kind == SchemaMatchKind::invalid,
+            "a dataset of an aperture-plane image with no frequency coordinate was accepted");
+
+    // Beside a sky image, an aperture-plane variable with no u or v does not open, and the sky does.
+    auto beside = CompleteStore();
+    beside["APERTURE"] = SkyArray("float32", R"({"type":"aperture"})", aperture_plane);
+    const auto probe = Probe(beside);
+    Require(probe.kind == SchemaMatchKind::match, "a sky image beside a coordinate-less aperture did not match");
+    auto beside_store = Open(beside);
+    Require(static_cast<bool>(beside_store), "the in-memory store failed to open");
+    const auto discovery = XradioProfile().Discover(beside_store.value());
+    Require(
+        static_cast<bool>(discovery) && OpenableImageIds(discovery.value().images) == std::vector<std::string>{"SKY"},
+        "an aperture-plane variable without its coordinates was offered");
 }
 
 // A user keyword that cannot be reported -- a dictionary, as a CASA image's miscinfo can hold -- is
@@ -1901,6 +1977,7 @@ int main() {
         TestA002StoreThatIsNotOneIsInvalid();
         TestA002StoreNamingNoSkyIsDecidedByWhatItHolds();
         TestAnUnreportableUserKeywordDoesNotCloseTheImage();
+        TestAnApertureImageIsDescribedOnItsPlane();
         TestAnUnreadSchemaVersionIsRefused();
         TestAnIntegerSkyImageXradioWroteOpens();
         TestAnotherDatasetNamingAVersionIsNotAnImage();

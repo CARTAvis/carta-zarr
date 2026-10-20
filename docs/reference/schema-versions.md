@@ -29,9 +29,9 @@ They apply even to a store that declares 0.0.2: XRADIO 1.2.5 stamps 0.0.2 on an
 older store it upgrades on read, whether or not the upgrade reached those
 fields. A store whose data groups name no sky, such as an aperture plane or a
 point spread function alone, is not refused for that: it is decided by what it
-holds, so an aperture-only store is a non-match whose diagnostic says
-aperture-plane variables are not openable. Ordinary image and coordinate
-validation applies after them.
+holds. A real aperture-plane image opens; a store of complex ones alone is a
+non-match whose diagnostic says they are not openable. Ordinary image and
+coordinate validation applies after them.
 
 For a refused image dataset, `ProbeSchema` returns `kind == invalid` with the
 reason as its first diagnostic, and `Dataset::Open` returns an error with the

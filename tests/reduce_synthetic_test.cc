@@ -116,7 +116,7 @@ void TestAHistogramCountsEveryPixel() {
 
     carta::zarr::HistogramRequest request;
     request.planes.spectral = {0, kZ, 1};
-    request.bins = 50;
+    request.bin_count = 50;
     request.lower = 0.0;
     request.upper = 1000.0;
 
@@ -124,7 +124,7 @@ void TestAHistogramCountsEveryPixel() {
     options.read_budget_bytes = 4 * 64 * 65 * 2 * 4;
     WorkPool workers(4);
 
-    std::vector<std::uint64_t> counts(request.bins * kZ, 0);
+    std::vector<std::uint64_t> counts(request.bin_count * kZ, 0);
     std::uint64_t blocks = 0;
     const auto reducible = Reducible(source, image, geometry, workers);
     const auto outcome = carta::zarr::internal::ComputeHistogram(
@@ -136,7 +136,7 @@ void TestAHistogramCountsEveryPixel() {
             ++blocks;
             for (std::uint64_t c = 0; c < block.channel_count; ++c) {
                 for (std::size_t bin = 0; bin < block.bin_count; ++bin) {
-                    counts.at(((block.first_channel + c) * request.bins) + bin) = block.Counts(c)[bin];
+                    counts.at(((block.first_channel + c) * request.bin_count) + bin) = block.Counts(c)[bin];
                 }
             }
             return true;
@@ -149,8 +149,8 @@ void TestAHistogramCountsEveryPixel() {
             "the first is the case that read the wrong channels before");
 
     // The oracle: the same rule, over the same formula.
-    std::vector<std::uint64_t> expected(request.bins * kZ, 0);
-    const float width = static_cast<float>((request.upper - request.lower) / request.bins);
+    std::vector<std::uint64_t> expected(request.bin_count * kZ, 0);
+    const float width = static_cast<float>((request.upper - request.lower) / request.bin_count);
     const float lower = static_cast<float>(request.lower);
     const float upper = static_cast<float>(request.upper);
     for (std::uint64_t z = 0; z < kZ; ++z) {
@@ -159,10 +159,10 @@ void TestAHistogramCountsEveryPixel() {
                 const float value = Value({l, m, z, 0, 0});
                 if (lower <= value && value <= upper) {
                     auto bin = static_cast<std::size_t>((value - lower) / width);
-                    if (bin >= request.bins) {
-                        bin = request.bins - 1;
+                    if (bin >= request.bin_count) {
+                        bin = request.bin_count - 1;
                     }
-                    ++expected.at((z * request.bins) + bin);
+                    ++expected.at((z * request.bin_count) + bin);
                 }
             }
         }
@@ -193,7 +193,7 @@ void TestARangeWiderThanAFloatStillBinsItsPixels() {
 
     carta::zarr::HistogramRequest request;
     request.planes.spectral = {0, 1, 1};
-    request.bins = 10;
+    request.bin_count = 10;
     request.lower = -3e38;
     request.upper = 3e38;
 
@@ -212,7 +212,7 @@ void TestARangeWiderThanAFloatStillBinsItsPixels() {
     Require(static_cast<bool>(outcome),
             std::string("the histogram failed: ") + (outcome ? "" : outcome.error().message));
 
-    std::vector<std::uint64_t> expected(request.bins, 0);
+    std::vector<std::uint64_t> expected(request.bin_count, 0);
     expected.at(0) = kRows;
     expected.at(6) = kRows;
     expected.at(9) = kRows;
@@ -289,7 +289,7 @@ void TestEveryRangeIsBinnedAsTheCallerBinsIt() {
         });
         carta::zarr::HistogramRequest request;
         request.planes.spectral = {0, 1, 1};
-        request.bins = c.bins;
+        request.bin_count = c.bins;
         request.lower = c.lower;
         request.upper = c.upper;
 
@@ -500,7 +500,7 @@ void TestAPlaneHistogramSplitAcrossWorkers() {
 
     carta::zarr::HistogramRequest request;
     request.planes.spectral = {0, kSplitZ, 1};
-    request.bins = 37;
+    request.bin_count = 37;
     request.lower = 0.0;
     request.upper = 1000.0;
 
@@ -510,7 +510,7 @@ void TestAPlaneHistogramSplitAcrossWorkers() {
     const auto counts_from = [&](std::size_t worker_count) {
         WorkPool workers(worker_count);
         const auto reducible = Reducible(source, image, geometry, workers);
-        std::vector<std::uint64_t> counts(request.bins * kSplitZ, 0);
+        std::vector<std::uint64_t> counts(request.bin_count * kSplitZ, 0);
         const auto outcome = carta::zarr::internal::ComputeHistogram(
             reducible, request,
             [&](const carta::zarr::HistogramBlock& block) {
@@ -519,7 +519,7 @@ void TestAPlaneHistogramSplitAcrossWorkers() {
                 }
                 for (std::uint64_t c = 0; c < block.channel_count; ++c) {
                     for (std::size_t bin = 0; bin < block.bin_count; ++bin) {
-                        counts.at(((block.first_channel + c) * request.bins) + bin) = block.Counts(c)[bin];
+                        counts.at(((block.first_channel + c) * request.bin_count) + bin) = block.Counts(c)[bin];
                     }
                 }
                 return true;
@@ -565,7 +565,7 @@ void TestACubeHistogramSplitAcrossWorkers() {
 
     carta::zarr::CubeHistogramRequest request;
     request.planes.spectral = {0, kSplitZ, 1};
-    request.bins = 64;
+    request.bin_count = 64;
 
     ReadOptions options;
     options.read_budget_bytes = kRoomyBudget;
@@ -760,7 +760,7 @@ void TestACubeSpreadIsCentredWhateverTheMagnitude() {
         SyntheticPixelSource source(image, geometry, spread.value);
         carta::zarr::CubeHistogramRequest request;
         request.planes.spectral = {0, kSplitZ, 1};
-        request.bins = 64;
+        request.bin_count = 64;
         ReadOptions options;
         options.read_budget_bytes = 4 * 64 * 65 * 2 * 4;
         WorkPool workers(4);
@@ -809,11 +809,11 @@ void TestProgressNeverClaimsTheWholeRunBeforeItsLastRead() {
 
         carta::zarr::CubeHistogramRequest cube;
         cube.planes.spectral = spectral;
-        cube.bins = 16;
+        cube.bin_count = 16;
         std::vector<double> reported;
         const auto histogram = carta::zarr::internal::ComputeCubeHistogram(
             reducible, cube, options, [&](const carta::zarr::CubeHistogramProgress& update) {
-                reported.push_back(update.progress);
+                reported.push_back(update.completeness);
                 return true;
             });
         Require(static_cast<bool>(histogram), "the cube histogram failed" + which);
@@ -923,7 +923,7 @@ void TestAPlaneHistogramHandsOverAtEveryReadOfItsBlock() {
 
     carta::zarr::HistogramRequest request;
     request.planes.spectral = {0, 8, 1};
-    request.bins = 16;
+    request.bin_count = 16;
     request.lower = 0.0;
     request.upper = 1000.0;
     ReadOptions options;
@@ -1018,14 +1018,14 @@ std::vector<double> CubeProgress(const SyntheticPixelSource& source, const Image
     const auto reducible = Reducible(source, image, geometry, workers);
     carta::zarr::CubeHistogramRequest request;
     request.planes.spectral = spectral;
-    request.bins = 16;
+    request.bin_count = 16;
     request.spatial_sample = sample;
     ReadOptions options;
     options.read_budget_bytes = 1;
     std::vector<double> reported;
     const auto outcome = carta::zarr::internal::ComputeCubeHistogram(
         reducible, request, options, [&](const carta::zarr::CubeHistogramProgress& update) {
-            reported.push_back(update.progress);
+            reported.push_back(update.completeness);
             return true;
         });
     Require(static_cast<bool>(outcome), "the cube histogram failed");

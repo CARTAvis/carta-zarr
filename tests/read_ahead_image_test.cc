@@ -150,9 +150,9 @@ void TestACacheWithoutRoomForTwoRunsIsDeclinedAndSaysWhy() {
             "the refusal did not say which image: " + declined.error().message);
 
     ReadOptions pooled;
-    pooled.control.cache_pool = context.NewCachePool(std::size_t{64} << 20).value();
+    pooled.control.cache_pool = context.CreateCachePool(std::size_t{64} << 20).value();
     Require(ReadAhead::For({{image, pooled}}).has_value(), "a pool of the frames' own was not the cache asked");
-    pooled.control.cache_pool = context.NewCachePool(1).value();
+    pooled.control.cache_pool = context.CreateCachePool(1).value();
     Require(!ReadAhead::For({{image, pooled}}), "a pool of a byte was read ahead into");
     Require(!ReadAhead::For({}), "reading ahead of nothing was made");
 }
@@ -168,15 +168,15 @@ void TestAFlagChunkedOtherwiseIsCountedInItsOwnChunks() {
     Require(image.descriptor().has_pixel_mask, "the coarse-flag fixture has no flag to count");
 
     ReadOptions pooled;
-    pooled.control.cache_pool = context.NewCachePool(300).value();
+    pooled.control.cache_pool = context.CreateCachePool(300).value();
     const auto declined = ReadAhead::For({{image, pooled}});
     Require(!declined && declined.error().code == ErrorCode::buffer_too_small,
             "a cache without room for two runs of a coarse flag beside the pixels was read ahead into");
-    pooled.control.cache_pool = context.NewCachePool(400).value();
+    pooled.control.cache_pool = context.CreateCachePool(400).value();
     Require(ReadAhead::For({{image, pooled}}).has_value(), "a cache with room for two runs was declined");
     ReadOptions unmasked = pooled;
     unmasked.apply_pixel_mask = false;
-    unmasked.control.cache_pool = context.NewCachePool(200).value();
+    unmasked.control.cache_pool = context.CreateCachePool(200).value();
     Require(ReadAhead::For({{image, unmasked}}).has_value(), "an unmasked read was asked room for a flag");
 }
 

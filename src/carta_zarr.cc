@@ -133,7 +133,7 @@ Result<Context> Context::Create(const ContextOptions& options) {
     });
 }
 
-Result<CachePool> Context::NewCachePool(std::size_t bytes) const {
+Result<CachePool> Context::CreateCachePool(std::size_t bytes) const {
     // Guarded for the reason Create is: the pool's spec and its handle are both allocations, and
     // one that fails is the machine refusing a resource, which a caller is told as a Result.
     return Guarded(ErrorCode::io_error, {}, [&]() -> Result<CachePool> {
@@ -412,7 +412,7 @@ const DatasetDescriptor& Dataset::descriptor() const noexcept {
     return _impl->descriptor;
 }
 
-Result<DatasetSize> Dataset::Size(std::chrono::milliseconds stored_size_timeout) const {
+Result<DatasetSize> Dataset::Size(std::chrono::milliseconds measure_timeout) const {
     return Guarded(ErrorCode::io_error, _impl->location, [&]() -> Result<DatasetSize> {
         // The caller's timeout becomes a deadline here and nowhere lower: a timeout is measured from
         // whenever the caller asked, which is a fact only this end of the call knows. Everything
@@ -423,9 +423,9 @@ Result<DatasetSize> Dataset::Size(std::chrono::milliseconds stored_size_timeout)
         using Clock = std::chrono::steady_clock;
         const auto now = Clock::now();
         const auto room = std::chrono::duration_cast<std::chrono::milliseconds>(Clock::time_point::max() - now);
-        const auto deadline = stored_size_timeout >= room
+        const auto deadline = measure_timeout >= room
                                 ? Clock::time_point::max()
-                                : now + std::chrono::duration_cast<Clock::duration>(stored_size_timeout);
+                                : now + std::chrono::duration_cast<Clock::duration>(measure_timeout);
         return internal::DatasetSizeBytes(*_impl->store, deadline);
     });
 }

@@ -203,7 +203,7 @@ int main(int argc, char** argv) {
     const auto histogram = TimeIt(repeats, [&]() -> std::string {
         carta::zarr::HistogramRequest request;
         request.planes.spectral = {0, channels, 1};
-        request.bins = 1024;
+        request.bin_count = 1024;
         request.lower = -1.0e9;
         request.upper = 1.0e9;
         const auto outcome = sky.ComputeHistogram(request, [](const carta::zarr::HistogramBlock&) { return true; });
@@ -213,7 +213,7 @@ int main(int argc, char** argv) {
     const auto cube = TimeIt(repeats, [&]() -> std::string {
         carta::zarr::CubeHistogramRequest request;
         request.planes.spectral = {0, channels, 1};
-        request.bins = 1024;
+        request.bin_count = 1024;
         const auto outcome = sky.ComputeCubeHistogram(request);
         return outcome ? std::string{} : outcome.error().message;
     });

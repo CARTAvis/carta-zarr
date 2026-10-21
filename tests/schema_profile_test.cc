@@ -1181,8 +1181,8 @@ void TestADescriptionIsBuiltFromTheValuesItIsGiven() {
     Require(descriptor.direction && descriptor.direction->projection == "SIN", "the direction comes from the root");
     Require(descriptor.spectral.has_value(), "three channels make a spectral coordinate");
     const auto& spectral = *descriptor.spectral;
-    Require(spectral.channel_frequencies == values.frequency, "the channels are the values handed in");
-    Require(spectral.system == "LSRK", "the frame is frequency's own");
+    Require(spectral.values == values.frequency, "the channels are the values handed in");
+    Require(spectral.reference_frame == "LSRK", "the frame is frequency's own");
     Require(spectral.reference_value && *spectral.reference_value == 1.402e9,
             "the reference is the frequency named, not the first channel");
     Require(spectral.reference_pixel && *spectral.reference_pixel == 3.0,
@@ -1536,7 +1536,7 @@ void TestAStoreOfSchema002IsRead() {
     Require(probe.diagnostics.empty(), "a 0.0.2 store was matched with something to say");
 
     const auto described = DescribeWithChannels(Store002());
-    Require(described.descriptor.spectral && described.descriptor.spectral->system == "GEO",
+    Require(described.descriptor.spectral && described.descriptor.spectral->reference_frame == "GEO",
             "a 0.0.2 store's frame is frequency's own frame");
     Require(described.descriptor.image_role == "sky", "the base group's sky is the sky");
 }

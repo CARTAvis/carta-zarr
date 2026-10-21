@@ -54,7 +54,7 @@ public:
     Result<void> Prepare(const Operation& operation) override {
         (void)operation;
         _first_touch.reset();
-        auto pool = _context.NewCachePool(_first_touch_bytes);
+        auto pool = _context.CreateCachePool(_first_touch_bytes);
         if (!pool) {
             return std::move(pool).error();
         }

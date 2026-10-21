@@ -41,7 +41,7 @@ public:
     // A decoded-chunk cache of `bytes`, apart from the one this context shares among every read, for
     // a read to keep what it decodes in through ReadControl::cache_pool. Zero is the pool that keeps
     // nothing. See CachePool.
-    Result<CachePool> NewCachePool(std::size_t bytes) const;
+    Result<CachePool> CreateCachePool(std::size_t bytes) const;
 
 private:
     class Impl;
@@ -187,7 +187,7 @@ public:
     //
     // The timeout is not named after a directory because a dataset need not live in one: what can
     // be sized, and how quickly, is the transport's affair.
-    Result<DatasetSize> Size(std::chrono::milliseconds stored_size_timeout = std::chrono::milliseconds(50)) const;
+    Result<DatasetSize> Size(std::chrono::milliseconds measure_timeout = std::chrono::milliseconds(50)) const;
     Result<Image> OpenImage(std::string_view image_id) const;
 
 private:

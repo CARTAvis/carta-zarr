@@ -70,7 +70,7 @@ int main(int argc, char** argv) {
     }
     if (image_descriptor.spectral) {
         const auto& spectral = *image_descriptor.spectral;
-        std::cout << "spectral frame=" << spectral.system;
+        std::cout << "spectral frame=" << spectral.reference_frame;
         if (spectral.increment) {
             std::cout << " increment=" << *spectral.increment << ' ' << spectral.unit;
         }

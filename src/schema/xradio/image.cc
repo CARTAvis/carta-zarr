@@ -117,7 +117,7 @@ std::optional<SpectralCoordinate> DescribeSpectralCoordinate(const Store& store,
     }
 
     SpectralCoordinate spectral;
-    spectral.channel_frequencies = frequency_values;
+    spectral.values = frequency_values;
     nlohmann::json frequency_attributes = nlohmann::json::object();
     if (const auto& frequency_metadata = store.ReadNodeMetadata("frequency"); frequency_metadata) {
         if (const auto* const attributes = MemberObject(frequency_metadata.value(), "attributes")) {
@@ -127,10 +127,10 @@ std::optional<SpectralCoordinate> DescribeSpectralCoordinate(const Store& store,
 
     // The axis reports the same unit, from the same rule.
     spectral.unit = CoordinateUnit(store, SkyCoordinate(AxisRole::spectral));
-    spectral.system = AttributeString(frequency_attributes, "frame");
+    spectral.reference_frame = AttributeString(frequency_attributes, "frame");
     // The channel a linear description is measured from, which is the first one unless the
     // reference frequency names another.
-    double reference_value = spectral.channel_frequencies.front();
+    double reference_value = spectral.values.front();
     if (const auto* const reference_frequency = MemberObject(frequency_attributes, "reference_frequency")) {
         if (const auto value = MemberNumber(*reference_frequency, "data")) {
             reference_value = *value;
@@ -140,7 +140,7 @@ std::optional<SpectralCoordinate> DescribeSpectralCoordinate(const Store& store,
         spectral.rest_frequency = MemberNumber(*rest_frequency, "data");
     }
 
-    auto fit = FitSpectralAxis(spectral.channel_frequencies, reference_value, "frequency");
+    auto fit = FitSpectralAxis(spectral.values, reference_value, "frequency");
     spectral.reference_pixel = fit.reference_pixel;
     spectral.reference_value = fit.reference_value;
     spectral.increment = fit.increment;
@@ -149,14 +149,14 @@ std::optional<SpectralCoordinate> DescribeSpectralCoordinate(const Store& store,
     // An axis of one channel has no spacing to fit an increment from. Schema 0.0.2 states the width
     // of every channel, and for the one channel that is the increment, measured from it. An axis of
     // more channels keeps what its channels say, whatever the width says.
-    if (!spectral.increment && spectral.channel_frequencies.size() == 1) {
+    if (!spectral.increment && spectral.values.size() == 1) {
         if (const auto* const width = MemberObject(frequency_attributes, "channel_width")) {
             const auto* const attributes = MemberObject(*width, "attrs");
             const std::string unit = attributes == nullptr ? std::string{} : AttributeString(*attributes, "units");
             const auto value = MemberNumber(*width, "data");
             if (value && std::isfinite(*value) && *value != 0.0 && (unit.empty() || unit == spectral.unit)) {
                 spectral.reference_pixel = 1.0;
-                spectral.reference_value = spectral.channel_frequencies.front();
+                spectral.reference_value = spectral.values.front();
                 spectral.increment = *value;
             }
         }

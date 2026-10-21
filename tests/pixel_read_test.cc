@@ -335,8 +335,8 @@ void TestReadsThroughAPoolOfTheirOwn(const char* fixture) {
             "the read through the session's pool failed");
 
     for (const std::size_t bytes : {std::size_t{0}, std::size_t{64} << 20}) {
-        const auto pool = context->NewCachePool(bytes);
-        Require(static_cast<bool>(pool), "NewCachePool(" + std::to_string(bytes) + ") failed");
+        const auto pool = context->CreateCachePool(bytes);
+        Require(static_cast<bool>(pool), "CreateCachePool(" + std::to_string(bytes) + ") failed");
         Require(pool->bytes() == bytes, "a pool of " + std::to_string(bytes) + " bytes says it is another size");
         carta::zarr::ReadOptions options;
         options.control.cache_pool = *pool;
@@ -559,8 +559,8 @@ void TestAPrefetchedPlaneIsReadFromThePool(const char* fixture, std::uint64_t ex
             "the plane could not be read before anything was emptied");
 
     const auto [context, sky] = open();
-    const auto pool = context.NewCachePool(std::size_t{64} << 20);
-    Require(static_cast<bool>(pool), "NewCachePool failed");
+    const auto pool = context.CreateCachePool(std::size_t{64} << 20);
+    Require(static_cast<bool>(pool), "CreateCachePool failed");
     carta::zarr::ReadOptions options;
     options.control.cache_pool = *pool;
     const auto chunks = sky.Prefetch(plane(0), options);
@@ -610,8 +610,8 @@ void TestAPoolDoesNotCarryOneDatasetsArraysIntoTheNext(const char* fixture) {
     plane.axes = {{0, kL, 1}, {0, kM, 1}, {0, 1, 1}, {0, 1, 1}, {0, 1, 1}};
     const auto context = carta::zarr::Context::Create();
     Require(static_cast<bool>(context), "Context::Create failed");
-    const auto pool = context->NewCachePool(std::size_t{64} << 20);
-    Require(static_cast<bool>(pool), "NewCachePool failed");
+    const auto pool = context->CreateCachePool(std::size_t{64} << 20);
+    Require(static_cast<bool>(pool), "CreateCachePool failed");
     auto options = Unmasked();
     options.control.cache_pool = *pool;
     const auto read = [&](const carta::zarr::ReadOptions& with) {

@@ -119,15 +119,15 @@ void TestDirection(const carta::zarr::ImageDescriptor& sky) {
 void TestSpectralAndPolarization(const carta::zarr::ImageDescriptor& sky) {
     Require(sky.spectral.has_value(), "no spectral coordinate was reported");
     const auto& spectral = *sky.spectral;
-    Require(spectral.channel_frequencies.size() == 2, "the channel table lost a channel");
-    RequireClose(spectral.channel_frequencies.at(0), 1.4e9, 1.0, "first channel frequency");
-    RequireClose(spectral.channel_frequencies.at(1), 1.401e9, 1.0, "second channel frequency");
+    Require(spectral.values.size() == 2, "the channel table lost a channel");
+    RequireClose(spectral.values.at(0), 1.4e9, 1.0, "first channel frequency");
+    RequireClose(spectral.values.at(1), 1.401e9, 1.0, "second channel frequency");
     Require(spectral.unit == "Hz", "the frequency unit was not taken from frequency's units");
     // The spectral axis reports the unit its coordinate does, from the same units attribute.
     const auto spectral_axis = carta::zarr::AxisIndex(sky.axes, carta::zarr::AxisRole::spectral);
     Require(spectral_axis && sky.axes.at(*spectral_axis).unit == spectral.unit,
             "the spectral axis reported a unit other than its coordinate's");
-    Require(spectral.system == "LSRK", "SPECSYS was not normalized to the canonical spectral system");
+    Require(spectral.reference_frame == "LSRK", "SPECSYS was not normalized to the canonical spectral system");
     Require(spectral.rest_frequency.has_value(), "RESTFRQ was dropped");
     RequireClose(*spectral.rest_frequency, 1.420405751e9, 1.0, "rest frequency");
     // These channels are evenly spaced, so the optional linear description must be present.
@@ -294,7 +294,7 @@ void TestContinuumConversion() {
     Require(static_cast<bool>(image), "the continuum SKY could not be opened");
     const auto& sky = image.value().descriptor();
     Require(sky.sub_type == "SpectralIndex", "BTYPE 'Spectral index' was read as '" + sky.sub_type + "'");
-    Require(sky.spectral.has_value() && sky.spectral->channel_frequencies.size() == 1,
+    Require(sky.spectral.has_value() && sky.spectral->values.size() == 1,
             "the continuum image did not have one channel");
     Require(sky.spectral->increment && *sky.spectral->increment == 1.0e6,
             "the channel width XRADIO wrote was not the increment of the one channel");

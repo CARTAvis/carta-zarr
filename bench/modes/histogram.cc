@@ -31,7 +31,7 @@ class HistogramRunner final : public CubeRunner {
 public:
     HistogramRunner(const Context& context, Image image, CubeAxes axes, HistogramMethod method)
         : CubeRunner(std::move(image), axes), _method(method) {
-        if (auto pool = context.NewCachePool(0)) {
+        if (auto pool = context.CreateCachePool(0)) {
             _keeping_nothing = *pool;
         }
         // Sized here so that no operation pays for growing it.
@@ -49,7 +49,7 @@ public:
         CubeHistogramRequest request;
         request.planes.spectral = Range{operation.channel, operation.channel_count, 1};
         request.planes.polarization = operation.polarization;
-        request.bins = AutomaticBins(axes());
+        request.bin_count = AutomaticBins(axes());
         request.spatial_sample = _method.kind == HistogramMethod::Kind::sampled ? _method.stride : 1;
         auto histogram = image().ComputeCubeHistogram(request, options);
         if (!histogram) {
@@ -109,10 +109,10 @@ private:
         if (lowest < highest) {
             HistogramRequest bins;
             bins.planes = range.planes;
-            bins.bins = AutomaticBins(axes());
+            bins.bin_count = AutomaticBins(axes());
             bins.lower = lowest;
             bins.upper = highest;
-            _counts.assign(bins.bins, 0);
+            _counts.assign(bins.bin_count, 0);
             const auto add = [this](const HistogramBlock& block) {
                 if (!block.complete) {
                     return true;

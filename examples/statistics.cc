@@ -72,7 +72,7 @@ int main(int argc, char** argv) {
     // range is explicitly chosen by this application; outliers are excluded.
     HistogramRequest histogram;
     histogram.planes = planes;
-    histogram.bins = 64;
+    histogram.bin_count = 64;
     histogram.lower = -1e6;
     histogram.upper = 1e6;
     std::uint64_t histogram_channels = 0;
@@ -95,7 +95,7 @@ int main(int argc, char** argv) {
 
     CubeHistogramRequest cube;
     cube.planes = planes;
-    cube.bins = 64;
+    cube.bin_count = 64;
     const auto combined = image.ComputeCubeHistogram(cube);
     if (!combined) {
         return examples::Report(combined.error());
@@ -108,6 +108,6 @@ int main(int argc, char** argv) {
     std::cout << '\n';
     // Check that the streaming consumers received all requested final channels.
     const bool complete = reduced_channels == planes.spectral.count && histogram_channels == planes.spectral.count &&
-                          result.counts.size() == cube.bins;
+                          result.counts.size() == cube.bin_count;
     return complete ? 0 : 1;
 }

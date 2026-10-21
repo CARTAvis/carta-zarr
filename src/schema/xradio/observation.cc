@@ -63,12 +63,12 @@ ObservationInfo DescribeObservation(const zarr::ArrayMetadata& image) {
     if (const auto* const obsdate = MemberObject(image.attributes, "obsdate")) {
         std::string format;
         if (const auto* const attributes = MemberObject(*obsdate, "attrs")) {
-            observation.timesys = Upper(AttributeString(*attributes, "scale"));
+            observation.time_scale = Upper(AttributeString(*attributes, "scale"));
             format = Upper(AttributeString(*attributes, "format"));
         }
         // A number, as every XRADIO writes it. A string date is no XRADIO's, and is not read.
         if (const auto value = MemberNumber(*obsdate, "data")) {
-            observation.mjd_obs = MjdOfNumber(*value, format);
+            observation.observation_mjd = MjdOfNumber(*value, format);
         }
     }
     return observation;

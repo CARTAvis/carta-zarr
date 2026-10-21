@@ -48,7 +48,7 @@ struct CachePoolAccess;
 // will come back for, which is more than a session should keep for everything else and is wanted only
 // while the walk lasts: it reads through a pool of that size, and lets go of it when it ends.
 //
-// Made by Context::NewCachePool, and a shared handle like Context: copying one shares the pool, and
+// Made by Context::CreateCachePool, and a shared handle like Context: copying one shares the pool, and
 // it is the last copy let go of that frees what the pool holds. The pool runs on its Context's
 // threads, so a read through it takes its turn among the session's reads rather than competing with
 // them. Arrays are opened per pool, so the first read of an array through a new one pays to open it

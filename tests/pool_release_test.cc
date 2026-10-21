@@ -137,8 +137,8 @@ void TestWhatAPoolDecodedGoesWithThePool() {
     {
         std::vector<carta::zarr::CachePool> pools;
         for (int i = 0; i < kPools; ++i) {
-            auto pool = context->NewCachePool(std::size_t{64} << 20);
-            Require(static_cast<bool>(pool), "NewCachePool failed");
+            auto pool = context->CreateCachePool(std::size_t{64} << 20);
+            Require(static_cast<bool>(pool), "CreateCachePool failed");
             carta::zarr::ReadOptions options;
             options.control.cache_pool = *pool;
             const auto read = image->Read(whole, {pixels.data(), pixels.size()}, options);

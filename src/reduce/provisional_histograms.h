@@ -50,10 +50,10 @@ namespace carta::zarr::internal {
  */
 class ProvisionalHistograms {
 public:
-    // How many bins each provisional histogram holds, for a request asking for `bins` that stated
-    // `provisional_bins`. See CubeHistogramRequest::provisional_bins, which this is the whole of.
-    static std::size_t Resolution(std::uint32_t bins, std::uint32_t provisional_bins) {
-        std::size_t provisional = provisional_bins;
+    // How many bins each provisional histogram holds, for a request asking for `bin_count` that stated
+    // `provisional_bin_count`. See CubeHistogramRequest::provisional_bin_count, which this is the whole of.
+    static std::size_t Resolution(std::uint32_t bins, std::uint32_t provisional_bin_count) {
+        std::size_t provisional = provisional_bin_count;
         if (provisional == 0) {
             provisional = std::clamp<std::size_t>(static_cast<std::size_t>(bins) * kProvisionalBinsPerBin,
                                                   kLeastProvisionalBins, kMostProvisionalBins);
@@ -72,11 +72,11 @@ public:
     // says why and what it was measured at. Divided by what one provisional histogram costs, it comes
     // out at four histograms at the default resolution.
     ProvisionalHistograms(const ReducibleImage& image, const CubeHistogramRequest& request)
-        : _bins(request.bins),
+        : _bins(request.bin_count),
           _sampled(request.spatial_sample > 1),
           _split(image.Split(kCubeAccumulatorCacheBytes,
-                             Resolution(request.bins, request.provisional_bins) * sizeof(std::uint64_t))),
-          _accumulators(_split.most(), Accumulator(Resolution(request.bins, request.provisional_bins))) {}
+                             Resolution(request.bin_count, request.provisional_bin_count) * sizeof(std::uint64_t))),
+          _accumulators(_split.most(), Accumulator(Resolution(request.bin_count, request.provisional_bin_count))) {}
 
     ProvisionalHistograms(const ProvisionalHistograms&) = delete;
     ProvisionalHistograms& operator=(const ProvisionalHistograms&) = delete;

@@ -98,15 +98,15 @@ std::string WithFailure(std::size_t which, Call&& call) {
     return outcome;
 }
 
-void TestNewCachePool(const carta::zarr::Context& context) {
-    const auto call = [&]() { return static_cast<bool>(context.NewCachePool(std::size_t{1} << 20)); };
+void TestCreateCachePool(const carta::zarr::Context& context) {
+    const auto call = [&]() { return static_cast<bool>(context.CreateCachePool(std::size_t{1} << 20)); };
     const auto total = AllocationsOf(call);
-    Require(total > 0, "NewCachePool allocated nothing to fail");
+    Require(total > 0, "CreateCachePool allocated nothing to fail");
     // The first, which is the library asking for the pool, and the last, which is the handle it
     // returns.
     for (const auto which : {std::size_t{1}, total}) {
         const auto outcome = WithFailure(which, call);
-        Require(outcome == "an error", "NewCachePool with allocation " + std::to_string(which) + " of " +
+        Require(outcome == "an error", "CreateCachePool with allocation " + std::to_string(which) + " of " +
                                            std::to_string(total) + " failing gave " + outcome);
     }
 }
@@ -147,7 +147,7 @@ void TestOpeningAndProbing(const carta::zarr::Context& context) {
 int main() {
     auto context = carta::zarr::Context::Create({});
     Require(static_cast<bool>(context), "Context::Create failed");
-    TestNewCachePool(*context);
+    TestCreateCachePool(*context);
     TestOpeningAndProbing(*context);
     std::cout << "allocation failure tests passed\n";
     return 0;

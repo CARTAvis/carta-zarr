@@ -164,7 +164,7 @@ void TestTasksWhoseRangesDriftedApartAddUpExactly() {
 
     Fixture fixture(4);
     CubeHistogramRequest request;
-    request.bins = 4;
+    request.bin_count = 4;
     ProvisionalHistograms histograms(fixture.Reducible(), request);
     histograms.Add(PlaneOf(pixels, kWidth, kRows));
     const auto result = histograms.Collect();
@@ -213,7 +213,7 @@ void TestAReadIsCountedAtItsStrides() {
 
     Fixture fixture(1);
     CubeHistogramRequest request;
-    request.bins = 3;
+    request.bin_count = 3;
     ProvisionalHistograms histograms(fixture.Reducible(), request);
     histograms.Add(slab);
     const auto result = histograms.Collect();
@@ -236,7 +236,7 @@ void TestASnapshotIsTheAnswerSoFar() {
     std::vector<float> second(8, 6.0F);
     Fixture fixture(1);
     CubeHistogramRequest request;
-    request.bins = 2;
+    request.bin_count = 2;
     ProvisionalHistograms histograms(fixture.Reducible(), request);
 
     histograms.Add(PlaneOf(first, 4, 2));
@@ -266,7 +266,7 @@ void TestNothingFiniteFoundNoRange() {
 
     Fixture fixture(2);
     CubeHistogramRequest request;
-    request.bins = 5;
+    request.bin_count = 5;
     request.spatial_sample = 3;
     ProvisionalHistograms histograms(fixture.Reducible(), request);
     check(histograms.Collect(), 0.0, "before any read");

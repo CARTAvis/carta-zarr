@@ -44,7 +44,7 @@ int main(int argc, char** argv) {
     // A one-off scan uses its own zero-byte pool, leaving the session's cache
     // available for interactive reads. Cancellation callbacks may use an atomic
     // flag set by the application's event loop or another thread.
-    const auto pool = context.value().NewCachePool(0);
+    const auto pool = context.value().CreateCachePool(0);
     if (!pool) {
         return examples::Report(pool.error());
     }

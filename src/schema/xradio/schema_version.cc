@@ -15,7 +15,11 @@ namespace {
 // Why a store naming 0.0.2 is not one, or nothing when it is. Three things schema 0.0.2 requires,
 // checked rather than the whole schema, because they are what this library reads that older stores
 // lack: a store XRADIO 1.2.5 upgraded on read is stamped 0.0.2 whether or not the upgrade could
-// reach them.
+// reach them. The sky's own check applies to a store whose data groups name a sky. The schema does not
+// require one: an aperture-plane store or a point spread function alone is well formed without it,
+// and is left to the profile, which opens what it can and says why it will not open the rest. The
+// frequency's applies whatever the groups name: an older store with no sky, which XRADIO's empty-image
+// factory wrote, is stamped 0.0.2 by the upgrade as readily as one with a sky.
 std::optional<Diagnostic> WhyNot002(const Store& store) {
     const auto not_002 = [](const std::string& why, std::string node_path) {
         return Diagnostic{DiagnosticCode::invalid_metadata,
@@ -34,15 +38,14 @@ std::optional<Diagnostic> WhyNot002(const Store& store) {
     for (auto group = groups->begin(); sky.empty() && group != groups->end(); ++group) {
         sky = AttributeString(group.value(), "sky");
     }
-    if (sky.empty()) {
-        return not_002("no data group names a sky image", "/attributes/data_groups");
-    }
-    const auto& image = store.ReadArrayMetadata(sky);
-    if (!image) {
-        return not_002("its data groups name " + sky + " as the sky, which is not an array", sky);
-    }
-    if (AttributeString(image.value().attributes, "type") != "sky") {
-        return not_002("its sky image " + sky + " is not typed \"sky\"", sky);
+    if (!sky.empty()) {
+        const auto& image = store.ReadArrayMetadata(sky);
+        if (!image) {
+            return not_002("its data groups name " + sky + " as the sky, which is not an array", sky);
+        }
+        if (AttributeString(image.value().attributes, "type") != "sky") {
+            return not_002("its sky image " + sky + " is not typed \"sky\"", sky);
+        }
     }
     if (const auto& frequency = store.ReadArrayMetadata("frequency"); frequency) {
         const auto& attributes = frequency.value().attributes;

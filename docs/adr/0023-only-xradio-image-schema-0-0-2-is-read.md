@@ -25,11 +25,18 @@ names): a row held only what differed between versions, and with one version not
   not read. It is refused with `DiagnosticCode::unsupported_schema_version` first among the probe's
   diagnostics and `ErrorCode::unsupported_schema_version` from `Dataset::Open`, as any other
   version is, and the message says to write it again with XRADIO 1.2.5 or later.
-- A store that names 0.0.2 but fails ADR 0022's three checks -- its data groups name a sky image,
-  that image is typed `"sky"`, and its frequency coordinate, if it has one, gives a frame and units --
-  is malformed: `invalid`, with `invalid_metadata` and the reason. The checks stay because the
-  version alone does not say a store conforms: XRADIO 1.2.5 stamps 0.0.2 on any store it upgrades on
-  read, including stores its own `check_image` rejects.
+- A store that names 0.0.2 but fails ADR 0022's checks -- it has data groups, the sky image they
+  name, if they name one, is typed `"sky"`, and its frequency coordinate, if it has one, gives a frame
+  and units -- is malformed: `invalid`, with `invalid_metadata` and the reason. The checks stay
+  because the version alone does not say a store conforms: XRADIO 1.2.5 stamps 0.0.2 on any store it
+  upgrades on read, including stores its own `check_image` rejects.
+- A store whose data groups name no sky image is not malformed for that
+  ([#40](https://github.com/CARTAvis/carta-zarr/issues/40)). The schema does not require one: XRADIO
+  writes data groups of an aperture plane, and of a point spread function alone. Such a store is
+  decided by ADR 0009's rule as any other is: one of aperture-plane variables answers `no_match`,
+  saying they are not openable, and one with an image this library opens matches. Its frequency
+  coordinate is still checked: an older store with no sky is stamped 0.0.2 by XRADIO 1.2.5's upgrade
+  as readily as one with a sky.
 - Zarr that is not an image dataset is not refused at all, whether it names a version or not, as
   before.
 

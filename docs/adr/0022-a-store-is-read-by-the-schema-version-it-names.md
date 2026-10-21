@@ -2,7 +2,8 @@
 
 *Its two rows are superseded by [ADR 0023](0023-only-xradio-image-schema-0-0-2-is-read.md): only
 schema 0.0.2 is read, and a store naming no version is refused. Its checks, its refusal of an unknown
-version and what the schema is held to stand.*
+version and what the schema is held to stand. Its sky checks apply to a store whose data groups name a
+sky image ([#40](https://github.com/CARTAvis/carta-zarr/issues/40)): the schema requires none.*
 
 XRADIO 1.2.5 gives its image format a version. `IMAGE_SCHEMA_VERSION = "0.0.2"` in
 `xradio/image/schema.py` is written to every store's root as `schema_version`, `schema.py` defines

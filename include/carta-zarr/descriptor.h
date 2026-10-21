@@ -221,8 +221,8 @@ struct ApertureCoordinate {
 
 struct SpectralCoordinate {
     std::string unit;
-    std::string
-        reference_frame;  // casacore or FITS SPECSYS name, e.g. "LSRK", "BARY", "GEO", "TOPOCENT"; never astropy's
+    // A casacore or FITS SPECSYS name, such as "LSRK", "BARY", "GEO" or "TOPOCENT", never astropy's.
+    std::string reference_frame;
     // CRPIX3, 1-based as DirectionCoordinate::reference_pixel is. Absent, with the two below it,
     // when the channels are not evenly spaced: there is then no linear description to give and a
     // consumer builds a tabular axis from values instead.

@@ -2,13 +2,16 @@
 
 A fixed set of cubes to measure carta-zarr's read paths on, and to compare them with FITS: each cube
 is a FITS file, written by `tools/zarr-bench/generate.py --fits`, and each of its Zarr layouts is
-made from that FITS by the site's xradio converter, as production data is. Every cube is synthetic, so
-the whole set rebuilds from nothing on any machine.
+made from that FITS by XRADIO's own `open_image` and `write_image`, through `convert.py`, as
+production data is. Every cube is synthetic, so the whole set rebuilds from nothing on any machine.
 
 ```sh
-XRADIO_CONVERTER=/path/to/fits_to_zarr_xradio.py CARTA_ZARR_BENCH=/path/to/carta-zarr-bench \
-    tools/testset/build.sh /data/carta-testset
+CARTA_ZARR_BENCH=/path/to/carta-zarr-bench tools/testset/build.sh /data/carta-testset
 ```
+
+`XRADIO_CONVERTER` names another converter instead of `convert.py`, such as a site's own. It takes
+the same arguments: the FITS file, `--chunks` and `--shards` as lengths along time, frequency,
+polarization, l and m (0 for the whole axis), `--compute_mask`, `--compressor` and `--output`.
 
 `build.sh` skips what already exists, so a run that stopped is finished by running it again. A FITS
 file or a Zarr appears under its own name only once it is complete, and a Zarr only once `verify.py`
@@ -20,9 +23,9 @@ decodes is the FITS cube's bit for bit, NaN exactly where the FITS cube is once 
 beams mean is not compared: the set is for measuring reads, and whether carta-zarr reads metadata
 right is for its own tests to say.
 
-It needs `uv`, the converter, carta-zarr-bench (a build with `-DCARTA_ZARR_BUILD_BENCH=ON`), and
-about 155 GB; on a 28-thread machine with local NVMe it takes about 13 minutes, a third of it
-verifying.
+It needs `uv` and carta-zarr-bench (a build with `-DCARTA_ZARR_BUILD_BENCH=ON`), and about
+160 GB; on a 28-thread machine with local NVMe the five layouts take about 12 minutes, more than half
+of it verifying, once the FITS files exist.
 
 ## Cubes and layouts
 
@@ -41,7 +44,7 @@ Shapes are written l x m x frequency; every other axis is 1.
 | `cigar_c128x128x64.zarr` | 128 x 128 x 64 (4 MiB) | - | - |
 | `cigar_c64x64x256.zarr` | 64 x 64 x 256 (4 MiB) | - | - |
 
-Each Zarr is about 21 GB.
+Each Zarr is 18 to 20 GB, compressed with blosc zstd 5 and byte shuffle, XRADIO's default.
 
 - A pancake has large planes and few channels; a cigar small planes and many. Both are chunked at
   4 MiB, as sites have chunked their cubes.
@@ -52,15 +55,14 @@ Each Zarr is about 21 GB.
   their chunks; 64 x 64 x 256 is a deeper chunk, nearer the depth `docs/storage-tuning.md` points to
   for a cube this long, which reads a spectrum from a quarter as many chunks at the cost of decoding
   256 channels to read one.
-- A layout is a chunk, an optional shard (a whole number of chunks) and whether it carries a flag.
-  With a flag the converter writes `FLAG_SKY`, true where the pixel is NaN (`--compute_mask`); the
-  pixels are the same, so the two differ only in what reading the flag costs. Add a layout by adding
-  a line to `layouts` in `build.sh`; its name says all three, e.g. `pancake_c256x256x16_s1024x1024x16_flag.zarr`.
-- xradio's FITS reader, 1.2.2 to 1.2.5, leaves that flag undeclared: untyped, not named by the image
-  or a data group, so carta-zarr does not apply it. The converter has to declare it (type `flag`, the image's
-  `flag` attribute, and a `base` data group naming it); `verify.py` refuses a flagged layout carta-zarr
-  opens without a pixel mask, so a converter that does not makes `build.sh` stop at the first one.
-- The converter writes no chunk that is wholly NaN, so a fully flagged run of channels long enough
+- A layout is a chunk, an optional shard (a whole number of chunks), whether it carries a flag, and
+  its compressor. With a flag, XRADIO writes `FLAG_SKY`, true where the pixel is NaN
+  (`--compute_mask`), and the image declares it; the pixels are the same, so the two differ only in
+  what reading the flag costs. `verify.py` refuses a flagged layout carta-zarr opens without a pixel
+  mask, so a converter whose flag carta-zarr does not apply stops `build.sh` at the first one. Add a
+  layout by adding a line to `layouts` in `build.sh`; its name says what it is, e.g.
+  `pancake_c256x256x16_s1024x1024x16_flag.zarr`, and `_zstd` at the end for plain zstd.
+- XRADIO writes no chunk that is wholly NaN, so a fully flagged run of channels long enough
   to cover a chunk leaves chunks that are not on disk at all.
 
 ## What the cubes hold
@@ -84,12 +86,9 @@ HI cube from an ASKAP mosaic:
 
 `generate.py --fits` writes the FITS file, with the axes ASKAPsoft writes (RA, Dec, Stokes,
 frequency), the coordinates the synthetic dataset would have, the unit, the spectral frame, the rest
-frequency and one beam, which xradio gives every plane. It writes no telescope, observatory or
-observation date: nothing a read costs depends on them. xradio 1.2.2's FITS reader refuses a file
-without `DATE-OBS`, `TIMESYS` and `TELESCOP`, so the converter has to run on xradio 1.2.5 or later.
-carta-zarr reads only XRADIO image schema 0.0.2, so the converter also has to write it: name the
-version, type the sky image `sky`, and give the frequency coordinate its `frame` and `units`, as
-xradio's own `write_image` does.
+frequency and one beam, which XRADIO gives every plane. It writes no telescope, observatory or
+observation date: nothing a read costs depends on them, and XRADIO's FITS reader does not need them.
+It warns that the file has no observation date, and gives the time coordinate MJD 0.
 
 ## Calibration
 

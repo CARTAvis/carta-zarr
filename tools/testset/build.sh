@@ -5,13 +5,10 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 
 # Build the standard read-path test set in OUTPUT: each cube as a FITS file, written by generate.py,
-# and each of its Zarr layouts made from that FITS by the site's xradio converter, as production data
-# is. The converter must run on xradio 1.2.5 or later, whose FITS reader asks for no telescope or
-# observation date, which the FITS files do not carry; and for a flagged layout it must declare the
-# flag it computes (see README.md).
+# and each of its Zarr layouts made from that FITS by XRADIO's own open_image and write_image, through
+# convert.py. XRADIO_CONVERTER names another converter that takes the same arguments.
 #
-#   XRADIO_CONVERTER=/path/to/fits_to_zarr_xradio.py CARTA_ZARR_BENCH=/path/to/carta-zarr-bench \
-#       tools/testset/build.sh OUTPUT
+#   CARTA_ZARR_BENCH=/path/to/carta-zarr-bench tools/testset/build.sh OUTPUT
 #
 # What exists is skipped, so a run that stopped part-way is finished by running it again; a FITS
 # file or a Zarr appears under its name only once it is complete, and a Zarr only once verify.py has
@@ -20,8 +17,8 @@ set -euo pipefail
 
 here=$(cd "$(dirname "$0")" && pwd)
 generate="$here/../zarr-bench/generate.py"
-output=${1:?usage: XRADIO_CONVERTER=... $0 OUTPUT}
-converter=${XRADIO_CONVERTER:?set XRADIO_CONVERTER to the xradio FITS-to-Zarr converter}
+output=${1:?usage: CARTA_ZARR_BENCH=... $0 OUTPUT}
+converter=${XRADIO_CONVERTER:-$here/convert.py}
 [ -f "$converter" ] || { echo "no converter at $converter" >&2; exit 1; }
 # verify.py reads each Zarr through carta-zarr itself, as carta-backend would.
 bench=${CARTA_ZARR_BENCH:?set CARTA_ZARR_BENCH to carta-zarr-bench, from a build with -DCARTA_ZARR_BUILD_BENCH=ON}
@@ -35,13 +32,14 @@ cubes=(
     "cigar|512,512,30000|"
 )
 
-# cube | chunk (l, m, frequency) | shard (l, m, frequency), or - | flag: yes or no
+# cube | chunk (l, m, frequency) | shard (l, m, frequency), or - | flag: yes or no |
+# compressor: blosc-zstd or zstd
 layouts=(
-    "pancake|256,256,16|-|no"
-    "pancake|512,512,4|-|no"
-    "pancake|256,256,16|-|yes"
-    "cigar|128,128,64|-|no"
-    "cigar|64,64,256|-|no"
+    "pancake|256,256,16|-|no|blosc-zstd"
+    "pancake|512,512,4|-|no|blosc-zstd"
+    "pancake|256,256,16|-|yes|blosc-zstd"
+    "cigar|128,128,64|-|no|blosc-zstd"
+    "cigar|64,64,256|-|no|blosc-zstd"
 )
 
 say() { echo "== $(date '+%F %T') $*" >&2; }
@@ -58,10 +56,10 @@ for entry in "${cubes[@]}"; do
 done
 
 for entry in "${layouts[@]}"; do
-    IFS='|' read -r cube chunk shard flag <<< "$entry"
+    IFS='|' read -r cube chunk shard flag compressor <<< "$entry"
     IFS=',' read -r cl cm cf <<< "$chunk"
     name="${cube}_c${cl}x${cm}x${cf}"
-    arguments=(--chunks "0,$cf,0,$cl,$cm")
+    arguments=(--chunks "0,$cf,0,$cl,$cm" --compressor "$compressor")
     expected=(--chunks "$chunk")
     if [ "$shard" != - ]; then
         IFS=',' read -r sl sm sf <<< "$shard"
@@ -77,13 +75,14 @@ for entry in "${layouts[@]}"; do
         name+="_flag"
         arguments+=(--compute_mask)
     fi
+    [ "$compressor" = zstd ] && name+="_zstd"
     zarr="$output/$name.zarr"
     [ -e "$zarr" ] && continue
     partial="$output/$name.partial.zarr"
     rm -rf "$partial"
     say "$name: converting $cube.fits"
     uv run --quiet --python-preference only-managed "$converter" "$output/$cube.fits" "${arguments[@]}" \
-        --output "$partial" 2> >(grep -v Warning >&2)
+        --output "$partial" 2> >(grep -v -i warning >&2)
     say "$name: verifying"
     uv run --quiet "$here/verify.py" "$output/$cube.fits" "$partial" --flag "$flag" "${expected[@]}" --bench "$bench" \
         > "$output/$name.verify.txt" || {

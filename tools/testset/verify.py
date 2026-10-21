@@ -27,8 +27,8 @@ FITS cube is.
 
 What the coordinates, the unit or the beams mean is not compared: the test set exists to measure
 reads, and whether carta-zarr reads metadata right is for carta-zarr's own tests to say. The flag is,
-because the converter's --compute_mask leaves it undeclared (xradio 1.2.2 to 1.2.5), and a layout
-that looks flagged and is not would measure something else.
+because a layout that looks flagged and is not, such as one whose image does not declare its flag,
+would measure something else.
 
     verify.py CUBE.fits CUBE.zarr --flag {yes,no} --chunks L,M,F [--shards L,M,F]
               [--bench PATH] [--block-mib 1024]

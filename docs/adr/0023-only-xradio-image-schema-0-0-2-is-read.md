@@ -1,5 +1,9 @@
 # Only XRADIO image schema 0.0.2 is read
 
+*Amended for 0.3.0 ([#66](https://github.com/CARTAvis/carta-zarr/issues/66)): the read-path test set is
+converted again, with XRADIO 1.3.0's own `open_image` and `write_image`. The decision below is
+unchanged.*
+
 *Supersedes [ADR 0022](0022-a-store-is-read-by-the-schema-version-it-names.md)'s rows: its checks,
 its refusal of an unknown version and what the schema is held to stand.*
 

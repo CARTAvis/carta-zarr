@@ -76,4 +76,4 @@ search by dimensions and shape.
   `aperture` first. carta-backend builds a casacore `LinearCoordinate` named `UU`/`VV` in `lambda`
   from `aperture`, where it builds a `DirectionCoordinate` from `direction`.
 - The conformance fixture `conformance_aperture` is the amplitude of the cube's transform, masked,
-  converted by XRADIO 1.2.5. The test opens it, reads it masked and reduces it by role.
+  converted by XRADIO 1.3.0. The test opens it, reads it masked and reduces it by role.

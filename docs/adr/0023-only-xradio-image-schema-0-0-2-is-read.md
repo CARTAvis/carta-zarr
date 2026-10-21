@@ -55,10 +55,10 @@ XRADIO's own conversion wrote. Its pixels are read as float32, like any other.
 
 ADR 0022 said retiring the second row would wait until the site converter wrote stores that pass
 `check_image`, and the data converted with it had been converted again. That wait is given up: the
-converter moves to XRADIO's own `write_image` once XRADIO 1.2.6 gives it chunks, shards and a
-compressor, and everyone testing carta-zarr regenerates their data with it then. Until then the
-converter's current output, the converted cubes on the test machines and the read-path test set do
-not open.
+converter moves to XRADIO's own `write_image` once XRADIO 1.3.0 gives it chunks, shards and a
+compressor, and everyone testing carta-zarr regenerates their data with it then. (This first named a
+1.2.x release that was never tagged; 1.3.0 is the release after 1.2.5.) Until then the converter's
+current output, the converted cubes on the test machines and the read-path test set do not open.
 
 0.2.0 is not tagged, and it already changes the ABI, so removing a `DiagnosticCode` goes into it
 rather than into 0.3.

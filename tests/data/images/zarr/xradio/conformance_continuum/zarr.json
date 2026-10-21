@@ -4,9 +4,9 @@
       "projection": "SIN",
       "reference_direction": {
         "attrs": {
+          "units": "rad",
           "frame": "fk5",
           "type": "sky_coord",
-          "units": "rad",
           "equinox": "j2000.0"
         },
         "data": [
@@ -108,10 +108,13 @@
             }
           },
           {
-            "name": "zstd",
+            "name": "blosc",
             "configuration": {
-              "level": 0,
-              "checksum": false
+              "typesize": 8,
+              "cname": "zstd",
+              "clevel": 5,
+              "shuffle": "shuffle",
+              "blocksize": 0
             }
           }
         ],
@@ -164,10 +167,13 @@
             }
           },
           {
-            "name": "zstd",
+            "name": "blosc",
             "configuration": {
-              "level": 0,
-              "checksum": false
+              "typesize": 20,
+              "cname": "zstd",
+              "clevel": 5,
+              "shuffle": "shuffle",
+              "blocksize": 0
             }
           }
         ],
@@ -209,10 +215,13 @@
             }
           },
           {
-            "name": "zstd",
+            "name": "blosc",
             "configuration": {
-              "level": 0,
-              "checksum": false
+              "typesize": 8,
+              "cname": "zstd",
+              "clevel": 5,
+              "shuffle": "shuffle",
+              "blocksize": 0
             }
           }
         ],
@@ -255,10 +264,13 @@
             }
           },
           {
-            "name": "zstd",
+            "name": "blosc",
             "configuration": {
-              "level": 0,
-              "checksum": false
+              "typesize": 8,
+              "cname": "zstd",
+              "clevel": 5,
+              "shuffle": "shuffle",
+              "blocksize": 0
             }
           }
         ],
@@ -329,10 +341,13 @@
             }
           },
           {
-            "name": "zstd",
+            "name": "blosc",
             "configuration": {
-              "level": 0,
-              "checksum": false
+              "typesize": 8,
+              "cname": "zstd",
+              "clevel": 5,
+              "shuffle": "shuffle",
+              "blocksize": 0
             }
           }
         ],
@@ -375,10 +390,13 @@
             }
           },
           {
-            "name": "zstd",
+            "name": "blosc",
             "configuration": {
-              "level": 0,
-              "checksum": false
+              "typesize": 8,
+              "cname": "zstd",
+              "clevel": 5,
+              "shuffle": "shuffle",
+              "blocksize": 0
             }
           }
         ],
@@ -426,10 +444,13 @@
             }
           },
           {
-            "name": "zstd",
+            "name": "blosc",
             "configuration": {
-              "level": 0,
-              "checksum": false
+              "typesize": 4,
+              "cname": "zstd",
+              "clevel": 5,
+              "shuffle": "shuffle",
+              "blocksize": 0
             }
           }
         ],
@@ -471,10 +492,13 @@
             }
           },
           {
-            "name": "zstd",
+            "name": "blosc",
             "configuration": {
-              "level": 0,
-              "checksum": false
+              "typesize": 8,
+              "cname": "zstd",
+              "clevel": 5,
+              "shuffle": "shuffle",
+              "blocksize": 0
             }
           }
         ],
@@ -525,10 +549,13 @@
             }
           },
           {
-            "name": "zstd",
+            "name": "blosc",
             "configuration": {
-              "level": 0,
-              "checksum": false
+              "typesize": 4,
+              "cname": "zstd",
+              "clevel": 5,
+              "shuffle": "shuffle",
+              "blocksize": 0
             }
           }
         ],
@@ -549,9 +576,9 @@
           },
           "pointing_center": {
             "attrs": {
+              "units": "rad",
               "frame": "fk5",
-              "type": "sky_coord",
-              "units": "rad"
+              "type": "sky_coord"
             },
             "data": [
               0.7853981633974483,
@@ -617,10 +644,13 @@
             }
           },
           {
-            "name": "zstd",
+            "name": "blosc",
             "configuration": {
-              "level": 0,
-              "checksum": false
+              "typesize": 8,
+              "cname": "zstd",
+              "clevel": 5,
+              "shuffle": "shuffle",
+              "blocksize": 0
             }
           }
         ],
@@ -666,10 +696,13 @@
             }
           },
           {
-            "name": "zstd",
+            "name": "blosc",
             "configuration": {
-              "level": 0,
-              "checksum": false
+              "typesize": 8,
+              "cname": "zstd",
+              "clevel": 5,
+              "shuffle": "shuffle",
+              "blocksize": 0
             }
           }
         ],

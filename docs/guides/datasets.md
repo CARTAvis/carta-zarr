@@ -8,10 +8,11 @@ XRADIO package and library versions differ, is set out in
 ## Write a dataset
 
 Install the XRADIO version you mean to produce datasets with, and keep it
-pinned for a reproducible workflow; this page follows 1.2.5:
+pinned for a reproducible workflow; this page follows 1.3.0. The `casacore`
+extra is needed to read CASA images:
 
 ```sh
-pip install "xradio==1.2.5"
+pip install "xradio[zarr,casacore]==1.3.0"
 ```
 
 XRADIO converts a FITS or CASA image:
@@ -23,15 +24,14 @@ xds = open_image("cube.fits")
 write_image(xds, "cube", out_format="zarr")  # writes cube.img.zarr
 ```
 
-Open the resulting `cube.img.zarr` with carta-zarr. XRADIO's FITS reader is
-strict: it needs both celestial axes and refuses axis types it does not
-support, every axis needs `CTYPE` and `CUNIT`, the Stokes axis included, and
-the header must carry `LONPOLE`, `LATPOLE`, the `PC` matrix and `DATE-OBS`.
+Open the resulting `cube.img.zarr` with carta-zarr. XRADIO's FITS reader
+needs a `CTYPE` on every axis and refuses axis types it does not support,
+such as `LINEAR`. Without `DATE-OBS` or `MJD-OBS`, the image's time is MJD 0.
 
 The repository's
 [fixture generator](https://github.com/CARTAvis/carta-zarr/blob/dev/tests/data/generate_conformance_fixtures.py)
-is a reproducible example of producing conforming data with XRADIO 1.2.5. Its
-fixture with a flag is converted from a CASA image, so it also needs casatools.
+is a reproducible example of producing conforming data with XRADIO 1.3.0. Its
+fixtures with a flag are converted from CASA images, so it also needs casatools.
 
 ## Check the dataset
 

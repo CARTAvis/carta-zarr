@@ -72,7 +72,7 @@ carta::zarr::Image OpenSky() {
 }
 
 void TestIdentityAndAxes(const carta::zarr::ImageDescriptor& sky) {
-    // XRADIO 1.2.5 writes the BTYPE of the FITS image it converted.
+    // XRADIO 1.3.0 writes the BTYPE of the FITS image it converted.
     Require(sky.sub_type == "Intensity", "SKY's sub_type was '" + sky.sub_type + "'");
     Require(sky.unit == "Jy/beam", "BUNIT did not survive the conversion as the image unit");
     Require(sky.data_groups == std::vector<std::string>{"base"}, "SKY's data group membership changed");
@@ -142,7 +142,7 @@ void TestSpectralAndPolarization(const carta::zarr::ImageDescriptor& sky) {
     Require(spectral.increment.has_value(), "evenly spaced channels reported no increment");
     RequireClose(*spectral.increment, 1.0e6, 1.0, "channel increment");
 
-    // The polarization labels are a zstd-compressed fixed_length_utf32 array, which TensorStore
+    // The polarization labels are a blosc-compressed fixed_length_utf32 array, which TensorStore
     // cannot read: this is the custom string decoder running against XRADIO's real output.
     Require(sky.polarization.has_value(), "no polarization coordinate was reported");
     Require(sky.polarization->labels == std::vector<std::string>({"I", "Q", "U"}),
@@ -160,7 +160,7 @@ void TestTemporalAndStorage(const carta::zarr::ImageDescriptor& sky, const carta
     Require(sky.temporal->format == "MJD", "the time format was not normalized");
 
     Require(!geometry.sharded, "XRADIO's zarr writer started sharding");
-    Require(geometry.compressor == "zstd", "XRADIO's zarr writer changed compressor");
+    Require(geometry.compressor == "blosc", "XRADIO's zarr writer changed compressor");
     // Stored as (time, frequency, polarization, l, m) chunks of (1, 2, 3, 5, 4), reported in the
     // descriptor's logical order.
     Require((geometry.chunk_shape == std::vector<std::uint64_t>{5, 4, 2, 3, 1}),
@@ -289,7 +289,7 @@ void TestFlaggedConversion() {
     TestFlagsMaskTheirOwnImage(dataset.value(), "SKY_OTHER", "FLAG_SKY_OTHER", kOtherMasked);
 }
 
-// A continuum image of a spectral index, converted from FITS by XRADIO 1.2.5. Its one channel has no
+// A continuum image of a spectral index, converted from FITS by XRADIO 1.3.0. Its one channel has no
 // spacing to give an increment, so the channel width XRADIO writes is the increment; and BTYPE is
 // what the image measures.
 void TestContinuumConversion() {
@@ -344,7 +344,7 @@ void TestKeywordsConversion() {
 }
 
 // The amplitude of the cube's transform, an image of the aperture plane as CASA's ia.fft makes one,
-// converted by XRADIO 1.2.5. u and v play the spatial roles, so the reads and reductions reach them
+// converted by XRADIO 1.3.0. u and v play the spatial roles, so the reads and reductions reach them
 // as they reach l and m; it has an aperture coordinate and no direction; its mask is FLAG_APERTURE,
 // found by its shape since no data group names it; and it has no beams.
 void TestApertureConversion() {

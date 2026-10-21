@@ -49,10 +49,13 @@
             }
           },
           {
-            "name": "zstd",
+            "name": "blosc",
             "configuration": {
-              "level": 0,
-              "checksum": false
+              "typesize": 4,
+              "cname": "zstd",
+              "clevel": 5,
+              "shuffle": "shuffle",
+              "blocksize": 0
             }
           }
         ],
@@ -75,9 +78,9 @@
           },
           "pointing_center": {
             "attrs": {
+              "units": "rad",
               "frame": "icrs",
-              "type": "sky_coord",
-              "units": "rad"
+              "type": "sky_coord"
             },
             "data": [
               0.0,
@@ -96,11 +99,11 @@
           },
           "object_name": "Zarr conformance source",
           "user": {
+            "btype": "Intensity",
+            "object": "Zarr conformance source",
             "bmaj": 2e-05,
             "bmin": 1e-05,
-            "bpa": 0.1,
-            "btype": "Intensity",
-            "object": "Zarr conformance source"
+            "bpa": 0.1
           },
           "description": null,
           "beam_fit_params": "BEAM_FIT_PARAMS_APERTURE",
@@ -152,10 +155,13 @@
             }
           },
           {
-            "name": "zstd",
+            "name": "blosc",
             "configuration": {
-              "level": 0,
-              "checksum": false
+              "typesize": 20,
+              "cname": "zstd",
+              "clevel": 5,
+              "shuffle": "shuffle",
+              "blocksize": 0
             }
           }
         ],
@@ -200,10 +206,13 @@
             "name": "bytes"
           },
           {
-            "name": "zstd",
+            "name": "blosc",
             "configuration": {
-              "level": 0,
-              "checksum": false
+              "typesize": 1,
+              "cname": "zstd",
+              "clevel": 5,
+              "shuffle": "shuffle",
+              "blocksize": 0
             }
           }
         ],
@@ -250,10 +259,13 @@
             }
           },
           {
-            "name": "zstd",
+            "name": "blosc",
             "configuration": {
-              "level": 0,
-              "checksum": false
+              "typesize": 8,
+              "cname": "zstd",
+              "clevel": 5,
+              "shuffle": "shuffle",
+              "blocksize": 0
             }
           }
         ],
@@ -329,10 +341,13 @@
             }
           },
           {
-            "name": "zstd",
+            "name": "blosc",
             "configuration": {
-              "level": 0,
-              "checksum": false
+              "typesize": 4,
+              "cname": "zstd",
+              "clevel": 5,
+              "shuffle": "shuffle",
+              "blocksize": 0
             }
           }
         ],
@@ -372,10 +387,13 @@
             }
           },
           {
-            "name": "zstd",
+            "name": "blosc",
             "configuration": {
-              "level": 0,
-              "checksum": false
+              "typesize": 8,
+              "cname": "zstd",
+              "clevel": 5,
+              "shuffle": "shuffle",
+              "blocksize": 0
             }
           }
         ],
@@ -421,10 +439,13 @@
             }
           },
           {
-            "name": "zstd",
+            "name": "blosc",
             "configuration": {
-              "level": 0,
-              "checksum": false
+              "typesize": 8,
+              "cname": "zstd",
+              "clevel": 5,
+              "shuffle": "shuffle",
+              "blocksize": 0
             }
           }
         ],
@@ -470,10 +491,13 @@
             }
           },
           {
-            "name": "zstd",
+            "name": "blosc",
             "configuration": {
-              "level": 0,
-              "checksum": false
+              "typesize": 8,
+              "cname": "zstd",
+              "clevel": 5,
+              "shuffle": "shuffle",
+              "blocksize": 0
             }
           }
         ],
@@ -519,10 +543,13 @@
             }
           },
           {
-            "name": "zstd",
+            "name": "blosc",
             "configuration": {
-              "level": 0,
-              "checksum": false
+              "typesize": 8,
+              "cname": "zstd",
+              "clevel": 5,
+              "shuffle": "shuffle",
+              "blocksize": 0
             }
           }
         ],

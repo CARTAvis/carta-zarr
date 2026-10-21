@@ -5,7 +5,7 @@ Three version numbers describe different things:
 | Version | Meaning |
 |---|---|
 | carta-zarr 0.2.0 | The C++ library and its API/ABI |
-| XRADIO 1.2.5 | The Python package used to write the current conformance fixtures |
+| XRADIO 1.3.0 | The Python package used to write the current conformance fixtures |
 | Image schema 0.0.2 | The layout declared in the dataset's root `schema_version` attribute |
 
 The schema profile that reads it is `kXradioImageSchema` (`xradio.image`). Do not compare the dataset's schema version to the installed

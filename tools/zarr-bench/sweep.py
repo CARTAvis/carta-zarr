@@ -1399,7 +1399,7 @@ def run_sweep(sweep: Sweep, layouts: list[Layout]) -> None:
 
 def validation_possible(config: dict[str, Any]) -> tuple[bool, str]:
     if not has_validation(config):
-        return False, "no validate_crop (or validate_synthetic) was given"
+        return False, f"no {'validate_synthetic' if config['source']['synthetic'] else 'validate_crop'} was given"
     # Without a way to empty caches the stages already had to read more than RAM -- unless that check
     # is off, and then nothing has been validated yet.
     if cold_method(config) == "off" and config["checks"]["ram"]:
@@ -1546,8 +1546,12 @@ def plural(count: int, noun: str) -> str:
     return f"{count} {noun}{'' if count == 1 else 's'}"
 
 
-def first_touch_advice(mode: str, shape: dict[str, int], chunk: dict[str, int], users: int, ops: int) -> str:
-    """What would give a mode first touches enough: the chunks it reads are too few for its operations."""
+def first_touch_advice(mode: str, shape: dict[str, int], chunk: dict[str, int], users: int, ops: int,
+                       make: str) -> str:
+    """What would give a mode first touches enough: the chunks it reads are too few for its operations.
+
+    `make` is how the cube is made larger: "crop" for a crop of a source, "synthesize" for a synthetic one.
+    """
     total = users * ops
     depth = chunk.get("frequency", 1)
     if mode == "plane":
@@ -1556,7 +1560,7 @@ def first_touch_advice(mode: str, shape: dict[str, int], chunk: dict[str, int], 
             math.ceil(shape.get("polarization", 1) / chunk.get("polarization", 1))
         fewer = f", or set measure.ops plane = {slabs // users}" if slabs >= 2 * users else ""
         return (f"{total} planes a trial fall in {plural(slabs, 'run')} of chunks {plural(depth, 'channel')} deep: "
-                f"crop at least {depth * total} channels{fewer}.")
+                f"{make} at least {depth * total} channels{fewer}.")
     tiles = math.ceil(shape.get("l", 1) / chunk.get("l", 1)) * math.ceil(shape.get("m", 1) / chunk.get("m", 1))
     where = (f"{total} {mode} operations a trial fall in {plural(tiles, 'spatial chunk')} of "
              f"{chunk.get('l', 1)}×{chunk.get('m', 1)}")
@@ -1564,7 +1568,7 @@ def first_touch_advice(mode: str, shape: dict[str, int], chunk: dict[str, int], 
         # Users who share a chunk are each other's cache, and no count of operations parts them.
         return (f"{where}, too few for {users} users to read chunks of their own: only a cube with a larger plane, "
                 "or fewer users, can measure this.")
-    return f"{where}: set measure.ops {mode} = {tiles // users}, or crop a larger plane."
+    return f"{where}: set measure.ops {mode} = {tiles // users}, or {make} a larger plane."
 
 
 def write_report(sweep: Sweep, layouts: list[Layout], invalid: list[tuple[Layout, str]]) -> list[str]:
@@ -1596,6 +1600,8 @@ def write_report(sweep: Sweep, layouts: list[Layout], invalid: list[tuple[Layout
     if errors:
         warnings.append(f"**{errors} operations failed** with an error; their rows in results.csv say why.")
     # One warning per layout and mode, about the most users it was short with.
+    synthetic = bool(config["source"]["synthetic"])
+    make, cube = ("synthesize", "synthetic cube") if synthetic else ("crop", "crop")
     short: dict[tuple[str, str], tuple[int, Stats, str]] = {}
     for (stage, dataset, _, users, mode, _), stats in results.groups.items():
         entry = sweep.state["datasets"].get(dataset)
@@ -1604,11 +1610,11 @@ def write_report(sweep: Sweep, layouts: list[Layout], invalid: list[tuple[Layout
     for (name, mode), (users, stats, dataset) in sorted(short.items()):
         chunk = axis_lengths(results.chunk_shapes.get(dataset, ""))
         ops = int(config["measure"]["ops"].get(mode, BENCH_DEFAULT_OPS[mode]))
-        advice = first_touch_advice(mode, axis_lengths(results.shapes.get(dataset, "")), chunk, users, ops)
+        advice = first_touch_advice(mode, axis_lengths(results.shapes.get(dataset, "")), chunk, users, ops, make)
         warnings.append(f"**Too few first touches for {mode} on {name}**: with {users} user{'s' if users > 1 else ''}, "
                         f"{stats.first_touches} of {len(stats.ops)} operations read no chunk another one read, so "
                         f"{mode} is ranked on every operation there, cache hits included, and so is every layout "
-                        f"compared with it. The crop is small for chunks of {chunk_text(chunk)}. {advice}")
+                        f"compared with it. The {cube} is small for chunks of {chunk_text(chunk)}. {advice}")
 
     # -- Conclusion
     now, after = analysis.recommendations()

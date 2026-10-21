@@ -37,10 +37,10 @@ Result<void> ReadInto(const std::filesystem::path& array_path, const StoreContex
     if (destination.data == nullptr) {
         return Error{ErrorCode::invalid_argument, "Destination buffer is null", std::string(node)};
     }
-    // The selection is well formed by construction, so nothing about it is checked again here. The
-    // destination is not the selection's: it is whatever the caller handed across the seam, and the
-    // read writes through it as far as the selection reaches. Holding the one to the other is what
-    // stands between a caller's mistake and a write past the end of its buffer.
+    // The selection is well formed by construction, so it is not checked again. The destination is
+    // whatever the caller passed across the seam, and the read writes through it as far as the
+    // selection reaches, so this check is what stops a caller's mistake from writing past the end
+    // of its buffer.
     if (selection.destination_extent() > destination.size) {
         return Error{ErrorCode::buffer_too_small, "Destination buffer is too small", std::string(node)};
     }
@@ -55,12 +55,10 @@ Result<void> ReadInto(const std::filesystem::path& array_path, const StoreContex
     }
 
     try {
-        // Reused across calls. A slice read happens once per casacore cursor step, so opening here
-        // would make a fixed cost a per-call one.
-        // A read with a pool of its own runs against that pool's context rather than the session's.
-        // Chosen here rather than by the caller because this is where the array handle is taken,
-        // and a handle carries the pool it was opened against.
-        // Kept by the store either way, so that a pool outliving it keeps nothing of it.
+        // The handle is opened once and reused: a slice read happens once per casacore cursor step.
+        // A read with a pool of its own opens the array against that pool's context, because a
+        // handle carries the pool it was opened against. The pool keys the handle by this store, so
+        // a pool that outlives the store does not keep it.
         const StoreContext* pool =
             control.cache_pool ? CachePoolAccess::StoreContextOf(*control.cache_pool).get() : nullptr;
         auto opened = context->OpenArray(array_path, node, pool);
@@ -72,9 +70,9 @@ Result<void> ReadInto(const std::filesystem::path& array_path, const StoreContex
             return allowed.error();
         }
         auto const store = std::move(opened).value();
-        // Whether this is the array the store described was settled before the store handed over
-        // where it lives -- its rank included, which is the selection's because the selection was
-        // built from the descriptor of that array.
+        // The store checked that this is the array it described before handing over where it lives,
+        // including its rank, which matches the selection because the selection was built from that
+        // array's descriptor.
         const auto rank = selection.start().size();
         std::vector<tensorstore::Index> start(rank);
         std::vector<tensorstore::Index> count(rank);
@@ -101,8 +99,8 @@ Result<void> ReadInto(const std::filesystem::path& array_path, const StoreContex
                          std::string(node)};
         }
 
-        // Conversion rides the same copy, so a float64 or integer array is never materialized in
-        // its stored type first.
+        // The conversion happens in the same copy, so a float64 or integer array is never
+        // materialized in its stored type first.
         auto converted = tensorstore::Cast(std::move(transposed).value(), target_dtype);
         if (!converted.ok()) {
             return Error{ErrorCode::unsupported_data_type,
@@ -110,11 +108,11 @@ Result<void> ReadInto(const std::filesystem::path& array_path, const StoreContex
                          std::string(node)};
         }
 
-        // Axis 0 is the fastest-varying destination dimension: over a densely packed buffer the strides
-        // are Fortran order's, and within a larger read they are that read's, from where this part of
-        // it begins. TensorStore requires a shared array here; the caller owns this buffer and the read
-        // below is awaited before returning, so a non-owning shared pointer is what the ownership
-        // actually is rather than a way around the check.
+        // Axis 0 is the fastest-varying destination dimension: over a densely packed buffer the
+        // strides are Fortran order's, and within a larger read they are that read's, from where this
+        // part begins. TensorStore requires a shared array here. The caller owns this buffer and the
+        // read below completes before returning, so a non-owning shared pointer describes the
+        // ownership accurately.
         const auto strides = selection.DestinationStrides();
         std::vector<tensorstore::Index> shape(rank);
         std::vector<tensorstore::Index> byte_strides(rank);
@@ -147,10 +145,9 @@ Result<void> ReadFloat32(const std::filesystem::path& array_path, const StoreCon
 Result<void> ReadMaskBytes(const std::filesystem::path& array_path, const StoreContextPtr& context,
                            std::string_view node, const PixelSelection& selection, BufferView<std::uint8_t> destination,
                            const ReadControl& control) {
-    // The caller's buffer holds bytes, so the read converts into bytes. Asking TensorStore for
-    // bool and writing it through a reinterpret_cast of that buffer assumed bool and uint8_t are
-    // the same object, which C++ does not say they are; the conversion costs nothing here because
-    // it rides the copy the read already performs.
+    // The caller's buffer holds bytes, so the read converts into bytes rather than writing bool
+    // through a reinterpret_cast, which C++ does not allow. The conversion costs nothing, because it
+    // happens in the copy the read already performs.
     return ReadInto(array_path, context, node, selection, tensorstore::dtype_v<std::uint8_t>, destination, control);
 }
 

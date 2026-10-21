@@ -18,7 +18,7 @@ The per-pixel loop inlines through the visitor. `AccumulateRow` is instantiated 
 the same state by being local types behind a template parameter. Type-erasing the visitor puts an
 indirect call at the slab boundary and stops the enclosing loop nest from inlining.
 
-`54731c1`, which made the accumulation loop vectorise, is worth about 25% of a whole-region
+`54731c1`, which made the accumulation loop vectorize, is worth about 25% of a whole-region
 reduction: a 240 x 240 x 250 profile settles at 24-28 ms against 33 ms, with the reads unchanged at
 10.7 ms. Its own message records what makes this dangerous: "That figure is from a Release build.
 The same comparison in the default Debug build dir shows no difference at all, which is how this

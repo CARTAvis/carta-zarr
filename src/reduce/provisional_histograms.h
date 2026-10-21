@@ -11,8 +11,8 @@
 //
 // The rule for how finely to bin, an accumulator per task, the per-pixel loop that feeds them, and
 // the collection that adds six totals across tasks and re-aggregates each task's provisional
-// histogram onto the caller's bins. Each can be asked a question with a few rows of pixels and an
-// exact answer, rather than only through a whole walk compared against a two-pass answer.
+// histogram onto the caller's bins. Each can be tested with a few rows of pixels and an exact answer,
+// rather than only through a whole walk compared with a two-pass answer.
 //
 // Not the spectral reduction's StatisticSlots, although it counts the same six statistics; that
 // header says why the two stay apart.
@@ -38,20 +38,19 @@ namespace carta::zarr::internal {
 /**
  * The provisional histograms of one cube histogram, one per task, and the answer over them.
  *
- * Each task bins into a GrowingHistogram of its own whose range grows to fit what it sees, and
- * keeps the six statistics beside it. Nothing merges two of them until Collect, which takes the
- * extremes across all of them -- exact, however the bins fell -- and re-aggregates each one onto
- * the same target grid. No two provisional histograms are ever merged with each other, which is
- * what makes their ranges having drifted apart not a problem.
+ * Each task bins into its own GrowingHistogram, whose range grows to fit what it sees, and keeps the
+ * six statistics with it. Collect takes the extremes across all of them, which are exact however the
+ * bins fell, and re-aggregates each one onto the same target grid. Provisional histograms are never
+ * merged with each other, so it does not matter that their ranges drift apart.
  *
- * There are never more tasks than histograms: the split that decides how many there are is the
- * same one Add divides each read with, and it is held here rather than by the caller, so the two
- * cannot be made from different budgets. ADR 0005.
+ * There are never more tasks than histograms: the split that decides how many there are is the one
+ * Add divides each read with, and it is held here rather than by the caller, so the two cannot come
+ * from different budgets. ADR 0005.
  */
 class ProvisionalHistograms {
 public:
     // How many bins each provisional histogram holds, for a request asking for `bin_count` that stated
-    // `provisional_bin_count`. See CubeHistogramRequest::provisional_bin_count, which this is the whole of.
+    // `provisional_bin_count`. This implements CubeHistogramRequest::provisional_bin_count.
     static std::size_t Resolution(std::uint32_t bins, std::uint32_t provisional_bin_count) {
         std::size_t provisional = provisional_bin_count;
         if (provisional == 0) {
@@ -83,14 +82,13 @@ public:
 
     // Count every pixel of one read.
     //
-    // Rows of the whole read, numbered across its planes, rather than rows of one plane. A
-    // provisional histogram is half a megabyte, so a task has to be long enough to earn the cache it
-    // pulls in: split per plane, a task was a few hundred thousand pixels against that half megabyte
-    // and the pass ran slower than not splitting at all.
+    // Rows of the whole read, numbered across its planes, rather than rows of one plane. A provisional
+    // histogram is half a megabyte, so a task has to be long enough to pay for the cache it pulls in:
+    // split per plane, a task is a few hundred thousand pixels, and the pass runs slower than without
+    // splitting.
     //
-    // By task, not by worker: the cap can leave fewer histograms than the pool has workers, and a
-    // task is the thing there is one histogram for. A read of one task binds into the first, on this
-    // thread.
+    // By task, not by worker: the cap can leave fewer histograms than the pool has workers, and there
+    // is one histogram per task. A read of one task bins into the first, on this thread.
     void Add(const Slab& slab) {
         const std::uint64_t rows = slab.channel_count * slab.v_count;
         _split.Run(_split.Tasks(slab.u_count, rows), rows,
@@ -100,8 +98,8 @@ public:
     }
 
     // The answer over everything added so far. The extremes are exact for the pixels counted, so the
-    // grid to re-aggregate onto is known at any point, not only at the last one -- which is what lets
-    // a walk hand a caller a snapshot part of the way through.
+    // grid to re-aggregate onto is known at any point, not only at the end, which lets a walk hand a
+    // caller a snapshot part of the way through.
     //
     // Not free: it re-aggregates every provisional histogram. Safe to call between reads, with no
     // Add under way.
@@ -124,8 +122,8 @@ public:
         totals.sum_sq_dev = spread.sum_sq_dev;
 
         result.counts.assign(_bins, 0);
-        // Nothing finite was read, so the extrema stay at the NaN SpectralTotals starts them at: the
-        // one place that answer is written, for this and for every spectral block.
+        // Nothing finite was read, so the extrema stay at the NaN SpectralTotals starts them at, which
+        // is the one place that default is written, for this and for every spectral block.
         if (totals.num_pixels == 0.0) {
             return result;
         }
@@ -146,11 +144,10 @@ public:
 private:
     // One task's provisional histogram and the statistics beside it.
     //
-    // Tasks are claimed from a shared counter rather than divided up front, so task n is run by a
-    // different thread on each read and an accumulator does move between cores as the pass
-    // advances. The pool hands the body a worker index that would avoid that, and nothing here uses
-    // it; whether it is worth anything is unmeasured. ADR 0005 records the state rather than
-    // pretending it is settled.
+    // Tasks are claimed from a shared counter rather than divided up front, so task n runs on a
+    // different thread on each read, and an accumulator moves between cores as the pass advances. The
+    // pool passes the body a worker index that would avoid that, which nothing here uses; whether it
+    // would help is unmeasured. ADR 0005 records this as open.
     //
     // Padded to a cache line because Add writes the range and a bin on every pixel, and two
     // accumulators sharing a line would trade it between cores a billion times over a cube this
@@ -171,7 +168,7 @@ private:
 
     // Rows [first, last) of a read, numbered across its planes, into one accumulator.
     static void TakeRows(const Slab& slab, std::uint64_t first, std::uint64_t last, Accumulator& into) {
-        // Hoisted so the per-pixel loop reads as it did inside the walk's visitor.
+        // Hoisted into locals for the per-pixel loop.
         const float* const base = slab.pixels;
         const std::uint64_t stride_u = slab.stride_u;
         const std::uint64_t stride_v = slab.stride_v;
@@ -187,9 +184,9 @@ private:
         double sum_sq = 0.0;
         double minimum = std::numeric_limits<double>::infinity();
         double maximum = -std::numeric_limits<double>::infinity();
-        // Each row's distances from a shift of its own, put together a row at a time: see
-        // reduce/deviations.h. Beside the sum rather than instead of any of it, so the sum is the
-        // same bits it always was.
+        // Each row's distances from a shift of its own, combined a row at a time: see
+        // reduce/deviations.h. Kept alongside the sum rather than replacing any of it, so the sum is
+        // unchanged.
         Spread spread;
         for (std::uint64_t index = first; index < last; ++index) {
             const float* row = base + ((index / v_count) * stride_z) + ((index % v_count) * stride_v);

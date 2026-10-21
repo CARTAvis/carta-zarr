@@ -103,14 +103,14 @@ Three things follow from the distinction, and the first is why it is needed at a
 `no_match` otherwise.** A store whose only image disagreed with a coordinate was reported `invalid`
 before, by the probe's own copy of the rule. Without the distinction it would have become `no_match`
 -- every image disqualified, no default, nothing matched -- and a caller would be told that no
-built-in profile recognised a store that a profile recognised perfectly well and found broken. A
+built-in profile recognized a store that a profile recognized perfectly well and found broken. A
 store whose only image will not parse now answers the same way, which is a change: it used to be a
 non-match with its reason dropped.
 
 Malformed is not enough on its own, though: a malformed node says a store is broken, not that it
 is an image dataset. A visibility dataset whose weights array will not parse was answered `invalid`
 and listed by CARTA as a broken image. So `invalid` also needs evidence of an image dataset -- an
-image variable this profile recognised, openable or not; a node bearing one of XRADIO's image names,
+image variable this profile recognized, openable or not; a node bearing one of XRADIO's image names,
 such as `SKY`; or a root whose `type` is `image_dataset` -- and a store with none is `no_match`,
 whatever in it would not parse.
 
@@ -227,14 +227,14 @@ consumer that wants it.
 
 **Diagnostics dropped on `no_match`.** `ProbeStore` fills neither `diagnostics` nor `schema_id` on
 the branch where nothing matched, so a store of nothing but complex variables is still reported as
-unrecognised with no reason attached, although `InspectImages` says in a comment that the discovery
+unrecognized with no reason attached, although `InspectImages` says in a comment that the discovery
 diagnostics explain it. The promotion rule above rescues the malformed half of that case and leaves
 the capability half exactly as it is.
 
 *Since decided:* `ProbeStore` now keeps what the profile said when it did not match, so that store is
 refused with the profile's own reason ("Complex sky-plane variables are not openable") instead of
 "No built-in schema profile matched the Zarr store". Only diagnostics the profile produced are kept
--- a store with nothing in it the profile recognised still carries none, and falls back to the
+-- a store with nothing in it the profile recognized still carries none, and falls back to the
 generic message -- and `schema_id` stays empty, as `ProbeResult` promises for a kind that is not a
 match. The kind itself does not change: the store is still one this library is not for. With a
 second profile, the first to say anything would be the one heard, the same rule the invalid branch

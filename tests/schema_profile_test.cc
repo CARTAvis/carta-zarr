@@ -10,7 +10,7 @@
 // no TensorStore.
 //
 // Whole descriptors are deliberately absent: they read coordinate values, which an in-memory
-// transport has none of. Descriptor behaviour is covered in tests/schema_probe_test.cc against
+// transport has none of. Descriptor behavior is covered in tests/schema_probe_test.cc against
 // fixtures on disk. The parts of describing an image that read only metadata do belong here, which
 // is why choosing a flag is below: what a flag has to be is checked in tests/flag_test.cc without a
 // store at all, and what happens when the store is consulted is checked here.
@@ -223,13 +223,13 @@ void TestNonMatch() {
             "a valid non-XRADIO group was not reported as an unsupported schema");
     // Nothing in it looked like an image, so the profile has nothing to say about it either.
     Require(probe.value().diagnostics.empty() && probe.value().schema_id.empty(),
-            "a store with nothing the profile recognised was reported with the profile's say-so");
+            "a store with nothing the profile recognized was reported with the profile's say-so");
 }
 
 // A store whose only images are ones this library does not open is still one no profile matched,
-// and the reason is the profile's own: it recognised the images and refused them. That reason used
-// to be dropped on the way out of ProbeStore, so the refusal a consumer saw was "no profile matched"
-// with nothing to say which variable, or why.
+// and the reason is the profile's own: it recognized the images and refused them. ProbeStore passes
+// that reason on: the probe's diagnostics name the variable, and the refusal on opening keeps the
+// reason rather than saying only "no profile matched".
 void TestNothingOpenableSaysWhy() {
     using carta::zarr::internal::ProbeStore;
     using carta::zarr::internal::RequireOpenableDataset;
@@ -481,7 +481,7 @@ void TestAnImageDisagreeingWithACoordinateIsNotOpenable() {
 
 // Nothing openable is two different answers, and a consumer acts on the difference. A store of
 // well-formed variables this library does not open is a store it is not for; a store whose only
-// image disagrees with its coordinates is one this profile recognised and found broken, and
+// image disagrees with its coordinates is one this profile recognized and found broken, and
 // reporting that as "no profile matched" names nothing anyone can act on.
 void TestNothingOpenableIsInvalidOnlyWhenSomethingIsMalformed() {
     auto capability = CompleteStore();
@@ -499,7 +499,7 @@ void TestNothingOpenableIsInvalidOnlyWhenSomethingIsMalformed() {
 
     const auto broken = Probe(malformed);
     Require(broken.kind == SchemaMatchKind::invalid,
-            "a store whose only image disagrees with a coordinate was reported as unrecognised");
+            "a store whose only image disagrees with a coordinate was reported as unrecognized");
     Require(broken.diagnostics.size() == 2 && broken.diagnostics.front().node_path == "SKY" &&
                 broken.diagnostics.back().node_path == "APERTURE",
             "the refusal did not lead with the reason the store was refused, and keep the other");
@@ -762,8 +762,8 @@ void TestTheInventorySaysWhatEachNodeIs() {
             "an array whose metadata does not parse was not carried with its refusal");
     for (const std::string name : {"ODD", "NUMBERED"}) {
         const auto* entry = find(name);
-        Require(entry->kind == NodeKind::unrecognised && entry->array == nullptr && entry->reason.has_value(),
-                "a node that does not say it is a group or an array was not unrecognised: " + name);
+        Require(entry->kind == NodeKind::unrecognized && entry->array == nullptr && entry->reason.has_value(),
+                "a node that does not say it is a group or an array was not unrecognized: " + name);
     }
 
     // Sorted by name, which is the order discovery's diagnostics come out in.
@@ -804,9 +804,9 @@ void TestANodeThatWillNotParseIsDiagnosedNotRefused() {
             return diagnostic.node_path == node && diagnostic.code == code;
         });
     };
-    Require(said_of("JUNK", carta::zarr::DiagnosticCode::unrecognised_node),
+    Require(said_of("JUNK", carta::zarr::DiagnosticCode::unrecognized_node),
             "a document that will not parse was not diagnosed as such");
-    Require(said_of("ODD", carta::zarr::DiagnosticCode::unrecognised_node),
+    Require(said_of("ODD", carta::zarr::DiagnosticCode::unrecognized_node),
             "a node_type Zarr does not define was not diagnosed as such");
     Require(!HasDiagnostic(said, carta::zarr::DiagnosticCode::unreadable_array),
             "a node that never said it was an array was called one");
@@ -843,8 +843,7 @@ void TestAnArrayWithAMalformedCodecIsDiagnosedNotRefused() {
 }
 
 // The report latches: once a requirement is unmet, later ones are no-ops. A store with two faults
-// is therefore diagnosed once, by the first fault reached -- the behaviour a probe had when every
-// check returned early, now stated somewhere rather than emerging from the control flow.
+// is therefore diagnosed once, by the first fault reached.
 //
 // Both faults have to be ones the probe still reaches. A coordinate of the wrong length is not:
 // agreeing with it is part of being an image this profile opens, so a store with one has no
@@ -1048,17 +1047,17 @@ void TestADataGroupDeclaresItsSkysFlag() {
     auto agreeing = FlagOfSky(nodes);
     Require(agreeing && agreeing.value() == "FLAG_1", "two groups naming the same flag were refused");
 
-    // "./FLAG_1" names the node FLAG_1, and every rule above holds of it however it is spelt.
-    const auto spelt = [&](const std::string& data_groups) {
+    // "./FLAG_1" names the node FLAG_1, and every rule above holds of it however it is spelled.
+    const auto spelled = [&](const std::string& data_groups) {
         nodes[""] = RootGroupWithDataGroups(data_groups);
         return FlagOfSky(nodes);
     };
-    auto dotted = spelt(R"({"base":{"sky":"SKY","flag":"./FLAG_2"}})");
+    auto dotted = spelled(R"({"base":{"sky":"SKY","flag":"./FLAG_2"}})");
     Require(dotted && dotted.value() == "FLAG_2", "a declared ./FLAG_2 was not chosen as the node FLAG_2");
-    auto aliases = spelt(R"({"base":{"sky":"SKY","flag":"FLAG_1"},"robust":{"sky":"SKY","flag":"./FLAG_1"}})");
+    auto aliases = spelled(R"({"base":{"sky":"SKY","flag":"FLAG_1"},"robust":{"sky":"SKY","flag":"./FLAG_1"}})");
     Require(aliases && aliases.value() == "FLAG_1", "two spellings of one flag were taken for two flags");
-    auto dotted_sky = spelt(R"({"base":{"sky":"./SKY","flag":"FLAG_2"}})");
-    Require(dotted_sky && dotted_sky.value() == "FLAG_2", "a group whose sky is spelt ./SKY was not SKY's");
+    auto dotted_sky = spelled(R"({"base":{"sky":"./SKY","flag":"FLAG_2"}})");
+    Require(dotted_sky && dotted_sky.value() == "FLAG_2", "a group whose sky is spelled ./SKY was not SKY's");
     auto own_dotted = nodes;
     own_dotted["SKY"] = SkyArray("float32", R"({"units":"Jy/beam","type":"sky","flag":"./FLAG_1"})");
     own_dotted[""] = RootGroup();
@@ -1123,12 +1122,12 @@ void TestAnUndeclaredFlagIsTakenOnlyByItsName() {
     }
 
     // Nor one a data group gives a sky image as its flag, however the group spells it.
-    for (const std::string& spelt : {"FLAG_POINT_SPREAD_FUNCTION", "./FLAG_POINT_SPREAD_FUNCTION"}) {
+    for (const std::string& spelled : {"FLAG_POINT_SPREAD_FUNCTION", "./FLAG_POINT_SPREAD_FUNCTION"}) {
         auto owned = nodes;
-        owned[""] = RootGroupWithDataGroups(R"({"base":{"sky":"SKY","flag":")" + spelt + R"("}})");
+        owned[""] = RootGroupWithDataGroups(R"({"base":{"sky":"SKY","flag":")" + spelled + R"("}})");
         auto taken = flag_of(owned, "POINT_SPREAD_FUNCTION");
         Require(taken && taken.value().empty(),
-                "a flag a data group gives the sky, spelt " + spelt + ", was taken as the point spread function's");
+                "a flag a data group gives the sky, spelled " + spelled + ", was taken as the point spread function's");
     }
 }
 
@@ -1208,9 +1207,8 @@ void TestSizeRefusesAStoreWithNoArrays() {
 }
 
 // Every rule that turns metadata and coordinate values into a descriptor, reached with the values
-// handed in. This build reads no values, so while describing an image read its own, everything
-// below was reachable only from a store written to disk -- and the image_type fallback and the time
-// axis's scale and format were not reached at all.
+// passed in. This build reads no values, so passing them in is the only way to reach these rules,
+// the time axis's scale and format included, without a store on disk.
 void TestADescriptionIsBuiltFromTheValuesItIsGiven() {
     using carta::zarr::internal::xradio::CoordinateValues;
     using carta::zarr::internal::xradio::DescribeImageFrom;
@@ -1314,7 +1312,7 @@ void TestAnArrayDisagreeingWithTheRootsCopyIsRefused() {
         RequireRefusedAs(read.error(), ErrorCode::invalid_metadata, "l", "l rewritten with " + how);
     }
 
-    // The copy names an array whose own document is not there: a store that only a reader honouring
+    // The copy names an array whose own document is not there: a store that only a reader honoring
     // the copy alone could open, which ADR 0004 calls malformed.
     auto missing = ConsolidatedStore();
     missing.erase("l");
@@ -1783,11 +1781,11 @@ void TestAnApertureImageIsDescribedOnItsPlane() {
     no_crval["u"] = NumericArray("[4]", R"(["u"])", "float64", R"({"units":"lambda"})");
     auto no_crval_store = Open(no_crval);
     Require(static_cast<bool>(no_crval_store), "the in-memory store failed to open");
-    const auto uncentred = DescribeImageFrom(no_crval_store.value(), "APERTURE", values);
-    Require(static_cast<bool>(uncentred), "an aperture-plane image whose u has no crval was not described");
-    Require(uncentred.value().descriptor.aperture->reference_value.at(0) == 0.0,
+    const auto uncentered = DescribeImageFrom(no_crval_store.value(), "APERTURE", values);
+    Require(static_cast<bool>(uncentered), "an aperture-plane image whose u has no crval was not described");
+    Require(uncentered.value().descriptor.aperture->reference_value.at(0) == 0.0,
             "a u with no crval was not given 0 as its reference value");
-    const auto& said = uncentred.value().descriptor.diagnostics;
+    const auto& said = uncentered.value().descriptor.diagnostics;
     Require(std::any_of(said.begin(), said.end(),
                         [](const carta::zarr::Diagnostic& diagnostic) {
                             return diagnostic.code == carta::zarr::DiagnosticCode::invalid_metadata &&

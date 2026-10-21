@@ -9,7 +9,7 @@
 //
 // A comparison between layouts rests on three things this pins. Every layout is asked for the same
 // positions, which depend on the cube's shape and the seed and nothing else. Processes standing for
-// different users never share a position while there are enough to go round, and say so when there
+// different users never share a position while there are enough to go around, and say so when there
 // are not. And the fingerprint of what an operation read agrees between layouts holding the same
 // pixels, so that a layout read wrongly shows up in the CSV rather than as a fast time.
 //
@@ -462,7 +462,7 @@ void TestARowIsOneLine() {
     Require(std::find(fields.begin(), fields.end(), "io_error: \"a\", then b") != fields.end(),
             "a quoted field did not survive the round trip");
 
-    const auto summary = SummariseRow(line);
+    const auto summary = SummarizeRow(line);
     Require(summary.has_value() && summary->run_key == row.run_key && summary->trial == 3 &&
                 summary->status == "error" && summary->seconds == 1.25,
             "a row does not read back as what was written");
@@ -596,7 +596,7 @@ void TestResumingDropsARowCutShort() {
         const auto lines = lines_of();
         Require(!lines.empty() && lines.front() == CsvHeader(), what + ": the header is not the first line");
         for (std::size_t i = 1; i < lines.size(); ++i) {
-            Require(SummariseRow(lines[i]).has_value(), what + ": line " + std::to_string(i + 1) + " is not a row");
+            Require(SummarizeRow(lines[i]).has_value(), what + ": line " + std::to_string(i + 1) + " is not a row");
         }
         return lines.size() - 1;
     };

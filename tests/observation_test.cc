@@ -10,8 +10,7 @@
 // the schema describes. The contract is that a field it cannot read is skipped and the rest is kept
 // -- nothing here can close an image. This takes JSON, so no store is written.
 //
-// The geodetic-to-cartesian conversion is asserted here for the first time. It was reachable only
-// through a store, and no fixture wrote a position that would show a swapped axis.
+// The geodetic-to-cartesian conversion is checked here directly, from JSON.
 
 #include "schema/xradio/observation.h"
 
@@ -55,8 +54,8 @@ void TestTheReadableFieldsAreReported() {
     Require(observation.telescope_name == "Test scope", "the telescope name was not read");
 }
 
-// longitude, latitude and radius become OBSGEO-X, Y, Z. Nothing in the repository wrote a position
-// where swapping two of the three would change the answer, so this one is deliberately asymmetric.
+// longitude, latitude and radius become OBSGEO-X, Y, Z. The position is deliberately asymmetric, so
+// that swapping any two of the three changes the answer.
 void TestTheTelescopePositionBecomesCartesian() {
     const double lon = 0.5;
     const double lat = 0.25;
@@ -133,29 +132,29 @@ void TestNothingToDescribe() {
             "an image with no observation attributes reported some");
     Require(!observation.observatory_position.has_value() && !observation.observation_mjd.has_value(),
             "an image with no observation attributes reported a position or a date");
-    Require(!observation.pointing_center.has_value(), "an image with no pointing centre reported one");
+    Require(!observation.pointing_center.has_value(), "an image with no pointing center reported one");
 }
 
 // Where the telescope pointed, in degrees and in the frame named as the reference direction's is,
 // equinox included. XRADIO writes it in radians, from OBSRA and OBSDEC or from the reference
 // direction; either way it is reported.
-void TestThePointingCentreIsReportedInDegrees() {
+void TestThePointingCenterIsReportedInDegrees() {
     const double pi = std::acos(-1.0);
     const auto observation = Describe(nlohmann::json{
         {"pointing_center",
          {{"data", {pi / 4.0, pi / 6.0}},
           {"attrs", {{"frame", "fk5"}, {"type", "sky_coord"}, {"units", "rad"}, {"equinox", "j2000.0"}}}}}});
-    Require(observation.pointing_center.has_value(), "the pointing centre was not read");
+    Require(observation.pointing_center.has_value(), "the pointing center was not read");
     const auto& pointing = *observation.pointing_center;
     Require(Near(pointing.value.at(0), 45.0) && Near(pointing.value.at(1), 30.0),
-            "the pointing centre was not converted to degrees");
-    Require(pointing.reference_frame == "FK5", "the pointing centre's frame was not named as a reference frame is");
-    Require(pointing.equinox && Near(*pointing.equinox, 2000.0), "the pointing centre's equinox was not read");
+            "the pointing center was not converted to degrees");
+    Require(pointing.reference_frame == "FK5", "the pointing center's frame was not named as a reference frame is");
+    Require(pointing.equinox && Near(*pointing.equinox, 2000.0), "the pointing center's equinox was not read");
 
     Require(!Describe(nlohmann::json{{"pointing_center", {{"data", {1.0}}}}}).pointing_center,
-            "a pointing centre of one angle was reported");
+            "a pointing center of one angle was reported");
     Require(!Describe(nlohmann::json{{"pointing_center", "somewhere"}}).pointing_center,
-            "a pointing centre that is not a measure was reported");
+            "a pointing center that is not a measure was reported");
 }
 
 // The dataset's keywords and the image's, the image's winning; each kind of value XRADIO can carry,
@@ -226,7 +225,7 @@ int main() {
         TestObsdateSplitsIntoScaleAndValue();
         TestObsdateSpellings();
         TestNothingToDescribe();
-        TestThePointingCentreIsReportedInDegrees();
+        TestThePointingCenterIsReportedInDegrees();
         TestUserKeywordsAreMergedAndTyped();
         std::cout << "carta-zarr observation tests passed\n";
         return 0;

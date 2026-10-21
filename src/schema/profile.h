@@ -18,13 +18,13 @@
 namespace carta::zarr::internal {
 
 // One image as a profile describes it: what a consumer is told about it, and the geometry its reads
-// and reductions are cut by. Made together because the geometry is the image's stored layout put into
-// the descriptor's logical order, and the layout is read only while the image is being described.
+// and reductions are cut by. Made together because the geometry is the image's stored layout in the
+// descriptor's logical order, and the layout is read only while the image is described.
 struct DescribedImage {
     ImageDescriptor descriptor;
     ChunkGeometry geometry;
-    // The flag's, by its own layout, which need not be the pixels': a flag has to share the image's
-    // dimensions and nothing more. Empty when the image has no pixel mask.
+    // The flag's geometry, from its own layout, which may differ from the pixels': a flag has to share
+    // the image's dimensions and nothing more. Empty when the image has no pixel mask.
     ChunkGeometry flag_geometry;
 };
 
@@ -36,10 +36,9 @@ enum class ProbeKind {
     invalid_dataset,
 };
 
-// A probe answers one more question than a descriptor does -- whether a profile describes the store
-// at all -- and otherwise is exactly what Dataset::descriptor() reports, which Dataset::Open takes
-// from it by move. Saying that with the type rather than by copying the fields is what keeps the two
-// level: a field added to DatasetDescriptor reaches both by construction.
+// A probe answers one more question than a descriptor does, whether a profile describes the store at
+// all, and is otherwise exactly what Dataset::descriptor() reports; Dataset::Open moves it from here.
+// Inheriting rather than copying the fields means a field added to DatasetDescriptor reaches both.
 //
 // The inherited fields are filled to the extent the kind allows. A supported_dataset fills them all;
 // an invalid_dataset names the schema it failed to be and says why in diagnostics; anything else
@@ -58,9 +57,8 @@ struct ImageDiscovery {
 };
 
 // Everything a profile has to say about a store it is meeting for the first time. The two halves
-// come back together because they are one enumeration: deciding whether a store matches means
-// finding out what is in it, and answering the two questions separately meant enumerating twice or
-// caching the answer somewhere both could reach.
+// come back together because they come from one enumeration: deciding whether a store matches means
+// finding out what is in it.
 //
 // `discovery` is what `probe` was decided from, so it is filled whatever the match kind says.
 struct SchemaInspection {
@@ -71,49 +69,46 @@ struct SchemaInspection {
 // What a probe's refusal should be reported as.
 //
 // A profile that rejects a store has already worked out why, often down to the attribute, and a
-// consumer shows whatever comes back here to whoever picked the file. Reporting "not a supported
-// dataset" instead throws that away and names a schema profile the store may have nothing to do
-// with. The fallback is for the case the probe genuinely had nothing to say.
+// consumer shows this message to whoever picked the file. "Not a supported dataset" would throw that
+// away and name a schema profile the store may have nothing to do with. The fallback is for when the
+// probe had nothing to say.
 std::string RejectionMessage(const std::vector<Diagnostic>& diagnostics, std::string_view fallback);
 
-// Whether a probe's answer is a dataset that can be opened, as the error a caller should report
-// when it is not. The counterpart, one level up, of the question a profile answers about a single
-// image within a dataset: that one is about an image, this one about the dataset holding it.
+// Whether a probe's answer is a dataset that can be opened, as the error a caller should report when
+// it is not. The dataset-level counterpart of RequireQualified, which asks it of one image.
 //
-// Three ways it is not, and they are three different errors: nothing matched, something matched and
-// was malformed, and a profile matched a store that has no images in it. Which one a refusal is,
-// and what it says, is the profile's question rather than the facade's.
+// There are three ways it is not, each a different error: nothing matched, something matched and was
+// malformed, or a profile matched a store with no images in it. The profile, not the facade, decides
+// which one a refusal is and what it says.
 Result<void> RequireOpenableDataset(const ProbeResult& probe, std::string_view location);
 
 /**
  * A named, versioned description of how an image dataset is laid out, bound to its identifier.
  *
- * A profile is looked up once and then asked questions, rather than every question carrying an
- * identifier to be resolved again. It binds the identifier only: the built-in table outlives every
- * store, so binding a store here would invent a lifetime problem that does not exist.
+ * A profile is looked up once and then asked questions, rather than each question resolving an
+ * identifier again. It binds only the identifier: the built-in table outlives every store, so
+ * binding a store here would create a lifetime problem.
  *
- * "Profile" rather than "adapter" deliberately -- GLOSSARY.md names this concept the schema profile,
- * and an adapter in this codebase is the thing satisfying an interface at a seam, as the filesystem
- * and in-memory transports do.
+ * "Profile" rather than "adapter": GLOSSARY.md calls this concept the schema profile, and an adapter
+ * in this codebase is what implements an interface at a seam, as the filesystem and in-memory
+ * transports do.
  */
 class SchemaProfile {
 public:
     // Reports unsupported_schema when no built-in profile carries this identifier.
     static Result<SchemaProfile> For(std::string_view schema_id);
 
-    // The two questions a profile is asked about a store it is meeting for the first time. Both go
-    // through one enumeration, because deciding whether a store matches means finding out what is in
-    // it -- but there is no cache behind them, so asking both costs two enumerations. Nothing wants
-    // both today; ProbeStore, which does, reaches the enumeration itself.
+    // The two questions a profile is asked about a store it is meeting for the first time. Each does
+    // one enumeration with no cache behind it, so asking both costs two. ProbeStore, which needs
+    // both, calls Inspect instead.
     Result<SchemaProbeResult> Probe(const Store& store) const;
     Result<ImageDiscovery> Discover(const Store& store) const;
 
-    // One of these rather than a verified and an unverified form. Describing an image establishes
-    // its own precondition, against the one variable it was handed rather than by enumerating the
-    // store, so no caller has to establish it first.
+    // Describing an image checks its own precondition against the one variable it was handed,
+    // without enumerating the store, so no caller has to check it first.
     Result<DescribedImage> Describe(const Store& store, std::string_view image_id) const;
-    // Asks nothing about openability, deliberately: an Image handle exists only for a variable
-    // Dataset::OpenImage already opened, so there is nothing left here to establish.
+    // Does not check openability: an Image handle exists only for a variable Dataset::OpenImage
+    // already opened.
     Result<std::vector<Beam>> ReadBeams(const Store& store, std::string_view image_id) const;
 
 private:
@@ -126,8 +121,7 @@ private:
 
     static const std::vector<Entry>& BuiltIn();
 
-    // One enumeration, answering both halves at once. Private because no caller wants both: it is
-    // what Probe and Discover are each one half of.
+    // One enumeration, answering both halves at once. Probe and Discover each return one half.
     Result<SchemaInspection> Inspect(const Store& store) const;
 
     explicit SchemaProfile(const Entry& entry) : _entry(&entry) {}

@@ -6,10 +6,8 @@
 
 // The stored layout permuted into the order the library reads.
 //
-// This rule lived in the facade, where the only way to it was opening a dataset on disk -- so the
-// two cases it exists for, a sharded array and one whose stored order is not the logical one, were
-// checked by whichever committed fixture happened to have them. It takes a descriptor and a layout
-// and answers, so this target links nothing.
+// It takes a descriptor and a layout, so this target links nothing, and the two cases the rule
+// exists for, a sharded array and one whose stored order is not the logical one, are tested directly.
 
 #include "schema/chunk_geometry.h"
 

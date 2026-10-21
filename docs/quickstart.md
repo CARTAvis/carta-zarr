@@ -22,7 +22,7 @@ The output for that fixture looks like this:
 
 ```text
 schema=xradio.image version=0.0.2
-SKY openable=1 role=sky
+SKY openable=1
 spectral frame=LSRK increment=1e+06 Hz
 Read 20 pixels from SKY; 13 are finite
 ```
@@ -41,12 +41,11 @@ explains how to produce one.
 ## What each stage does
 
 1. `Context::Create` creates shared cache and execution resources.
-2. `Dataset::Open` opens the Zarr hierarchy, recognises the schema and lists
+2. `Dataset::Open` opens the Zarr hierarchy, recognizes the schema and lists
    image candidates. The example prints its declared schema version and
-   diagnostics. It does not load every
-   image's pixels.
+   diagnostics. It does not load any image's pixels.
 3. `dataset.descriptor().images` exposes a read-only list of `ImageEntry`
-   values. Each has an ID, openability, role, axes and diagnostics.
+   values. Each has an ID, openability, axes and diagnostics.
 4. `Dataset::OpenImage(id)` describes the chosen image and verifies the
    metadata needed to read it. Coordinate values may be read at this stage.
    The example prints the image's subtype when it has one, its spectral frame,

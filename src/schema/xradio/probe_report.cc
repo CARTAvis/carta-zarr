@@ -19,9 +19,9 @@ namespace zarr_metadata = ::carta::zarr::internal::zarr;
 
 namespace {
 
-// A metadata read that failed, as the diagnostic the probe reports it by. A data type this library
-// does not read is that; anything else a read can fail with -- a codec or a Zarr version it does not
-// read, or the store not answering -- is metadata the probe could not use, and the message says which.
+// The diagnostic code the probe reports a failed metadata read with. A code DiagnosticCode shares
+// keeps its name; anything else (a codec or Zarr version this library does not read, or the store
+// not answering) is invalid_metadata, and the message says which.
 //
 // Every code is listed, with no default, so that an ErrorCode added later is a warning here until
 // someone says what a probe should call it.

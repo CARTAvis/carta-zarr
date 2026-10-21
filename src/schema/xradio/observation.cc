@@ -110,8 +110,8 @@ std::vector<UserKeyword> DescribeUserKeywords(const nlohmann::json& root_attribu
         if (value.is_boolean()) {
             keywords.push_back(UserKeyword{name, value.get<bool>()});
         } else if (value.is_number_unsigned()) {
-            // A positive integer, which is how JSON is parsed whatever it was written as; one past what
-            // a signed 64-bit integer holds is not given as a number it is not.
+            // The JSON parser reads any non-negative integer as unsigned. One too large for a signed
+            // 64-bit integer is left out rather than reported as a different number.
             const auto unsigned_value = value.get<std::uint64_t>();
             if (unsigned_value > static_cast<std::uint64_t>(std::numeric_limits<std::int64_t>::max())) {
                 left_out("holds an integer too large for a signed 64-bit integer");

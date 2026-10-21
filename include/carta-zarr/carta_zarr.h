@@ -22,11 +22,10 @@ namespace carta::zarr {
 // Context, Dataset and Image are shared handles, and a handle always refers to something: the only
 // way to get one is from the factory that made what it refers to, and nothing empties it afterwards.
 //
-// That includes moving from one. Each of the three moves by copying -- one reference-count
-// increment -- so the handle left behind still works. A defaulted move would null it, which gave every
-// handle an empty state reachable only by std::move: each entry point then had to refuse it, and no
-// consumer could construct one or test for it. A consumer that needs a handle it fills in later
-// holds a std::optional of one. See ADR 0013.
+// That includes moving from one. Each of the three moves by copying, which is one reference-count
+// increment, so the handle left behind still works. A defaulted move would leave it null: an empty
+// state that every entry point would have to refuse, and that no consumer could create or test for.
+// A consumer that needs to fill in a handle later holds a std::optional of one. See ADR 0013.
 class CARTA_ZARR_EXPORT Context final {
 public:
     Context(const Context&) = default;
@@ -70,9 +69,7 @@ public:
     const ChunkGeometry& chunk_geometry() const noexcept;
 
     // Every operation below takes its ReadOptions, and Read and ComputeCubeHistogram their progress
-    // callback, as defaulted trailing arguments rather than as one overload per argument left off.
-    // The overloads said nothing but "and the rest are defaults", three times over for Read, and a
-    // reader had to open each to see that it forwarded.
+    // callback, as defaulted trailing arguments.
 
     /// Reads a densely packed result in logical axis order, axis 0 fastest-varying. Returns the
     /// number of elements written. Safe to call concurrently on one handle.
@@ -83,9 +80,8 @@ public:
     /// fully written, and a caller discards it. A read given no progress callback reports no such
     /// count, so on failure a caller discards all of its destination.
     ///
-    /// float is the only output this library produces. It is said in the destination's type rather
-    /// than asked for in the request, because a request that could name a type the buffer was not
-    /// shaped for is a mistake worth making unspellable.
+    /// float is the only output this library produces. The destination's type says so, rather than a
+    /// field of the request, so that a request cannot name a type the buffer was not sized for.
     ///
     /// It is read in pieces that keep to ReadOptions::read_budget_bytes, and a progress callback
     /// watches them as they finish. See ProgressCallback.
@@ -96,11 +92,10 @@ public:
     // names, and returns how many chunks that was. Nothing is written anywhere the caller can see:
     // the point is that a Read which follows finds them decoded.
     //
-    // For reading ahead of somebody -- the next run of chunks of a playing animation, while this run's
-    // frames are served from the cache -- where reading the pixels themselves would allocate and fill
-    // a destination only to throw it away. An animation need not call it: ReadAhead decides when, and
-    // calls it on a thread of its own. It reads one element
-    // of each chunk, which decodes the whole chunk, so its cost is the decoding alone.
+    // It is for reading ahead, such as the next run of chunks of a playing animation while this run's
+    // frames come from the cache. A Read would allocate and fill a destination only to throw it away.
+    // An animation need not call it: ReadAhead decides when, and calls it on a thread of its own. It
+    // reads one element of each chunk, which decodes the whole chunk, so its cost is the decoding alone.
     //
     // A Read of the same chunks that starts before this has finished waits for the decode already
     // under way rather than starting another, as long as what is cached is not checked against
@@ -167,7 +162,7 @@ private:
     std::shared_ptr<Impl> _impl;
 
     friend class Dataset;
-    // Which cache an image's reads go through, which reading ahead has to hold two runs of it.
+    // ReadAhead needs the cache an image's reads go through, to keep two runs of chunks in it.
     friend class ReadAhead;
 };
 
@@ -190,8 +185,8 @@ public:
     // The two are not interchangeable and the second does not bound the first, so a consumer that
     // shows the number to someone should show which one it got.
     //
-    // The timeout is not named after a directory because a dataset need not live in one: what can
-    // be sized, and how quickly, is the transport's affair.
+    // The timeout does not mention a directory because a dataset need not live in one: what can be
+    // sized, and how quickly, depends on the transport.
     Result<DatasetSize> Size(std::chrono::milliseconds measure_timeout = std::chrono::milliseconds(50)) const;
     Result<Image> OpenImage(std::string_view image_id) const;
 

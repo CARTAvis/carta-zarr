@@ -38,7 +38,7 @@ Or synthesize one, when there is no real cube to hand:
   compress.
 - **The synthetic cube** is a continuum-subtracted HI cube from a mosaic, calibrated against
   ASKAP's (`tools/testset/README.md` has the calibration):
-  - noise varying by channel and rising towards the footprint's edge;
+  - noise varying by channel and rising toward the footprint's edge;
   - faint line sources (`--line-sources`);
   - NaN outside an irregular footprint (`--footprint-fill`);
   - runs of flagged channels (`--flagged-channels`);
@@ -116,7 +116,7 @@ open. `run` writes one CSV row per operation; `--help` lists its options.
 - **Processes.** `--processes N` stands for N users, since carta-controller starts one backend per
   user: N processes, each with its own context, released together. They read different positions;
   a cube histogram splits the channels between them. When there are not enough positions to go
-  round, the rows that share one say `overlap`.
+  around, the rows that share one say `overlap`.
 - **Trials.** Each trial empties the caches, then forks fresh processes, so no trial inherits a cache
   or a thread pool from the one before. Within a trial a process keeps its context, as a backend
   would: a region or an animation may find chunks an earlier operation decoded, and an `open` after
@@ -200,7 +200,7 @@ that did not survive validation. The tables behind it follow.
   make a plane read the channels around it too. Stage 1 ends with a table of each layout's side of
   that trade, the layouts no other beats in every mode marked as the front, and a note when doubling
   the weight of `spectrum` or of `plane` would change the best layout.
-- **Too few first touches.** When a crop is shallow for its chunk depth -- 1024 channels hold only 8
+- **Too few first touches.** When a crop or a synthetic cube is shallow for its chunk depth -- 1024 channels hold only 8
   chunks 128 deep, against 16 planes a user -- fewer than five operations of a mode read chunks of
   their own. That mode is then ranked on every operation, and the report says so and what to change.
 - **The read budget** has no backend setting, so a setting with one is never recommended. The report

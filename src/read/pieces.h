@@ -19,29 +19,29 @@
 
 namespace carta::zarr::internal {
 
-// The most chunks a piece of a read with a progress callback decodes, unless one chunk along the cut is
-// more. Such a read reports each piece as it lands, so a piece is how long its caller waits: the cursor
-// spectrum carta-backend draws as it fills. A budget aimed at the decode threads grows with them, and
-// cut to that alone a spectrum of the 512 x 512 x 30000 test cube came in nine pieces on 28 threads
-// instead of thirty, each 160 ms apart on a cold local NVMe disk rather than 55 -- a wait that grows
-// with what each chunk costs to fetch, not to decode, since carta-backend's I/O threads stay two.
-// Sixteen is about what the fixed budget before it afforded: cut to it, the spectrum reported thirty
-// times again, 55 ms apart, and took as long as it did then -- a tenth longer than in nine pieces.
+// The most chunks in all that a piece of a read with a progress callback decodes, unless one chunk
+// along the cut already spans more. Such a read reports each piece as it lands, so the piece size is how long its
+// caller waits between updates, as with the cursor spectrum carta-backend draws as it fills. A budget based on the
+// decode threads grows with them: cut to that alone, a spectrum of the 512 x 512 x 30000 test cube came in nine pieces
+// on 28 threads, 160 ms apart on a cold local NVMe disk. The wait grows with what each chunk costs to fetch, not to
+// decode, since carta-backend keeps two I/O threads. Cut to sixteen chunks, it came in thirty pieces 55 ms apart, and
+// took a tenth longer in total.
 inline constexpr std::uint64_t kWatchedPieceChunks = 16;
 
 /**
  * One piece of an ordinary read. See GLOSSARY.md for what a piece is.
  *
- * What to read -- the caller's request, narrowed along the axis the read is cut on -- and where in the
+ * What to read (the caller's request, narrowed along the axis the read is cut on) and where in the
  * destination it lands. A piece fills the destination from `first_element` for as many elements as
  * its request selects, and the pieces of a read fill it end to end, so the finished part is always a
  * prefix.
  *
- * A piece is read straight into the destination unless even the least of them -- one chunk along the
- * cut, and the whole of every other axis -- holds more than a read affords. Then `segments` are the
- * parts it is read in, cut along the other axes, each read straight into its place in the piece's run
- * of the destination. A segment is not a run of the destination, which is why it is not a piece:
- * progress is reported when the whole piece is in, and the prefix holds.
+ * A piece is read straight into the destination unless even the smallest possible piece (one chunk
+ * along the cut, and the whole of every other axis) holds more than the budget allows. Then
+ * `segments` are the parts it is read in, cut along the other axes, each read straight into its place
+ * in the piece's part of the destination. A segment does not fill a contiguous run of the
+ * destination, so it is not a piece: progress is reported when the whole piece is in, and the prefix
+ * holds.
  */
 struct Piece {
     ReadRequest request;
@@ -52,22 +52,21 @@ struct Piece {
 /**
  * Cut a read into pieces.
  *
- * Pure: it reaches no further than the descriptor, the geometry and what the caller asked for, so
- * the strategy is checkable without a store, a transport or a directory tree.
+ * Pure: it uses only the descriptor, the geometry and the request, so it can be tested without a
+ * store, a transport or a directory tree.
  *
- * Every read is cut to fit its budget -- the caller's, or the library's own when it states none -- so
- * that what a read holds is bounded whether or not it has a progress callback. One that has one
- * (`reports_progress` true) is cut to no more than kWatchedPieceChunks as well, so that it has pieces
- * to report and they come often. The one exception is a single plane with no progress callback, whose
- * budget affords a chunk for each of `decode_threads`: it is read whole, which is faster than in
- * segments one after another, and what it holds beyond the budget is bounded by the plane. A read
- * that fits, or that has no axis selecting more than one element, is one piece covering everything,
- * so that the loop reading it is the same loop either way.
+ * Every read is cut to fit its budget (the caller's, or the library's own when the caller gives none),
+ * so what a read holds is bounded whether or not it has a progress callback. A read with one
+ * (`reports_progress` true) is also cut to at most kWatchedPieceChunks, so that progress comes often.
+ * The one exception is a single plane with no progress callback whose budget allows a chunk for each
+ * of `decode_threads`: it is read whole, which is faster than reading segments one after another, and
+ * the plane bounds what it holds beyond the budget. A read that fits, or that has no axis selecting
+ * more than one element, is one piece covering everything, so the same loop reads it either way.
  *
- * Where to cut, how much one piece may cover, where its end is rounded out to a chunk boundary, and
- * the segments of a piece too large to read whole all happen here. Whether the flag is decoded beside
- * the pixels, which the sizing counts, is asked of AppliesPixelMask rather than of the caller; what it
- * costs is asked of the flag's own layout, `flag_geometry`, which need not be the pixels'.
+ * This decides where to cut, how much one piece may cover, where its end is rounded out to a chunk
+ * boundary, and the segments of a piece too large to read whole. Whether the flag is decoded with the
+ * pixels, which the sizing counts, comes from AppliesPixelMask; what it costs comes from the flag's
+ * own layout, `flag_geometry`, which may differ from the pixels'.
  *
  * The request has been checked against the descriptor already: it is a selection of this image.
  */
@@ -78,19 +77,17 @@ std::vector<Piece> PlanPieces(const ImageDescriptor& descriptor, const ChunkGeom
 /**
  * Read a densely packed float32 result, one piece at a time.
  *
- * Everything an ordinary read does apart from being reached through a handle: it validates the
- * request against the descriptor, plans the pieces, reads each one's flag and pixels in that order,
- * folds the flag in, and reports progress. The caller supplies the source and translates whatever
- * comes back; it does not need to know that any of this happened.
+ * Everything an ordinary read does apart from the handle: it validates the request against the
+ * descriptor, plans the pieces, reads each piece's flag and then its pixels, applies the flag, and
+ * reports progress. The caller supplies the source and translates the result.
  *
  * It takes the source, the descriptor and the two geometries, which are all it uses, rather than the
- * ReducibleImage a reduction is handed: that also carries an axis map and a pool, and a read has no
- * use for either.
+ * ReducibleImage a reduction gets, which also carries an axis map and a pool a read does not need.
  *
- * The flag is read before the pixels, which is the opposite of what a pass does and is the reason
- * ADR 0005 gives for this staying outside one: the destination is the caller's, so a mask that
- * cannot be read must not leave a piece of it updated. A piece read in segments keeps that for each
- * segment; the segments of it already put in place stay there, past the finished prefix.
+ * The flag is read before the pixels, the opposite of a pass, which is the reason ADR 0005 gives for
+ * keeping reads outside the pass: the destination is the caller's, so a mask that cannot be read must
+ * not leave part of a piece updated. A piece read in segments does the same for each segment; the
+ * segments already in place stay there, past the finished prefix.
  *
  * Reports buffer_too_small when the destination cannot hold the selection.
  */
@@ -103,29 +100,28 @@ Result<std::size_t> ReadInPieces(const PixelSource& source, const ImageDescripto
  * One selected element in every chunk that `request` touches, and no more.
  *
  * Reading a single element of a chunk decodes all of it, so this request decodes exactly the chunks
- * a read of `request` would, into whatever cache the read goes through, while asking for a
- * destination of one float a chunk rather than one a pixel. A plane of a 7763 x 4742 image in
- * 512 x 512 chunks is 160 of them, where reading the plane itself is 147 MB to allocate and fill.
+ * a read of `request` would, into whatever cache the read goes through, with a destination of one
+ * float per chunk rather than per pixel. A plane of a 7763 x 4742 image in 512 x 512 chunks is 160
+ * floats, where reading the plane itself means allocating and filling 147 MB.
  *
- * Along an axis the chunks a request touches are consecutive unless its stride is a chunk or more,
- * in which case every element it selects is in a chunk of its own already and the range is kept as
- * it is. Otherwise the range becomes the first element of each chunk from the one its start is in to
- * the one its last element is in -- an element of the chunk in either case, though not one the
- * request selected.
+ * Along an axis, the chunks a request touches are consecutive unless its stride is a chunk or more.
+ * Then every element it selects is already in a chunk of its own, and the range is kept. Otherwise
+ * the range becomes the first element of each chunk, from the chunk its start is in to the chunk its
+ * last element is in. That element is in the chunk, though the request may not have selected it.
  *
  * Pure, and the request has been checked against the descriptor already.
  */
 ReadRequest OneElementPerChunk(const ChunkGeometry& geometry, const ReadRequest& request);
 
 /**
- * Decode the chunks a read of `request` would decode, keeping them wherever options.control's
- * cache pool says, and hand back nothing but how many there were.
+ * Decode the chunks a read of `request` would decode, keeping them in options.control's cache pool,
+ * and return only how many there were.
  *
- * A read of OneElementPerChunk(request) through ReadInPieces, so it is checked and cancelled
- * exactly as a read is. With the mask applied the flag's chunks are decoded too, which a read that
- * follows will want, sampled by `flag_geometry` rather than by the pixels': a flag chunked finer
- * than its image, sampled where the pixels are, had half its chunks left to read from storage. The
- * count is of both.
+ * A read of OneElementPerChunk(request) through ReadInPieces, so it is checked and cancelled exactly
+ * as a read is. With the mask applied, the flag's chunks are decoded too, since the read that follows
+ * will want them. They are sampled by `flag_geometry` rather than the pixels' geometry: a flag
+ * chunked finer than its image, sampled where the pixels are, would leave half its chunks unread.
+ * The count includes both.
  */
 Result<std::uint64_t> PrefetchChunks(const PixelSource& source, const ImageDescriptor& descriptor,
                                      const ChunkGeometry& geometry, const ChunkGeometry& flag_geometry,

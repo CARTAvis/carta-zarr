@@ -35,7 +35,7 @@ namespace {
 
 namespace zarr_metadata = ::carta::zarr::internal::zarr;
 
-// Where an image no data group has as its own is listed: XRADIO's own names in their order, then every
+// Where an image that is no data group's own is listed: XRADIO's own names in their order, then every
 // other name after them.
 std::size_t KnownImageRank(std::string_view image_id) {
     return static_cast<std::size_t>(std::find(kKnownImages.begin(), kKnownImages.end(), image_id) -
@@ -221,23 +221,22 @@ std::optional<TemporalCoordinate> DescribeTemporalCoordinate(const Store& store,
 
 // What discovery found, and the two things beyond the listing that deciding the match needs: whether
 // anything in this store was malformed rather than merely unopenable, and which diagnostic says so;
-// and whether anything in it is evidence of an image dataset at all.
+// and whether anything in it shows it is an image dataset at all.
 //
-// Here rather than on ImageDiscovery because it is this profile reasoning about its own store, and
-// ImageDiscovery is what every profile answers with. A second profile would decide its own match
-// from its own reasons; shaping that for it now would be guessing at a caller that does not exist.
+// Here rather than on ImageDiscovery, because this is this profile's own reasoning, and
+// ImageDiscovery is what every profile returns. A second profile would decide its match for its own
+// reasons.
 struct Discovered {
     ImageDiscovery discovery;
     std::optional<std::size_t> first_malformation;
     // A malformed node says the store is broken, not what it is. An image variable this profile
-    // recognised, openable or not, or a node bearing one of XRADIO's image names, says it is an
-    // image dataset; so does a root that says so, which InspectImages asks.
+    // recognized, openable or not, or a node with one of XRADIO's image names, shows it is an image
+    // dataset; so does a root that says so, which InspectImages checks.
     bool image_evidence = false;
 };
 
 // Which variables of this store are images this profile will open. Only InspectImages calls it:
-// deciding whether the store matches means enumerating it, and the answer to both questions comes
-// back together so that nothing has to enumerate twice or cache the result.
+// deciding whether the store matches means enumerating it, so both answers come from one enumeration.
 Result<Discovered> DiscoverImages(const Store& store) {
     const auto& inventory = store.Inventory();
     if (!inventory) {
@@ -264,11 +263,11 @@ Result<Discovered> DiscoverImages(const Store& store) {
         if (qualified.diagnostic) {
             said.push_back(std::move(*qualified.diagnostic));
         }
-        // Metadata the inventory has already parsed, and a listed node is always an array whose
-        // metadata did parse: the two kinds that are not never qualify as listed.
+        // Metadata the inventory has already parsed: a listed node is always an array whose metadata
+        // parsed, since no other kind of node is ever listed.
         const auto& metadata = entry.array->value();
-        // Only for an image that opens: the axes promise what OpenImage would report, and a
-        // variable it refuses reports nothing -- an aperture-plane one would have only some of them.
+        // Only for an image that opens: the axes promise what OpenImage would report, and a variable
+        // it refuses reports nothing.
         auto axes = qualified.openable ? DescribeAxes(metadata) : std::vector<AxisDescriptor>{};
         result.images.push_back(ImageEntry{entry.name, qualified.openable, std::move(said), std::move(axes)});
     }
@@ -298,25 +297,24 @@ Result<SchemaInspection> InspectImages(const Store& store) {
     ProbeReport report(store, "image dataset");
 
     const auto& root_attributes = store.RootAttributes();
-    // A store that is not read is still enumerated, to tell an image dataset -- refused for what it
-    // names -- from Zarr of something else that names a version too, as XRADIO's measurement sets do,
-    // or none.
+    // A store that is not read is still enumerated, to tell an image dataset (refused for the version
+    // it names) from Zarr of something else that names a version or none, as XRADIO's measurement sets
+    // do.
     auto checked = CheckSchemaVersion(store);
     auto found = DiscoverImages(store);
     if (!found) {
         return found.error();
     }
     auto& discovery = found.value().discovery;
-    // A malformed node alone is not evidence of an image dataset: a visibility dataset with a weights
-    // array that will not parse is Zarr of something else, and calling it a broken image sent CARTA's
-    // file browser to list it as one.
+    // A malformed node alone does not show an image dataset: a visibility dataset with a weights array
+    // that will not parse is Zarr of something else, and calling it a broken image would make CARTA's
+    // file browser list it as one.
     const bool image_dataset =
         found.value().image_evidence || AttributeString(root_attributes, "type") == "image_dataset";
 
-    // What a refusal is reported as is the first diagnostic, and node enumeration order decides
-    // which that is otherwise -- which is alphabetical, and has nothing to do with why the store was
-    // refused. A store holding an aperture-plane variable and a malformed one would name the
-    // aperture plane.
+    // A refusal is reported by its first diagnostic. Otherwise node enumeration order, which is
+    // alphabetical, would decide which that is, regardless of why the store was refused, so the first
+    // malformation is moved to the front.
     if (!discovery.default_image_id && found.value().first_malformation) {
         auto& said = discovery.diagnostics;
         const auto reason = said.begin() + static_cast<std::ptrdiff_t>(*found.value().first_malformation);
@@ -332,7 +330,7 @@ Result<SchemaInspection> InspectImages(const Store& store) {
     };
 
     if (checked.refusal) {
-        // Refused for its version ahead of anything else wrong with it, which is reported by rules
+        // Refused for its version before anything else wrong with it, which would be judged by rules
         // the store may not follow. Something that is not an image dataset is not refused at all.
         if (!image_dataset) {
             report.SetDiagnostics(discovery.diagnostics);
@@ -346,17 +344,16 @@ Result<SchemaInspection> InspectImages(const Store& store) {
 
     if (!discovery.default_image_id) {
         report.SetDiagnostics(discovery.diagnostics);
-        // Nothing here this profile will open, and which answer that is depends on why. A store of
-        // complex images, on either plane, is well formed and simply not for this library. One
-        // whose images disagree with their coordinates, or whose metadata will not parse, is a
-        // store this profile recognised and found broken -- and reporting that as a non-match tells
-        // whoever picked the file that nothing knew what it was, which is untrue and no use. But only
-        // a store with something of an image about it.
+        // Nothing here will open, and the answer depends on why. A store of complex images, on either
+        // plane, is well formed and simply not for this library. One whose images disagree with their
+        // coordinates, or whose metadata will not parse, is a store this profile recognized and found
+        // broken; reporting that as a non-match would tell whoever picked the file that nothing knew
+        // what it was, which is untrue. That applies only to a store that shows it is an image dataset.
         return finish(found.value().first_malformation && image_dataset ? SchemaMatchKind::invalid
                                                                         : SchemaMatchKind::no_match);
     }
 
-    // Once discovery found an openable image, validate the metadata needed by the image reader.
+    // Discovery found an openable image, so validate the metadata the image reader needs.
     report.SetDiagnostics(discovery.diagnostics);
     const auto& first_image = *discovery.default_image_id;
     const auto& array_result = store.ReadArrayMetadata(first_image);
@@ -375,8 +372,8 @@ Result<SchemaInspection> InspectImages(const Store& store) {
         }
         RequirePresentCoordinates(report, sky, aperture);
         // Whenever an image of the sky opens: every XRADIO writes it then, so a store without it is
-        // malformed rather than a store with no direction to report. An aperture-plane image has no
-        // direction, and XRADIO writes none for a dataset of them alone.
+        // malformed, not a store with no direction to report. An aperture-plane image has no direction,
+        // and XRADIO writes none for a dataset of only those.
         if (sky) {
             report.RequireCoordinateSystem(root_attributes);
         }
@@ -388,14 +385,14 @@ Result<SchemaInspection> InspectImages(const Store& store) {
 }
 
 Result<DescribedImage> DescribeImage(const Store& store, std::string_view image_id) {
-    // Refused on its metadata before any value is read, so that an image this profile will not open
-    // is reported as that rather than as whatever reading its coordinates ran into.
+    // Refused on its metadata before any value is read, so that an image this profile will not open is
+    // reported as that, rather than as whatever error reading its coordinates hits.
     if (auto qualified = RequireQualified(store, image_id); !qualified) {
         return qualified.error();
     }
-    // And held to its own document, which is what its pixels are read from. Nothing below reads
-    // them, so without this an image whose own document disagreed with the root's copy opened and
-    // then failed every read. Its coordinates are held to theirs as they are read.
+    // And checked against its own document, which its pixels are read from. Nothing below reads them,
+    // so without this an image whose own document disagreed with the root's copy would open and then
+    // fail every read. Its coordinates are checked against theirs as they are read.
     if (const auto& verified = store.VerifyArray(image_id); !verified) {
         return verified.error();
     }
@@ -422,7 +419,7 @@ Result<DescribedImage> DescribeImageFrom(const Store& store, std::string_view im
                             : ErrorCode::invalid_schema;
         return Error{code, refusal.message, refusal.node_path};
     }
-    // Parsed already, and the qualification just accepted it: the store hands back what it holds.
+    // Parsed already, and the qualification just accepted it: the store returns what it holds.
     const auto& image = store.ReadArrayMetadata(image_id).value();
 
     ImageDescriptor descriptor;
@@ -435,8 +432,8 @@ Result<DescribedImage> DescribeImageFrom(const Store& store, std::string_view im
     descriptor.axes = DescribeAxes(image);
 
     // A direction axis is linear by construction, so its increment is reported even when the samples
-    // are not evenly spaced; the fit says so in a diagnostic rather than withholding the value. So is
-    // an aperture-plane axis, and an image is on one plane or the other (ADR 0024).
+    // are not evenly spaced; the fit says so in a diagnostic rather than withholding the value. An
+    // aperture-plane axis is the same, and an image is on one plane or the other (ADR 0024).
     if (PlaneOf(image).value_or(Plane::sky) == Plane::aperture) {
         descriptor.aperture = DescribeAperture(store, values.u, values.v, descriptor.diagnostics);
     } else {
@@ -447,8 +444,8 @@ Result<DescribedImage> DescribeImageFrom(const Store& store, std::string_view im
         descriptor.direction = std::move(direction.value());
     }
 
-    // Absent only when no samples were handed in, which reading them never does: every coordinate is
-    // required, and the probe refused a dataset missing one. Same for the two below.
+    // Absent only when no samples were passed in, which reading them never does: every coordinate is
+    // required, and the probe refuses a dataset missing one. The same goes for the two below.
     if (auto spectral = DescribeSpectralCoordinate(store, values.frequency, descriptor); spectral) {
         descriptor.spectral = std::move(spectral);
     }
@@ -463,13 +460,12 @@ Result<DescribedImage> DescribeImageFrom(const Store& store, std::string_view im
         descriptor.temporal = std::move(temporal);
     }
 
-    // Parse Observation & Telescope Metadata from the selected image's attributes.
+    // Observation and telescope metadata, from the image's attributes.
     descriptor.observation = DescribeObservation(image);
     descriptor.user_keywords = DescribeUserKeywords(root_attrs, image, image_id, descriptor.diagnostics);
 
-    // Read from the metadata already in hand rather than asked of the store again, and assigned
-    // unconditionally: every array ParseArrayMetadata accepted has a layout, so there is no failure
-    // here to handle and no absence to represent.
+    // Read from the metadata already in hand rather than from the store again, and assigned
+    // unconditionally: every array ParseArrayMetadata accepted has a layout.
     const auto layout = zarr_metadata::ParseStorageLayout(image);
 
     auto pixel_mask = DetermineFlag(store, image, image_id);
@@ -477,8 +473,8 @@ Result<DescribedImage> DescribeImageFrom(const Store& store, std::string_view im
         return pixel_mask.error();
     }
     descriptor.pixel_mask_id = pixel_mask.value();
-    // The flag is read only by a masked read, so an image whose flag disagreed with the root's copy
-    // opened, read unmasked, and failed every masked read.
+    // The flag is checked here too: only a masked read reads it, so an image whose flag disagreed
+    // with the root's copy would open, read unmasked, and fail every masked read.
     ChunkGeometry flag_geometry;
     if (!descriptor.pixel_mask_id.empty()) {
         const auto& verified = store.VerifyArray(descriptor.pixel_mask_id);
@@ -493,8 +489,8 @@ Result<DescribedImage> DescribeImageFrom(const Store& store, std::string_view im
 }
 
 Result<std::vector<Beam>> ReadBeams(const Store& store, std::string_view image_id) {
-    // A beam is the sky's: the aperture plane has none. XRADIO 1.2.5 and 1.3.0 name a
-    // BEAM_FIT_PARAMS_APERTURE on an aperture-plane image all the same, and write no such array.
+    // A beam belongs to the sky: the aperture plane has none. XRADIO 1.2.5 and 1.3.0 still name a
+    // BEAM_FIT_PARAMS_APERTURE on an aperture-plane image, and write no such array.
     if (const auto& image = store.ReadArrayMetadata(image_id); image && PlaneOf(image.value()) == Plane::aperture) {
         return std::vector<Beam>{};
     }
@@ -507,21 +503,20 @@ Result<std::vector<Beam>> ReadBeams(const Store& store, std::string_view image_i
         beam_array_name = AttributeString(*attributes, "beam_fit_params");
     }
     if (beam_array_name.empty()) {
-        // No beam array associated
+        // The image names no beam table.
         return std::vector<Beam>{};
     }
 
-    // Bound to the table's own document, so its layout and its unit are read from what its values
-    // were decoded with rather than from the root's copy of it.
+    // Read with the table's own document, so its layout and its unit come from what its values were
+    // decoded with, not from the root's copy.
     const auto& table = store.ReadNumericArray(beam_array_name);
     if (!table) {
         return table.error();
     }
 
-    // The image named a beam table, so what the table needs to be read is required rather than
-    // optional. A label array that cannot be read -- absent, malformed, or written with a codec
-    // this build does not carry -- fails the read: an empty beam list is the answer for an image
-    // that has no beam at all, which this one is not.
+    // The image named a beam table, so the labels are required. A label array that cannot be read
+    // (absent, malformed, or written with a codec this build does not have) fails the read: an empty
+    // beam list means an image with no beam at all, which this one is not.
     auto parameter_labels = store.ReadStringArray1D("beam_params_label");
     if (!parameter_labels) {
         return parameter_labels.error();

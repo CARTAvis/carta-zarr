@@ -24,24 +24,24 @@ namespace carta::zarr::internal {
 // decoded, its compressed bytes and the codec's own buffer are resident beside the decoded copy.
 // Measured peak resident memory, over a 7763 x 4742 x 128 cube in 512 x 512 x 64 chunks of blosc
 // zstd, is `base + destination + chunks x (2 x decoded + compressed)` at one, two and four chunks a
-// read, and four decode threads or twenty-eight made no difference to it -- so what a read holds
-// is decided by how many chunks it decodes, not by the machine. Compressed bytes are at most about
-// the decoded ones, so three is the worst a chunk holds.
+// read, and four decode threads or twenty-eight made no difference, so what a read holds depends on
+// how many chunks it decodes, not on the machine. Compressed bytes are at most about the decoded
+// ones, so a chunk holds at most three times its decoded size.
 //
-// Three on every image, rather than a figure per codec: a cheaper codec is held under the budget it
-// was given, while a figure worked out from TensorStore's codecs would go quietly wrong when they
-// change. It is a statement of what the budget means, not a tuning, so nothing overrides it.
+// Three for every image, rather than a figure per codec: a cheaper codec just stays under its
+// budget, while a figure worked out from TensorStore's codecs would quietly go wrong when they
+// change. It defines what the budget means and is not a tuning, so nothing overrides it.
 inline constexpr std::uint64_t kHeldBytesPerDecodedByte = 3;
 
 // The chunks one read should decode at once for each thread decoding them, below which the decode
 // pool runs short of work.
 //
 // On a 1 MiB chunk image a whole-plane profile took 98 ms at 64 chunks per request and 462 ms at
-// one, which is what it took with the pool limited to one thread: a request holding one chunk has
-// nothing to spread over the pool. A count fixed for every machine does not hold: eight a read was
-// within a quarter of flat on a five-core machine, and on twenty-eight threads it left most of them
-// idle and plane reads of 64 MiB chunks ran 2.4 times slower. Two a thread keeps every thread one
-// chunk ahead of the one it is decoding.
+// one, the same as with the pool limited to one thread: a request holding one chunk has nothing to
+// spread over the pool. No fixed count suits every machine: eight per read was within a quarter of
+// the best on a five-core machine, but on twenty-eight threads it left most of them idle and plane
+// reads of 64 MiB chunks ran 2.4 times slower. Two per thread keeps every thread one chunk ahead of
+// the one it is decoding.
 inline constexpr std::uint64_t kChunksPerDecodeThread = 2;
 
 // The least a read holds by default, whatever its chunks and threads. On small chunks this, not the
@@ -49,9 +49,9 @@ inline constexpr std::uint64_t kChunksPerDecodeThread = 2;
 // busy and a piece short enough to report progress on.
 inline constexpr std::uint64_t kLeastBytesPerRead = 256u << 20;
 
-// The most a read holds by default. Two chunks a thread of 64 MiB ones would hold over 10 GiB on
-// twenty-eight threads; this keeps them to ten. What a deployment short of memory wants instead it
-// sets as ReadOptions::read_budget_bytes.
+// The most a read holds by default. Two 64 MiB chunks per thread would hold over 10 GiB on
+// twenty-eight threads; this limits that to ten chunks. A deployment short of memory sets
+// ReadOptions::read_budget_bytes instead.
 inline constexpr std::uint64_t kMostBytesPerRead = 2u << 30;
 
 // What one read may hold when the caller has not said otherwise, given what one chunk of it holds
@@ -66,9 +66,9 @@ inline std::uint64_t DefaultReadBytes(std::uint64_t held_per_chunk, std::size_t 
 // Never zero: a budget smaller than a single unit still reads one, because a chunk is the smallest
 // thing that can be decoded and refusing to read is the worse answer.
 //
-// A unit is at least one chunk; one of none is read as one. A free function rather than only the
-// pass plan's, because the occupancy asks it too, and it takes the one number rather than the plan
-// so that the occupancy can ask it with nothing linked behind it -- ADR 0006.
+// A unit is at least one chunk; a unit of zero chunks is taken as one. A free function rather than a
+// pass plan method, because the occupancy uses it too, and it takes one number rather than the plan
+// so that the occupancy can use it with nothing linked behind it (ADR 0006).
 inline std::uint64_t UnitsAffordable(std::uint64_t chunks_per_read, std::uint64_t chunks_per_unit) {
     return std::max<std::uint64_t>(1, chunks_per_read / std::max<std::uint64_t>(1, chunks_per_unit));
 }
@@ -84,9 +84,9 @@ inline std::uint64_t ChunkElements(const ChunkGeometry& geometry) {
 
 // Bytes one chunk of this image decompresses to.
 //
-// A type the table does not name is counted as four bytes rather than refused. This is a read
-// budget: getting it wrong makes a read the wrong size, which costs time, while refusing here would
-// close an image over a question nobody asked.
+// A type the table does not name is counted as four bytes rather than refused. This only sizes a
+// read budget: getting it wrong makes a read the wrong size, which costs time, while refusing here
+// would close an image for no good reason.
 inline std::uint64_t DecodedChunkBytes(const ImageDescriptor& descriptor, const ChunkGeometry& geometry) {
     const std::uint64_t elements = ChunkElements(geometry);
     const auto* const info = zarr::FindDataType(descriptor.stored_type);
@@ -96,9 +96,9 @@ inline std::uint64_t DecodedChunkBytes(const ImageDescriptor& descriptor, const 
 
 // The most flag chunks one pixel chunk along an axis of `length` elements lies across: one when the
 // two are chunked alike, more when the flag's are shorter or their boundaries fall inside a pixel
-// chunk. Asked of every pixel chunk rather than bounded, since a bound that assumes the worst
-// alignment doubles the count of two chunk shapes that line up; an axis is at most a few thousand
-// chunks long. An axis with no chunk shape to speak of is one chunk, of either.
+// chunk. Counted for every pixel chunk rather than bounded, since a bound that assumes the worst
+// alignment doubles the count for two chunk shapes that line up; an axis is at most a few thousand
+// chunks long. An axis without a chunk shape is one chunk, for either.
 inline std::uint64_t FlagChunksAcross(std::uint64_t length, std::uint64_t pixel_chunk, std::uint64_t flag_chunk) {
     // Chunked alike needs no walk, and every read asks this of every axis.
     if (flag_chunk == 0 || length == 0 || flag_chunk == pixel_chunk) {
@@ -117,19 +117,17 @@ inline std::uint64_t FlagChunksAcross(std::uint64_t length, std::uint64_t pixel_
 // pixel chunk lies across, whole, at a byte an element. `flag_geometry` without a chunk shape is
 // taken to be the pixels'.
 //
-// One byte an element rather than another copy of the pixels: a flag is boolean over the image's own
-// shape by construction -- RequireUsableFlag holds it to both -- so beside a float32 chunk it is a
-// quarter of one, not a second one. But a flag need share nothing else with its image, and its chunks
-// are what is decoded. Chunked alike, or finer and lined up, that comes to the pixel chunk's own
-// elements. Coarser, it is more: a flag kept whole in one chunk is all of it beside every pixel
-// chunk, and counting it in the pixels' chunks said a read of the coarse-flag fixture's two-chunk row
-// decoded 100 bytes where it decoded 200.
+// One byte per element: a flag is boolean over the image's own shape (RequireUsableFlag checks
+// both), so beside a float32 chunk it is a quarter of the size. But a flag need share nothing else
+// with its image, and its own chunks are what is decoded. Chunked alike, or finer and lined up, that
+// comes to the pixel chunk's own elements. Coarser, it is more: a flag stored whole in one chunk
+// counts whole for every pixel chunk. Counting it in the pixels' chunks would say a read of the
+// coarse-flag fixture's two-chunk row decoded 100 bytes where it decoded 200.
 //
-// This is the most one pixel chunk can bring, and a read of several that share a flag chunk decodes
-// that chunk once, so a flag coarser than its pixels is over-counted in any read of more than one.
-// That is the side to be wrong on. Every walk here counts what it may decode in pixel chunks, and an
-// over-count costs a read some of the chunks it could have decoded in parallel, where an under-count
-// spends memory the caller's budget said not to.
+// This is the most one pixel chunk can bring. A read of several pixel chunks that share a flag chunk
+// decodes it once, so a flag coarser than its pixels is over-counted in any read of more than one.
+// That is the safer side: every walk counts what it may decode in pixel chunks, and an over-count
+// costs a read some parallelism, where an under-count would spend memory beyond the caller's budget.
 inline std::uint64_t DecodedFlagBytes(const ImageDescriptor& descriptor, const ChunkGeometry& geometry,
                                       const ChunkGeometry& flag_geometry) {
     const auto& flag = flag_geometry.chunk_shape.empty() ? geometry : flag_geometry;
@@ -146,19 +144,18 @@ inline std::uint64_t DecodedFlagBytes(const ImageDescriptor& descriptor, const C
 }
 
 // Who holds the pixels a read produces: the caller, whose destination they go straight into and which
-// no budget can shrink -- an ordinary read's, segments included -- or the library, in a buffer of its
-// own that the budget pays for: a pass's slab, which its visitor reads.
+// no budget can shrink (an ordinary read, segments included), or the library, in a buffer of its own
+// that the budget counts (a pass's slab, which its visitor reads).
 enum class PixelsHeld { by_caller, by_library };
 
-// What one read of this image holds, and how much it may hold at once: the answers every walk starts
-// from, whether it is Image::Read cutting pieces or a reduction planning a pass. A read and a
-// reduction that sized themselves against different costs would split the same image differently for
-// no reason either could give, so both ask this.
+// What one read of this image holds, and how much it may hold at once: what every walk starts from,
+// whether Image::Read cutting pieces or a reduction planning a pass. Both use this, so they count
+// what a chunk costs the same way.
 //
-// A chunk here is a pixel chunk. What it decodes to counts the flag it brings, in the flag's own
-// chunks (see DecodedFlagBytes); what it holds is that, kHeldBytesPerDecodedByte over, plus the
-// buffers the library allocates for its share of the read -- the folded-in flag a byte an element,
-// and the pixels when the library rather than the caller holds them. The default budget aims at
+// A chunk here is a pixel chunk. What it decodes to includes the flag it brings, in the flag's own
+// chunks (see DecodedFlagBytes). What it holds is that times kHeldBytesPerDecodedByte, plus the
+// buffers the library allocates for its share of the read: the applied flag at a byte per element,
+// and the pixels when the library rather than the caller holds them. The default budget is based on
 // `decode_threads`, the threads of the context the read goes through.
 struct ReadCost {
     bool apply_mask = false;
@@ -186,8 +183,8 @@ struct ReadCost {
                (pixels == PixelsHeld::by_library ? _chunk_elements * sizeof(float) : 0);
     }
 
-    // How many chunks the budget affords when `pixels` holds what they produce. Zero when it affords
-    // less than one, which every caller floors at one through UnitsAffordable: a chunk is the least
+    // How many chunks the budget allows when `pixels` holds what they produce. Zero when it allows
+    // less than one, which every caller raises to one through UnitsAffordable: a chunk is the least
     // that can be decoded.
     std::uint64_t ChunksPerRead(PixelsHeld pixels) const {
         return budget_bytes / std::max<std::uint64_t>(1, Held(pixels));
@@ -240,8 +237,7 @@ inline std::uint64_t AlignedBlockEnd(std::uint64_t begin, std::uint64_t desired,
 // Not the chunks from the first selected element to the last. A stride of a chunk or more puts every
 // selected element in a chunk of its own and can step over whole chunks between them, which a span
 // would count and nothing decodes. Below a chunk, no step is long enough to skip one, and the two
-// agree. There was a ChunksSpanned beside this, and piece sizing asked it rather than this, so a
-// strided read was sized for chunks it stepped over; this is the one answer now.
+// agree.
 inline std::uint64_t ChunksTouched(std::uint64_t start, std::uint64_t count, std::uint64_t stride,
                                    std::uint64_t chunk) {
     if (count == 0) {
@@ -256,11 +252,10 @@ inline std::uint64_t ChunksTouched(std::uint64_t start, std::uint64_t count, std
 }
 
 // The chunks along an axis of `length` elements that a sample of every `stride`th element from the
-// first has an element in, in order: the ones ChunksTouched counts, named. A whole-plane pass walks
+// first has an element in, in order: the chunks ChunksTouched counts. A whole-plane pass walks
 // these, so that a chunk the sample steps over is neither read nor counted.
 //
-// Worked out as they are asked for rather than listed, so that a walk asking for them allocates
-// nothing.
+// Computed on demand rather than listed, so a walk over them allocates nothing.
 class SampledChunks {
 public:
     SampledChunks(std::uint64_t length, std::uint64_t chunk, std::uint64_t stride)

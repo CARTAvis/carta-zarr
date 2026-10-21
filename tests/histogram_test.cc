@@ -177,7 +177,7 @@ void TestCountsMatchTheOracle(const carta::zarr::Image& sky) {
 }
 
 // The narrow case: a range that excludes most of the plane, which is what tells a walk that counts
-// every pixel from one that honours the bounds.
+// every pixel from one that honors the bounds.
 void TestPixelsOutsideTheRangeAreNotCounted(const carta::zarr::Image& sky) {
     const auto request = WholeSpectrum(0, 10.0F, 25.0F, 4);
     const auto collected = Collect(sky, request, {});
@@ -481,7 +481,7 @@ void TestAWidePlaneSplitsAndStillCounts(const char* fixture) {
     const std::uint32_t bins = 64;
 
     // Channel by channel: a slab split by channel writes each channel's counts itself, and one
-    // written into its neighbour's would leave totals over the cube unchanged.
+    // written into its neighbor's would leave totals over the cube unchanged.
     std::vector<std::vector<std::uint64_t>> oracle(kFrequency, std::vector<std::uint64_t>(bins, 0));
     const double width = (upper - lower) / bins;
     for (std::uint64_t f = 0; f < kFrequency; ++f) {
@@ -737,8 +737,8 @@ void TestThreadCountDoesNotChangeTheCounts(const char* fixture) {
 }
 
 // A result nobody filled in has found no range, which is what the extrema say for a walk that read no
-// finite pixel. A zero read as a range from zero to zero. The default is SpectralTotals' own now,
-// which is the point: it is written once, for this and for every spectral block.
+// finite pixel; a zero would read as a range from zero to zero. The default is SpectralTotals' own,
+// written once, for this and for every spectral block.
 void TestAnUnfilledResultHasFoundNoRange() {
     const carta::zarr::CubeHistogramResult unfilled;
     Require(std::isnan(unfilled.totals.min) && std::isnan(unfilled.totals.max),

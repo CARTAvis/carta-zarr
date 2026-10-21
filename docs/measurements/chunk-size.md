@@ -506,7 +506,7 @@ carta-zarr-bench run cube.zarr --mode animation --cache-bytes 1G \
     --label "LAYOUT|users=4|cache=1G" --csv pancake.csv
 ```
 
-On the Mac, planes were also read again with `--cold off`, labelled `LAYOUT|users=1|cache=5G|warm`.
+On the Mac, planes were also read again with `--cold off`, labeled `LAYOUT|users=1|cache=5G|warm`.
 With each machine's CSVs in one directory:
 
 ```sh

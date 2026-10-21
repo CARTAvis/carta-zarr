@@ -40,11 +40,11 @@ namespace carta::zarr {
 // it from the mask.
 //
 // sum_sq_dev is the sum of the squared deviations of those same pixels from their own mean -- the
-// centred second moment, Σ(v − mean)² -- so that a sample variance is sum_sq_dev / (num_pixels − 1).
-// It is here because the variance cannot be had from sum and sum_sq once the pixels are far from zero
-// against their spread: sum_sq − sum²/n subtracts two numbers that agree in every digit a double
-// holds, and what is left is rounding. See ADR 0018. What to say for one pixel is the caller's, as
-// for every quantity derived from these.
+// centered second moment, Σ(v − mean)² -- so that a sample variance is sum_sq_dev / (num_pixels − 1).
+// It is needed because the variance cannot be computed from sum and sum_sq when the pixels are far
+// from zero compared with their spread: sum_sq − sum²/n subtracts two numbers that agree in every
+// digit a double holds, and what is left is rounding. See ADR 0018. What to report for a single pixel
+// is up to the caller, as for every quantity derived from these.
 //
 // A reduction asked for sum_sq_dev accumulates num_pixels and sum as well, since putting two sets of
 // pixels' deviations together needs both their counts and their means, and a block carries them.
@@ -61,10 +61,9 @@ enum class Statistic : std::uint32_t {
 // A set of statistics, made by joining them with |: `Statistic::sum | Statistic::num_pixels`. A single
 // statistic is the set of just it.
 //
-// A type of its own rather than an integer, because an integer could name a statistic that does not
-// exist -- a bit past the last one would compile and simply never be accumulated -- and because
-// `set & statistic` would read as a question and be a number. Nothing makes one from bits, so every
-// set holds only statistics there are.
+// A type of its own rather than an integer: an integer could hold a bit for a statistic that does not
+// exist, which would compile and never be accumulated, and `set & statistic` would look like a
+// question but be a number. Nothing makes a set from raw bits, so a set holds only real statistics.
 class StatisticSet {
 public:
     constexpr StatisticSet() noexcept = default;
@@ -99,16 +98,15 @@ inline constexpr StatisticSet operator|(Statistic a, Statistic b) noexcept {
 // Which planes of an image a reduction is over: a range along the spectral coordinate, one
 // polarization, and one time.
 //
-// The three travel together because a reduction is always over whole planes, and they are one type
-// rather than three fields because they are answered together: whether an image can serve this is
-// one question about that image's axes. An ordinary read says the same thing as one range per axis
-// instead, which is why ReadRequest carries no plane selection.
+// A reduction is always over whole planes, and whether an image can serve these three is one question
+// about its axes, so they are one type. An ordinary read gives one range per axis instead, which is
+// why ReadRequest has no plane selection.
 //
 // polarization and time are indices into their own axes. An image that has no such axis accepts
 // zero and nothing else: index 0 of an axis an image does not have is the image itself, and any
 // other index names a plane that does not exist.
 struct PlaneSelection {
-    // The channels the reduction is over, along the image's spectral axis. Strides are honoured.
+    // The channels the reduction is over, along the image's spectral axis. Strides are honored.
     Range spectral;
     std::uint64_t polarization = 0;
     std::uint64_t time = 0;
@@ -116,10 +114,9 @@ struct PlaneSelection {
 
 // A 2D (x, y) mask in logical image coordinates, addressed row-major with x fastest.
 //
-// This is a borrowed view: the raster must stay valid until ReduceSpectral returns, and the
-// library never retains it. The shape is the region's bounding box rather than the image, which is
-// what makes handing over tens of thousands of regions at once affordable -- 5,792 PV boxes on a
-// 4096^2 image describe themselves in 2.5 MB.
+// This is a borrowed view: the raster must stay valid until ReduceSpectral returns, and the library
+// never keeps it. Its shape is the region's bounding box rather than the image, which keeps tens of
+// thousands of regions small: 5,792 PV boxes on a 4096^2 image take 2.5 MB.
 //
 // A mask with no data selects the whole bounding box, and an unmasked region is written without one:
 // `{x_start, y_start, width, height}`. That branch is required, not a convenience: an unrotated
@@ -131,9 +128,9 @@ struct RegionMask {
     std::uint64_t width = 0;
     std::uint64_t height = 0;
     // A raster is all a region needs. The reduction turns it into runs along whichever spatial axis
-    // the store varies fastest, in one pass over it -- about 2 ms for a 7763x4742 bounding box -- so
-    // that it finds the chunks a region occupies from the runs, and accumulates every run with the
-    // loop an unmasked region uses. A raster too fragmented to be worth runs is read as a raster.
+    // the store varies fastest, in one pass that takes about 2 ms for a 7763x4742 bounding box. It
+    // finds the chunks a region covers from the runs, and accumulates each run with the same loop as
+    // an unmasked region. A raster too fragmented for runs to help is read as a raster.
     //
     // width * height elements when there is one, and nothing when there is not; a reduction refuses
     // any other size, so a raster cut for another box is an error rather than a read past its end.
@@ -142,17 +139,17 @@ struct RegionMask {
 
 // One plane histogram request: bin every pixel of each plane over a fixed range.
 //
-// The bounds arrive as double and the per-pixel arithmetic happens in float, which is not an
-// oversight but the rule a caller already follows: it keeps the range as double, divides by the bin
-// count in double, and narrows only the resulting width to float. Comparing a pixel then happens
-// against the narrowed bounds. An integer count is the one thing here that can match exactly rather
-// than to a tolerance, so the sequence of roundings is copied rather than approximated.
+// The bounds arrive as double and the per-pixel arithmetic is in float, on purpose. That is what a
+// caller already does: it keeps the range as double, divides by the bin count in double, and narrows
+// only the resulting width to float. Pixels are then compared with the narrowed bounds. Bin counts
+// are integers that can match a caller's exactly, so the library makes the same roundings in the
+// same order.
 //
-// Copied for the ranges a float does not span as well. Where the narrowed width underflows to zero
-// or overflows to infinity, or the narrowed bounds span more than a float holds or meet in one
-// float, every pixel of the range is binned in double against a width found from the narrowed
-// bounds, and a range of no width puts every pixel it admits in the first bin. The bounds must be
-// finite with lower below upper, and must each fit in a float.
+// The same holds for ranges a float cannot span. When the narrowed width underflows to zero or
+// overflows to infinity, or the narrowed bounds span more than a float holds or round to the same
+// float, every pixel is binned in double against a width taken from the narrowed bounds. A range of
+// zero width puts every pixel in it in the first bin. The bounds must be finite, with lower below
+// upper, and each must fit in a float.
 //
 // A pixel outside [lower, upper] is not counted, and neither is one that is not finite, which is
 // the same rule: NaN fails both comparisons.
@@ -171,9 +168,8 @@ class HistogramBlocks;
 
 // Bin counts for a run of planes, valid only inside the sink call.
 //
-// Read through Counts, as a SpectralBlock is read through Series: how the channels are laid out is
-// the library's alone, which is why only the library can fill one in, and why a caller never indexes
-// one by hand.
+// Read it through Counts, as a SpectralBlock is read through Series. Only the library knows how the
+// channels are laid out, so only the library fills one in.
 struct HistogramBlock {
     // Index into the request's spectral selection, as SpectralBlock::first_channel is.
     std::uint64_t first_channel = 0;
@@ -201,16 +197,15 @@ using HistogramSink = std::function<bool(const HistogramBlock&)>;
 // The seven statistics a reduction counts over a set of pixels: one region at one channel of a
 // SpectralBlock, or everything a cube histogram's selection covers.
 //
-// What nothing was counted into reads as zero for the counts and sums and NaN for the extrema, since
-// there is no smallest value of nothing -- and that is what a default-constructed one holds, so a
-// total nobody filled in cannot pass for a range that was found. A caller deriving a mean from these
-// sees the division it must not perform either way.
+// Over no pixels, the counts and sums are zero and the extrema are NaN, since there is no smallest
+// value of nothing. A default-constructed one holds the same, so an empty total cannot pass for a
+// range that was found. A caller deriving a mean sees that num_pixels is zero.
 //
-// In a SpectralBlock, a statistic the block does not carry reads the same way. A caller that has to
-// tell "not asked for" from "nothing there" asks the block, with Carries.
+// In a SpectralBlock, a statistic the block does not carry reads the same way. To tell "not asked
+// for" from "nothing there", ask the block with Carries.
 //
-// One type for both, rather than a set of fields per result, so that the same statistic is spelt and
-// defaulted the same way wherever it is reported.
+// One type for both uses, so that each statistic has the same name and default wherever it is
+// reported.
 struct SpectralTotals {
     double num_pixels = 0.0;
     double nan_count = 0.0;
@@ -235,10 +230,10 @@ struct CubeHistogramResult {
 
 // What the walk hands the caller as it goes.
 //
-// `snapshot` answers over the pixels read so far, which is a legitimate histogram of them: the
-// extremes are tracked exactly as the walk runs, so the bin edges it re-aggregates onto are the
-// right ones for what it has seen. They move as more of the cube arrives, which is why it hands
-// back a whole result rather than counts alone -- the caller needs the range that goes with them.
+// `snapshot` returns a correct histogram of the pixels read so far: the extremes are tracked exactly
+// as the walk runs, so its bin edges are right for what it has seen. The edges move as more of the
+// cube arrives, so it returns a whole result rather than counts alone: the caller needs the range
+// that goes with them.
 //
 // It is not free: it re-aggregates every worker's provisional histogram. A caller reporting on a
 // timer should call it only when it reports, not on every update.
@@ -253,9 +248,8 @@ struct CubeHistogramProgress {
 // which then reports cancelled.
 //
 // An argument of Image::ComputeCubeHistogram, as ProgressCallback is of Image::Read, rather than a
-// field of CubeHistogramRequest. A request says what to compute and is data; this is the caller's
-// code, run while it is computed. As a field it was the one request in the library that carried
-// behaviour, which the reasoning for ProgressCallback had already ruled out.
+// field of CubeHistogramRequest. A request is data that says what to compute; this is the caller's
+// code, run while it is computed.
 using CubeHistogramProgressCallback = std::function<bool(const CubeHistogramProgress&)>;
 
 // One histogram for the whole selection in a single pass, for a caller that does not know the range
@@ -267,18 +261,18 @@ using CubeHistogramProgressCallback = std::function<bool(const CubeHistogramProg
 // whenever a pixel falls outside -- no pixel is lost, only resolution -- and re-aggregates at the
 // end over the extremes it tracked exactly along the way.
 //
-// What is given up is where the bin edges land. A provisional bin straddling a target edge is split
-// between the two in proportion to the overlap, so what is left is the assumption that pixels are
-// spread evenly inside one provisional bin -- the same assumption the caller's own percentile makes
-// between target bins, and a far smaller error than giving the straddling bin to one side whole.
-// The extremes, the total count and the sums are exact.
+// What is given up is where the bin edges land. A provisional bin that straddles a target edge is
+// split between the two target bins in proportion to the overlap. That assumes pixels are spread
+// evenly inside one provisional bin, which is the same assumption the caller's own percentile makes
+// between target bins, and a far smaller error than giving the whole bin to one side. The extremes,
+// the total count and the sums are exact.
 //
 // The walk runs on as many threads as the context was given, each with a provisional histogram of
-// its own that it re-aggregates onto the same target grid at the end, so the counts depend on the
-// thread count and a caller who needs the same ones every time asks for one decode thread. It is
-// not much of a dependence: on a billion-pixel cube, at one thread or twenty-eight, fewer than
-// 0.01% of pixels landed in a different bin than the two-pass answer's, and every percentile CARTA
-// offers within 0.003 of a bin of it.
+// its own that it re-aggregates onto the same target grid at the end. So the counts depend on the
+// thread count, and a caller that needs the same counts every time asks for one decode thread. The
+// difference is small: on a billion-pixel cube, at one thread or twenty-eight, fewer than 0.01% of
+// pixels landed in a different bin than in the two-pass answer, and every percentile CARTA offers was
+// within 0.003 of a bin of it.
 //
 // The result is one histogram for the whole selection, not one per plane: no plane's counts can be
 // settled until the last pixel has been read, and holding a provisional histogram for every plane
@@ -291,11 +285,11 @@ struct CubeHistogramRequest {
     // they are re-aggregated onto `bin_count`. Larger is more faithful and costs eight bytes a bin for
     // every task the walk is split into.
     //
-    // Zero takes the library's default, which is sixteen times the bins asked for, held between
-    // 4,096 and 65,536 -- the range where tuning.h measured the error and the time to flatten out. A
-    // value stated here is taken as given, up to kMaxHistogramBins, so a caller can ask for coarser
-    // than the default as well as finer. Either way it is rounded up to a power of two, and to at
-    // least two, so that merging in pairs leaves nothing behind.
+    // Zero takes the library's default: sixteen times the bins asked for, kept between 4,096 and
+    // 65,536, the range where tuning.h measured the error and the time to level off. Any other value
+    // is used as given, up to kMaxHistogramBins, so it can be coarser or finer than the default.
+    // Either way it is rounded up to a power of two, and to at least two, so that merging in pairs
+    // leaves nothing behind.
     std::uint32_t provisional_bin_count = 0;
     // Take every nth pixel along both spatial axes. One reads every pixel.
     //
@@ -307,14 +301,14 @@ struct CubeHistogramRequest {
 
 // The largest number of bins one histogram accepts. CARTA's automatic bin count is the square root
 // of the plane's pixel count, which is 32,768 for the largest image anyone has; this is a guard
-// against an uninitialised count, not a capacity estimate.
+// against an uninitialized count, not a capacity estimate.
 inline constexpr std::uint32_t kMaxHistogramBins = 1u << 20;
 
 // The largest number of regions one reduction accepts.
 //
 // This is a structural guard, not a capacity estimate: the largest legitimate request is one box
 // per pixel along an image diagonal, which is 46,341 for a 32768^2 image. The bound exists so that
-// a caller passing an uninitialised count gets invalid_argument instead of a 16 GB allocation.
+// a caller passing an uninitialized count gets invalid_argument instead of a 16 GB allocation.
 inline constexpr std::size_t kMaxSpectralRegions = 1u << 20;
 
 struct SpectralReduceRequest {
@@ -323,10 +317,9 @@ struct SpectralReduceRequest {
     // returns, as each one's raster is.
     BufferView<const RegionMask> regions;
     StatisticSet statistics;
-    // How often to hand results back, as a hint rather than a contract. Zero lets the library
-    // choose, which is what most callers want: it emits as often as it can without making the reads
-    // any smaller, so a region covering the image reports a chunk layer at a time while a
-    // cursor-sized one reports far less often, and neither pays for the difference.
+    // How often to hand results back, as a hint. Zero lets the library choose, which is what most
+    // callers want: it emits as often as it can without making the reads any smaller. A region
+    // covering the image then reports a chunk layer at a time, and a cursor-sized one far less often.
     //
     // The library lowers a hint to fit a 64 MiB block budget and then to a whole number of
     // spectral chunks, because a block boundary inside a chunk would split one decode's results
@@ -346,10 +339,9 @@ class StatisticSlots;
 // only for the duration of the call. How they are laid out is the library's alone, which is why
 // only the library can fill one in.
 //
-// min and max are reported as NaN for a channel whose region contributed no finite pixel, since
-// there is no such thing as the smallest value of nothing. sum, sum_sq and sum_sq_dev are zero in that case,
-// which is what they are worth, and num_pixels is zero -- so a caller deriving a mean sees the
-// division it must not perform.
+// min and max are NaN for a channel where the region has no finite pixel, since there is no smallest
+// value of nothing. sum, sum_sq, sum_sq_dev and num_pixels are zero, so a caller deriving a mean sees
+// that it must not divide.
 struct SpectralBlock {
     // Index into the request's spectral selection, not an image channel: the image channel is
     // planes.spectral.start + (first_channel + i) * planes.spectral.stride.
@@ -360,9 +352,10 @@ struct SpectralBlock {
     // before the last pixel of the block is read. The same channels arrive again, refined, and a
     // last time with complete set; a caller that only wants finished answers ignores the rest.
     //
-    // The statistics of an unfinished block are honest over the pixels read so far: the counts and
-    // sums are partial and grow, the extrema are over a subset, and anything derived from them --
-    // a mean, an RMS -- is an estimate that converges. NumPixels says how much is behind them.
+    // The statistics of an unfinished block are correct for the pixels read so far: the counts and
+    // sums are partial and grow, the extrema are over a subset, and anything derived from them, such
+    // as a mean or an RMS, is an estimate that converges. num_pixels says how many pixels are behind
+    // them.
     bool complete = true;
     // The fraction of this block's chunks that are in the values, in [0, 1]. One when complete.
     double completeness = 1.0;
@@ -380,8 +373,8 @@ struct SpectralBlock {
     }
 
     // One region's channel_count values of one statistic, in channel order, or nullptr when the block
-    // does not carry that statistic. nullptr means nothing else: a region past region_count is a
-    // mistake in the caller, not a statistic that is absent, and is not answered as one.
+    // does not carry that statistic. A region past region_count is a mistake in the caller, not a
+    // missing statistic, and is asserted rather than answered with nullptr.
     const double* Series(std::size_t region, Statistic statistic) const noexcept {
         assert(region < region_count);
         for (std::size_t slot = 0; slot < _statistic_count; ++slot) {

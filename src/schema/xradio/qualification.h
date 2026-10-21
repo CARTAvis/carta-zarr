@@ -9,13 +9,12 @@
 
 // Whether this profile will open a variable, and what it has to say about one it will not.
 //
-// One module rather than a rule per stage. Everything that needs the answer asks here, which is
-// what makes an entry in the listing a statement about opening rather than about what a variable
-// looks like: a listing cannot offer a variable that opening would refuse.
+// Everything that needs the answer asks here, so an entry in the listing says the variable will
+// open, not only that it looks like an image: a listing cannot offer a variable that opening would
+// refuse.
 //
-// It takes a Store because that is the narrowest thing its tests can stand up: it reads array
-// metadata and nothing else, and a Store over the in-memory transport costs a map entry. See ADR
-// 0006.
+// It takes a Store because that is the narrowest input its tests can build: it reads only array
+// metadata, and a Store over the in-memory transport costs a map entry. See ADR 0006.
 
 #include "carta-zarr/descriptor.h"
 #include "carta-zarr/result.h"
@@ -30,10 +29,10 @@ namespace carta::zarr::internal::xradio {
 /**
  * What this profile decided about one node of a store.
  *
- * Three answers rather than two, because a node can fail to be an image in two different ways that
- * a consumer acts on differently. A coordinate array, a flag, and a beam table are not images and
- * there is nothing to say about them. A complex sky-plane variable is an image this profile will
- * not open, and a consumer that lists the dataset's images should see it with the reason attached.
+ * Three answers rather than two, because a node can fail to be an image in two ways that a consumer
+ * acts on differently. A coordinate array, a flag and a beam table are not images, and there is
+ * nothing to say about them. A complex image is an image this profile will not open, and a consumer
+ * listing the dataset's images should see it with the reason attached.
  */
 struct NodeQualification {
     // It belongs in the dataset's image listing, openable or not.
@@ -45,25 +44,23 @@ struct NodeQualification {
     std::optional<Diagnostic> diagnostic;
     // Whether what there is to say is a defect in the store rather than a limit of this library.
     //
-    // A complex sky-plane variable and an aperture-plane variable are well-formed things this
-    // profile does not open; a variable whose extent disagrees with the coordinate it names, and a
-    // node whose metadata will not parse, are the store being wrong about itself. The probe acts on
-    // the difference: a dataset with nothing openable in it is a store this profile does not match,
-    // unless something in it was malformed, which is a store it matched and found broken.
+    // A complex image is well formed, and this profile does not open it. A variable whose extent
+    // disagrees with the coordinate it names, or a node whose metadata will not parse, is the store
+    // being wrong about itself. The probe acts on the difference: a dataset with nothing openable in
+    // it is a store this profile does not match, unless something in it was malformed, which makes it
+    // a store the profile matched and found broken.
     bool malformed = false;
 };
 
-// Asked of every entry the store's inventory holds. What the node is, and whether an array's
-// metadata parsed, the inventory has already decided; a node that will not parse is one of the
-// answers here rather than a failure to arrive at one. The Store is for the coordinates an image
-// names, which are other nodes.
+// Asked of every entry in the store's inventory. The inventory has already decided what the node is
+// and whether an array's metadata parsed; a node that will not parse gets an answer here rather than
+// an error. The Store is for reading the coordinates an image names, which are other nodes.
 NodeQualification QualifyNode(const Store& store, const NodeEntry& entry);
 
 // The precondition of describing an image, as the error a caller should report when it is not met.
 //
-// Describing reads coordinate values and builds a descriptor; every one of those steps assumes the
-// variable is an image this profile opens. Asking here rather than re-deciding is the whole point
-// of the module: the answer is the one the listing gave.
+// Describing reads coordinate values and builds a descriptor, and every step assumes the variable is
+// an image this profile opens. Asking here gives the same answer the listing gave.
 Result<void> RequireQualified(const Store& store, std::string_view image_id);
 
 }  // namespace carta::zarr::internal::xradio

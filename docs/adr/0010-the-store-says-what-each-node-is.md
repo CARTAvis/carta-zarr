@@ -1,5 +1,9 @@
 # The store says what each node is, and its callers decide what to do about it
 
+*Amended for 0.3.0 ([#55](https://github.com/CARTAvis/carta-zarr/issues/55)):
+`DiagnosticCode::unrecognised_node` is spelled `unrecognized_node`, as the rest of the API is. The
+decision below is unchanged.*
+
 ADR 0004 put the seam at the transport and gave `Store` everything that turns bytes into meaning:
 "node path validation, JSON parsing, consolidated metadata, array metadata, storage layout, and the
 caches". The listing was the one place that rule was not followed. `Store::ListNodes` read every
@@ -10,7 +14,7 @@ see whether it had been a group. Flag selection parsed every node, groups includ
 answer. They agreed only where those three happened to coincide.
 
 `Store::Inventory` replaces it. Every node comes back under one canonical name, sorted, as a
-`group`, an `array`, or an `unrecognised` node, and an array comes back with its metadata already
+`group`, an `array`, or an `unrecognized` node, and an array comes back with its metadata already
 parsed -- a pointer to the one the store holds, so nothing is copied and a group is never parsed as
 an array. GLOSSARY.md calls it the node inventory.
 
@@ -31,11 +35,11 @@ fresh store about a single image before anything has listed it, which only tests
 What a caller does with a node that is not a usable array is its own business:
 
 - **Image discovery diagnoses it**, because it may have been an image, and a store whose sky
-  variable disappears without a word reads as a store nobody recognised.
+  variable disappears without a word reads as a store nobody recognized.
 - **Flag selection passes over it**, because a mask candidate that cannot be read is simply not the
   mask. Complaining would make a guess into a finding about the store.
 - **The declared size refuses an array it cannot size**, because a total that leaves out an array it
-  knows is there is wrong rather than small -- and counts neither a group nor an unrecognised node,
+  knows is there is wrong rather than small -- and counts neither a group nor an unrecognized node,
   because neither is an array.
 
 These were recoverable only from three control flows, and nothing said they were meant to differ.
@@ -71,9 +75,9 @@ true of the documents. It was never true of the listing, and this is where the d
 `FindNode` looks a name up as given and does not respell it, so `OpenImage("./SKY")` answers
 `not_found`, while an image declaring `flag: "./MASK_0"` finds its mask. That asymmetry is deliberate.
 A flag attribute, a coordinate name, a consolidated key -- those are spellings the store wrote for
-itself, and the library has to recognise them. An image id is a name the library handed out, and a
+itself, and the library has to recognize them. An image id is a name the library handed out, and a
 consumer passing it back got it from the listing. Accepting any spelling there would put a
-non-canonical id into a descriptor and two cache entries behind one image, to honour a promise nobody
+non-canonical id into a descriptor and two cache entries behind one image, to honor a promise nobody
 asked for.
 
 ## A node whose metadata will not parse is diagnosed
@@ -82,9 +86,9 @@ GLOSSARY.md already decided this. Under **Diagnostic** it lists "a node skipped 
 would not parse" among the things diagnosed rather than refused, because the rest of the dataset is
 still readable. The listing did the opposite: it gave up on the first document that would not parse,
 so one stray broken `zarr.json` beside a good image closed the dataset. It was also inconsistent
-with its neighbour -- an array whose metadata would not parse as an array was already a diagnostic.
+with its neighbor -- an array whose metadata would not parse as an array was already a diagnostic.
 
-A document that will not parse is an `unrecognised` node now, carrying the parser's error. Only that
+A document that will not parse is an `unrecognized` node now, carrying the parser's error. Only that
 failure: a read that failed outright -- a transport error, a node listed and then gone -- says the
 hierarchy could not be taken, and still refuses. The line is between "this node could not say what it
 is" and "the store could not be read".
@@ -105,7 +109,7 @@ ADR 0009 left "the other readings of a parse failure" undecided, naming `Determi
 
 A node whose `node_type` is present and not a string used to throw. Two of the three readers asked
 for it as a string with a default, which nlohmann refuses with `type_error.302`, so discovery threw
-and the dataset did not open. It is an unrecognised node now, like any other.
+and the dataset did not open. It is an unrecognized node now, like any other.
 
 carta-backend sees one change: a dataset holding a stray document that will not parse is listed
 with its images and a diagnostic, where the file browser used to report an error. Nothing there
@@ -129,5 +133,5 @@ For the store's own references it holds only because the first read of a name is
 life of the store.
 
 **Diagnostics dropped on `no_match`.** Unchanged from ADR 0009: a store of nothing but unsupported
-variables is still reported as unrecognised with no reason attached. *Since decided* -- see the
+variables is still reported as unrecognized with no reason attached. *Since decided* -- see the
 same entry in ADR 0009: the reason is carried now, and the kind is unchanged.

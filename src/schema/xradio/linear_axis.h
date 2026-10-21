@@ -61,22 +61,22 @@ struct DirectionAxisFit {
  * The linear description of one direction axis, from its direction cosines.
  *
  * A direction axis is linear by construction, so it keeps the increment whether or not the samples
- * came back evenly spaced -- an uneven one is a rounding story about the samples, not a statement
- * that the axis is tabular. The diagnostic saying so is carried either way.
+ * are evenly spaced: uneven samples are rounding, not a sign that the axis is tabular. The diagnostic
+ * saying so is kept either way.
  *
  * The samples are direction cosines and the descriptor reports degrees, so the increment is scaled
- * here. That conversion used to sit at the call site, where nothing could reach it: dropping it
- * would have shipped an l/m pixel scale wrong by a factor of 57.3 with every test still passing.
+ * here, where tests can reach it. Without the scaling, an l/m pixel scale would be wrong by a factor
+ * of 57.3.
  */
 DirectionAxisFit FitDirectionAxis(const std::vector<double>& cosines, std::string_view axis_name);
 
 /**
  * The linear description of one aperture-plane axis, u or v, from its samples in wavelengths.
  *
- * Linear by construction, as a direction axis is -- a Fourier transform's grid -- so the increment is
- * kept whether or not the samples came back evenly spaced, and a degenerate axis is said to be one.
- * `reference` is the value the reference pixel lands on, XRADIO's `crval`; nothing asks for 0.0, the
- * centre of the plane. Nothing is scaled: the unit is the coordinate's own.
+ * Linear by construction, as a direction axis is (it is a Fourier transform's grid), so the increment
+ * is kept whether or not the samples are evenly spaced, and a degenerate axis is reported as one.
+ * `reference` is the value the reference pixel lands on, XRADIO's `crval`; nullopt measures from 0.0,
+ * the center of the plane. Nothing is scaled: the unit is the coordinate's own.
  */
 DirectionAxisFit FitApertureAxis(const std::vector<double>& values, std::optional<double> reference,
                                  std::string_view axis_name);
@@ -92,13 +92,13 @@ struct SpectralAxisFit {
 /**
  * The linear description of a spectral coordinate, from its channel frequencies.
  *
- * The opposite rule to a direction axis, and for the opposite reason: XRADIO warns that neighbouring
+ * The opposite rule to a direction axis, and for the opposite reason: XRADIO warns that neighboring
  * channels need not be evenly spaced, so unevenly spaced ones get no linear description at all and
  * the consumer builds a tabular axis instead. See ADR 0002.
  *
- * A diagnostic about a reference pixel the consumer will never see would only confuse it, so that
- * one is dropped when the description is withheld. The reason why is kept, because it is what tells
- * the consumer to go tabular.
+ * When the description is withheld, a diagnostic about its reference pixel would only confuse the
+ * consumer, so it is dropped. The nonuniform_axis diagnostic is kept, because it tells the consumer
+ * to build a tabular axis.
  */
 SpectralAxisFit FitSpectralAxis(const std::vector<double>& channels, double reference, std::string_view axis_name);
 

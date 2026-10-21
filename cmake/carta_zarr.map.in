@@ -7,8 +7,8 @@
 /* What libcarta-zarr exports on ELF platforms: its own API and nothing else.
  *
  * TensorStore and the libraries it brings -- Abseil, riegeli, zstd, zlib, blosc and others -- are
- * linked in statically, and were built without hidden visibility, so without this they were exported
- * too: 11,335 symbols, of which 42 were carta-zarr's. A program that also links its own zlib or zstd,
+ * linked in statically, and were built without hidden visibility, so without this they would be
+ * exported too: 11,335 symbols, of which 42 are carta-zarr's. A program that also links its own zlib or zstd,
  * as carta-backend does, then has two definitions of one name, and the dynamic linker binds every
  * call to whichever it found first, including the calls made from inside this library.
  *

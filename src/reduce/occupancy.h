@@ -28,8 +28,7 @@ class Occupancy;
 // and v is the other, so that a plane arrives with u contiguous and never has to be transposed on
 // the way in. A caller's x and y are mapped onto these once, at the top of the reduction.
 //
-// Placed, because a pass never knows what a region is: this is what a region looks like once it is
-// placed, not something the walk holds.
+// The pass itself never sees regions: this is a region once it is placed on the walk's axes.
 class PlacedRegion {
 public:
     // The rows of this region inside the box [u0, u1) x [v0, v1), half-open. None when the region
@@ -55,9 +54,9 @@ public:
      * `span(first, last, mask, mask_step)` over the pixels [first, last).
      *
      * `mask` is null when every pixel of the span is selected -- a run, or a region that is its whole
-     * box -- and otherwise points at the raster's byte for `first`, the next pixel's `mask_step` bytes
-     * on. Which of the three a region is, how its runs are encoded and which way its raster's rows
-     * lie are all said here and nowhere else.
+     * box -- and otherwise points at the raster's byte for `first`, with the next pixel's `mask_step`
+     * bytes on. Which of the three kinds a region is, how its runs are encoded, and which way its
+     * raster's rows lie are all handled here and nowhere else.
      *
      * `y` must be one of the region's rows. `span` is a template parameter and must not become a
      * std::function: a reduction's per-pixel loop is inside it. ADR 0005.
@@ -123,8 +122,8 @@ struct ColumnRun {
 // The regions touching one chunk, as a view into the index that holds them. Valid for as long as
 // the Occupancy is.
 //
-// A view rather than a pair of iterators because the accumulation reads one per chunk cell and
-// wants to write a range-for; the same shape BufferView carries, for the same reason.
+// A view rather than a pair of iterators, because the accumulation reads one per chunk cell in a
+// range-for; BufferView has the same shape for the same reason.
 struct RegionRefs {
     const std::uint32_t* data = nullptr;
     std::size_t size = 0;
@@ -136,10 +135,9 @@ struct RegionRefs {
 /**
  * One footprint of a reduction: what the walk reads, and the chunks it spans.
  *
- * The chunks are what the accumulation looks regions up by, and the slab is what the walk is handed.
- * They describe one rectangle, and used to be written out twice beside each other -- a SlabFootprint
- * for the walk and a second struct of the same bounds for the accumulation -- because the walk's type
- * has no use for chunk coordinates and the accumulation could not do without them.
+ * The accumulation looks regions up by the chunks, and the walk is handed the slab. Both describe
+ * the same rectangle: the walk's type has no use for chunk coordinates, and the accumulation needs
+ * them.
  */
 struct OccupiedFootprint {
     SlabFootprint slab;
@@ -151,8 +149,8 @@ struct OccupiedFootprint {
 };
 
 // The extent of an image's plane along its two spatial axes, in the caller's x and y, which is what a
-// region is placed on. A struct rather than two more numbers beside a chunk shape of two, so that
-// neither pair can be handed over in the other's place.
+// region is placed on. A struct rather than two more numbers beside a two-number chunk shape, so
+// that one pair cannot be passed in place of the other.
 struct PlaneExtent {
     std::uint64_t width = 0;
     std::uint64_t height = 0;
@@ -161,34 +159,32 @@ struct PlaneExtent {
 /**
  * Which chunks a set of regions occupies, and which of them touch each one.
  *
- * Occupies rather than covers: the bounding box of a thin cut laid along the diagonal is the whole
- * image, while the cut touches one chunk per row. Bucketing by the box would read every chunk to
- * reach the band, so the region's own mask decides instead -- one pass over bytes the caller already
- * holds, against the chunks they would otherwise stand for.
+ * Occupies rather than covers: the bounding box of a thin cut along the diagonal is the whole image,
+ * while the cut touches one chunk per row. Bucketing by the box would read every chunk, so the
+ * region's own mask decides instead, with one pass over bytes the caller already holds.
  *
- * Built once per reduction and read for the whole of it. Without it the walk is chunks x regions
- * intersection tests -- 6.5 x 10^8 for a WSU diagonal -- which would put the region count back on
- * the critical path the spectral reduction exists to clear.
+ * Built once per reduction and read throughout it. Without it the walk would make chunks x regions
+ * intersection tests (6.5 x 10^8 for a WSU diagonal), putting the region count back on the critical
+ * path the spectral reduction exists to clear.
  *
- * It takes the caller's regions in the caller's own x and y, because placing them onto the walk's
- * axes is part of the same question: which axis the store varies fastest is what decides both where
- * a region lands and which way the runs made from its raster lie.
+ * It takes the caller's regions in the caller's own x and y, because placing them on the walk's axes
+ * is part of the same question: the axis the store varies fastest decides both where a region lands
+ * and which way the runs made from its raster lie.
  *
- * Takes chunk_u, chunk_v and the fastest spatial axis rather than a PassPlan, because those are
- * what the question is about and what a test can stand up with nothing linked behind it -- ADR 0006,
- * and the same reasoning CheckedPlanes gives for taking a descriptor rather than a ReducibleImage.
+ * Takes chunk_u, chunk_v and the fastest spatial axis rather than a PassPlan, because those are what
+ * the question is about, and a test can build them with nothing linked behind them (ADR 0006).
  */
 class Occupancy {
 public:
-    // Reports invalid_slice for a region that is empty or falls off `plane`, which does not fit the
-    // image as a read range past an axis does not. Reports invalid_argument for a region set it cannot
-    // place otherwise: none, or more than kMaxSpectralRegions; a region carrying a raster that is not
-    // width * height bytes; and a set touching more chunks than one reduction can index. Nothing is
-    // assumed of the regions, so nothing has to be checked before this is called.
+    // Reports invalid_slice for a region that is empty or falls off `plane`, as a read range past an
+    // axis does. Reports invalid_argument for a region set it cannot place otherwise: none, or more
+    // than kMaxSpectralRegions; a region with a raster that is not width * height bytes; or a set
+    // touching more chunks than one reduction can index. Nothing is assumed of the regions, so nothing
+    // has to be checked before this is called.
     //
-    // A region's raster is turned into runs here, along u, so that the walk
-    // takes the unmasked loop for it and its chunks are found from the runs; see region_runs.h. That
-    // is one pass over the raster per call, about 2 ms for a 7763x4742 bounding box.
+    // A region's raster is turned into runs here, along u, so that the walk takes the unmasked loop
+    // for it and finds its chunks from the runs; see region_runs.h. That is one pass over the raster
+    // per call, about 2 ms for a 7763x4742 bounding box.
     static Result<Occupancy> Of(BufferView<const RegionMask> regions, PlaneExtent plane, std::uint64_t chunk_u,
                                 std::uint64_t chunk_v, AxisRole fastest_spatial_axis, const std::string& node);
 
@@ -199,8 +195,8 @@ public:
     // The chunks one spectral layer of the whole region set occupies. Zero when the regions select
     // nothing at all, which a mask of zeroes does.
     //
-    // The same number as the chunks of every footprint added up, which is how a pass over them counts
-    // it: occupancy_test holds the two equal.
+    // The same as the chunks of every footprint added up, which is how a pass over them counts it;
+    // occupancy_test checks that the two agree.
     std::uint64_t LayerChunks() const noexcept { return _layer_chunks; }
 
     /**
@@ -209,17 +205,16 @@ public:
      * Rows below one that repeat its runs exactly are read with it, so that a solid rectangle becomes
      * a few large requests while a diagonal stays one chunk per row; and a run wider than a read is
      * cut into pieces a read can hold. Each footprint is clamped to the regions' own pixels, and counts
-     * the chunks it occupies in one spectral layer -- which is what the walk sizes its slabs by and
-     * counts its progress in.
+     * the chunks it occupies in one spectral layer, which the walk sizes its slabs by and counts its
+     * progress in.
      *
-     * Formed here rather than by the reduction because every step of it is a question about this
-     * index: which rows repeat, how wide a run is, where the bounding box ends. Asked from outside,
-     * that took eight accessors onto the representation and a second copy of the footprint's bounds.
+     * Formed here rather than by the reduction, because every step is a question about this index:
+     * which rows repeat, how wide a run is, where the bounding box ends.
      *
-     * Takes the budget as the one number it needs -- how many chunks a read may decode, zero when a
-     * single chunk is more than the budget -- rather than a PassPlan, for the reason Of takes a chunk
-     * shape rather than one. It does not depend on which channels are being read, so a reduction
-     * forms these once and walks them for every block it emits.
+     * Takes the budget as the one number it needs (how many chunks a read may decode, zero when a
+     * single chunk exceeds the budget) rather than a PassPlan, for the same reason Of takes a chunk
+     * shape. It does not depend on which channels are read, so a reduction forms these once and walks
+     * them for every block it emits.
      */
     std::vector<OccupiedFootprint> Footprints(std::uint64_t chunks_per_read) const;
 
@@ -237,9 +232,9 @@ public:
         return RegionRefs{_entries.data() + first, static_cast<std::size_t>(last - first)};
     }
 
-    // The compressed-row index itself, one offset per occupied cell and one past the last. Exposed
-    // because it is what Of promises -- the incidences of one chunk are contiguous and in region
-    // order, which is what the counting sort is for -- and a test has nothing else to say that against.
+    // The compressed-row index itself, one offset per occupied cell and one past the last. Exposed so
+    // a test can check what Of promises: the regions of one chunk are contiguous and in region order,
+    // which is what the counting sort is for.
     const std::vector<std::uint64_t>& offsets() const noexcept { return _offsets; }
     const std::vector<std::uint32_t>& entries() const noexcept { return _entries; }
 
@@ -284,7 +279,7 @@ private:
     // The cells some region occupies, by Cell number, ascending; and per cell, where its regions
     // start in _entries. Sized by what the regions occupy and never by the box around them: two
     // pixels at opposite corners of a plane cut in single-pixel chunks are two cells, where an index
-    // over the box was 2^30 offsets, allocated before a pixel was read.
+    // over the box would be 2^30 offsets, allocated before a pixel is read.
     std::vector<std::uint64_t> _cells;
     std::vector<std::uint64_t> _offsets;
     std::vector<std::uint32_t> _entries;

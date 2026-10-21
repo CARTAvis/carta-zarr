@@ -27,14 +27,13 @@ namespace carta::zarr::internal::xradio {
  * left empty rather than half converted -- every element is checked before it is converted, because
  * the alternative is an exception out of nlohmann on a path whose caller is holding a Result.
  *
- * Takes one array's metadata and returns a descriptor field, so
- * the geodetic-to-cartesian conversion and the obsdate scale/value split are checkable without a
- * store, a transport or a directory tree.
+ * Takes one array's metadata and returns a descriptor field, so the geodetic-to-cartesian conversion
+ * and the obsdate scale/value split can be tested without a store, a transport or a directory tree.
  */
 ObservationInfo DescribeObservation(const zarr::ArrayMetadata& image);
 
-// The `user` keywords of the dataset and of `image`, merged, the image's winning: what XRADIO's writer
-// would write back. Sorted by name, as a JSON object holds them. A value that is not a boolean, an
+// The `user` keywords of the dataset and of `image`, merged, with the image's winning, as XRADIO's
+// writer would write them back. Sorted by name, as a JSON object holds them. A value that is not a boolean, an
 // integer, a number or a string is left out, and a diagnostic naming it is added to `diagnostics`.
 std::vector<UserKeyword> DescribeUserKeywords(const nlohmann::json& root_attributes, const zarr::ArrayMetadata& image,
                                               std::string_view image_id, std::vector<Diagnostic>& diagnostics);

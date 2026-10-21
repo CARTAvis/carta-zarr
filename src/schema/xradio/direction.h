@@ -19,7 +19,7 @@ namespace carta::zarr::internal::xradio {
 
 // A sky direction measure as XRADIO writes one (SkyDirectionArray): two angles in radians under
 // `data`, its frame and, for an equatorial frame, its equinox under `attrs`. Nothing when it has no
-// two numeric angles. The reference direction and the pointing centre are both read by it, so the
+// two numeric angles. Both the reference direction and the pointing center are read with it, so the
 // two name a frame the same way.
 std::optional<SkyDirection> ReadSkyDirection(const nlohmann::json* measure);
 
@@ -27,16 +27,13 @@ std::optional<SkyDirection> ReadSkyDirection(const nlohmann::json* measure);
  * What the root's coordinate_system_info says: everything in a DirectionCoordinate but the two
  * things the l and m samples decide, the increment and the reference pixel.
  *
- * The one reading of that attribute. The probe asks it whether to accept a store and the description
- * asks it what to report, and each used to read the attribute its own way: the probe refused a
- * projection that was missing, a pole that was not two numbers, a matrix that was not two by two,
- * while the description filled in a default for each -- a leniency nothing could reach, because the
- * probe had already refused. And the probe looked only when the attribute was there, so a store
- * without one opened with a projection of "" and a reference of (0, 0), which read as answers.
+ * The one reader of that attribute: the probe uses it to decide whether to accept a store, and the
+ * description to decide what to report, so the two cannot disagree.
  *
- * Every XRADIO writes it, so a store without it, or with one missing any of those four, is
- * malformed: invalid_metadata, naming the attribute. What may be absent is the reference frame, the
- * equinox and the projection parameters, which leave their fields empty.
+ * Every XRADIO writes it, so a store without it, or with one missing the projection, the reference
+ * direction, the native pole or the matrix, is malformed: invalid_metadata, naming the attribute. The
+ * reference frame, the equinox and the projection parameters may be absent, and leave their fields
+ * empty.
  */
 Result<DirectionCoordinate> ReadCoordinateSystem(const nlohmann::json& root_attributes);
 
@@ -48,11 +45,10 @@ Result<DirectionCoordinate> ReadCoordinateSystem(const nlohmann::json& root_attr
  * and latPole, and omitting them shifts coordinates silently rather than raising an error. See
  * ADR 0002.
  *
- * Takes JSON and two vectors of samples and returns a descriptor, so everything it decides -- the
- * radians the attributes are written in against the degrees the descriptor reports, which slot of
- * the transformation matrix each element belongs in, how an equinox spelled "J2000" becomes a
- * number -- is checkable without a store, a transport or a directory tree. It was file-local inside
- * a 779-line translation unit before, and none of those was.
+ * Takes JSON and two vectors of samples and returns a descriptor, so everything it decides can be
+ * tested without a store, a transport or a directory tree: converting the attributes' radians to the
+ * descriptor's degrees, which slot of the transformation matrix each element goes in, and how an
+ * equinox written "J2000" becomes a number.
  */
 Result<DirectionCoordinate> DescribeDirection(const nlohmann::json& root_attributes,
                                               const std::vector<double>& l_values, const std::vector<double>& m_values,

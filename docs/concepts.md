@@ -99,7 +99,7 @@ that owns the underlying descriptor.
   context's worker pool, which computes one read at a time, so they interleave
   read by read rather than run side by side.
 - **Do not assign to a handle another thread is using.** A handle is a value
-  holding a shared pointer: give each thread its own copy, or synchronise
+  holding a shared pointer: give each thread its own copy, or synchronize
   assignment to one variable yourself.
 - **Call `ReadAhead::Served` from one thread at a time,** the one that serves
   the frames, even through copies of the controller. `Cancel` and `stats` may be

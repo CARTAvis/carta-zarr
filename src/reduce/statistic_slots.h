@@ -13,10 +13,10 @@
 // kStatisticOrder, and nothing outside this file indexes into it. The block accumulator and each
 // task's private partial are the same thing at two extents, so they are one type here.
 //
-// Not the cube histogram's accumulator, although it counts the same statistics. It keeps them
-// in registers for one region and one channel, decides an extremum is untouched by num_pixels being
-// zero rather than by it still being infinite, and is padded to a cache line beside its histogram,
-// which is a number ADR 0005 measured. Folding it into this would move that number for nothing.
+// Not the cube histogram's accumulator, although it counts the same statistics. That one keeps them
+// in registers for one region and one channel, treats an extremum as untouched when num_pixels is
+// zero rather than when it is still infinite, and is padded to a cache line beside its histogram, a
+// layout ADR 0005 measured. Merging the two would change that measurement for no gain.
 
 #include "carta-zarr/reduce.h"
 
@@ -44,7 +44,7 @@ struct RowTotals {
     double smallest = std::numeric_limits<double>::infinity();
     double largest = -std::numeric_limits<double>::infinity();
     // The good pixels' mean, as a base and an offset, and their squared deviations from it; left at
-    // zero by a loop not asked for them. See reduce/deviations.h.
+    // zero by a loop that was not asked for them. See reduce/deviations.h.
     double base = 0.0;
     double offset = 0.0;
     double sum_sq_dev = 0.0;
@@ -56,8 +56,8 @@ public:
     // The statistics in `requested`, in kStatisticOrder. A request for none has been refused before
     // anything asks for its layout.
     //
-    // sum_sq_dev brings num_pixels and sum with it: two sets' deviations are put together from their
-    // counts and means, so a fold or a merge without them would have nothing to do it with.
+    // sum_sq_dev brings num_pixels and sum with it: two sets' deviations are combined from their
+    // counts and means, so a fold or a merge needs them.
     static StatisticLayout Of(StatisticSet requested) {
         if (requested.Contains(Statistic::sum_sq_dev)) {
             requested |= Statistic::num_pixels | Statistic::sum;
@@ -103,9 +103,9 @@ private:
 // and a Debug build checks them.
 class StatisticSlots {
 public:
-    // Reshape to `regions` x `channels` and start from nothing: zero for the counts and sums, and
-    // the identities of the extrema, which is what lets a fold never ask whether it is the first.
-    // Keeps its storage, so a partial reused slab after slab does not allocate.
+    // Reshape to `regions` x `channels` and start from nothing: zero for the counts and sums, and the
+    // identities of the extrema, so a fold never needs to ask whether it is the first. Keeps its
+    // storage, so a partial reused slab after slab does not allocate.
     void Reset(const StatisticLayout& layout, std::size_t regions, std::uint64_t channels) {
         _layout = layout;
         _regions = regions;
@@ -114,7 +114,7 @@ public:
         _base_at = layout.count() * _channels;
         _offset_at = _base_at + _channels;
         // Worked out once here rather than from the slot table on every fold: the fold runs once per
-        // row, and these are loop invariants for all of them.
+        // row, and these do not change between rows.
         for (std::size_t i = 0; i < kStatisticOrder.size(); ++i) {
             const int slot = layout._slot_of.at(i);
             _offset.at(i) = slot < 0 ? kAbsent : static_cast<std::size_t>(slot) * _channels;
@@ -135,8 +135,8 @@ public:
     // every region in every chunk, so it stays inline and asks only the questions Reset answered.
     //
     // kDeviations says whether the layout has sum_sq_dev, which the caller knows once for every row
-    // it folds: asked here, of every row, it would cost a reduction of one-pixel strips 2% whether or
-    // not it was asked for the spread.
+    // it folds. Checking it here for every row would cost a reduction of one-pixel strips 2%, whether
+    // or not it was asked for the spread.
     template <bool kDeviations>
     void Fold(std::size_t region, std::uint64_t channel, const RowTotals& row) noexcept {
         assert(region < _regions && channel < _channels);
@@ -174,8 +174,8 @@ public:
     }
 
     // Adds partials[0], partials[1], ... into channels [offset, offset + their channels), in that
-    // order. The order is the determinism rule -- sums added in another association are different
-    // bits -- which is why this takes them all rather than one at a time. Every partial has this
+    // order. The fixed order keeps results deterministic, since sums added in a different order give
+    // different bits, so this takes them all rather than one at a time. Every partial has this
     // block's layout and regions, and fits at `offset`.
     void MergeInOrder(const StatisticSlots* partials, std::size_t count, std::uint64_t offset) {
         for (std::size_t task = 0; task < count; ++task) {
@@ -229,13 +229,12 @@ public:
 
     // Hands the block to `sink` as a SpectralBlock and returns what the sink returned.
     //
-    // An extremum nothing contributed to is still its identity, which is the one value it must not
-    // be reported as, so it is reported as NaN. Finding those needs no bookkeeping: a finite pixel
-    // can never leave an infinity behind, so only the untouched entries are still infinite -- and by
-    // the same argument the NaN that replaced one is the only NaN there, so the identity can be put
-    // back afterwards. It is put back every time, finished block or not: the values are only the
-    // sink's for the length of the call, so nobody can tell, and the accumulator a hand-over leaves
-    // is then always the one it found.
+    // An extremum nothing contributed to still holds its identity (an infinity), which must not be
+    // reported, so it is reported as NaN. Finding those needs no bookkeeping: a finite pixel never
+    // leaves an infinity behind, so only untouched entries are still infinite, and likewise the NaN
+    // that replaced one is the only NaN there, so the identity can be restored afterwards. It is
+    // restored every time, finished block or not: the sink only sees the values during the call, and
+    // the accumulator is left as it was found.
     template <typename Sink>
     bool HandOver(std::uint64_t first_channel, bool complete, double completeness, const Sink& sink) {
         Settle(true);

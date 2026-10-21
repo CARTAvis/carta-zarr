@@ -84,6 +84,13 @@ foreach(shape small wide)
         message(FATAL_ERROR "shape ${shape} has no report of its own:\n${sweep_log}")
     endif()
 endforeach()
+# Both shapes are synthetic and short of first touches: the advice is to synthesize a larger cube,
+# not to crop one.
+file(READ "${results}/wide/summary.md" wide)
+if(NOT wide MATCHES "The synthetic cube is small for chunks of" OR NOT wide MATCHES "synthesize at least"
+   OR wide MATCHES "Too few first touches[^\n]*[Cc]rop")
+    message(FATAL_ERROR "a synthetic shape's first-touch warning did not say to synthesize:\n${wide}")
+endif()
 
 file(READ "${results}/summary.md" summary)
 foreach(section "## Each shape" "[small](small/summary.md)" "## One layout for every shape"

@@ -19,24 +19,21 @@ namespace carta::zarr::internal {
 /**
  * Where an image's pixels and its flag come from.
  *
- * The seam neither the pass nor an ordinary read owns, which is why it is named after neither of
- * their units: a pass reads slabs and a read reads pieces, and both ask the same two questions.
+ * Shared by the pass and an ordinary read, so it is named after neither: a pass reads slabs and a
+ * read reads pieces, and both ask the same two questions.
  *
  * Two adapters: StorePixelSource, which reads them from a `Store`, and the synthetic one in
- * tests/support, which computes them from their own coordinates. The second is what lets a walk be
- * asked about a cube of any size, about what it read rather than what it handed over, and about
- * what it does at four thousand pixels square -- none of which a directory tree can answer.
+ * tests/support, which computes them from their own coordinates. The synthetic one lets tests run a
+ * walk over a cube of any size, check what it read rather than what it returned, and see what it
+ * does at four thousand pixels square, none of which a directory tree on disk can do.
  *
- * Consulted once per slab or once per piece, so the indirect call is paid per megabyte of pixels
- * rather than per pixel. That is the whole reason it can be an interface at all while a visitor
- * cannot: see ADR 0005.
+ * It is called once per slab or once per piece, so the indirect call costs once per megabyte of
+ * pixels rather than per pixel. That is why it can be an interface while a visitor cannot: see
+ * ADR 0005.
  *
- * `destination` is what the caller has to write into, from where this read's first element lands
- * to the end of the caller's buffer -- not the selection's size restated. A source writes the
- * selection's elements into the front of it and nothing past them, and refuses a destination too
- * short to hold them before writing any. The length used to cross as a separate count that every
- * caller worked out from the selection it was passing, so the check against it compared the
- * selection with itself and could never catch the caller's mistake it was there for.
+ * `destination` runs from where this read's first element lands to the end of the caller's buffer;
+ * it is not the selection's size restated. A source writes the selection's elements into the front
+ * of it and nothing past them, and refuses a destination too short to hold them before writing any.
  */
 class PixelSource {
 public:

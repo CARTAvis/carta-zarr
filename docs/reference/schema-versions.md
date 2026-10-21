@@ -76,7 +76,7 @@ for every store that opens, and empty for one that declares nothing.
   `date_obs` has been removed; string-valued observation dates and numeric
   equinox forms not written by XRADIO are not interpreted, and neither is a
   numeric date without a format.
-- **Pointing centre:** read from the image's `pointing_center` into
+- **Pointing center:** read from the image's `pointing_center` into
   `ObservationInfo::pointing_center`, in degrees, its frame named as the
   reference direction's is. XRADIO's FITS reader writes `OBSRA`/`OBSDEC`, or
   the reference direction when the file has neither; both are reported.

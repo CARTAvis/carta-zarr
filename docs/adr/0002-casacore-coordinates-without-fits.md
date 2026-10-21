@@ -10,7 +10,7 @@ The FITS intermediate is lossy in ways that have already caused work: a FITS hea
 axis linearly, through `CRVALn`, `CDELTn`, and `CRPIXn`, which cannot express a non-uniform
 polarization ordering or a non-uniform frequency axis. The backend already detects the first case
 and overwrites the converter's polarization coordinate with a `StokesCoordinate` built from the
-per-plane list. XRADIO explicitly warns that neighbouring frequency channels need not be evenly
+per-plane list. XRADIO explicitly warns that neighboring frequency channels need not be evenly
 spaced, so the same defect applies to the spectral axis, where the correct target is a
 `TabularCoordinate` built from the full channel list.
 

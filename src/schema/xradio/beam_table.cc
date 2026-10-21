@@ -66,7 +66,7 @@ Result<std::vector<Beam>> DescribeBeams(const zarr::NumericArray& table,
                      "Beam table does not carry the frequency, polarization and parameter dimensions", table.node()};
     }
     // The labels are the coordinate of the parameter dimension, so there is one for each parameter.
-    // A count of either other than the other's is labels written for another table.
+    // If the counts differ, the labels were written for another table.
     if (parameter_labels.size() != beam_metadata.shape.at(*param_dim)) {
         return Error{ErrorCode::invalid_metadata,
                      "Beam parameter labels are " + std::to_string(parameter_labels.size()) +

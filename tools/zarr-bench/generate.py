@@ -34,7 +34,7 @@ Two sources of pixels:
                    pixels.
 
   --synthetic      A continuum-subtracted HI cube from a mosaic, like ASKAP's, by default: noise
-                   that varies by channel and rises towards the footprint's edge, faint line
+                   that varies by channel and rises toward the footprint's edge, faint line
                    sources, NaN outside the footprint and runs of flagged channels; continuum
                    sources on request. The coordinates are built from a template XRADIO wrote (the
                    conformance fixture by default), stretched to --shape, on ASKAP's frequency axis
@@ -105,7 +105,7 @@ DEFAULT_TEMPLATE = REPO_ROOT / "tests" / "data" / "images" / "zarr" / "xradio" /
 NOISE_TILE = 128
 
 # A synthetic cube's defaults are an ASKAP HI cube's: its first channel, its channel width, HI's rest
-# frequency, and the noise, in Jy/beam, that with the rise towards the footprint's edge comes to
+# frequency, and the noise, in Jy/beam, that with the rise toward the footprint's edge comes to
 # ASKAP Hydra's median plane rms of 2.1 mJy/beam.
 ASKAP_FREQUENCY_START = 1.2955e9
 ASKAP_CHANNEL_WIDTH = 18518.518518518518
@@ -265,7 +265,7 @@ class Stripe:
         return f"{self.filesystem}:count={self.count},size={self.size}"
 
     def size_with_unit(self, kibi: str, mebi: str) -> str:
-        """The size in the largest binary unit it is a whole number of, spelt as the tool wants."""
+        """The size in the largest binary unit it is a whole number of, spelled as the tool wants."""
         if self.size % (1 << 20) == 0:
             return f"{self.size >> 20}{mebi}"
         if self.size % (1 << 10) == 0:
@@ -357,7 +357,7 @@ def round_mantissa(values: np.ndarray, keep_bits: int) -> np.ndarray:
 
     The trailing bits become zero, which is what lets a compressor find something to compress in
     data that is otherwise noise. It is what numcodecs' BitRound does, and what a pipeline that
-    quantises its products would hand a reader.
+    quantizes its products would hand a reader.
     """
     if keep_bits >= 23:
         return values
@@ -373,7 +373,7 @@ class Synthetic:
     """A cube whose every pixel is a function of its position and the seed.
 
     By default it looks like a continuum-subtracted HI cube from a mosaic, such as ASKAP's: noise
-    whose rms varies from channel to channel and rises towards the edge of the footprint, with heavy
+    whose rms varies from channel to channel and rises toward the edge of the footprint, with heavy
     tails; faint line sources, each present in a few hundred km/s of the band; NaN outside an
     irregular footprint; and runs of channels flagged in part or in whole. Continuum sources, point
     and extended, can be added.
@@ -420,7 +420,7 @@ class Synthetic:
         return {"orders": orders, "amplitudes": amplitudes, "phases": phases, "radius": radius}
 
     def within(self, l_range: range, m_range: range) -> np.ndarray | None:
-        """How far into the footprint each pixel is: 0 at its centre, 1 at its edge, over 1 outside.
+        """How far into the footprint each pixel is: 0 at its center, 1 at its edge, over 1 outside.
         None when there is no footprint."""
         if self.footprint_fill is None:
             return None
@@ -486,11 +486,11 @@ class Synthetic:
         rng = np.random.default_rng([self.seed, STREAM_LINES])
         n = self.line_sources
         _, count, _, length_l, length_m = self.shape
-        centre = rng.uniform(-0.05 * count, 1.05 * count, n)
+        center = rng.uniform(-0.05 * count, 1.05 * count, n)
         width_kms = rng.uniform(50.0, 500.0, n)
         frequencies = np.asarray(self.frequencies)
         step = abs(frequencies[1] - frequencies[0]) if count > 1 else 1.0
-        at = frequencies[np.clip(centre.astype(int), 0, count - 1)]
+        at = frequencies[np.clip(center.astype(int), 0, count - 1)]
         width = width_kms * 1e3 / SPEED_OF_LIGHT * at / step  # in channels
         return {
             "l": rng.uniform(0, length_l, n),
@@ -499,7 +499,7 @@ class Synthetic:
             "ratio": rng.uniform(0.3, 1.0, n),
             "angle": rng.uniform(0.0, math.pi, n),
             "peak": self.noise * 10 ** rng.uniform(0.0, 1.3, n),
-            "centre": centre,
+            "center": center,
             "width": width,
             "horn": np.where(rng.uniform(size=n) < 0.5, 0.0, rng.uniform(0.2, 0.5, n)),
         }
@@ -546,7 +546,7 @@ class Synthetic:
                                 la - tl * tile : lb - tl * tile, ma - tm * tile : mb - tm * tile
                             ]
         block *= self.channel_rms[f0:f1][None, :, None, None, None]
-        # Primary-beam correction raises the noise towards the edge of the footprint.
+        # Primary-beam correction raises the noise toward the edge of the footprint.
         within = self.within(range(l0, l1), range(m0, m1))
         if within is not None:
             block *= (1 + EDGE_GAIN * np.minimum(within, 1.0) ** 8).astype(np.float32)
@@ -569,11 +569,11 @@ class Synthetic:
             spectrum = spectra(index, f0, f1)
             if spectrum is None:
                 continue
-            centre_l, centre_m = table["l"][index], table["m"][index]
+            center_l, center_m = table["l"][index], table["m"][index]
             la, lb = max(l0, int(first_l[index])), min(l1, int(last_l[index]) + 1)
             ma, mb = max(m0, int(first_m[index])), min(m1, int(last_m[index]) + 1)
-            dl = np.arange(la, lb)[:, None] - centre_l
-            dm = np.arange(ma, mb)[None, :] - centre_m
+            dl = np.arange(la, lb)[:, None] - center_l
+            dm = np.arange(ma, mb)[None, :] - center_m
             cos, sin = math.cos(table["angle"][index]), math.sin(table["angle"][index])
             major = table["major"][index]
             minor = major * table["ratio"][index]
@@ -590,18 +590,18 @@ class Synthetic:
 
     def line_spectrum(self, index: int, f0: int, f1: int) -> np.ndarray | None:
         lines = self.lines
-        centre, width, horn = lines["centre"][index], lines["width"][index], lines["horn"][index]
+        center, width, horn = lines["center"][index], lines["width"][index], lines["horn"][index]
         if horn == 0:
             sigma = width / 2.355
             half = 5 * sigma
         else:
             edge = max(width / 10, 0.5)
             half = width / 2 + 5 * edge
-        a, b = max(f0, math.floor(centre - half)), min(f1, math.ceil(centre + half) + 1)
+        a, b = max(f0, math.floor(center - half)), min(f1, math.ceil(center + half) + 1)
         if a >= b:
             return None
         spectrum = np.zeros(f1 - f0)
-        x = np.arange(a, b) - centre
+        x = np.arange(a, b) - center
         if horn == 0:
             profile = np.exp(-0.5 * (x / sigma) ** 2)
         else:
@@ -643,7 +643,7 @@ class SkyDirection:
     are, over the cube's l and m. Each is as large as a plane -- 8 GiB apiece at 32768 square -- so
     it is computed a block at a time, as the pixels are, rather than whole."""
 
-    reference: tuple[float, float]  # right ascension and declination of the projection centre
+    reference: tuple[float, float]  # right ascension and declination of the projection center
     lengths: tuple[int, int]  # of l and m
     increments: tuple[float, float]  # of l and m
 
@@ -1319,7 +1319,7 @@ def tree_size(path: Path) -> tuple[int, int]:
 def codec_spelling(codecs: list[dict[str, Any]], where: str) -> str:
     """The --codec spelling of a chain of zarr v3 codecs this generator could have written: bytes,
     then at most one compressor. Anything else is refused rather than approximated, since a layout
-    labelled the source's own that is not would make every comparison with it wrong."""
+    labeled the source's own that is not would make every comparison with it wrong."""
     names = [codec.get("name") for codec in codecs]
     if not names or names[0] != "bytes" or len(names) > 2:
         raise SystemExit(f"--layout-from-source: {where} has codecs {names}, which this generator cannot write")
@@ -1339,7 +1339,7 @@ def codec_spelling(codecs: list[dict[str, Any]], where: str) -> str:
 def take_layout_from_source(args: argparse.Namespace) -> None:
     """Fill in --chunk, --shard, --codec and --no-consolidate as the source has them, so that the
     rewrite is the source's own layout over the crop -- what a data producer already writes, to
-    compare every other layout with -- and has the identity it would have had spelt out by hand."""
+    compare every other layout with -- and has the identity it would have had spelled out by hand."""
     source = Path(args.source).resolve()
     root = read_metadata(source)
     image = args.image or default_image(root)
@@ -1460,7 +1460,7 @@ def parse_arguments(argv: list[str] | None) -> argparse.Namespace:
     synthetic.add_argument("--shape", help="frequency=F,polarization=P,l=L,m=M")
     synthetic.add_argument("--seed", type=int, default=1)
     synthetic.add_argument("--noise", type=float, default=ASKAP_NOISE,
-                           help="noise rms at the footprint's centre, in the image's units")
+                           help="noise rms at the footprint's center, in the image's units")
     synthetic.add_argument("--frequency-start", type=float, default=ASKAP_FREQUENCY_START,
                            help="the first channel's frequency, in Hz (ASKAP's 1295.5 MHz)")
     synthetic.add_argument("--channel-width", type=float, default=ASKAP_CHANNEL_WIDTH,
@@ -1592,8 +1592,7 @@ class Output:
     Claiming is the only way this script deletes or creates an output, and it refuses an output over
     any dataset the run reads before it does either: --force deletes what is at the output, so an
     output that is the source, an alias of it or a directory around it would take the source with
-    it, and one inside it would be written into the dataset being read. That used to be two
-    statements of main() that had to stay in that order.
+    it, and one inside it would be written into the dataset being read.
     """
 
     path: Path

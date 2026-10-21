@@ -24,9 +24,8 @@
 
 namespace carta::zarr {
 
-// What a diagnostic is about. One closed set, so that a code is a name the compiler checks rather
-// than a string two places could spell differently -- which is what it was, made from ErrorCode's
-// names in some places and written out as literals in others.
+// What a diagnostic is about. A closed set, so that the compiler checks each code rather than two
+// places spelling a string differently.
 //
 // Several share a name with an ErrorCode, and mean the same thing: the diagnostic is what the error
 // would have been, had the rest of the store not still been readable.
@@ -34,8 +33,8 @@ enum class DiagnosticCode {
     invalid_metadata,
     unsupported_data_type,
     ambiguous_schema,
-    // A node the store holds that is neither a group nor an array this library recognises.
-    unrecognised_node,
+    // A node the store holds that is neither a group nor an array this library recognizes.
+    unrecognized_node,
     // An array whose metadata would not parse.
     unreadable_array,
     // A coordinate whose samples are not evenly spaced, so it has no linear description.
@@ -58,8 +57,8 @@ inline const char* DiagnosticCodeName(DiagnosticCode code) noexcept {
             return "unsupported_data_type";
         case DiagnosticCode::ambiguous_schema:
             return "ambiguous_schema";
-        case DiagnosticCode::unrecognised_node:
-            return "unrecognised_node";
+        case DiagnosticCode::unrecognized_node:
+            return "unrecognized_node";
         case DiagnosticCode::unreadable_array:
             return "unreadable_array";
         case DiagnosticCode::nonuniform_axis:
@@ -97,16 +96,13 @@ struct SchemaProbeResult {
     std::vector<Diagnostic> diagnostics;
 };
 
-// What Context::Create takes: the resources every dataset and image opened through that context
-// share. Named for the context rather than for opening, which it was, because it opens nothing --
-// Dataset::Open takes a location and the context, and none of these.
+// What Context::Create takes: the resources that every dataset and image opened through that context
+// share.
 struct ContextOptions {
     // How much decoded-chunk cache this context may hold, in bytes.
     //
-    // Three answers, and one field because they are one question: no value leaves TensorStore's own
-    // default alone, zero asks for a pool that holds nothing, and any other number sizes it. It was
-    // two fields -- a size where zero meant "default" and a separate disable_cache -- which made
-    // "no cache" sayable twice and, when both were set, resolved silently in favour of the size.
+    // No value leaves TensorStore's own default alone, zero asks for a pool that holds nothing, and
+    // any other number sets its size.
     std::optional<std::size_t> cache_bytes;
     unsigned int io_threads = 0;
     unsigned int decode_threads = 0;
@@ -156,10 +152,9 @@ struct ImageEntry {
     // The axes Dataset::OpenImage would report for this image -- ImageDescriptor::axes, element for
     // element -- and empty when it is not openable.
     //
-    // Here so that a consumer can decide whether it can use an image from the listing alone. One that
-    // displays a single time step, say, refuses an image with two, and without these it had to open
-    // every image in the dataset to find out, reading every coordinate value to answer a question
-    // about shapes. They come from metadata the listing has already parsed.
+    // They let a consumer decide from the listing alone whether it can use an image: one that shows a
+    // single time step can pass over an image with two without opening it. They come from metadata the
+    // listing has already parsed.
     std::vector<AxisDescriptor> axes;
 };
 
@@ -198,10 +193,9 @@ struct DirectionCoordinate {
     std::optional<double> equinox;
     // CRPIX, and 1-based as FITS counts it: the first pixel of an axis is 1.0, not 0.0.
     //
-    // Stated rather than implied because a consumer that reads it the other way shifts every
-    // coordinate it builds by a whole pixel and is told nothing -- which is the failure ADR 0002
-    // describes for the projection parameters, arriving by a different route. casacore counts from
-    // zero, so a consumer handing this to a DirectionCoordinate subtracts one.
+    // A consumer that reads it as 0-based shifts every coordinate it builds by a whole pixel, with no
+    // error to tell it so. casacore counts from zero, so a consumer handing this to a
+    // DirectionCoordinate subtracts one.
     //
     // SpectralCoordinate::reference_pixel is the same convention, from the same fit.
     std::array<double, 2> reference_pixel{0.0, 0.0};
@@ -227,8 +221,8 @@ struct ApertureCoordinate {
 
 struct SpectralCoordinate {
     std::string unit;
-    std::string
-        reference_frame;  // casacore or FITS SPECSYS name, e.g. "LSRK", "BARY", "GEO", "TOPOCENT"; never astropy's
+    // A casacore or FITS SPECSYS name, such as "LSRK", "BARY", "GEO" or "TOPOCENT", never astropy's.
+    std::string reference_frame;
     // CRPIX3, 1-based as DirectionCoordinate::reference_pixel is. Absent, with the two below it,
     // when the channels are not evenly spaced: there is then no linear description to give and a
     // consumer builds a tabular axis from values instead.
@@ -236,9 +230,8 @@ struct SpectralCoordinate {
     std::optional<double> reference_value;  // CRVAL3
     std::optional<double> increment;        // CDELT3
     std::optional<double> rest_frequency;
-    // One a channel, in `unit`, as TemporalCoordinate::values are in theirs. Named for what is
-    // checked of them: the unit is the frequency coordinate's own, which the schema holds only to
-    // being given, so nothing here promises Hz.
+    // One value per channel, in `unit`. The unit is the frequency coordinate's own. The schema only
+    // requires that one is given, so the values need not be in Hz.
     std::vector<double> values;
 };
 
@@ -281,8 +274,9 @@ struct ObservationInfo {
 // A keyword the dataset carries that this library does not interpret: a FITS card XRADIO's reader
 // left alone, lower-cased, or an entry of a CASA image's miscinfo.
 //
-// An integer is one JSON wrote as one and a signed 64-bit integer holds. JSON's parser reads an
-// integer beyond 64 bits either way as a number, so such a one arrives as the nearest double.
+// An integer that fits in a signed 64-bit integer is reported as one. A larger one that fits in 64
+// unsigned bits is left out with a diagnostic, and one beyond 64 bits arrives as the nearest double,
+// because that is how the JSON parser reads it.
 struct UserKeyword {
     std::string name;
     std::variant<bool, std::int64_t, double, std::string> value;
@@ -309,7 +303,7 @@ struct ChunkGeometry {
     // destination, and that is not a rounding error: on the same 2048x2048x16 image stored both ways,
     // a whole-plane spectral profile took a third to a half longer along the wrong axis.
     //
-    // So the walk follows the store rather than the other way round, and the runs a reduction makes
+    // So the walk follows the store rather than the other way around, and the runs a reduction makes
     // from a region's raster lie along this axis.
     AxisRole fastest_spatial_axis = AxisRole::spatial_x;
     std::vector<std::uint64_t> chunk_shape;
@@ -332,11 +326,11 @@ struct Beam {
 
 // Which of two questions a reported size answers.
 //
-// Said rather than resolved into "how close is this", because the library cannot tell: the declared
-// answer is what a caller gets when the store could not be measured, so there is no measurement to
-// compare it against. Nor can it be inferred -- compression pushes what a store occupies below what
-// its arrays declare, while per-node metadata and shard indices push it above, and which wins is a
-// property of the store this path could not read. See ADR 0008.
+// The library says which, rather than how close the size is, because it cannot tell. The declared size
+// is what a caller gets when the store could not be measured, so there is no measurement to compare it
+// with. Nor can it be estimated: compression makes a store smaller than its arrays declare, while
+// per-node metadata and shard indexes make it larger, and which wins depends on the files that could
+// not be read. See ADR 0008.
 //
 // `declared` is first so that a DatasetSize nobody filled in claims the weaker of the two.
 enum class SizeBasis {
@@ -374,9 +368,9 @@ struct ImageDescriptor {
     std::optional<PolarizationCoordinate> polarization;
     std::optional<TemporalCoordinate> temporal;
     std::optional<ObservationInfo> observation;
-    // The dataset's `user` keywords and the image's own, the image's winning where both name one, by
-    // name. A value that is not a boolean, an integer, a number or a string -- a dictionary or a list,
-    // as a CASA image's miscinfo can hold -- is left out, and a diagnostic names it.
+    // The dataset's `user` keywords and the image's own. Where both have a keyword of the same name, the
+    // image's wins. A value that is not a boolean, an integer, a number or a string, such as the
+    // dictionary or list a CASA image's miscinfo can hold, is left out, and a diagnostic names it.
     std::vector<UserKeyword> user_keywords;
     std::vector<Diagnostic> diagnostics;
 };

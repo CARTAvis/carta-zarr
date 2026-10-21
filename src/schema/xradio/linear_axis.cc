@@ -78,9 +78,9 @@ LinearAxisFit FitLinearAxis(const std::vector<double>& values, std::optional<dou
     fit.uniform = IsEvenlySpaced(values, increment);
     if (fit.uniform && values.size() > 2) {
         // Adjacent samples of a direction cosine axis differ in their last few digits, so one pair
-        // carries several digits less precision than the axis itself does. Spreading the whole span
-        // over the samples recovers them, and two axes cut from the same grid then agree exactly --
-        // which casacore's square-pixel test requires.
+        // has several digits less precision than the axis itself. Dividing the whole span by the
+        // number of steps recovers them, and two axes cut from the same grid then agree exactly, as
+        // casacore's square-pixel test requires.
         increment = (values.back() - values.front()) / static_cast<double>(values.size() - 1);
         fit.increment = increment;
     }
@@ -121,14 +121,14 @@ DirectionAxisFit FitConstructedAxis(const std::vector<double>& values, std::opti
     }
     direction.reference_pixel = fit.reference_pixel;
     direction.diagnostics = std::move(fit.diagnostics);
-    // A direction axis is linear by construction, so an axis that cannot be described linearly is a
-    // store this library cannot make sense of rather than a coordinate it reports tabularly -- which
-    // is what a spectral axis in the same position is. Three ways to reach it: fewer than two
-    // samples, two samples that are the same, and a sample that is not a finite number. Each leaves the
-    // caller's reference pixel and increment at whatever they were, and says so.
+    // A direction axis is linear by construction, so one that cannot be described linearly is a store
+    // this library cannot make sense of, rather than a coordinate to report as tabular, as a spectral
+    // axis would be. There are three ways to get here: fewer than two samples, two equal samples, and
+    // a sample that is not a finite number. Each leaves the caller's reference pixel and increment as
+    // they were, and adds a diagnostic.
     //
     // Diagnosed here rather than in FitLinearAxis because a spectral axis with one channel is not
-    // degenerate, it is a continuum image, and it takes the tabular path by design.
+    // degenerate: it is a continuum image, and it takes the tabular path by design.
     if (!fit.reference_pixel) {
         direction.diagnostics.push_back(
             MakeDiagnostic(DiagnosticCode::degenerate_axis,

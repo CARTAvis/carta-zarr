@@ -19,9 +19,9 @@ enum class ErrorCode {
     unsupported_schema,
     unsupported_schema_version,
     ambiguous_schema,
-    // A schema profile recognised the dataset, and it does not conform to that schema: a file to
-    // complain about, where unsupported_schema is one this library is not for. invalid_metadata is
-    // Zarr's own: a root that will not parse, before any profile is asked.
+    // A schema profile recognized the dataset, and it does not conform to that schema: the file is
+    // broken. unsupported_schema is a file this library is not for. invalid_metadata is about Zarr
+    // itself: a root that will not parse, before any profile is asked.
     invalid_schema,
     invalid_argument,
     invalid_metadata,
@@ -80,9 +80,8 @@ inline const char* ErrorCodeName(ErrorCode code) noexcept {
 }
 
 struct Error {
-    // Always set where the library makes one. Initialized all the same, so an Error a caller declares
-    // and fills in later is never read with a code nobody gave it; it is the first code, as `Error{}`
-    // already made it.
+    // The library always sets it. The default only matters for an Error a caller declares and fills
+    // in later, which then never holds an uninitialized code. It is the first code, as `Error{}` gives.
     ErrorCode code = ErrorCode::not_found;
     std::string message;
     std::string node_path;

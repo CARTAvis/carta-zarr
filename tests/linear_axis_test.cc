@@ -196,16 +196,16 @@ void TestADegenerateDirectionAxisSaysSo() {
 // runs downward as XRADIO writes it.
 void TestAnApertureAxisIsMeasuredFromItsCrval() {
     const std::vector<double> u{2000.0, 1000.0, 0.0, -1000.0, -2000.0};
-    const auto centred = FitApertureAxis(u, 0.0, "u");
-    Require(centred.increment && Near(*centred.increment, -1000.0), "u's increment was scaled or lost its sign");
-    Require(centred.reference_pixel && Near(*centred.reference_pixel, 3.0), "u was not measured from zero");
-    Require(centred.diagnostics.empty(), "an even aperture axis said something");
+    const auto centered = FitApertureAxis(u, 0.0, "u");
+    Require(centered.increment && Near(*centered.increment, -1000.0), "u's increment was scaled or lost its sign");
+    Require(centered.reference_pixel && Near(*centered.reference_pixel, 3.0), "u was not measured from zero");
+    Require(centered.diagnostics.empty(), "an even aperture axis said something");
 
     const auto shifted = FitApertureAxis(u, 1000.0, "u");
     Require(shifted.reference_pixel && Near(*shifted.reference_pixel, 2.0), "u was not measured from its crval");
     const auto unstated = FitApertureAxis(u, std::nullopt, "u");
     Require(unstated.reference_pixel && Near(*unstated.reference_pixel, 3.0),
-            "an axis with no crval was not measured from the centre of the plane");
+            "an axis with no crval was not measured from the center of the plane");
 
     const auto one = FitApertureAxis({0.0}, 0.0, "v");
     Require(!one.reference_pixel && Diagnosed(one, carta::zarr::DiagnosticCode::degenerate_axis),

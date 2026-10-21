@@ -26,8 +26,8 @@ namespace {
 
 namespace zarr_metadata = ::carta::zarr::internal::zarr;
 
-// Parse metadata bytes handed up by a Transport. Parsing lives above the seam so that every
-// Transport reports a malformed node the same way.
+// Parse metadata bytes returned by a Transport. Parsing lives above the seam so that every Transport
+// reports a malformed node the same way.
 Result<nlohmann::json> ParseNodeMetadata(const std::string& bytes, std::string_view node_path) {
     try {
         return nlohmann::json::parse(bytes);
@@ -54,21 +54,20 @@ std::string NormalizeMetadataKey(std::string key) {
     return key;
 }
 
-// The documents are moved out of the root rather than copied out of it. The root is parsed here and
-// nothing reads it again afterwards, and these are whole node metadata documents: copying them is
-// the single largest cost of opening a consolidated store, and it buys a second copy of what the
-// store is about to own anyway.
+// The documents are moved out of the root rather than copied. The root is parsed here and never read
+// again, and these are whole node metadata documents: copying them would be the largest single cost
+// of opening a consolidated store, for a second copy of what the store is about to own.
 //
-// Each key is filed under the node's canonical name, the one every read of that node is keyed by.
-// A key is first stripped of what makes it name a document rather than a node -- a leading slash, a
-// trailing zarr.json -- and then held to the same rule as any other node name. Filed under what the
-// block happened to spell, a copy keyed "./SKY" was never found by a read of "SKY": the node was
-// read again, cached twice, and listed under a name no caller asks for.
+// Each key is filed under the node's canonical name, which every read of that node is keyed by. A
+// key is first stripped of what makes it name a document rather than a node (a leading slash, a
+// trailing zarr.json) and then held to the same rule as any other node name. Filed as written, a
+// copy keyed "./SKY" would never be found by a read of "SKY": the node would be read again, cached
+// twice, and listed under a name no caller asks for.
 //
-// Two ways the block can be wrong about itself are refusals rather than keys to pass over. For a
-// consolidated store the block is the whole listing -- nothing enumerates the transport behind it --
-// so a key dropped here is a node missing from the dataset, and a variable that disappears without
-// a word is a worse answer than a store that is refused with one.
+// Two ways the block can be wrong about itself are refused rather than skipped. For a consolidated
+// store the block is the whole listing (nothing enumerates the transport behind it), so a key
+// dropped here is a node missing from the dataset, and a variable that silently disappears is worse
+// than a store refused with a reason.
 Result<void> CollectConsolidatedMetadata(nlohmann::json& metadata, const std::string& prefix,
                                          std::map<std::string, nlohmann::json>& output) {
     if (!metadata.is_object()) {
@@ -105,10 +104,10 @@ Result<void> CollectConsolidatedMetadata(nlohmann::json& metadata, const std::st
 }
 
 // What the store takes from the root's copy of an array's document rather than from the array's own,
-// and so what the two must agree about: an image is qualified and described from the copy -- its
-// extent, its dimensions and their order, its data type -- and its reads are planned from the chunks
-// and shards the copy says it has, and what its values mean is read from its attributes. See
-// Store::VerifyArray for what is left out and why.
+// and so what the two must agree on. An image is qualified and described from the copy (its extent,
+// its dimensions and their order, its data type), its reads are planned from the chunks and shards
+// the copy says it has, and what its values mean is read from its attributes. See Store::VerifyArray
+// for what is left out and why.
 Result<void> RequireSameArray(const zarr_metadata::ArrayMetadata& copy, const zarr_metadata::ArrayMetadata& own,
                               const std::string& node) {
     const auto differs = [&node](const std::string& what) {
@@ -119,8 +118,8 @@ Result<void> RequireSameArray(const zarr_metadata::ArrayMetadata& copy, const za
     if (copy.shape != own.shape) {
         return differs("shape");
     }
-    // Two axes of one length exchanged leave every extent agreeing, and a read addressed by the
-    // copy's names then puts one axis's values where the other's should be.
+    // Two axes of the same length swapped would leave every extent agreeing, and a read addressed by
+    // the copy's names would put one axis's values where the other's should be.
     if (copy.dimension_names != own.dimension_names) {
         return differs("dimension names");
     }
@@ -133,12 +132,12 @@ Result<void> RequireSameArray(const zarr_metadata::ArrayMetadata& copy, const za
     if (copy_layout.chunk_shape != own_layout.chunk_shape || copy_layout.shard_shape != own_layout.shard_shape) {
         return differs("chunk layout");
     }
-    // What the values mean -- a coordinate's unit and frame, its reference and rest frequencies, an
-    // image's unit and the flag it declares -- is read from the attributes, and those are taken from
-    // the copy while the values are decoded with the own document. A copy left behind by a rewrite
-    // of the attributes alone described the values in the old terms: a frequency axis in Hz reported
-    // as GHz opened and read. Compared whole, because which attributes a profile reads is the
-    // profile's business and the store's rule is that what it takes from the copy agrees.
+    // What the values mean (a coordinate's unit and frame, its reference and rest frequencies, an
+    // image's unit and the flag it declares) is read from the attributes, which are taken from the
+    // copy, while the values are decoded with the array's own document. A copy left behind by a
+    // rewrite of the attributes alone would describe the values in the old terms, such as a frequency
+    // axis in Hz reported as GHz. Compared whole, because which attributes a profile reads is up to
+    // the profile, and the store's rule is that everything it takes from the copy agrees.
     if (copy.attributes != own.attributes) {
         return differs("attributes");
     }
@@ -147,13 +146,13 @@ Result<void> RequireSameArray(const zarr_metadata::ArrayMetadata& copy, const za
 
 }  // namespace
 
-// A node name is a relative path carrying no ".." component. Validating it here rather than in a
-// Transport holds every Transport to the same rule, and yields the key the caches are stored under.
+// A node name is a relative path with no ".." component. Validating it here rather than in a
+// Transport holds every Transport to the same rule, and gives the key the caches are stored under.
 //
 // A "." component is dropped rather than refused, because "./SKY" names the node "SKY" and a store
-// is entitled to spell it that way. A pixel read's name comes through here too before it reaches
-// Transport::ArrayDirectory, which refuses a "." outright, so an image declaring
-// `flag: "./MASK_0"` reads its mask as well as describing it.
+// may write it that way. A pixel read's name also passes through here before it reaches
+// Transport::ArrayDirectory, which refuses a "." outright, so an image declaring `flag: "./MASK_0"`
+// can read its mask as well as describe it.
 Result<std::string> NormalizeNodeName(std::string_view node) {
     const std::filesystem::path relative(node);
     if (relative.empty() || relative.is_absolute() || relative.has_root_path()) {
@@ -183,9 +182,8 @@ Store::Store(TransportPtr transport, nlohmann::json root_attributes,
       _has_consolidated_metadata(has_consolidated_metadata),
       _context(std::move(context)),
       _caches(std::make_shared<StoreCaches>()) {
-    // The root's copy is node metadata this store has already read, so it goes where node metadata
-    // is kept. Reading one of these nodes is then a lookup in the one table, rather than a second
-    // table consulted first and a document copied out of it on every call.
+    // The root's copy is node metadata this store has already read, so it goes where node metadata is
+    // kept, and reading one of these nodes is a lookup in that one table.
     _consolidated_nodes.reserve(consolidated_metadata.size());
     for (auto& [node, metadata] : consolidated_metadata) {
         _consolidated_nodes.push_back(node);
@@ -234,8 +232,8 @@ Result<Store> OpenStore(TransportPtr transport, StoreContextPtr context) {
         return Error{ErrorCode::not_zarr, "The Zarr root must be a group", "zarr.json"};
     }
 
-    // Taken before the children are moved out from under it, so that what the root says about itself
-    // does not depend on the order of the two.
+    // Taken before the children are moved out of it, so that what the root says about itself does not
+    // depend on the order of the two.
     auto root_attributes = metadata.value("attributes", nlohmann::json::object());
 
     std::map<std::string, nlohmann::json> consolidated;
@@ -265,20 +263,20 @@ const nlohmann::json& Store::RootAttributes() const noexcept {
 const Result<nlohmann::json>& Store::ReadNodeMetadata(std::string_view node) const {
     auto node_name_result = NormalizeNodeName(node);
     if (!node_name_result) {
-        // A rejected name is remembered like any other answer, so that everything handed back from
-        // here is a reference to something the store owns. It is keyed by the name as asked for,
-        // which cannot collide with a normalized one: this is the name normalization refused.
+        // A rejected name is remembered like any other answer, so that everything returned from here
+        // is a reference to something the store owns. It is keyed by the name as asked for, which
+        // cannot collide with a normalized one, since normalization refused it.
         return _caches->node_metadata.GetOrCompute(
             std::string(node), [&]() -> Result<nlohmann::json> { return node_name_result.error(); });
     }
     const std::string node_name = std::move(node_name_result.value());
 
     // The root's consolidated copy was put in this table when the store was built, so a node it
-    // accounted for is found here and never read. Consolidated metadata is a copy that saves a
-    // read, not a substitute for the document it copies: it carries `must_understand: false`, so a
-    // reader that ignores it reads the same hierarchy, and the array data behind these names is
-    // opened by TensorStore from each array's own metadata whatever this decides. A node the copy
-    // does not mention is therefore read, not missing.
+    // covers is found here and never read. Consolidated metadata is a copy that saves a read, not a
+    // substitute for the document it copies: it carries `must_understand: false`, so a reader that
+    // ignores it reads the same hierarchy, and TensorStore opens the array data behind these names
+    // from each array's own metadata regardless. A node the copy does not mention is therefore read,
+    // not missing.
     return _caches->node_metadata.GetOrCompute(node_name, [&]() -> Result<nlohmann::json> {
         auto bytes = _transport->ReadNodeBytes(node_name);
         if (!bytes) {
@@ -290,9 +288,9 @@ const Result<nlohmann::json>& Store::ReadNodeMetadata(std::string_view node) con
 
 const Result<zarr::ArrayMetadata>& Store::ReadArrayMetadata(std::string_view node) const {
     // Keyed by the normalized name, as the node metadata below it is: two spellings of one node are
-    // one node, and keying by what the caller typed would read and parse it twice. A name that
-    // cannot be normalized has no such key, so it is filed under what the caller typed -- the one
-    // case where two spellings do not share an entry, and both of them are refusals anyway.
+    // one node, and keying by what the caller typed would read and parse it twice. A name that cannot
+    // be normalized has no such key, so it is filed under what the caller typed; that is the one case
+    // where two spellings do not share an entry, and both are refusals anyway.
     auto key = NormalizeNodeName(node);
     const std::string cache_key = key ? key.value() : std::string(node);
     return _caches->array_metadata.GetOrCompute(cache_key, [&]() -> Result<zarr::ArrayMetadata> {
@@ -308,8 +306,8 @@ const Result<zarr::ArrayMetadata>& Store::ReadArrayMetadata(std::string_view nod
 }
 
 const Result<zarr::ArrayMetadata>& Store::VerifyArray(std::string_view node) const {
-    // Keyed by the name as asked rather than normalized, unlike the tables below it: a pixel read
-    // asks once per piece, and normalizing a name costs more than the lookup -- enough to show in a
+    // Keyed by the name as asked rather than normalized, unlike the tables below it: a pixel read asks
+    // once per piece, and normalizing a name costs more than the lookup, enough to show in a
     // whole-cube read. The names asked are the ones the inventory and the descriptor hand out, so a
     // second spelling of a node is rare, and costs one more read of its document when it happens.
     return _caches->verified_arrays.GetOrCompute(std::string(node), [&]() -> Result<zarr::ArrayMetadata> {
@@ -317,9 +315,9 @@ const Result<zarr::ArrayMetadata>& Store::VerifyArray(std::string_view node) con
         if (!copy) {
             return copy.error();
         }
-        // Normalizes, since the copy above was found under this name.
+        // Normalizing succeeds, since the copy above was found under this name.
         const std::string name = NormalizeNodeName(node).value();
-        // Read from its own document in the first place, so there is no other document to hold it to.
+        // Read from its own document to begin with, so there is no other document to compare it with.
         if (!std::binary_search(_consolidated_nodes.begin(), _consolidated_nodes.end(), name)) {
             return copy;
         }
@@ -352,12 +350,11 @@ const Result<std::vector<NodeEntry>>& Store::Inventory() const {
     using Listing = Result<std::vector<NodeEntry>>;
     return _caches->inventory.GetOrCompute([&]() -> Listing {
         std::vector<std::string> node_names;
-        // The one place the copy is taken as the whole truth rather than as a first look. Listing
-        // is what consolidated metadata exists to avoid -- on a store reached over a network,
-        // enumerating a hierarchy is the expensive question -- so a store that consolidated its
-        // metadata is taken at its word about which nodes it has. The cost is a node added after
-        // the copy was written: it is invisible until the dataset is consolidated again, the same
-        // staleness zarr-python's own consolidated open accepts. Reading a node it does not
+        // The one place the copy is trusted completely. Listing is what consolidated metadata exists
+        // to avoid (on a store reached over a network, enumerating a hierarchy is expensive), so a
+        // store with consolidated metadata is taken at its word about which nodes it has. A node added
+        // after the copy was written is invisible until the dataset is consolidated again, the same
+        // staleness zarr-python's own consolidated open accepts. Reading a node the copy does not
         // mention still falls through to the node itself, above.
         if (_has_consolidated_metadata) {
             // Canonical already: they were filed that way when the store was built.
@@ -367,10 +364,10 @@ const Result<std::vector<NodeEntry>>& Store::Inventory() const {
             if (!listed) {
                 return listed.error();
             }
-            // Held to the rule every other node name is held to, so that a listed name is the key
-            // its reads are cached under. A name that rule refuses cannot be read at all, and a
-            // transport that lists one is wrong about where its own nodes are -- which is not the
-            // store's metadata being wrong, and is not something to diagnose around.
+            // Held to the same rule as every other node name, so that a listed name is the key its
+            // reads are cached under. A name the rule refuses cannot be read at all, and a transport
+            // that lists one is wrong about its own nodes, which is not a metadata problem to
+            // diagnose.
             node_names.reserve(listed.value().size());
             for (const auto& name : listed.value()) {
                 auto canonical = NormalizeNodeName(name);
@@ -392,23 +389,23 @@ const Result<std::vector<NodeEntry>>& Store::Inventory() const {
             const auto& metadata = ReadNodeMetadata(node);
             if (!metadata) {
                 // A document that was read and would not parse says nothing about what the node is,
-                // and that is an answer about the node rather than about the hierarchy: the other
-                // nodes were read, and the images among them still open. GLOSSARY.md says so of a
-                // node whose metadata would not parse -- diagnosed rather than refused.
+                // and that is an answer about the node rather than the hierarchy: the other nodes were
+                // read, and the images among them still open. As GLOSSARY.md says, such a node is
+                // diagnosed rather than refused.
                 //
-                // Only that failure. A read that failed at all -- a transport error, a node listed
-                // and then gone -- says the hierarchy could not be taken, and is reported as such.
+                // Only that failure. Any read failure (a transport error, a node listed and then gone)
+                // means the hierarchy could not be listed, and is reported as such.
                 if (metadata.error().code != ErrorCode::invalid_metadata) {
                     return metadata.error();
                 }
-                entries.push_back(NodeEntry{std::move(node), NodeKind::unrecognised, nullptr, metadata.error()});
+                entries.push_back(NodeEntry{std::move(node), NodeKind::unrecognized, nullptr, metadata.error()});
                 continue;
             }
-            NodeEntry entry{std::move(node), NodeKind::unrecognised, nullptr, std::nullopt};
+            NodeEntry entry{std::move(node), NodeKind::unrecognized, nullptr, std::nullopt};
 
-            // Looked up rather than taken with a default, because a node_type that is present and
-            // not a string is a document that does not say what it is -- and asking for it as a
-            // string would throw rather than answer.
+            // Looked up rather than read with a default, because a node_type that is present but not a
+            // string is a document that does not say what it is, and reading it as a string would
+            // throw.
             const auto& document = metadata.value();
             const auto declared = document.find("node_type");
             const std::string node_type =
@@ -442,17 +439,17 @@ const NodeEntry* Store::FindNode(std::string_view name) const {
 }
 
 const Result<zarr::NumericArray>& Store::ReadNumericArray(std::string_view node) const {
-    // A rejected name is remembered under the name as asked for, as ReadArrayMetadata remembers it,
-    // so that what is handed back is always something the store owns. Reading it refuses it the way
-    // ReadArrayMetadata does, because VerifyArray asks that first.
+    // A rejected name is remembered under the name as asked for, as in ReadArrayMetadata, so that
+    // what is returned is always something the store owns. Reading it is refused the way
+    // ReadArrayMetadata refuses it, because VerifyArray asks that first.
     auto key = NormalizeNodeName(node);
     const std::string cache_key = key ? key.value() : std::string(node);
     return _caches->double_arrays.GetOrCompute(cache_key, [&] { return ReadNumericArrayUncached(node); });
 }
 
 Result<zarr::NumericArray> Store::ReadNumericArrayUncached(std::string_view node) const {
-    // Bound to the array's own document, which is what TensorStore decodes the values with, and which
-    // VerifyArray holds the root's copy to.
+    // Read with the array's own document, which TensorStore decodes the values with, and which
+    // VerifyArray compares the root's copy against.
     const auto& own = VerifyArray(node);
     if (!own) {
         return own.error();
@@ -473,9 +470,8 @@ Result<zarr::NumericArray> Store::ReadNumericArrayUncached(std::string_view node
 }
 
 // The one place the store asks where an array's bytes are. A transport answers with a location that
-// does not depend on the caller's working directory, so nothing here or below normalizes: this ran
-// weakly_canonical on every pixel read, and what it was protecting against belongs at the root,
-// which is resolved once when the transport opens.
+// does not depend on the caller's working directory, so nothing here or below normalizes it: that
+// belongs at the root, which is resolved once when the transport opens.
 Result<std::filesystem::path> Store::ResolveArrayDirectory(std::string_view node) const {
     auto name = NormalizeNodeName(node);
     if (!name) {
@@ -519,9 +515,9 @@ Result<std::vector<std::string>> Store::ReadStringArray1D(std::string_view node)
 }
 
 Result<std::vector<std::string>> Store::ReadStringArray1DUncached(std::string_view node) const {
-    // Decoded with the array's own document, as TensorStore decodes a numeric one: it is what wrote
-    // the chunks. The root's copy was what this decoded with, so a copy naming a compressor the labels
-    // were never written with failed to read labels that were fine.
+    // Decoded with the array's own document, as TensorStore decodes a numeric one, since that
+    // document describes how the chunks were written. A root copy naming another compressor would
+    // otherwise fail to read labels that are fine.
     const auto& own = VerifyArray(node);
     if (!own) {
         return own.error();
@@ -534,8 +530,8 @@ Result<std::vector<std::string>> Store::ReadStringArray1DUncached(std::string_vi
         return zarr_metadata::ReadFixedLengthUtf32StringArray(array_path.value(), own.value(), node);
     } catch (const std::exception& e) {
         // io_error, as in every other read on this Store. What the decoder itself refuses comes back
-        // as a Result with its own code; what escapes as an exception is a file or an allocation,
-        // which is nothing the caller passed in.
+        // as a Result with its own code; an exception here comes from a file or an allocation, not
+        // from anything the caller passed in.
         return Error{ErrorCode::io_error, e.what(), std::string(node)};
     }
 }

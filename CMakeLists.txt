@@ -119,8 +119,8 @@ target_include_directories(carta_zarr
         $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
     PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/src)
-# The library starts its own worker threads now (WorkPool), so it asks for the threading
-# support it uses rather than inheriting it from TensorStore's link interface.
+# The library starts its own worker threads (WorkPool), so it asks for the threading support it
+# uses rather than inheriting it from TensorStore's link interface.
 find_package(Threads REQUIRED)
 target_link_libraries(carta_zarr PRIVATE
     Threads::Threads
@@ -224,9 +224,9 @@ if(CARTA_ZARR_BUILD_TESTS AND BUILD_TESTING)
     set(CARTA_ZARR_WIDE_FIXTURE
         CARTA_ZARR_PIXEL_FIXTURE_WIDE="${CARTA_ZARR_FIXTURE_DIR}/xradio/pixels_wide")
 
-    # Implementation groups a test compiles directly. Each is the set of sources that one internal
-    # thing needs to stand up on its own, so a test says what it is testing rather than how the
-    # dependency graph happens to be shaped this week.
+    # Implementation groups a test compiles directly. Each is the set of sources one internal part
+    # needs to build on its own, so a test names what it is testing rather than following the
+    # current shape of the dependency graph.
     set(CARTA_ZARR_METADATA_SOURCES src/zarr/array_metadata.cc)
     set(CARTA_ZARR_PASS_SOURCES
         src/reduce/pass.cc
@@ -308,7 +308,7 @@ if(CARTA_ZARR_BUILD_TESTS AND BUILD_TESTING)
 
     # The schema profile's structural decisions read metadata only, so they run against an in-memory
     # transport instead of a directory tree. This target compiles the internals directly and links no
-    # TensorStore: the value reader is stubbed, which is also the honest behaviour of a transport
+    # TensorStore: the value reader is stubbed, which is also the honest behavior of a transport
     # holding no array data.
     carta_zarr_add_test(carta_zarr_profile_tests INTERNAL
         TEST_NAME carta-zarr-schema-profile
@@ -336,10 +336,8 @@ if(CARTA_ZARR_BUILD_TESTS AND BUILD_TESTING)
             ${CARTA_ZARR_METADATA_SOURCES}
         LIBRARIES nlohmann_json::nlohmann_json ZLIB::ZLIB Zstd::Zstd Blosc::blosc)
 
-    # What an array's document says about how it is stored. Links only nlohmann: ParseStorageLayout
-    # was a Store method reading the raw node metadata, so its sharding rules could be reached only
-    # by writing a store to a directory and opening an image out of it, and two of its refusals
-    # could not be reached at all.
+    # What an array's document says about how it is stored. Links only nlohmann, so the sharding rules
+    # are tested without writing a store to a directory.
     carta_zarr_add_test(carta_zarr_array_metadata_tests INTERNAL
         TEST_NAME carta-zarr-array-metadata
         SOURCES tests/array_metadata_test.cc ${CARTA_ZARR_METADATA_SOURCES}
@@ -352,16 +350,16 @@ if(CARTA_ZARR_BUILD_TESTS AND BUILD_TESTING)
         SOURCES tests/numeric_array_test.cc src/zarr/numeric_array.cc ${CARTA_ZARR_METADATA_SOURCES}
         LIBRARIES nlohmann_json::nlohmann_json)
 
-    # Memo is a header-only utility, so this target compiles only the test. It pins the two
-    # decisions Store leans on: a value is computed exactly once, and a failure is remembered.
+    # Memo is a header-only utility, so this target compiles only the test. It checks the two
+    # behaviors Store relies on: a value is computed exactly once, and a failure is remembered.
     carta_zarr_add_test(carta_zarr_memo_tests INTERNAL
         TEST_NAME carta-zarr-memo
         SOURCES tests/memo_test.cc
         LIBRARIES Threads::Threads)
 
     # What the filesystem transport says is in a store. Compiled on its own because it needs nothing
-    # above the seam: the listing is asserted as the transport hands it over, before Store sorts and
-    # de-duplicates it and the shape of the walk stops being observable.
+    # above the seam: the listing is checked as the transport returns it, before Store sorts and
+    # de-duplicates it and the shape of the walk can no longer be seen.
     carta_zarr_add_test(carta_zarr_transport_tests INTERNAL
         TEST_NAME carta-zarr-transport
         SOURCES tests/transport_test.cc src/zarr/transport.cc
@@ -390,9 +388,8 @@ if(CARTA_ZARR_BUILD_TESTS AND BUILD_TESTING)
         LIBRARIES Threads::Threads)
 
     # Where an image points, from its root attributes and its l and m samples. No store, no
-    # transport: the whole thing takes JSON and two vectors. ADR 0002 rests on these fields reaching
-    # casacore intact, and the two that were asserted nowhere -- the increment and the
-    # transformation matrix -- are checked here.
+    # transport: the whole thing takes JSON and two vectors. ADR 0002 depends on these fields reaching
+    # casacore intact, including the increment and the transformation matrix.
     carta_zarr_add_test(carta_zarr_direction_tests INTERNAL
         TEST_NAME carta-zarr-direction
         SOURCES
@@ -410,9 +407,9 @@ if(CARTA_ZARR_BUILD_TESTS AND BUILD_TESTING)
         SOURCES tests/linear_axis_test.cc src/schema/xradio/linear_axis.cc)
 
     # What an image's own attributes say about the observation, and its user keywords. Pure
-    # JSON-to-struct functions, so this links no store, only the direction reader the pointing centre
-    # shares with the coordinate system: the geodetic conversion and the obsdate split used to be
-    # reachable only by opening a store, and the conversion was asserted nowhere at all.
+    # JSON-to-struct functions, so this links no store, only the direction reader the pointing center
+    # shares with the coordinate system. That lets it test the geodetic conversion and the obsdate
+    # split without opening a store.
     carta_zarr_add_test(carta_zarr_observation_tests INTERNAL
         TEST_NAME carta-zarr-observation
         SOURCES
@@ -443,25 +440,22 @@ if(CARTA_ZARR_BUILD_TESTS AND BUILD_TESTING)
         LIBRARIES nlohmann_json::nlohmann_json)
 
     # The stored layout permuted into the order the library reads. Links nothing: it takes a
-    # descriptor and a layout, so the sharded and permuted cases stop depending on which committed
-    # fixture happens to have them.
+    # descriptor and a layout, so the sharded and permuted cases do not depend on committed fixtures.
     carta_zarr_add_test(carta_zarr_chunk_geometry_tests INTERNAL
         TEST_NAME carta-zarr-chunk-geometry
         SOURCES tests/chunk_geometry_test.cc)
 
     # What an ordinary read decides before it reads anything. Compiled against pieces.cc alone:
-    # PlanPieces touches no store and no transport, so where a read is cut and how big a piece is --
-    # which is where the progress callback and the memory ceiling meet -- is checkable without a
-    # directory tree.
+    # PlanPieces touches no store and no transport, so where a read is cut and how big a piece is
+    # (where the progress callback and the memory limit meet) can be tested without a directory tree.
     carta_zarr_add_test(carta_zarr_piece_plan_tests INTERNAL
         TEST_NAME carta-zarr-piece-plan
         SOURCES tests/piece_plan_test.cc src/read/pieces.cc)
 
     # What an ordinary read does once it starts, against pixels that were never written down. The
     # read takes a PixelSource like the pass does, so this links no Store, no TensorStore and no
-    # WorkPool, since a read is not a reduction and has no arithmetic to run on one -- and
-    # the flag-before-pixels contract, which a fixture on disk cannot show because it cannot be told
-    # to fail one read and not another, is checkable here.
+    # WorkPool (a read is not a reduction, and runs no arithmetic on one). The flag-before-pixels
+    # contract can be tested here, where a source can fail one read and not another.
     carta_zarr_add_test(carta_zarr_read_synthetic_tests INTERNAL
         TEST_NAME carta-zarr-read-synthetic
         SOURCES
@@ -478,25 +472,23 @@ if(CARTA_ZARR_BUILD_TESTS AND BUILD_TESTING)
         TEST_NAME carta-zarr-plane-selection
         SOURCES tests/plane_selection_test.cc)
 
-    # The one-pass histogram's arithmetic, against chosen values and exact counts. Links nothing:
-    # the class takes floats and gives back counts, and its three past fixes were each a defect in
-    # one of these four behaviours that could only be seen as a tolerance over a fixture.
+    # The one-pass histogram's arithmetic, against chosen values and exact counts. Links nothing: the
+    # class takes floats and returns counts.
     carta_zarr_add_test(carta_zarr_growing_histogram_tests INTERNAL
         TEST_NAME carta-zarr-growing-histogram
         SOURCES tests/growing_histogram_test.cc)
 
     # What a cube histogram counts into, and the answer it makes of it, given rows of pixels written
-    # out in the test. Header-only apart from the pool it splits a read across: the resolution rule,
-    # the per-task provisional histograms and the collection over them were reachable only through a
-    # walk over a fixture and a two-pass tolerance, and the first had already drifted from its doc.
+    # out in the test. Header-only apart from the pool it splits a read across, so the resolution
+    # rule, the per-task provisional histograms and the collection over them are tested exactly
+    # rather than through a walk over a fixture.
     carta_zarr_add_test(carta_zarr_provisional_histograms_tests INTERNAL
         TEST_NAME carta-zarr-provisional-histograms
         SOURCES tests/provisional_histograms_test.cc src/work_pool.cc src/zarr/pixel_selection.cc
         LIBRARIES Threads::Threads)
 
     # What a pass decides before it reads anything. Compiled against pass.cc alone: PlanPass touches
-    # no store and no transport, so the read strategy -- which has moved more than once, and moved
-    # in three places each time -- is checkable without a directory tree.
+    # no store and no transport, so the read strategy can be tested without a directory tree.
     carta_zarr_add_test(carta_zarr_pass_tests INTERNAL
         TEST_NAME carta-zarr-pass
         SOURCES tests/pass_test.cc ${CARTA_ZARR_PASS_SOURCES}
@@ -532,7 +524,7 @@ if(CARTA_ZARR_BUILD_TESTS AND BUILD_TESTING)
         LIBRARIES Threads::Threads)
 
     # The same reductions with the overridable constants of tuning.h at each extreme: a task for
-    # every pixel and room for every worker's accumulator, so that every split there is is taken, and
+    # every pixel and room for every worker's accumulator, so that every possible split is taken, and
     # no room for a second accumulator, so that none is. ADR 0014 lets these be replaced only because
     # they decide how the work is divided and never what it answers, and these two check that claim:
     # every answer reduce_synthetic_test.cc expects must come out the same either way.
@@ -573,8 +565,8 @@ if(CARTA_ZARR_BUILD_TESTS AND BUILD_TESTING)
         SOURCES tests/chunk_blocks_test.cc)
 
     # Reading ahead of an animation: which run is decoded ahead and when, against images whose
-    # prefetch the test holds up until it lets go. No store and no TensorStore -- the policy is runs,
-    # caches and a thread, and an image's own answers are a seam it stands behind.
+    # prefetch the test can block until it releases it. No store and no TensorStore: the policy is
+    # runs, caches and a thread, behind a seam an image implements.
     carta_zarr_add_test(carta_zarr_read_ahead_tests INTERNAL
         TEST_NAME carta-zarr-read-ahead
         SOURCES tests/read_ahead_test.cc src/read_ahead.cc
@@ -590,16 +582,15 @@ if(CARTA_ZARR_BUILD_TESTS AND BUILD_TESTING)
 
     # Which chunks a set of regions occupies. LIBRARIES is empty and meant to stay empty: the
     # question is regions and a chunk shape in, an index out, so a target that starts needing a
-    # plan, a store or a thread pool has been handed something that is not its question. The 180
-    # lines behind Occupancy::Of were reachable only through ReduceSpectral over a real image
-    # before this, and two of their refusals were reachable from nothing at all.
+    # plan, a store or a thread pool has been handed something that is not its question. It reaches
+    # every refusal in Occupancy::Of without running ReduceSpectral over a real image.
     carta_zarr_add_test(carta_zarr_occupancy_tests INTERNAL
         TEST_NAME carta-zarr-occupancy
         SOURCES tests/occupancy_test.cc src/reduce/occupancy.cc src/reduce/region_runs.cc)
 
-    # What a pixel selection is: a descriptor and a request in, a selection out. It was reached only
-    # through reads that checked their answers, so a selection that was right about which pixels and
-    # wrong about where they land could only show up as a wrong sum.
+    # What a pixel selection is: a descriptor and a request in, a selection out. Tested directly, so a
+    # selection right about which pixels but wrong about where they land shows up as more than a
+    # wrong sum.
     carta_zarr_add_test(carta_zarr_selection_tests INTERNAL
         TEST_NAME carta-zarr-selection
         SOURCES tests/pixel_selection_test.cc src/zarr/pixel_selection.cc)
@@ -649,7 +640,7 @@ if(CARTA_ZARR_BUILD_TESTS AND BUILD_TESTING)
         DEFINITIONS ${CARTA_ZARR_PIXEL_FIXTURES} ${CARTA_ZARR_WIDE_FIXTURE})
 
     # Not a ctest: it reports durations and has no opinion about them, because every fixture here is
-    # too small for a threshold to mean anything. It is the guard described in ADR 0005 -- run it
+    # too small for a threshold to mean anything. It is the guard described in ADR 0005: run it
     # against build-release/ before and after a change to the pass, and compare. See its own header
     # for why a Debug number is worthless. No TEST_NAME, so it is built and never run by ctest.
     carta_zarr_add_test(carta_zarr_pass_timing PUBLIC

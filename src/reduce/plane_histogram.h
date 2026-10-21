@@ -21,12 +21,12 @@ namespace carta::zarr::internal {
  * to index, nothing to clip, and no mask to consult, so the walk is a band of chunk rows at a time
  * and the binning runs over the read buffer end to end.
  *
- * Like the reduction it reads in the store's own axis order -- binning does not care what order it
- * sees the pixels in, so there is no reason to pay a transpose for them.
+ * Like the reduction, it reads in the store's own axis order: binning does not care what order it
+ * sees the pixels in, so there is no reason to transpose them.
  *
- * `workers` runs the binning. Each plane's counts are its own row of the block, so the split is by
- * rows of the plane with one private histogram per worker, summed into the row at the end -- the
- * alternative, splitting by plane, is capped at however many planes one read holds, which for a
+ * `workers` runs the binning. Each plane's counts are its own row of the block, so the work is split
+ * by rows of the plane, with one private histogram per worker, summed into the row at the end.
+ * Splitting by plane instead would be limited to the number of planes one read holds, which for a
  * large image is often one.
  */
 Result<void> ComputeHistogram(const ReducibleImage& image, const HistogramRequest& request, const HistogramSink& sink,
@@ -35,16 +35,15 @@ Result<void> ComputeHistogram(const ReducibleImage& image, const HistogramReques
 /**
  * One histogram for the whole selection in a single pass. See CubeHistogramRequest.
  *
- * `workers` splits the same way, by rows of a plane, but each one keeps a provisional histogram of
- * its own for the whole walk rather than for one plane: a growing histogram's range is what it has
- * learned from the pixels it has seen, and handing that back between planes would make it learn the
- * range again on every one.
+ * `workers` splits the same way, by rows of a plane, but each worker keeps one provisional histogram
+ * for the whole walk rather than one per plane: a growing histogram's range is learned from the
+ * pixels it has seen, and starting over on each plane would make it learn the range again.
  *
- * They are never merged with each other. The extremes are tracked exactly, so by the end the target
- * bin edges are known and each worker re-aggregates onto them independently. That leaves the same
- * error the serial pass already has -- a provisional bin straddling a target edge goes to one side
- * -- once per worker instead of once, which is why this is the one reduction here whose counts are
- * not the serial answer exactly.
+ * The workers' histograms are never merged with each other. The extremes are tracked exactly, so by
+ * the end the target bin edges are known, and each worker re-aggregates onto them independently.
+ * That makes the serial pass's error, splitting a provisional bin that straddles a target edge, once
+ * per worker instead of once. This is why it is the one reduction whose counts are not exactly the
+ * serial answer.
  */
 Result<CubeHistogramResult> ComputeCubeHistogram(const ReducibleImage& image, const CubeHistogramRequest& request,
                                                  const ReadOptions& options,

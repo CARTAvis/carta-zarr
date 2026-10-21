@@ -48,7 +48,7 @@ Each Zarr is about 21 GB.
 - The pancake is chunked two ways at that size. 256 x 256 x 16 is what sites have used; 512 x 512 x 4
   is a shallower chunk, which decodes 4 channels to read one where the other decodes 16, at the cost
   of four times as many chunks along a spectrum.
-- The cigar is chunked two ways the other way round. 128 x 128 x 64 is shaped as sites have shaped
+- The cigar is chunked two ways the other way around. 128 x 128 x 64 is shaped as sites have shaped
   their chunks; 64 x 64 x 256 is a deeper chunk, nearer the depth `docs/storage-tuning.md` points to
   for a cube this long, which reads a spectrum from a quarter as many chunks at the cost of decoding
   256 channels to read one.
@@ -71,7 +71,7 @@ HI cube from an ASKAP mosaic:
 - ASKAP's frequency axis: 1295.5 MHz plus 18.5 kHz a channel, rest frequency HI's. The cigar's
   30000 channels span 556 MHz.
 - Noise of about 2 mJy/beam whose rms varies by about 15 % from channel to channel and doubles
-  towards the footprint's edge, as primary-beam correction makes it, with a heavy tail: 4 % of
+  toward the footprint's edge, as primary-beam correction makes it, with a heavy tail: 4 % of
   pixels drawn six times as wide.
 - Faint line sources, one per 10^8 pixels (94 in the pancake, 79 in the cigar): an elliptical
   Gaussian on the sky with a Gaussian or double-horned profile 50 to 500 km/s wide, peaking at 1 to
@@ -107,8 +107,8 @@ Hydra (`askap_hydra_extragalactic_256`), converted the same way at 256 x 256 x 1
 | channels wholly NaN | 0 | 66 |
 
 The synthetic cube compresses about 10 % worse. Its noise is independent from pixel to pixel, where
-a restored image's is correlated over the beam (ASKAP Hydra: 0.90 between neighbouring pixels, 0.66
-two apart), and neighbours that are alike shuffle and compress better. That is left as it is: the
+a restored image's is correlated over the beam (ASKAP Hydra: 0.90 between neighboring pixels, 0.66
+two apart), and neighbors that are alike shuffle and compress better. That is left as it is: the
 test set is for comparing layouts and formats on one set of pixels, not for passing as real data.
 
 The synthetic cube flags more than ASKAP Hydra does, on purpose: a run that covers whole chunks

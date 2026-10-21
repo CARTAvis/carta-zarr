@@ -1,4 +1,4 @@
-# A spread is a centred moment, not a difference of sums
+# A spread is a centered moment, not a difference of sums
 
 A spectral reduction and a cube histogram report the sum of squared deviations of the pixels from
 their own mean, `Statistic::sum_sq_dev`, and a consumer makes its standard deviation from that:
@@ -12,7 +12,7 @@ pixels are far from zero against their spread. Both terms of the subtraction are
 `n · mean²`, they agree in every digit a double holds, and what is left of the subtraction is the
 rounding each of them carried. A million float32 pixels, accumulated in doubles:
 
-| pixels | from the sums | centred | the pixels' own |
+| pixels | from the sums | centered | the pixels' own |
 |---|---|---|---|
 | all 1e8 | NaN | 0 | 0 |
 | 1e6 + noise of σ 0.5 | 1.918 | 0.4996 | 0.4996 |
@@ -28,7 +28,7 @@ something else does.
 ## How it is accumulated
 
 Updating a running mean per pixel -- Welford's method -- costs a division per pixel and stops the
-loop vectorising, and the per-pixel loop is what a reduction's time is (ADR 0005). So it is made in
+loop vectorizing, and the per-pixel loop is what a reduction's time is (ADR 0005). So it is made in
 two steps (`src/reduce/deviations.h`):
 
 - **Within a span**, the loop sums the pixels' distances from a shift, the span's first finite

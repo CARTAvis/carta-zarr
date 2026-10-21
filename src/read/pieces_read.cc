@@ -7,7 +7,7 @@
 // The half of an ordinary read that reads. See pieces.cc for why the two are apart.
 //
 // It names no Store: pixels arrive through the PixelSource seam, so everything under src/read/
-// compiles without one, the same way src/reduce/ already did.
+// compiles without one, as src/reduce/ does.
 
 #include "chunk_blocks.h"
 #include "pixel_mask.h"
@@ -27,10 +27,8 @@ namespace {
 
 // What every pixel read of an image asks before it touches storage.
 //
-// Written out twice until this: once here and once in the facade, where the mask read built its own
-// selection, sized its own buffer check and made its own control check on the way to the pixel seam.
-// The three are one question -- can this image serve this request into this buffer, now -- and a
-// read that answered two of them would be a read that had not checked.
+// The three checks are one question: can this image serve this request into this buffer, now? A read
+// that answered only two of them would not have checked.
 Result<zarr::PixelSelection> CheckRead(const ImageDescriptor& descriptor, const ReadRequest& request,
                                        std::size_t destination_size, const ReadControl& control) {
     auto selection = zarr::BuildSelection(descriptor, request, zarr::DestinationOrder::logical);
@@ -49,9 +47,9 @@ Result<zarr::PixelSelection> CheckRead(const ImageDescriptor& descriptor, const 
     return selection;
 }
 
-// Folds `mask`, dense in the selection's own order, into the pixels it was read beside, which lie in
-// `destination` where the selection says: densely for a piece, and in its piece's place for a segment.
-// Axis 0 is the fastest in both, so the mask arrives a run of axis 0's count at a time.
+// Applies `mask`, dense in the selection's own order, to the pixels it was read with, which lie in
+// `destination` where the selection says: densely for a piece, and in its place in the piece for a
+// segment. Axis 0 is the fastest in both, so the mask is applied one run of axis 0's count at a time.
 void ApplyPixelMaskWithin(const zarr::PixelSelection& selection, float* destination, const std::uint8_t* mask) {
     const auto& order = selection.destination_to_stored();
     const auto strides = selection.DestinationStrides();
@@ -100,8 +98,8 @@ Result<std::size_t> ReadInPieces(const PixelSource& source, const ImageDescripto
     if (!checked) {
         return checked.error();
     }
-    // The whole read's element count is what a piece's share is measured against; the selection each
-    // piece is actually read through is built per piece below.
+    // A piece's share is measured against the whole read's element count; the selection each piece
+    // is read through is built per piece below.
     const auto elements = checked.value().elements();
 
     const bool apply_mask = AppliesPixelMask(options, descriptor);
@@ -109,9 +107,9 @@ Result<std::size_t> ReadInPieces(const PixelSource& source, const ImageDescripto
         PlanPieces(descriptor, geometry, flag_geometry, request, options, decode_threads, static_cast<bool>(progress));
 
     std::vector<std::uint8_t> mask;
-    // Reads `part` of `within` into `into`, the destination from where `within` lands, at `part`'s place
-    // in it: its flag first, so that a flag that cannot be read leaves `into` as it was, then its
-    // pixels, then the one folded into the other.
+    // Reads `part` of `within` into `into` (the destination from where `within` lands), at `part`'s
+    // place in it: the flag first, so that a flag that cannot be read leaves `into` as it was, then
+    // the pixels, then the flag applied to them.
     const auto read_part = [&](const ReadRequest& part, const ReadRequest& within,
                                BufferView<float> into) -> Result<std::size_t> {
         auto selection = zarr::BuildSelectionWithin(descriptor, part, within);
@@ -126,8 +124,7 @@ Result<std::size_t> ReadInPieces(const PixelSource& source, const ImageDescripto
                 return dense.error();
             }
             mask.assign(part_elements, 0);
-            // TensorStore still owns the pixel operation's in-flight completion before it returns, so
-            // the destination remains valid for the next read.
+            // The read completes before it returns, so the destination remains valid for the next read.
             if (auto mask_read = source.ReadMask(dense.value(), {mask.data(), mask.size()}, options.control);
                 !mask_read) {
                 return mask_read.error();
@@ -146,9 +143,9 @@ Result<std::size_t> ReadInPieces(const PixelSource& source, const ImageDescripto
 
     for (const auto& piece : pieces) {
         // The rest of the caller's buffer from where this piece lands, not the piece's own size: the
-        // seam holds the one to the other, and handing it the piece's size would have it compare the
-        // piece with itself. first_element is short of the whole read's count, which CheckRead held
-        // to the buffer, so this never runs backwards.
+        // seam checks the piece against the buffer, and passing the piece's size would compare the
+        // piece with itself. first_element is below the whole read's count, which CheckRead checked
+        // against the buffer, so this never goes negative.
         const BufferView<float> piece_destination{destination.data + piece.first_element,
                                                   destination.size - static_cast<std::size_t>(piece.first_element)};
         std::size_t piece_elements = 0;
@@ -187,8 +184,8 @@ std::uint64_t Elements(const ReadRequest& request) {
 }
 
 // The most elements of a sample read at once when the caller sets no budget: 64 Ki, a quarter of a
-// MiB of pixels. A sample is one element a chunk and usually a few thousand at most, but an image of
-// small chunks can have millions to a plane.
+// MiB of pixels. A sample is one element per chunk and usually a few thousand at most, but an image
+// of small chunks can have millions per plane.
 constexpr std::uint64_t kSampleElements = std::uint64_t{1} << 16;
 
 // The most elements of `element_bytes` each that one piece of a sample may hold.
@@ -198,9 +195,9 @@ std::uint64_t SampleElements(const ReadOptions& options, std::size_t element_byt
 }
 
 // Calls `read` with `request` cut into pieces of at most `most` elements, in turn, until one fails.
-// The axes after some axis k are kept whole, k is cut into runs, and every axis before it is taken
-// an element at a time: k is the first axis whose followers fit together, and when not even the last
-// one alone does, it is that one that is cut.
+// The axes after some axis k are kept whole, k is cut into runs, and every axis before it is taken an
+// element at a time. k is the first axis whose following axes fit together; when not even the last
+// axis alone fits, the last axis is cut.
 template <typename Read>
 Result<void> ForEachPiece(const ReadRequest& request, std::uint64_t most, Read&& read) {
     const std::size_t rank = request.axes.size();
@@ -257,7 +254,7 @@ Result<std::uint64_t> PrefetchChunks(const PixelSource& source, const ImageDescr
                                      const ReadRequest& request, const ReadOptions& options,
                                      std::size_t decode_threads) {
     // Checked as the request the caller made, so that a mistake in it is reported in its own terms
-    // rather than in those of the sample made from it.
+    // rather than in terms of the sample made from it.
     if (auto checked = zarr::BuildSelection(descriptor, request, zarr::DestinationOrder::logical); !checked) {
         return checked.error();
     }
@@ -265,11 +262,11 @@ Result<std::uint64_t> PrefetchChunks(const PixelSource& source, const ImageDescr
     if (auto allowed = zarr::CheckReadControl(options.control, descriptor.id); !allowed) {
         return allowed.error();
     }
-    // The pixels and the flag are each sampled one element a chunk by their own layout, so the
+    // The pixels and the flag are each sampled one element per chunk by their own layout, so the
     // pixels are read here without the flag, which is sampled below.
     //
-    // Each in pieces, through one buffer the budget holds. A sample is one element a chunk, and an
-    // image of small chunks has a great many: read whole, a 1 KiB budget allocated 4 MiB for it.
+    // Each in pieces, through one buffer the budget holds. A sample is one element per chunk, and an
+    // image of small chunks has a great many: read whole, a 1 KiB budget would allocate 4 MiB for it.
     const auto sample = OneElementPerChunk(geometry, request);
     const auto chunks = Elements(sample);
     auto pixels_only = options;
@@ -294,12 +291,12 @@ Result<std::uint64_t> PrefetchChunks(const PixelSource& source, const ImageDescr
     const auto flag_chunks = Elements(flag_sample);
     std::vector<std::uint8_t> discarded_flags(
         static_cast<std::size_t>(std::min(flag_chunks, SampleElements(options, sizeof(std::uint8_t)))));
-    // Each element of the sample decodes a whole flag chunk, so a piece is held to the chunks the
-    // budget affords too, and not only to its buffer: a byte an element bounded the buffer and let one
-    // read of 1024 x 1024 flags chunked 32 x 32 decode a MiB against a budget of 8 KiB. A flag chunk
-    // holds what any chunk does for the bytes it decodes to, a byte an element. One chunk at the
-    // least, as a read holds one however small the budget. The pixels' pieces go through ReadInPieces,
-    // which cuts them by what their chunks hold as it cuts any read.
+    // Each element of the sample decodes a whole flag chunk, so a piece is limited to the chunks the
+    // budget allows, not only by its buffer: limited by the buffer alone, one read of 1024 x 1024
+    // flags chunked 32 x 32 would decode a MiB against a budget of 8 KiB. A flag chunk holds what any
+    // chunk does for its decoded bytes, one byte per element. At least one chunk, as a read holds one
+    // however small the budget. The pixels' pieces go through ReadInPieces, which cuts them by what
+    // their chunks hold, as it cuts any read.
     const std::uint64_t flag_chunk_held =
         kHeldBytesPerDecodedByte * ChunkElements(flag_geometry.chunk_shape.empty() ? geometry : flag_geometry);
     const std::uint64_t flag_budget =

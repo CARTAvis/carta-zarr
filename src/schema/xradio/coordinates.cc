@@ -133,9 +133,9 @@ std::vector<AxisDescriptor> DescribeAxes(const zarr_metadata::ArrayMetadata& ima
 }
 
 Result<CoordinateValues> ReadCoordinateValues(const Store& store, Plane plane) {
-    // Every one of the plane's, because every one is required: the probe refused a dataset missing one
-    // before an image of it could be described. A coordinate that cannot be read fails describing
-    // rather than leaving a hole, the polarization labels included, whatever the reason.
+    // Every one of the plane's, because every one is required: the probe refuses a dataset missing
+    // one before an image of it can be described. A coordinate that cannot be read, the polarization
+    // labels included, fails the description rather than leaving a hole.
     CoordinateValues values;
     for (const auto& coordinate : kCoordinates) {
         if (!OnPlane(coordinate, plane)) {

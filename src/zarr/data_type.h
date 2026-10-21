@@ -9,12 +9,6 @@
 
 // What this library knows about a Zarr v3 data type, in one table.
 //
-// It was in five: the real types a coordinate may use, the name-to-enum map a descriptor is filled
-// from, the byte sizes a dataset's size is summed with, the name-to-TensorStore-dtype check a pixel
-// read makes, and a second byte-size switch keyed on the enum rather than the name. Each covered a
-// different subset -- eleven types, twelve, fourteen, twelve, and "everything else is four bytes"
-// -- so adding a type meant finding all five and knowing which of them cared.
-//
 // Header-only, and it includes no JSON: chunk_blocks.h reads it, and that header is compiled by a
 // test target that links nothing at all.
 

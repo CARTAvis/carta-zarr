@@ -32,7 +32,7 @@ namespace carta::zarr::internal {
 // Samples of `stride` that fall in [begin, end), as a start and a count.
 //
 // Rounded up without adding stride - 1 first, which wraps for a stride near the top of the range: the
-// largest one there is selected nothing, where it should keep the origin as any stride past the plane
+// largest stride would select nothing, where it should keep the origin, as any stride past the plane
 // does.
 inline void SampledRange(std::uint64_t begin, std::uint64_t end, std::uint64_t stride, std::uint64_t& start,
                          std::uint64_t& count) {
@@ -45,31 +45,28 @@ inline void SampledRange(std::uint64_t begin, std::uint64_t end, std::uint64_t s
 
 /**
  * Walks one spatial footprint along the spectrum, a slab at a time, and the whole plane as bands of
- * them: what a Pass reads with, and nothing a reduction or a test reaches past the Pass for.
+ * footprints. A Pass reads with it; reductions and tests use the Pass.
  *
- * Which footprints to visit is not the walk's. A whole-plane pass bands the plane itself; a
- * reduction's come from its occupancy, which cuts the chunk runs its regions occupy -- see
- * Occupancy::Footprints. Those two are genuinely different walks and stay that way: joining them
- * into one traversal would make the plane's bands a special case of a region set, for a caller that
- * has no regions. What they had in common was everything inside one footprint -- how deep a slab goes, where
- * it is cut so that no decode serves two slabs, when the caller is told what it has, where
- * cancellation is checked, and how progress is counted -- and that was written out twice, in full,
- * with the subtlety intact in both copies: `reads_done` guards the report so that a footprint taken
- * in a single read still reports once at the end rather than before it starts.
+ * The walk does not choose which footprints to visit. A whole-plane pass bands the plane itself; a
+ * reduction's footprints come from its occupancy, which cuts the chunk runs its regions occupy (see
+ * Occupancy::Footprints). These are different walks: joining them would make the plane's bands a
+ * special case of a region set, for a caller with no regions. What they share is everything inside
+ * one footprint: how deep a slab goes, where it is cut so that no decode serves two slabs, when the
+ * caller is told what it has, where cancellation is checked, and how progress is counted. In
+ * particular, `reads_done` guards the report so that a footprint taken in a single read reports once
+ * at the end rather than before it starts.
  *
- * `reads_done` and `chunks_done` are the Pass's, because their spans are: a block resets them, a
- * whole run keeps them. They used to be every reduction's, passed down by reference, and the rule
- * about them was written in a comment at each place that did.
+ * `reads_done` and `chunks_done` belong to the Pass, because their lifetimes do: a block resets them,
+ * and a whole run keeps them.
  *
  * `visit` is a template parameter and must not become a `std::function`: the per-pixel loop inlines
- * through it, and 54731c1 measured a quarter of a reduction riding on that. ADR 0005. `report` is
- * one call per slab, which is the same footing `PixelSource` stands on.
+ * through it, which measured as a quarter of a reduction's time. ADR 0005. `report` is one call per
+ * slab, the same cost model as `PixelSource`.
  *
  * Holds the buffers, so a pass allocates once rather than once per footprint or per block.
  *
- * Its interface is protected, and a Pass is the one thing that derives from it: a class of its own
- * rather than a member of Pass because the read itself is out of line in pass_read.cc, and Pass is a
- * template.
+ * Its interface is protected, and only Pass derives from it. It is a class of its own rather than a
+ * part of Pass because the read itself is out of line in pass_read.cc, and Pass is a template.
  */
 class SlabWalk {
 public:
@@ -91,8 +88,8 @@ protected:
                 _plan.AlignedSlabEnd(slab_begin, std::min(slab_channels, end - slab_begin), end);
             const std::uint64_t slab_length = slab_end - slab_begin;
 
-            // What is in hand before spending another budget. A footprint that takes one read never
-            // gets here, so a small one still reports once -- at the end, through its caller.
+            // Report what is in hand before spending another budget. A footprint that takes one read
+            // never gets here, so a small one still reports once, at the end, through its caller.
             if (reads_done > 0) {
                 if (auto ready = report(chunks_done); !ready) {
                     return ready.error();
@@ -118,9 +115,8 @@ protected:
             if (!slab) {
                 return slab.error();
             }
-            // What was read is absolute; what the visitor indexes by is relative to this walk. The
-            // subtraction is the only place the two meet, and it is the only place it can be: the
-            // reader never sees `begin`, so it cannot compute this and does not try.
+            // What was read is absolute; what the visitor indexes by is relative to this walk. This is
+            // the only place the two meet, and the only place they can: the reader never sees `begin`.
             slab.value().first_channel = BlockChannel{slab_begin - begin};
 
             visit(slab.value());
@@ -132,7 +128,7 @@ protected:
     }
 
     /**
-     * Visit every plane of the channels [begin, end), a band of chunk rows at a time -- and a band in
+     * Visit every plane of the channels [begin, end), a band of chunk rows at a time, and a band in
      * pieces along its rows when one row is wider than a read may decode.
      *
      * Only the chunks the plan's sample has a pixel in are read or counted; see PassPlan::layer_chunks.
@@ -140,10 +136,10 @@ protected:
     template <typename BeforeRead, typename Visit>
     Result<void> OverBands(SelectionChannel begin, SelectionChannel end, std::uint64_t& reads_done,
                            std::uint64_t& chunks_done, BeforeRead&& before_read, Visit&& visit) {
-        // The chunk rows and columns the sample has a pixel in -- every one unless it steps over some
-        // -- in bands of as many rows as a read affords. A chunk the sample steps over is neither read
-        // nor counted, so what progress is a fraction of is what is decoded, and a sampled walk's
-        // report reaches its end.
+        // The chunk rows and columns the sample has a pixel in (all of them, unless it steps over
+        // some), in bands of as many rows as a read allows. A chunk the sample steps over is neither
+        // read nor counted, so progress is a fraction of what is decoded, and a sampled walk's
+        // progress reaches its end.
         const auto rows = ChunksSampled(_plan.v_length, _plan.chunk_v, _plan.sample);
         const auto columns = ChunksSampled(_plan.u_length, _plan.chunk_u, _plan.sample);
         for (std::uint64_t row = 0; row < rows.size();) {
@@ -155,9 +151,9 @@ protected:
             band.u_stride = _plan.sample;
             band.v_stride = _plan.sample;
 
-            // A chunk row wider than a read is read in pieces along it, as Occupancy::Footprints
-            // reads a run: band_rows floors at one, so without this the smallest read is a whole
-            // chunk row, however many budgets wide that is.
+            // A chunk row wider than a read is read in pieces along it, as Occupancy::Footprints reads
+            // a run: band_rows is at least one, so otherwise the smallest read would be a whole chunk
+            // row, however many budgets wide.
             const std::uint64_t segment_chunks = _plan.UnitsAffordable(band_rows);
             for (std::uint64_t column = 0; column < columns.size();) {
                 const std::uint64_t width = std::min(segment_chunks, columns.size() - column);
@@ -180,8 +176,7 @@ protected:
     Result<void> Allowed() const { return zarr::CheckReadControl(_options.control, _plan.descriptor->id); }
 
 private:
-    // What a slab is asked for and read into, and the read itself: the walk's own, and nothing a
-    // caller of it names. They were declared beside it for anyone to use, and only it ever did.
+    // What a slab is asked for and read into, and the read itself, all private to the walk.
 
     // One slab to read, in the pass's own axes.
     struct SlabRequest {
@@ -192,8 +187,8 @@ private:
         std::uint64_t v_count = 0;
         std::uint64_t v_stride = 1;
         // Which channels to read. A SelectionChannel rather than a plain number because Slab carries a
-        // BlockChannel, and handing one where the other belongs is the mistake this pair of types exists
-        // to refuse -- see ChannelIndex.
+        // BlockChannel, and passing one where the other belongs is the mistake these types exist to
+        // prevent; see ChannelIndex.
         SelectionChannel channel_index;
         std::uint64_t channel_count = 0;
     };
@@ -207,11 +202,11 @@ private:
     /**
      * Read one slab and hand back how to walk it.
      *
-     * This is what every pass over a cube has in common, whatever order it visits chunks in: ask for
-     * the stored dimensions reversed so the plane arrives untransposed, derive the strides of what
-     * comes back, read the pixels, and -- when the image has a flag the caller did not decline -- read
-     * that too and fold it into the pixels, because a flagged pixel and a NaN pixel mean the same thing
-     * to everything downstream.
+     * What every pass over a cube has in common, whatever order it visits chunks in: ask for the
+     * stored dimensions reversed so the plane arrives untransposed, derive the strides of what comes
+     * back, read the pixels, and, when the image has a flag the caller did not decline, read that too
+     * and apply it to the pixels, because a flagged pixel and a NaN pixel mean the same thing to
+     * everything downstream.
      *
      * The returned Slab points into this walk's buffers, so it is valid until the next read.
      */
@@ -227,9 +222,9 @@ private:
 struct PlaneBands {};
 
 // What a pass walks, spatially: the footprints a region set's occupancy cut, each read along the
-// spectrum in turn. Any range whose elements carry the SlabFootprint they are read over as `.slab`;
-// the element is handed back to the visitor beside each slab read over it, because a reduction
-// accumulating regions needs to know which chunk cells the slab covers.
+// spectrum in turn. Any range whose elements carry the SlabFootprint they are read over as `.slab`.
+// The element is passed to the visitor with each slab read over it, because a reduction accumulating
+// regions needs to know which chunk cells the slab covers.
 template <typename Footprints>
 struct FootprintsOf {
     const Footprints* footprints;
@@ -238,23 +233,20 @@ struct FootprintsOf {
 /**
  * One pass over an image, from the first read to the last hand-over.
  *
- * A reduction says what the pass walks -- the plane, or a region set's footprints -- and what to do
- * with each slab, and the pass does everything between: where a block is cut, when what is in hand
- * is handed over, how far along that is, and when a caller saying no stops it. Made by
- * PassOverPlane and PassOverFootprints.
+ * A reduction says what the pass walks (the plane, or a region set's footprints) and what to do with
+ * each slab, and the pass does everything else: where a block is cut, when what is in hand is handed
+ * over, how far along that is, and when a caller's refusal stops it. Made by PassOverPlane and
+ * PassOverFootprints.
  *
- * Which layer progress is a fraction of is the shape's own and not a caller's to state. It is the
- * chunks one spectral layer of what is walked occupies -- the plane's, or the sum of the footprints'
- * -- and it is both what the emit budget is spent against and the unit progress is counted in. A
- * reduction that gave one for the other read the right pixels and reported a bar that lied, so the
- * pass works it out from what it was given to walk, and there is nothing left to give wrongly.
+ * The pass works out the layer itself from what it walks, rather than taking it from the caller: the
+ * chunks one spectral layer of the plane, or of all the footprints, occupies. It is both what the
+ * emit budget is spent against and the unit progress is counted in, so a wrong one would read the
+ * right pixels but report wrong progress.
  *
- * The two walks stay two. Joining them would make the plane's bands a special case of a region set,
- * for a caller that has no regions; what they share is everything inside one footprint, which is
- * SlabWalk's.
+ * The two walks stay separate, as SlabWalk explains.
  *
  * Every callback is a template parameter and none may become a std::function: the per-pixel loop
- * inlines through `visit`, and 54731c1 measured a quarter of a reduction riding on that. ADR 0005.
+ * inlines through `visit`, which measured as a quarter of a reduction's time. ADR 0005.
  */
 template <typename Shape>
 class Pass : private SlabWalk {
@@ -273,9 +265,9 @@ public:
      *
      * `hand_over(first_channel, length, complete, completeness)` fills the reduction's own block and
      * calls its sink, returning what the sink returned: once before every read of a block after its
-     * first, with how much of the block's chunks are in it, and once more when the block is finished.
-     * `first_channel` is a SelectionChannel, and turning it into the plain number a public block
-     * carries is the one place the type is left behind.
+     * first, with the fraction of the block's chunks read so far, and once more when the block is
+     * finished. `first_channel` is a SelectionChannel; hand_over is the one place it becomes the plain
+     * number a public block carries.
      *
      * A sink returning false cancels, with the message the pass was made with.
      */
@@ -283,11 +275,11 @@ public:
     Result<void> InBlocks(std::size_t bytes_per_channel, std::uint32_t hint, Reset&& reset, Visit&& visit,
                           HandOver&& hand_over) {
         const SelectionChannel end_of_selection{_plan.planes.spectral.count};
-        // A shape occupying no chunks -- a region set whose mask selects nothing -- is the one place
-        // the two uses of the layer want opposite things. Spending the emit budget, zero is the honest
-        // answer: there is nothing to read, so the whole selection is one block rather than pieces
+        // A shape occupying no chunks, such as a region set whose mask selects nothing, is the one
+        // case where the two uses of the layer want opposite things. For the emit budget, zero is
+        // right: there is nothing to read, so the whole selection is one block rather than pieces
         // sized for chunks nobody will decode. As the denominator of a part-filled block's
-        // completeness it must never be zero.
+        // completeness, it must never be zero.
         const std::uint64_t emit_channels = _plan.EmitChannels(_layer_chunks, bytes_per_channel, hint);
         const std::uint64_t layer = std::max<std::uint64_t>(1, _layer_chunks);
 
@@ -296,8 +288,8 @@ public:
             const std::uint64_t length = end - begin;
             reset(length);
 
-            // What the completeness of a part-filled block is a fraction of, and what the walk has of
-            // it. Both are the block's: they start again when a block does.
+            // What the completeness of a part-filled block is a fraction of, and how much of it the
+            // walk has done. Both belong to the block and restart with each block.
             const std::uint64_t chunks_total = _plan.ChunksCovering(layer, begin, end);
             std::uint64_t chunks_done = 0;
             std::uint64_t reads_done = 0;
@@ -326,10 +318,10 @@ public:
     }
 
     /**
-     * Walk the whole selection as one run, telling `progress(fraction)` how far along it is: before
-     * every read after the first, so a run that takes one read never calls it, and never once the
-     * last read is done. `fraction` is the chunks read of the chunks the run covers. Returning false
-     * cancels, with the message the pass was made with.
+     * Walk the whole selection as one run, telling `progress(fraction)` how far along it is before
+     * every read after the first, so a run that takes one read never calls it, and it is not called
+     * after the last read. `fraction` is the chunks read out of the chunks the run covers. Returning
+     * false cancels, with the message the pass was made with.
      *
      * `visit` is as InBlocks has it, its `first_channel` counted from the start of the selection.
      */
@@ -370,14 +362,14 @@ private:
     Error Cancelled() const { return Error{ErrorCode::cancelled, _cancelled, _plan.descriptor->id}; }
 
     // The channels [begin, end) of every footprint of the shape. The footprints of one walk share
-    // `reads_done`, so a walk taken in a single read still reports once -- at the end, through its
-    // caller -- however many footprints it is made of.
+    // `reads_done`, so a walk taken in a single read still reports once (at the end, through its
+    // caller), however many footprints it is made of.
     template <typename Report, typename Visit>
     Result<void> Walk(SelectionChannel begin, SelectionChannel end, std::uint64_t& reads_done,
                       std::uint64_t& chunks_done, Report&& report, Visit& visit) {
-        // Asked here as well as before every read, because a region set occupying nothing makes no
-        // read: already cancelled, or past its deadline, it was handed a complete block and reported
-        // success without the control ever being asked.
+        // Checked here as well as before every read, because a region set occupying nothing makes no
+        // read: if already cancelled or past its deadline, it would otherwise be handed a complete
+        // block and report success without the control being checked.
         if (auto allowed = Allowed(); !allowed) {
             return allowed.error();
         }
@@ -411,7 +403,7 @@ inline Pass<PlaneBands> PassOverPlane(const PixelSource& source, const PassPlan&
 }
 
 // A pass over a region set's footprints, which must outlive it. Its layer is what they occupy
-// together, which is the region set's and not the plane's.
+// together, not the plane's.
 template <typename Footprints>
 Pass<FootprintsOf<Footprints>> PassOverFootprints(const PixelSource& source, const PassPlan& plan,
                                                   const ReadOptions& options, const Footprints& footprints,

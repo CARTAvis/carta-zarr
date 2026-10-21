@@ -117,7 +117,7 @@ void TestLayoutsHoldTheSamePixels() {
     const auto pixels = ReadAll(plain);
     Require(SameBits(pixels, ReadAll(sharded)), "two layouts of one synthetic cube hold different pixels");
 
-    // Not a cube of fill: there is noise, there are NaN corners outside the circle, and the centre is
+    // Not a cube of fill: there is noise, there are NaN corners outside the circle, and the center is
     // finite. Axis 0 is l and fastest, so the first element is a corner.
     std::size_t finite = 0;
     for (const float value : pixels) {

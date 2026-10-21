@@ -126,7 +126,7 @@ std::string CsvHeader();
 std::string FormatRow(const Row& row);
 std::vector<std::string> ParseCsvLine(const std::string& line);
 
-// The fields of a row this run's own code reads back: to resume, and to summarise a trial.
+// The fields of a row this run's own code reads back: to resume, and to summarize a trial.
 struct RowSummary {
     std::string run_key;
     unsigned trial = 0;
@@ -141,7 +141,7 @@ struct RowSummary {
     std::optional<double> t_end_s;
 };
 
-std::optional<RowSummary> SummariseRow(const std::string& line);
+std::optional<RowSummary> SummarizeRow(const std::string& line);
 
 // Where rows go: appended to a CSV and flushed a trial at a time, or to stdout.
 class CsvOutput {

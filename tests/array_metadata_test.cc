@@ -129,7 +129,7 @@ void TestAShardedArraysChunksAreUntransposed() {
     // Encoded axis i is decoded axis order[i]: [2,0,1] sends inner chunks [1,2,3] to [2,3,1].
     Require(three(sharded(R"({"name":"transpose","configuration":{"order":[2,0,1]}},)", "[1,2,3]")) ==
                 std::vector<std::uint64_t>{2, 3, 1},
-            "a three-axis transpose was undone the wrong way round");
+            "a three-axis transpose was undone the wrong way around");
     // Two in turn compose: [1,0,2] and then [0,2,1] is [1,2,0], which sends [1,2,3] to [3,1,2].
     Require(three(sharded(R"({"name":"transpose","configuration":{"order":[1,0,2]}},)"
                           R"({"name":"transpose","configuration":{"order":[0,2,1]}},)",

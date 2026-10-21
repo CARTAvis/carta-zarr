@@ -20,12 +20,11 @@ namespace carta::zarr::internal::xradio {
 /**
  * The beams a beam fit parameter table holds, one per (time, channel, polarization).
  *
- * Takes the arrays already read rather than a Store, which is the one thing about this module worth
- * stating: reading them is two value reads, and a caller that has to make them cannot be tested
- * without an array on disk. Handed the values instead, everything this decides -- which dimension is
- * which, that the labels name a major axis, a minor axis and a position angle, that a table missing
- * a dimension is an error rather than an empty list, and the order the three loops emit in -- is
- * checkable from a table and its labels. See ADR 0006.
+ * Takes the arrays already read rather than a Store. Reading them takes two value reads, which
+ * cannot be tested without an array on disk. Given the values, everything this decides can be tested
+ * from a table and its labels: which dimension is which, that the labels name a major axis, a minor
+ * axis and a position angle, that a table missing a dimension is an error rather than an empty list,
+ * and the order of the output. See ADR 0006.
  *
  * `table` is addressed by dimension name, through the document its values were decoded with. A
  * table with no time dimension reads as a single plane. The unit comes from the table's own `units`

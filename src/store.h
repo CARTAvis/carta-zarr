@@ -42,26 +42,24 @@ enum class NodeKind {
     array,
     // A document that would not say: one that would not parse at all, one that is not an object, or
     // one whose node_type is missing, not a string, or something Zarr does not define.
-    unrecognised,
+    unrecognized,
 };
 
 /**
  * One node of the hierarchy: its canonical name, what it is, and -- for an array -- its metadata as
  * the store parsed it.
  *
- * The parse is carried rather than left to be asked for because whether an array's metadata parses
- * is the one fact its callers disagree about what to do with, and each of them used to rebuild it on
- * its own: one read node_type out of the document, one parsed and then looked again to see whether
- * the failure was a group, one parsed everything and ignored the answer.
+ * The parse result is carried in the entry because callers treat a failed parse differently, and
+ * each would otherwise parse the document again. See Inventory.
  */
 struct NodeEntry {
     std::string name;
-    NodeKind kind = NodeKind::unrecognised;
+    NodeKind kind = NodeKind::unrecognized;
     // The array's metadata, parsed or refused, as the store holds it -- the object ReadArrayMetadata
     // hands back, so it lives as long as the store does. Null unless kind is array: a group is never
     // parsed as one.
     const Result<zarr::ArrayMetadata>* array = nullptr;
-    // Why the node is unrecognised. Absent unless it is.
+    // Why the node is unrecognized. Absent unless it is.
     std::optional<Error> reason;
 };
 
@@ -124,70 +122,66 @@ public:
     // its metadata parsed. Read once for the life of the store, which is what makes a dataset's
     // listing a snapshot -- a node written afterwards is not in it.
     //
-    // What a caller does with a node that is not a usable array is its own business, and the callers
-    // differ on purpose. Image discovery diagnoses an array whose metadata will not parse, because it
-    // may have been an image. Flag selection passes over one, because a mask candidate that cannot be
-    // read is simply not the mask. The declared size refuses one, because a total that leaves out an
-    // array it knows is there is a wrong total -- and counts neither a group nor a node it does not
-    // recognise, because neither is an array. Three policies about one fact; this is where the fact
-    // is decided, once.
+    // What a caller does with a node that is not a usable array is up to it, and the callers differ on
+    // purpose. Image discovery diagnoses an array whose metadata will not parse, because it may have
+    // been an image. Flag selection passes over one, because a flag candidate that cannot be read is
+    // not the flag. The declared size refuses one, because a total that leaves out a known array is
+    // wrong, and counts neither a group nor an unrecognized node, because neither is an array. The
+    // fact is decided here, once.
     const Result<std::vector<NodeEntry>>& Inventory() const;
-    // One node's entry by canonical name, or null when the inventory holds no such node -- and null
-    // as well when the hierarchy could not be taken at all, so a caller that must tell those apart
-    // asks Inventory() first. Another spelling of the name is not looked up: a caller holding a
-    // node's name got it from here.
+    // One node's entry by canonical name, or null when the inventory holds no such node, and also
+    // when the hierarchy could not be listed at all; a caller that must tell those apart asks
+    // Inventory() first. Other spellings of the name are not looked up.
     const NodeEntry* FindNode(std::string_view name) const;
     /**
      * An array's metadata as its own document gives it, once that document is known to describe the
      * array this store does.
      *
-     * The store decides what an array is -- what images there are, what a descriptor reports, how a
-     * read is planned -- from ReadArrayMetadata, which for a store that consolidated its metadata is
-     * the root's copy. The values are decoded from the array's own document: TensorStore opens an
-     * array from there, and so does the label decoder. A copy left stale by a rewrite, or written by
-     * hand, describes an array that is not the one on disk, and every value read from it would be
-     * answered for an array nobody described. So the two are held to each other on what the store
-     * takes from the copy: the extent, the names and order of the dimensions, the data type, the
-     * chunks and shards, and the attributes, which say what the values mean. How the chunks are
-     * encoded -- codecs, chunk keys, the fill value -- is not compared, because the copy is never
-     * used to decode one; what comes back here is the own document's, and that is what a reader
-     * decodes with.
+     * The store decides what an array is (what images there are, what a descriptor reports, how a
+     * read is planned) from ReadArrayMetadata, which for a store with consolidated metadata is the
+     * root's copy. The values are decoded from the array's own document: TensorStore opens an array
+     * from there, and so does the label decoder. A copy left stale by a rewrite, or written by hand,
+     * describes a different array from the one on disk. So the two must agree on everything the store
+     * takes from the copy: the extent, the names and order of the dimensions, the data type, the chunks
+     * and shards, and the attributes, which say what the values mean. How the chunks are encoded
+     * (codecs, chunk keys, the fill value) is not compared, because the copy is never used to decode;
+     * this returns the array's own document, which is what a reader decodes with.
      *
      * Reports invalid_metadata, naming the node, when the two disagree, when the copy names an array
      * whose own document is missing (ADR 0004: such a store is malformed), and when the own document
      * is not an array's. A transport that fails to read it reports what it reported.
      *
-     * Costs reading the own document once for the life of the store, and only for a node the root's
-     * copy accounted for: any other node's metadata was read from its own document in the first
-     * place, and is handed back as it is. Asked again, it is one lookup, without normalizing the
-     * name, because every piece of a pixel read asks. Probing and listing never ask, so they keep what
-     * consolidated metadata saves; every value read does ask, and describing an image asks of the
-     * image and its flag before any value is read. ADR 0017.
+     * Reads the array's own document once for the life of the store, and only for a node the root's
+     * copy covered: any other node's metadata was read from its own document to begin with, and is
+     * returned as it is. Asked again, it is one lookup, without normalizing the name, because every
+     * piece of a pixel read asks. Probing and listing never ask, so they keep what consolidated
+     * metadata saves; every value read does, and describing an image asks for the image and its flag
+     * before any value is read. ADR 0017.
      */
     const Result<zarr::ArrayMetadata>& VerifyArray(std::string_view node) const;
-    // Both are held to the array's own document first, as every value read is; see VerifyArray.
+    // Both check the array against its own document first, as every value read does; see
+    // VerifyArray.
     //
-    // A numeric array comes back bound to that document, which is what its values were decoded
-    // with, so a caller addressing them by dimension name, or reading their unit, reads the same
-    // document the values came from. Read once for the life of the store and handed back by
-    // reference, as VerifyArray's answer is.
+    // A numeric array comes back with that document, which its values were decoded with, so a caller
+    // addressing them by dimension name, or reading their unit, reads the document the values came
+    // from. Read once for the life of the store and returned by reference, as VerifyArray's answer is.
     const Result<zarr::NumericArray>& ReadNumericArray(std::string_view node) const;
     Result<std::vector<std::string>> ReadStringArray1D(std::string_view node) const;
 
-    // How many bytes this store occupies where it lives. Handed straight to the transport, which is
-    // the only thing that knows; Store fronts it for the same reason it fronts every other
-    // transport question, so that nothing above here learns where the bytes came from.
+    // How many bytes this store occupies where it lives. Passed straight to the transport, which is
+    // the only thing that knows; Store fronts it, as it does every other transport question, so that
+    // nothing above here learns where the bytes came from.
     Result<std::uint64_t> StoredSizeBytes(std::chrono::steady_clock::time_point deadline) const;
 
     // Pixel reads are deliberately uncached here: a slab is requested once and is far larger than
     // anything the metadata tables hold. Reuse belongs in TensorStore's chunk cache, which already
     // works at chunk granularity and is sized by the consumer's Context.
     //
-    // One function rather than two, because reading an image's pixels and reading its flag differed
-    // only in the element type: both hold the array to its own document, ask the transport where its
-    // bytes are, and hand that to the reader. `float` is pixels, converted from whatever the array holds;
-    // `std::uint8_t` is a flag, one byte an element, true meaning a flagged pixel. Instantiated for
-    // those two in store.cc and for nothing else.
+    // One function for pixels and flags, which differ only in the element type: both check the array
+    // against its own document, ask the transport where its bytes are, and pass that to the reader.
+    // `float` is pixels, converted from whatever the array holds; `std::uint8_t` is a flag, one byte
+    // per element, true meaning a flagged pixel. Instantiated for those two in store.cc and nothing
+    // else.
     template <typename T>
     Result<void> ReadPixelsInto(std::string_view node, const zarr::PixelSelection& selection, BufferView<T> destination,
                                 const ReadControl& control) const;
@@ -199,9 +193,8 @@ private:
 
     TransportPtr _transport;
     nlohmann::json _root_attributes;
-    // The names the root's copy accounted for, sorted. The documents themselves went into the node
-    // metadata table at construction, so there is one place a node's metadata is looked up rather
-    // than two.
+    // The names the root's copy covered, sorted. The documents themselves went into the node metadata
+    // table at construction, so a node's metadata is looked up in one place.
     std::vector<std::string> _consolidated_nodes;
     bool _has_consolidated_metadata = false;
     StoreContextPtr _context;
@@ -210,9 +203,9 @@ private:
 };
 
 // The name a node is filed under, however a document spells it: "./FLAG" is FLAG. Reports
-// invalid_argument for a name that is no node of a store -- empty, absolute, or climbing out of it with
-// "..". What a name a document gives has to be compared with the names the store lists, which are
-// filed this way.
+// invalid_argument for a name that cannot be a node of a store: empty, absolute, or climbing out of it
+// with "..". A name a document gives has to be normalized this way before it is compared with the
+// names the store lists.
 Result<std::string> NormalizeNodeName(std::string_view node);
 
 // Open a store on the local filesystem.
@@ -224,9 +217,8 @@ Result<Store> OpenStore(TransportPtr transport, StoreContextPtr context = {});
 // How large a dataset is, and which of two questions the answer is to -- see SizeBasis.
 //
 // The store's own size when the transport can report it before the deadline, and otherwise the
-// total uncompressed size the metadata declares for every array. Which of the two a caller gets is
-// this module's decision rather than the facade's: it is one question -- how large is this -- and
-// answering half of it up there is what had the facade walking a directory of its own.
+// total uncompressed size the metadata declares for every array. This module, not the facade, decides
+// which of the two a caller gets, so the whole question is answered in one place.
 //
 // Reports invalid_metadata for a store with no arrays at all, and for a size that overflows.
 Result<DatasetSize> DatasetSizeBytes(const Store& store, std::chrono::steady_clock::time_point deadline);

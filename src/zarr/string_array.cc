@@ -254,11 +254,11 @@ void SetBytesCodec(StringCodecInfo& info, BytesCodec codec) {
     info.bytes_codec = codec;
 }
 
-// The compressor is found by walking the chain in order, and a second one is refused. That is a
-// different rule from the one a StorageLayout asks -- which reports the first of zstd, gzip, blosc
-// it can see and shrugs at a malformed chain -- and the difference is deliberate: that field is
-// descriptive, while this one decides which decompressor actually runs. Unifying them would mean
-// either failing an open over a cosmetic field or letting this one guess.
+// The compressor is found by walking the chain in order, and a second one is refused. StorageLayout
+// uses a different rule on purpose: it reports the first of zstd, gzip and blosc it finds and
+// ignores a malformed chain, because its field is only descriptive, while this one decides which
+// decompressor actually runs. Unifying them would mean either failing an open over a descriptive
+// field or letting this one guess.
 StringCodecInfo ParseStringCodecs(const nlohmann::json& codecs) {
     StringCodecInfo info;
     bool seen_bytes = false;
@@ -308,8 +308,8 @@ struct StringArrayLayout {
     std::string fill_value;
 };
 
-// A fixed_length_utf32 fill value is a string, as zarr-python writes it; none at all is the empty
-// string, which is what this reader assumed of every array before it asked.
+// A fixed_length_utf32 fill value is a string, as zarr-python writes it; no fill value means the empty
+// string.
 std::string ParseStringFillValue(const nlohmann::json& fill_value) {
     if (fill_value.is_null()) {
         return {};
@@ -407,8 +407,8 @@ std::vector<std::uint8_t> DecodeStringChunk(std::vector<std::uint8_t> bytes, con
         Fail(ErrorCode::decode_error, "String array chunk is smaller than expected");
     }
     // A chunk is written whole, the last one included, so one holding more than its chunk shape
-    // accounts for is not the chunk the document describes -- and what lies past the end is not a
-    // label of this array, whatever it decodes to.
+    // allows is not the chunk the document describes, and what lies past the end is not a label of
+    // this array, whatever it decodes to.
     if (bytes_size > expected_chunk_bytes) {
         Fail(ErrorCode::decode_error, "String array chunk is larger than its chunk shape accounts for");
     }
@@ -469,8 +469,8 @@ Result<std::vector<std::string>> ReadFixedLengthUtf32StringArray(const std::file
         return Error{failure.code, failure.what(), std::string(node)};
     } catch (const std::bad_alloc&) {
         // A shortage of memory says nothing about the chunks. Store::ReadStringArray1D reports it as a
-        // read it could not make, which it asks again, rather than as a decode_error, an answer about
-        // the array remembered for the store's life.
+        // read it could not make, which is tried again next time, rather than as a decode_error, which
+        // would be remembered as an answer about the array for the store's life.
         throw;
     } catch (const std::exception& error) {
         return Error{ErrorCode::decode_error, error.what(), std::string(node)};

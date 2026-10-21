@@ -15,7 +15,7 @@
 namespace carta::zarr::internal {
 namespace {
 
-// A size as a message says it: in MiB once there are any, so that a cache of gigabytes reads as one.
+// A size for a message: in MiB once there is at least one, so that a cache of gigabytes reads well.
 std::string Size(std::uint64_t bytes) {
     return bytes < (1ULL << 20) ? std::to_string(bytes) + " bytes" : std::to_string(bytes >> 20) + " MiB";
 }
@@ -89,8 +89,8 @@ Result<std::unique_ptr<ReadingAhead>> ReadingAhead::For(std::vector<std::shared_
     if (sources.empty()) {
         return Error{ErrorCode::invalid_argument, "Reading ahead needs an image to read ahead of", {}};
     }
-    // What each cache has to hold -- two runs of every image reading through it, the one playing and
-    // the one decoded ahead -- and of which images, for saying so.
+    // What each cache has to hold (two runs of every image reading through it, the one playing and
+    // the one decoded ahead), and for which images, for the message.
     struct Demand {
         std::uint64_t needed = 0;
         std::uint64_t holds = 0;
@@ -201,10 +201,10 @@ void ReadingAhead::Served(Clock::time_point began, bool late, const std::vector<
         _worker = std::thread([this, work = std::move(work)] {
             const auto cancelled = [this] { return _cancelled.load(); };
             bool failed = false;
-            // Nothing above this thread can catch what escapes it -- an exception leaving a thread's
-            // function is std::terminate, which takes the consumer with it -- and a prefetch can throw
-            // before the image's own guard is reached: copying the options it reads with allocates.
-            // Reading ahead is for memory to spare, so a prefetch that ran out stops it.
+            // Nothing above this thread can catch what escapes it: an exception leaving a thread's
+            // function is std::terminate, which takes the consumer with it. A prefetch can throw before
+            // the image's own guard is reached, because copying the options it reads with allocates.
+            // Reading ahead uses spare memory, so a prefetch that runs out stops it.
             try {
                 for (const auto& [source, plane] : work) {
                     if (_cancelled) {
@@ -223,8 +223,8 @@ void ReadingAhead::Served(Clock::time_point began, bool late, const std::vector<
             }
         });
     } catch (...) {
-        // A machine with no thread to spare has no time to spare either, and one without the memory
-        // to start a thread none to decode ahead into.
+        // A machine with no thread to spare has no time to spare either, and one without the memory to
+        // start a thread has none to decode ahead into.
         const std::scoped_lock lock(_mutex);
         _under_way = false;
         _finished = Clock::now();

@@ -22,8 +22,8 @@
 
 namespace carta::zarr::internal {
 
-// The one place a HistogramBlock is handed its counts. HistogramBlock names this its friend, so the
-// layout Counts reads is set here and nowhere a caller can reach.
+// The one place a HistogramBlock is given its counts. HistogramBlock names this its friend, so the
+// layout Counts reads is set here, out of a caller's reach.
 class HistogramBlocks {
 public:
     // `counts` is [channel][bin], block.bin_count wide.
@@ -46,17 +46,17 @@ Result<void> ValidateBins(const std::string& node, std::uint32_t bins) {
 // the data's own extremes, so there is nothing here for it to be checked against.
 Result<void> ValidateRange(const std::string& node, const HistogramRequest& request) {
     // A zero-width range would divide by zero on every pixel. The caller decides what an image with
-    // no finite pixel should look like -- there is more than one defensible answer -- so this says
-    // no rather than inventing one.
+    // no finite pixel should look like, since there is more than one defensible answer, so this
+    // refuses rather than inventing one.
     if (!(request.lower < request.upper) || !std::isfinite(request.lower) || !std::isfinite(request.upper)) {
         return Error{ErrorCode::invalid_argument,
                      "A histogram needs a finite range with a lower bound below its upper bound", node};
     }
-    // Pixels are float, so the range is narrowed once and every pixel is binned against the
-    // narrowed copy. Bounds that do not fit a float leave nothing to bin against; the caller's own
-    // bounds are its pixels' extremes, which always fit. Everything else that narrowing does to a
-    // range -- two bounds narrowed to one float, a width underflowing to zero or overflowing to
-    // infinity -- the caller bins all the same, and ComputeHistogram bins as it does.
+    // Pixels are float, so the range is narrowed once and every pixel is binned against the narrowed
+    // copy. Bounds that do not fit a float leave nothing to bin against; the caller's own bounds are
+    // its pixels' extremes, which always fit. The caller still bins any other range narrowing
+    // affects (two bounds narrowed to one float, a width underflowing to zero or overflowing to
+    // infinity), and ComputeHistogram bins it the same way.
     if (!std::isfinite(static_cast<float>(request.lower)) || !std::isfinite(static_cast<float>(request.upper))) {
         return Error{ErrorCode::invalid_argument, "A histogram needs bounds that fit in a float, as its pixels do",
                      node};
@@ -96,10 +96,10 @@ Result<void> ComputeHistogram(const ReducibleImage& image, const HistogramReques
     // Over a range whose span and width are positive and finite in float, every offset is finite and
     // at least zero, and the float sequence above is the whole of it. Over any other, an offset found
     // in float can be NaN or infinite, and converting one to an index is undefined; there the caller
-    // bins every pixel in double, against a width found from the narrowed bounds, and a range of no
-    // width puts every pixel it admits in the first bin. Decided once for the range, as the caller
-    // decides it: deciding per pixel binned the lower half of a range wider than a float one way and
-    // the upper half the other, which is neither of the caller's answers.
+    // bins every pixel in double, against a width taken from the narrowed bounds, and a range of zero
+    // width puts every pixel in it in the first bin. Decided once for the range, as the caller decides
+    // it: deciding per pixel would bin the lower half of a range wider than a float one way and the
+    // upper half the other, which matches neither of the caller's answers.
     const float span = upper - lower;
     const bool finite_offsets = span > 0.0F && std::isfinite(span) && width > 0.0F && std::isfinite(width);
     const double wide_lower = lower;
@@ -108,9 +108,9 @@ Result<void> ComputeHistogram(const ReducibleImage& image, const HistogramReques
     const auto bins = static_cast<std::size_t>(request.bin_count);
     std::vector<std::uint64_t> counts;
 
-    // How many private histograms the binning may split a plane into. Capped three ways: by the
-    // pool, by memory -- see kHistogramPartialBudgetBytes -- and, inside the visit where the plane's
-    // size is known, by whether there is enough work to be worth waking anyone for.
+    // How many private histograms the binning may split a plane into. Capped three ways: by the pool,
+    // by memory (see kHistogramPartialBudgetBytes), and, inside the visit where the plane's size is
+    // known, by whether there is enough work to be worth waking another thread.
     const auto split = image.Split(kHistogramPartialBudgetBytes, bins * sizeof(std::uint64_t));
     // One allocation for the whole plan. Each task owns one row of it, so no two of them ever touch
     // the same bin and the sum at the end is the only place they meet.
@@ -119,12 +119,10 @@ Result<void> ComputeHistogram(const ReducibleImage& image, const HistogramReques
         partials.resize(split.most() * bins);
     }
 
-    // One read's worth of pixels binned into the block's counts. Named rather than written
-    // into the call below, because it is the longest of the three lambdas the pass is handed
-    // and written in place it would bury the other two.
+    // One read's worth of pixels binned into the block's counts. Named because it is the longest
+    // of the three lambdas the pass is handed, and written in place it would bury the other two.
     const auto bin_slab = [&](const Slab& slab) {
-        // Hoisted into locals so that the loops below are the same text they were when the
-        // pass handed these over as eight separate arguments.
+        // Hoisted into locals for the loops below.
         const std::uint64_t stride_u = slab.stride_u;
         const std::uint64_t stride_v = slab.stride_v;
         const std::uint64_t stride_z = slab.stride_z;
@@ -134,14 +132,14 @@ Result<void> ComputeHistogram(const ReducibleImage& image, const HistogramReques
             return counts.data() + (static_cast<std::size_t>((slab.first_channel + offset).index) * bins);
         };
 
-        // One loop per way of binning, each its own instantiation, so that the common one is the
-        // loop it always was. The caller's own rule in both: a pixel outside the range is not
-        // counted, and NaN fails both comparisons.
+        // One loop per way of binning, each its own instantiation, so that the common case stays a
+        // tight loop. Both follow the caller's rule: a pixel outside the range is not counted, and
+        // NaN fails both comparisons.
         const auto bin_rows_as = [&](auto finite, const float* plane, std::uint64_t v_first, std::uint64_t v_last,
                                      std::uint64_t* destination) {
-            // Copied into locals whose addresses never escape. Reached through the captures, each
-            // was loaded again for every pixel -- the store into a bin may, as far as the compiler
-            // knows, have changed it -- and through two lambdas' captures, twice over.
+            // Copied into locals whose addresses never escape. Read through the captures, each
+            // would be loaded again for every pixel, since as far as the compiler knows the store
+            // into a bin may have changed it.
             const float* const pixels = plane;
             const std::uint64_t row_stride = stride_v;
             const std::uint64_t column_stride = stride_u;
@@ -185,9 +183,9 @@ Result<void> ComputeHistogram(const ReducibleImage& image, const HistogramReques
         // Whole channels to a task when the busiest worker bins no more rows that way than it would
         // splitting each channel by rows. Each channel bins into its own counts, so a task that owns
         // whole channels needs no partials and the slab is one wake of the pool rather than one per
-        // channel. A chunk deep and narrow is why: 64 x 64 x 256 on a 512 x 512 plane is read in
-        // bands of a few chunk rows, each channel of a band too little to split, and waking the pool
-        // for every channel of every band took twice as long as binning the pixels. #6. Counted by
+        // channel. This matters for deep, narrow chunks: 64 x 64 x 256 on a 512 x 512 plane is read
+        // in bands of a few chunk rows, each channel of a band too small to split, and waking the
+        // pool for every channel of every band took twice as long as binning the pixels. Counted by
         // the busiest worker rather than by tasks, because the channels need not divide evenly:
         // sixteen among twelve workers is two each for eight and none for four, half as much again
         // as each channel's rows split twelve ways.
@@ -223,8 +221,8 @@ Result<void> ComputeHistogram(const ReducibleImage& image, const HistogramReques
             split.Run(row_tasks, v_count, [&](std::size_t task, std::uint64_t first, std::uint64_t last) {
                 bin_rows(plane, first, last, partials.data() + (task * bins));
             });
-            // Integer counts, so this sum is the serial loop's answer exactly -- which is what
-            // lets histogram_test keep comparing against an oracle rather than a tolerance.
+            // Integer counts, so this sum is exactly the serial loop's answer, which lets
+            // histogram_test compare with an oracle rather than a tolerance.
             for (std::size_t task = 0; task < row_tasks; ++task) {
                 const std::uint64_t* from = partials.data() + (task * bins);
                 for (std::size_t bin = 0; bin < bins; ++bin) {
@@ -239,7 +237,7 @@ Result<void> ComputeHistogram(const ReducibleImage& image, const HistogramReques
         [&](std::uint64_t length) { counts.assign(static_cast<std::size_t>(length) * bins, 0); }, bin_slab,
         [&](SelectionChannel first_channel, std::uint64_t length, bool complete, double completeness) {
             HistogramBlock block;
-            // Out of the type and into the public block, which is the one place it happens.
+            // From the typed index into the public block's plain one, here and nowhere else.
             block.first_channel = first_channel.index;
             block.channel_count = length;
             block.bin_count = bins;
@@ -278,9 +276,9 @@ Result<CubeHistogramResult> ComputeCubeHistogram(const ReducibleImage& image, co
             }
             CubeHistogramProgress update;
             update.completeness = fraction;
-            // By reference and lazily: re-aggregating on every read would cost more than the
-            // binning does on a cube with thousands of them, and a caller that only draws a bar
-            // never asks. Safe because the pass reports between reads, with no Add under way.
+            // By reference and lazily: re-aggregating on every read would cost more than the binning
+            // on a cube with thousands of reads, and a caller that only draws a progress bar never
+            // asks. Safe because the pass reports between reads, with no Add under way.
             update.snapshot = [&histograms]() { return histograms.Collect(); };
             return progress(update);
         },

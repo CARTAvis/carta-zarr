@@ -78,7 +78,7 @@ example, complete and with its checks.
 - [docs/adr](docs/adr) -- decisions and their alternatives.
 - [docs/contributing-docs.md](docs/contributing-docs.md) -- building the documentation locally.
 
-## Licence
+## License
 
 Copyright 2026- Academia Sinica Institute of Astronomy and Astrophysics (ASIAA), Associated
 Universities, Inc. (AUI) and the Inter-University Institute for Data Intensive Astronomy (IDIA).

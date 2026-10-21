@@ -20,28 +20,25 @@ namespace carta::zarr::internal {
  * How a reduction divides one read's arithmetic among the pool, given what each task's private
  * accumulator costs.
  *
- * Every reduction gives each task an accumulator of its own and adds them up afterwards, and every
- * one of them worked out the same three things for itself: how many accumulators it could afford,
- * which is a budget divided by what one costs and never more than the pool can run; how many tasks
- * a read was worth, which PlanRowTasks answers against kLeastPixelsPerTask; and how to hand each
- * task its contiguous run of rows. Three copies of the first, with the budget a constexpr inside the
- * function, is how the numbers ADR 0005 turns on came to live in three places.
+ * Every reduction gives each task an accumulator of its own and adds them up afterwards. This
+ * answers the three things each needs: how many accumulators it can afford (a budget divided by what
+ * one costs, and never more than the pool can run), how many tasks a read is worth (PlanRowTasks,
+ * against kLeastPixelsPerTask), and which contiguous rows each task gets.
  *
  * The accumulators themselves stay with the reductions, because they live for different spans: a
  * spectral reduction's are reset every slab and merged in order, a plane histogram's are zeroed per
  * plane and summed, and a cube histogram's last the whole walk and meet only at the end.
  *
- * What this does keep is ADR 0005's rule that there are never more tasks than accumulators. `Tasks`
- * never answers more than `most`, and a reduction reaches the pool only through `Run`, so a body
- * indexing its accumulator by task never shares one with another body.
+ * It keeps ADR 0005's rule that there are never more tasks than accumulators. `Tasks` never returns
+ * more than `most`, and a reduction reaches the pool only through `Run`, so no two bodies share an
+ * accumulator indexed by task.
  *
  * `Run` takes its body as a template parameter, and when a read is one task it calls it directly on
  * the calling thread. The pool's own std::function is paid once per task, outside the pixel loop,
- * which is the arrangement ADR 0005 records and the reason this must not grow a type-erased entry
- * point.
+ * as ADR 0005 records, so this must not grow a type-erased entry point.
  *
- * Cheap to make -- a reference and a count -- so a reduction whose accumulator's size depends on the
- * read makes one per read.
+ * Cheap to make (a reference and a count), so a reduction whose accumulator size depends on the read
+ * makes one per read.
  */
 class TaskSplit {
 public:

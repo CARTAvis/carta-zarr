@@ -547,10 +547,8 @@ void TestASampledRowSplitsAlongItToo() {
 // ---------------------------------------------------------------------------------------------
 // The blocks a pass cuts, and what it says as it fills them.
 //
-// These were the block emitter's, driven by a walk that read nothing and only said how far it got,
-// because the emitter and the walk were two things and the caller joined them. The pass is one
-// thing now, so they read real pixels -- and can say what the emitter's could not: that the
-// channels a block's walk reads are the channels the block is handed over as.
+// These read real pixels, so they can check that the channels a block's walk reads are the channels
+// the block is handed over as.
 
 // One hand-over, as the sink saw it.
 struct Handed {

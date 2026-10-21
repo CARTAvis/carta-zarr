@@ -13,7 +13,7 @@
 # fetched library this list does not.
 #
 # Each entry is the name FetchContent fetched it under, the name it goes by, and its notice files,
-# relative to its source and separated by commas. Where a project offers a choice of licence -- zstd
+# relative to its source and separated by commas. Where a project offers a choice of license -- zstd
 # is BSD or GPLv2, lz4's library BSD while its tools are GPL -- the file is the one for the library as
 # it is used here.
 set(CARTA_ZARR_THIRD_PARTY_NOTICES
@@ -36,7 +36,7 @@ set(CARTA_ZARR_THIRD_PARTY_NOTICES
 function(carta_zarr_write_third_party_notices deps output)
     string(CONCAT text "Third-party notices for carta-zarr\n\n"
                        "libcarta-zarr contains the following libraries, linked into it statically. Each is\n"
-                       "distributed under the licence that follows its name.\n")
+                       "distributed under the license that follows its name.\n")
     foreach(entry IN LISTS CARTA_ZARR_THIRD_PARTY_NOTICES)
         string(REPLACE "|" ";" fields "${entry}")
         list(GET fields 0 name)

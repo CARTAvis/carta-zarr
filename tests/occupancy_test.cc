@@ -305,8 +305,8 @@ void TestAlikeRowsAreReadTogether() {
 }
 
 // No footprint is more than one read can decode. A run wider than that is cut, rather than read in
-// one request -- which is what a region 80000 pixels wide once did, asking for 157 chunks, 628 MiB,
-// ten times the budget, with nothing to report or cancel from until it landed.
+// one request: for a region 80000 pixels wide, one request would be 157 chunks, 628 MiB, ten times
+// the budget, with no progress or cancellation until it landed.
 void TestNoFootprintIsMoreThanOneRead() {
     const auto occupancy = Built({Box(0, 0, 16, 16)}, 4, 4);
 
@@ -331,13 +331,6 @@ void TestNoFootprintIsMoreThanOneRead() {
     const auto cut = occupancy.Footprints(2);
     Require(cut.size() == 8, "four rows of four chunks were not cut into eight pieces of two");
 }
-
-// kMaxChunkIncidences, the other refusal, is not here, and the measurement is why: the smallest
-// input that trips it is 64 regions over a 1024 x 1024 chunk grid plus one more, which took 2.06 s
-// and 815 MB of resident memory to reach the check. The refusal exists to stop an allocation
-// nothing can serve, and a test of it has to make that allocation first. It was run once by hand
-// against this file's Occupancy::Of and reported "The regions together touch more chunks than one
-// reduction can index"; that is recorded here rather than paid for on every ctest run.
 
 void TestAGridTooLargeToIndexIsRefused() {
     // 65,536 chunks on a side, every one occupied, is 2^32 incidences, far past what one reduction

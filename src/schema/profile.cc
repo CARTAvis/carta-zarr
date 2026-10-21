@@ -20,11 +20,10 @@ std::string RejectionMessage(const std::vector<Diagnostic>& diagnostics, std::st
 
 Result<void> RequireOpenableDataset(const ProbeResult& probe, std::string_view location) {
     if (probe.kind != ProbeKind::supported_dataset) {
-        // Malformed and unrecognised are different answers, and a consumer acts on the difference:
-        // one is a file to complain about, the other is a file this library is not for. A dataset of
-        // a schema version this build does not read is a third: a file a newer build may open. And
-        // malformed is invalid_schema, not invalid_metadata, which is also what a root that will not
-        // parse is called: a consumer told the two apart only by probing the store a second time.
+        // Malformed and unrecognized are different answers, and a consumer acts on the difference:
+        // one is a broken file, the other a file this library is not for. A schema version this build
+        // does not read is a third: a file a newer build may open. Malformed is invalid_schema rather
+        // than invalid_metadata, so that it differs from a root that will not parse.
         ErrorCode code = ErrorCode::unsupported_schema;
         if (probe.kind == ProbeKind::invalid_dataset) {
             const bool version = !probe.diagnostics.empty() &&
@@ -34,10 +33,10 @@ Result<void> RequireOpenableDataset(const ProbeResult& probe, std::string_view l
         return Error{code, RejectionMessage(probe.diagnostics, "No built-in schema profile matched the Zarr store"),
                      std::string(location)};
     }
-    // A store the profile recognised and found nothing openable in. Not a rejection -- the profile
-    // matched -- so there are no diagnostics to report, and a consumer opening this would get a
-    // dataset it can do nothing with. The XRADIO profile answers no_match or invalid for such a store
-    // rather than match, so this is a profile's mistake, and it is the schema's answer all the same.
+    // A store the profile matched but found nothing openable in. It is not a rejection, so there are
+    // no diagnostics, and a consumer opening it would get a dataset it can do nothing with. The XRADIO
+    // profile answers no_match or invalid for such a store, so reaching this is a profile's mistake;
+    // it is still reported, as invalid_schema.
     if (probe.images.empty()) {
         return Error{ErrorCode::invalid_schema, "Supported schema has no image variables", std::string(location)};
     }
@@ -94,11 +93,11 @@ Result<ProbeResult> ProbeStore(const Store& store) {
     // match enumerates the store once.
     std::vector<SchemaInspection> matches;
     std::vector<SchemaProbeResult> invalid;
-    // What a profile that did not match had to say about the store anyway: a store of nothing but
-    // complex images is one the profile recognised the images of and will not open, and that is the
+    // What a profile that did not match had to say about the store anyway. In a store of nothing but
+    // complex images, the profile recognized the images and will not open them, and that is the
     // reason to give, not "nothing matched". A profile that found nothing it knew says nothing, so a
-    // store this library is simply not for still carries no diagnostic. The first profile to say
-    // anything is the one heard, as the first invalid one is below.
+    // store this library is not for carries no diagnostic. The first profile to say anything is the
+    // one reported, as with the first invalid one below.
     std::vector<Diagnostic> unmatched;
     for (const auto& entry : SchemaProfile::BuiltIn()) {
         auto inspection = entry.inspect(store);
@@ -116,9 +115,9 @@ Result<ProbeResult> ProbeStore(const Store& store) {
     }
 
     if (matches.size() > 1) {
-        // Unreachable while BuiltIn holds one entry, and the only thing here that a second profile
-        // turns on. ErrorCode::ambiguous_schema is not emitted anywhere yet, because this answers
-        // with a ProbeResult rather than an Error.
+        // Unreachable while BuiltIn holds one entry; only a second profile would reach it.
+        // ErrorCode::ambiguous_schema is not emitted anywhere yet, because this returns a ProbeResult
+        // rather than an Error.
         result.kind = ProbeKind::invalid_dataset;
         result.diagnostics.push_back(Diagnostic{
             DiagnosticCode::ambiguous_schema, "More than one built-in schema profile matched the Zarr store", {}});

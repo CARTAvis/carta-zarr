@@ -31,8 +31,8 @@ Writing, remote object stores and complex-valued images are outside the current
 supported set. A real-valued image of the aperture plane (`u`, `v`) opens, with an
 aperture coordinate in place of a direction. Listing the images in a dataset can show
 unsupported candidates, with diagnostics explaining why each cannot be opened.
-See [schema versions and reading rules](reference/schema-versions.md) for version
-selection and fallback diagnostics. Changes since 0.1 are listed in the [changelog](changelog.md).
+See [schema versions and reading rules](reference/schema-versions.md) for which stores
+are read and what a refused one reports. Changes since 0.1 are listed in the [changelog](changelog.md).
 
 ## Choose your next task
 

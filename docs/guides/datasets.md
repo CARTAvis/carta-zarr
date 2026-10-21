@@ -55,6 +55,6 @@ it larger, so show which one you got.
 ## Next steps
 
 - [List images and read a channel](reading.md) from the dataset.
-- Rewrite a real cube or synthesise one in other layouts with the
+- Rewrite a real cube or synthesize one in other layouts with the
   [benchmark generator](https://github.com/CARTAvis/carta-zarr/blob/dev/tools/zarr-bench/README.md).
 - Choose chunk and shard sizes for a workload with [storage tuning](../storage-tuning.md).

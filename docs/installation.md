@@ -140,7 +140,7 @@ the threads do.
 ## Link from another CMake project
 
 ```cmake
-find_package(CartaZarr 0.2 CONFIG REQUIRED)
+find_package(CartaZarr 0.3 CONFIG REQUIRED)
 target_link_libraries(your_target PRIVATE CARTA::zarr)
 ```
 
@@ -150,15 +150,15 @@ library; TensorStore is a private library dependency.
 
 ## Versions and distribution
 
-Before 1.0, `find_package(CartaZarr 0.2)` accepts only 0.2.x: a different minor
-version, such as 0.3, is not compatible. Record the exact library version your
+Before 1.0, `find_package(CartaZarr 0.3)` accepts only 0.3.x: a different minor
+version, such as 0.4, is not compatible. Record the exact library version your
 application uses, and rebuild when you change minor versions. Binary distributions must carry `LICENSE` and
 `THIRD_PARTY_NOTICES`, which the build writes from the sources of the ten
 libraries linked in and of the header-only `half`, and installs beside
 `LICENSE`.
 
-The current development version is 0.2.0. Applications built for 0.1 must update
-their CMake version requirement and rebuild against 0.2, because public descriptor
+The current development version is 0.3.0. Applications built for 0.2 must update
+their CMake version requirement and rebuild against 0.3, because public descriptor
 changes affect the ABI (the binary interface). The [changelog](changelog.md) lists
 the changes to check in your application.
 

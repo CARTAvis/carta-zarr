@@ -44,7 +44,7 @@ cmake --install build --prefix "$HOME/.local"
 ```
 
 ```cmake
-find_package(CartaZarr 0.2 CONFIG REQUIRED)  # before 1.0, finds 0.2.x and nothing else
+find_package(CartaZarr 0.3 CONFIG REQUIRED)  # before 1.0, finds 0.3.x and nothing else
 target_link_libraries(your_target PRIVATE CARTA::zarr)
 ```
 

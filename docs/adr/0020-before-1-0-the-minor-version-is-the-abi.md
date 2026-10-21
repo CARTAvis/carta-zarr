@@ -1,5 +1,12 @@
 # Before 1.0 the minor version is the ABI
 
+*Amended for 0.3.0 ([#69](https://github.com/CARTAvis/carta-zarr/issues/69)): a change to a public struct or a
+public signature no longer raises the minor in the commit that makes it. The changes between two
+releases are recorded under Unreleased in the CHANGELOG, and one commit raises the minor before the
+release, so that the version moves once however many changes the release holds. Between releases,
+`dev` is not ABI-stable: a binary built against it is rebuilt against the release. The rest of the
+decision is unchanged.*
+
 A release of this library says which other releases can stand in for it in three places: the soname a
 binary records when it links, the version node every exported symbol carries on ELF, and the package
 version file `find_package(CartaZarr <version>)` asks. Until 1.0 all three name the major and the

@@ -15,7 +15,8 @@
 
 """Find the layout, and the carta-backend settings, that read fastest on this storage.
 
-Driven by a TOML file (see example-sweep.toml), in four stages that each write into one results.csv:
+Driven by a TOML file (see example-sweep.toml), in five stages, the last only when asked for, that each
+write into one results.csv:
 
   stage1    Every layout, written by generate.py in turn, read by carta-zarr-bench at the baseline
             settings with one user and with the target number, then deleted. The source's own

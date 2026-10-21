@@ -20,20 +20,13 @@ namespace carta::zarr::internal {
 /**
  * A plane selection that an image has agreed to serve.
  *
- * The three fields of a `PlaneSelection` are one question -- can this image give me these planes --
- * and it was being asked in pieces. The spectral third was checked by the readable image, the other
- * two thirds by a stanza written out once per reduction in two different wordings, and a cube
- * histogram, which has no bins or bounds of its own to check, built a stand-in `HistogramRequest`
- * with `bins = 1` over `[0, 1]` for no reason but to reach one of those stanzas. `cad6c8a` fixed the
- * strided-range guard in three files.
- *
- * So the question is asked here, once, and the answer is a value rather than a `Result<void>`: a
- * `CheckedPlanes` is the only way to say a selection has been checked, and the only way to get one
- * is to check it. `PlanPass` and both reductions take one instead of three loose numbers, which is
- * how they stop being able to plan a pass over planes nobody looked at.
+ * The three fields of a `PlaneSelection` answer one question: can this image give these planes? It
+ * is checked here, once, and the answer is a value rather than a `Result<void>`. The only way to get
+ * a `CheckedPlanes` is to check a selection, so `PlanPass` and the reductions, which take one, cannot
+ * plan a pass over unchecked planes.
  *
  * Takes a descriptor and an `AxisMap` rather than a `ReducibleImage`, because those are what the
- * question is about and what a test can stand up with nothing linked behind it -- ADR 0006.
+ * check is about, and a test can build them with nothing linked behind them (ADR 0006).
  */
 class CheckedPlanes {
 public:
@@ -43,8 +36,8 @@ public:
                                     const PlaneSelection& planes) {
         const auto& node = descriptor.id;
 
-        // Compared by dividing the room that is left rather than by multiplying out the span:
-        // (count - 1) * stride wraps, and a wrapped span passes a check it should fail.
+        // Divides the room that is left rather than multiplying out the span: (count - 1) * stride
+        // can wrap, and a wrapped span would pass a check it should fail.
         const auto channels = descriptor.axes.at(map.spectral).length;
         if (planes.spectral.stride == 0 || planes.spectral.count == 0 || planes.spectral.start >= channels ||
             planes.spectral.count - 1 > (channels - 1 - planes.spectral.start) / planes.spectral.stride) {

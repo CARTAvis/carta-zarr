@@ -9,9 +9,9 @@
 
 // What a pixel read asks for, as opposed to how it is served.
 //
-// Split from pixel_reader.h so that a caller deciding what to read does not take a dependency on
-// the thing that reads it. A pass needs all of this and none of the Store, which is what lets a
-// reduction run against pixels that were never on disk.
+// Split from pixel_reader.h so that a caller deciding what to read does not depend on what reads it.
+// A pass needs all of this and none of the Store, which lets a reduction run against pixels that were
+// never on disk.
 
 #include "carta-zarr/read.h"
 #include "carta-zarr/result.h"
@@ -30,8 +30,8 @@ Result<void> CheckReadControl(const ReadControl& control, std::string_view node)
 //
 // An ordinary read wants logical order, because its destination is the caller's and its contract is
 // a dense image in the order the library reports. A pass wants stored order, because a plane that
-// arrives the way the store wrote it is never transposed, and the visitor pays for the difference in
-// nothing but strides.
+// arrives the way the store wrote it is never transposed; the visitor handles the difference with
+// strides.
 enum class DestinationOrder {
     logical,
     stored,
@@ -48,10 +48,10 @@ class PixelSelection;
 Result<PixelSelection> BuildSelection(const ImageDescriptor& descriptor, const ReadRequest& request,
                                       DestinationOrder order);
 
-// `part` of `whole`, with its destination where `part` lands in a dense logical-order destination of
-// all of `whole`: each step along an axis moves as far as it does in that, and the first element is
-// where `part` begins in it. What a segment is read through, straight into its piece's place, so
-// that it needs no buffer of its own and no copy. `part` must select only elements of `whole`.
+// `part` of `whole`, with its destination laid out as part of a dense logical-order destination for
+// all of `whole`: each step along an axis moves as far as it does there, and the first element is
+// where `part` begins. A segment is read through this straight into its place in the piece, with no
+// buffer of its own and no copy. `part` must select only elements of `whole`.
 Result<PixelSelection> BuildSelectionWithin(const ImageDescriptor& descriptor, const ReadRequest& part,
                                             const ReadRequest& whole);
 
@@ -65,11 +65,9 @@ Result<PixelSelection> BuildSelectionWithin(const ImageDescriptor& descriptor, c
  *
  * Only BuildSelection makes one, and it makes only well-formed ones: every vector has the array's
  * rank, the permutation is a permutation, no stride is zero, no count is zero, and the element count
- * fits. A reader used to check all of that again, because a struct of six public vectors could be
- * handed to it in any state; nothing could, and the check never fired. What a reader of pixels still
- * checks is whether the caller's destination holds this many elements, which is about the caller's
- * buffer rather than about the selection, and which a reader writing through a pointer must not take
- * on trust.
+ * fits. A reader of pixels still checks that the caller's destination holds this many elements:
+ * that is about the caller's buffer, not the selection, and a reader writing through a pointer must
+ * not take it on trust.
  */
 class PixelSelection {
 public:

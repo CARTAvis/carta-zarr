@@ -28,10 +28,9 @@ Result<std::vector<double>> ReadNumericValues(const std::filesystem::path& array
             return opened.error();
         }
 
-        // Every real Zarr type a coordinate may be stored in is read as double. Converting rather
-        // than requiring float64 is what the probe already promises: it accepts any real type, and
-        // an image whose coordinates are float32 or integer has to open rather than fail here.
-        // Conversion rides the read's own copy, as it does for pixels.
+        // Every real Zarr type a coordinate may be stored in is read as double. The probe accepts
+        // any real type, so an image whose coordinates are float32 or integer has to open rather
+        // than fail here. The conversion happens in the read's own copy, as it does for pixels.
         auto converted = tensorstore::Cast(opened.value(), tensorstore::dtype_v<double>);
         if (!converted.ok()) {
             return Error{ErrorCode::unsupported_data_type,

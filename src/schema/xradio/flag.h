@@ -10,8 +10,7 @@
 // Which variable supplies an image's pixel mask, and what a variable has to be before it can.
 //
 // The flag is the variable on disk; the pixel mask is what it becomes once a read folds it into the
-// pixels. That rule lives in src/pixel_mask.h and is a different question from this one -- this
-// module only chooses the variable.
+// pixels. That rule lives in src/pixel_mask.h. This module only chooses the variable.
 
 #include "carta-zarr/descriptor.h"
 #include "carta-zarr/error.h"
@@ -46,9 +45,8 @@ inline bool HoldsBooleans(const zarr::ArrayMetadata& metadata) {
  * The read applies the mask element by element against the same selection it read pixels with, so
  * anything less than the image's own dimensions in the image's own order is not a mask of it.
  *
- * Inline, and part of this module's interface rather than private to it, because it is the whole of
- * what a declared flag is checked against: the three ways a mask can be refused are answerable from
- * two pieces of metadata, with no store to stand up.
+ * Inline, and part of this module's interface, because it is everything a declared flag is checked
+ * against: the three reasons to refuse a mask need only two pieces of metadata, with no store.
  */
 inline Result<void> RequireUsableFlag(const zarr::ArrayMetadata& flag, const zarr::ArrayMetadata& image,
                                       std::string_view node) {
@@ -69,10 +67,10 @@ inline Result<void> RequireUsableFlag(const zarr::ArrayMetadata& flag, const zar
  * The flag this image declares, checked as able to mask it, or an empty name when it declares none.
  *
  * Declared either by the image's own `flag` attribute or by a root `data_groups` entry whose `sky` is
- * this image; the attribute outranks a group. A declaration that cannot serve -- a flag that is
- * missing or unusable, or two groups naming different ones -- is an error. One function for both
- * DetermineFlag and the listing's qualification, so that an image is never listed openable over a
- * declaration that would refuse it when opened.
+ * this image; the attribute outranks a group. A declaration that cannot be used (a flag that is
+ * missing or unusable, or two groups naming different ones) is an error. DetermineFlag and the
+ * listing's qualification both call this, so an image is never listed as openable when its
+ * declaration would refuse it on opening.
  */
 Result<std::string> DeclaredFlag(const Store& store, const zarr::ArrayMetadata& image, std::string_view image_id);
 
@@ -80,15 +78,15 @@ Result<std::string> DeclaredFlag(const Store& store, const zarr::ArrayMetadata& 
  * The flag variable supplying this image's pixel mask, or an empty name when it has none.
  *
  * A flag is declared either by the image's own `flag` attribute or by a root `data_groups` entry
- * whose `sky` is this image -- which is the only place XRADIO's writer records it. A declared flag
- * is binding: an image naming one that cannot serve is closed rather than opened unmasked, because
- * reads apply the mask by default and an unusable mask reported as no mask would show flagged pixels
- * as valid -- the one failure a consumer has no way to notice. With nothing declared, a sky image has
- * no flag, and any other image's is the array XRADIO names FLAG_<image> when it can mask the image;
- * nothing is found by its shape alone. See ADR 0019.
+ * whose `sky` is this image, which is the only place XRADIO's writer records it. A declared flag is
+ * binding: an image naming one that cannot be used is closed rather than opened unmasked. Reads apply
+ * the mask by default, and treating an unusable mask as no mask would show flagged pixels as valid,
+ * which a consumer has no way to notice. With nothing declared, a sky image has no flag, and any
+ * other image's flag is the array XRADIO names FLAG_<image>, if it can mask the image. No flag is
+ * found by its shape alone. See ADR 0019.
  *
  * Takes the whole Store rather than a narrower interface: what varies underneath is the transport,
- * which already has two adapters, and a seam here would have exactly one. See ADR 0006.
+ * which already has two adapters, and a seam here would have only one. See ADR 0006.
  */
 Result<std::string> DetermineFlag(const Store& store, const zarr::ArrayMetadata& image, std::string_view image_id);
 

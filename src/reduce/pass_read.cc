@@ -6,10 +6,9 @@
 
 // The half of the pass that touches the reader.
 //
-// Separate from pass.cc so that what a pass decides stays linkable without it: PlanPass and the
-// arithmetic beside it reach no further than the descriptor and the geometry, and the test that
-// pins them compiles that translation unit alone, with no store, no transport and no TensorStore
-// behind them.
+// Separate from pass.cc so that the planning can be linked without it: PlanPass and the arithmetic
+// beside it need only the descriptor and the geometry, and their test compiles pass.cc alone, with no
+// store, transport or TensorStore.
 
 #include "pixel_mask.h"
 #include "reduce/pass.h"
@@ -38,9 +37,9 @@ Result<Slab> SlabWalk::ReadSlab(const SlabRequest& request) {
         read_request.axes.at(plan.map.time) = Range{plan.planes.time, 1, 1};
     }
 
-    // Take the plane in the order the store wrote it, so that it is never transposed. Read hands
-    // back logical order because its callers want a densely packed image; a pass wants whatever is
-    // cheapest to read, and pays for the difference in nothing but these strides.
+    // Take the plane in the order the store wrote it, so that it is never transposed. Read returns
+    // logical order because its callers want a densely packed image; a pass wants whatever is
+    // cheapest to read, and only needs these strides to handle the difference.
     auto selection = zarr::BuildSelection(descriptor, read_request, zarr::DestinationOrder::stored);
     if (!selection) {
         return selection.error();

@@ -4,10 +4,10 @@
    SPDX-License-Identifier: GPL-3.0-or-later
 */
 
-// How large a dataset is, which is a question about a dataset and not about a node, so it is not a
-// method on Store. Both halves of the answer, measured and declared, live here, and the measured
-// one walks the location the store resolved when it opened rather than parsing the string again:
-// a process that changed directory since would otherwise measure somewhere else.
+// How large a dataset is. This is a question about a dataset, not a node, so it is not a method on
+// Store. Both answers, measured and declared, live here. The measured one walks the location the
+// store resolved when it opened rather than parsing the string again, since a process that changed
+// directory in between would otherwise measure somewhere else.
 
 #include "store.h"
 #include "zarr/data_type.h"
@@ -42,9 +42,9 @@ Result<std::uint64_t> ElementSizeBytes(const zarr::ArrayMetadata& metadata, std:
 // holds, and what a caller gets when the store itself cannot be measured.
 //
 // Not a bound on what the store occupies, in either direction. It counts array data only, so the
-// per-node zarr.json documents and any sharding indices are missing from it -- in this repo's own
-// fixtures those outweigh the compressed chunks several times over -- while compression pushes the
-// other way. Which wins is a property of the store, and this function runs when the store could not
+// per-node zarr.json documents and any sharding indexes are missing from it (in this repository's
+// own fixtures those outweigh the compressed chunks several times over), while compression pushes
+// the other way. Which wins depends on the store, and this function runs when the store could not
 // be read. See ADR 0008.
 
 Result<std::uint64_t> TotalArraySizeBytes(const Store& store) {
@@ -56,18 +56,17 @@ Result<std::uint64_t> TotalArraySizeBytes(const Store& store) {
     std::uint64_t total_bytes = 0;
     std::size_t array_count = 0;
     for (const auto& entry : inventory.value()) {
-        // A group holds no array data, and neither does a node that does not say it is an array --
-        // including one whose document would not parse, which might have been an array and cannot
-        // be sized either way. Leaving it out makes the total smaller than it might be, which a
-        // declared size already does not claim to rule out (ADR 0008); refusing would leave a
-        // dataset that opens with no size at all.
+        // A group holds no array data, and neither does a node that does not say it is an array,
+        // including one whose document would not parse: it might have been an array, but cannot be
+        // sized. Leaving it out can make the total too small, which a declared size does not rule out
+        // anyway (ADR 0008); refusing would leave a dataset that opens with no size at all.
         if (entry.kind != NodeKind::array) {
             continue;
         }
         ++array_count;
 
-        // An array this total knows is there and cannot size makes the total wrong rather than
-        // smaller, so it refuses instead of leaving the array out.
+        // A known array that cannot be sized would make the total wrong rather than only smaller,
+        // so this refuses instead of leaving the array out.
         const auto& node = entry.name;
         const auto& array_metadata_result = *entry.array;
         if (!array_metadata_result) {
@@ -110,15 +109,12 @@ Result<DatasetSize> DatasetSizeBytes(const Store& store, std::chrono::steady_clo
     }
     // Every way of failing to measure leaves the same thing to answer with: the transport has no
     // bytes to count, the deadline passed part-way through, a directory refused to be enumerated,
-    // or the total overflowed. The declared size is a more useful answer than an error to all four,
-    // and is what this reported before there was an error to swallow -- the walk was a bool and
-    // every one of its failure paths returned false.
+    // or the total overflowed. For all four, the declared size is a more useful answer than an error.
     //
-    // What is lost on the way is which of the four it was, and that is what would be needed to say
-    // anything about the number that comes back: a deadline that expired says the store is large,
-    // so the declared size is almost certainly above what it occupies, while a directory that
-    // refused to be read says nothing at all. The caller is told which question was answered, not
-    // how the answers compare.
+    // What is lost is which of the four it was, which is what would say something about the number
+    // returned: an expired deadline means the store is large, so the declared size is almost
+    // certainly above what it occupies, while a directory that could not be read says nothing. The
+    // caller is told which question was answered, not how the answers compare.
     auto declared = TotalArraySizeBytes(store);
     if (!declared) {
         return declared.error();

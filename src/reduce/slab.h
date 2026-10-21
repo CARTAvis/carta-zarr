@@ -7,9 +7,9 @@
 #ifndef CARTA_ZARR_SRC_REDUCE_SLAB_H_
 #define CARTA_ZARR_SRC_REDUCE_SLAB_H_
 
-// In a header of its own because more than the walk speaks it: the pass hands one to a visitor, and
-// a reduction's accumulation takes one, and neither the accumulation nor its tests should have to
-// include the walk -- its pixel source seam and its reader -- to say what a read of pixels is.
+// In a header of its own because more than the walk uses it: the pass hands one to a visitor, and a
+// reduction's accumulation takes one. Neither the accumulation nor its tests should have to include
+// the walk, with its pixel source seam and its reader, just to name a read of pixels.
 
 #include "reduce/pass_plan.h"
 
@@ -28,9 +28,9 @@ namespace carta::zarr::internal {
  * wants planes loops over `channel_count` itself, which costs it nothing.
  */
 struct Slab {
-    // Where this slab starts in the channel range its walk was given, which is what a visitor
-    // accumulating into a block of its own indexes by. Set by the walk, not by the reader: the
-    // reader is given an absolute index and has nothing to measure a relative one against.
+    // Where this slab starts in the channel range its walk was given, which a visitor accumulating
+    // into its own block indexes by. Set by the walk, not by the reader: the reader is given an
+    // absolute index and does not know where the range starts.
     BlockChannel first_channel;
     std::uint64_t channel_count = 0;
     const float* pixels = nullptr;

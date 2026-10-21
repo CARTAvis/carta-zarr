@@ -32,11 +32,11 @@ struct ReadAheadStats {
     // Runs decoded ahead, or started to be: one for each image a prefetch was for.
     unsigned prefetches = 0;
     // Of those, the ones a frame reached before they had finished. That frame waited for the decode
-    // under way rather than starting its own, so a prefetch caught up with is not one wasted -- only
-    // one that was started too late to hide the whole of its run.
+    // under way rather than starting its own, so such a prefetch is not wasted: it only started too
+    // late to hide all of its run.
     unsigned caught_up = 0;
-    // Whether reading ahead has stopped, for a frame late while a prefetch was under way or because
-    // it was cancelled. It does not start again.
+    // Whether reading ahead has stopped, because a frame was late while a prefetch was under way or
+    // because it was cancelled. It does not start again.
     bool stopped = false;
     // Whether a prefetch is being decoded now.
     bool under_way = false;
@@ -51,26 +51,26 @@ struct ReadAheadStats {
 // cube in 512 x 512 x 16 chunks stalled for up to 400 ms every sixteenth frame; decoding the next run
 // in the time the frames of this one left over hid every stall for one viewer.
 //
-// Only while that time is to be had. One prefetch is under way at a time, and once a frame is late
-// while one is, there are no more: with eight viewers animating that cube at once, prefetches that
-// kept ahead of every run still doubled the time of the frames played from the cache. A frame that
-// reaches a run still being decoded waits for that decode rather than starting its own; see
-// Image::Prefetch.
+// It reads ahead only while there is spare time. One prefetch runs at a time, and once a frame is
+// late while one runs, reading ahead stops: with eight viewers animating that cube at once,
+// prefetches that kept ahead of every run still doubled the time of the frames played from the cache.
+// A frame that reaches a run still being decoded waits for that decode rather than starting its own;
+// see Image::Prefetch.
 //
 // A handle like Image: copies share it, and the last of them to go cancels the prefetch under way and
 // waits for it. Nothing it starts outlives it.
 //
-// Threads: Served is called from one thread at a time -- the one that serves the frames -- and not from
-// two at once, even through two copies. Cancel and stats may be called from any thread, alongside it.
-// A prefetch runs on a thread of its own, and asks the cancellation_requested of the options each image
-// was given from there, so that callable must be safe to call from another thread.
+// Threads: call Served from one thread at a time, the one that serves the frames, even through two
+// copies. Cancel and stats may be called from any thread at the same time. A prefetch runs on a
+// thread of its own and calls each image's cancellation_requested from there, so that callable must be
+// safe to call from another thread.
 class CARTA_ZARR_EXPORT ReadAhead final {
 public:
     using Clock = std::chrono::steady_clock;
 
-    // How many frames ahead the next run is looked for, and so how many of the frames to come a
-    // caller need say. A run deeper than this is decoded ahead once its end is this near, which at
-    // CARTA's 5 frames a second is 13 s before it is needed. Measured, not configured: ADR 0014.
+    // How many frames ahead the next run is looked for, and so how many upcoming frames a caller
+    // needs to pass. A run deeper than this is decoded ahead once it is this near, which at CARTA's 5
+    // frames a second is 13 s before it is needed. Measured, not configured: ADR 0014.
     static constexpr std::size_t kUpcomingFrames = 64;
 
     ReadAhead(const ReadAhead&) = default;
@@ -80,24 +80,26 @@ public:
     ReadAhead& operator=(ReadAhead&& other) noexcept { return *this = other; }
     ~ReadAhead();
 
-    // Reading ahead of the animated `images`, each read with its options -- the cache a frame of it is
-    // read through is the one its runs are decoded into. AnimatedPlane::image is a position here.
+    // Reading ahead of the animated `images`, each read with its own options. Runs are decoded into
+    // the cache that the image's frames are read through. AnimatedPlane::image is an index into
+    // `images`.
     //
-    // Declined with buffer_too_small, saying which images and how much, unless each cache they read
-    // through holds two runs of every image that reads through it: the one playing and the one
-    // decoded ahead, or the second evicts the first. A run of 512 x 512 x 4 chunks of the cube above
-    // is 589 MB; of 512 x 512 x 16, 2.4 GB. invalid_argument when there are no images, or one has no
-    // plane to animate.
+    // Fails with buffer_too_small, naming the images and the size needed, unless each cache holds two
+    // runs of every image that reads through it: the one playing and the one decoded ahead. Otherwise
+    // the second would evict the first. A run of 512 x 512 x 4 chunks of the cube above is 589 MB; of
+    // 512 x 512 x 16, 2.4 GB. Fails with invalid_argument when there are no images, or one has no plane
+    // to animate.
     static Result<ReadAhead> For(const std::vector<std::pair<Image, ReadOptions>>& images);
 
-    // After every frame: when it began, whether it was late by the caller's own measure, the planes it
-    // showed and those of the frames to come, nearest first -- the first kUpcomingFrames of them are
-    // looked at. Returns at once; a prefetch it starts runs on a thread of its own.
+    // Call after every frame with when it began, whether it was late by the caller's own measure, the
+    // planes it showed, and the planes of the frames to come, nearest first. Only the first
+    // kUpcomingFrames of those are looked at. Returns at once; a prefetch it starts runs on a thread
+    // of its own.
     //
-    // A late frame that began while a prefetch was under way stops all reading ahead. Otherwise, with
-    // none under way, starts one that decodes, for each image shown, the first run to come that is not
-    // the run it shows now, unless that run has been decoded ahead already. Never fails: reading
-    // ahead that cannot be done is not done.
+    // A late frame that began while a prefetch was under way stops all reading ahead. Otherwise, if
+    // none is under way, it starts one that decodes, for each image shown, the next run after the one
+    // shown now, unless that run was already decoded ahead. Never fails: reading ahead that cannot be
+    // done is skipped.
     void Served(Clock::time_point began, bool late, const std::vector<AnimatedPlane>& shown,
                 const std::vector<std::vector<AnimatedPlane>>& upcoming);
 

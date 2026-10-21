@@ -40,24 +40,24 @@ public:
      * Open an array once and hand back the same handle afterwards.
      *
      * Opening is not cheap: it reads and parses the array's metadata and builds a driver. A pixel
-     * read is issued once per casacore cursor step, so paying that per call turns a fixed cost into
-     * a per-call one and dominates everything else -- measured at several milliseconds a call,
-     * against roughly a hundred milliseconds for a whole 4096-square plane read in one go.
+     * read is issued once per casacore cursor step, so opening per call would dominate everything
+     * else: several milliseconds a call, against about a hundred milliseconds for a whole
+     * 4096-square plane read at once.
      *
      * The handle is cheap to copy and safe to use from several threads, so callers get a copy and
      * the table is only locked around the lookup.
      *
-     * `through` is the pool a read has of its own, when it has one. A handle carries the pool it was
-     * opened against and keeps what that pool decoded alive, so it is kept in the pool's table and
-     * goes when the last holder of the pool lets go -- a pool is made for one task, and an image read
-     * through it may stay open through any number of them. A store kept them for a while instead,
-     * and five pools let go of left everything they had decoded alive until the image closed.
+     * `through` is the read's own pool, when it has one. A handle carries the pool it was opened
+     * against and keeps what that pool decoded alive, so it is kept in the pool's table and goes when
+     * the last holder of the pool lets go. A pool is made for one task, while an image read through it
+     * may stay open across many tasks, so keeping the handle with the store would keep every pool's
+     * decoded chunks alive until the image closed.
      *
-     * In the pool's table under this store, by its id: a pool outlives the stores read through it,
-     * and it once kept its handles by path alone, so a dataset closed, rewritten and opened again
-     * through the same pool was read through the handle opened for the one before -- the chunks it
-     * had decoded, and the data type it had then. An id is never reused, unlike an address. The
-     * handles of a store that has closed are dropped the next time the pool opens one.
+     * The pool's table keys a handle by this store's id as well as its path, because a pool outlives
+     * the stores read through it. Keyed by path alone, a dataset closed, rewritten and opened again
+     * through the same pool would be read through the old handle, with its old chunks and data type.
+     * An id, unlike an address, is never reused. The handles of a closed store are dropped the next
+     * time the pool opens one.
      */
     Result<tensorstore::TensorStore<>> OpenArray(const std::filesystem::path& array_path, std::string_view node,
                                                  const StoreContext* through = nullptr) const;
@@ -65,15 +65,13 @@ public:
     /**
      * The same resources with a cache pool of `bytes` of its own. See carta::zarr::CachePool.
      *
-     * A child context, so the thread pools are the shared ones -- a walk that ran on its own
-     * threads would compete with the session rather than take its turn.
+     * A child context, so the thread pools are the shared ones: a walk on its own threads would
+     * compete with the session rather than take its turn.
      *
-     * It keeps its own array table because a handle carries the pool it was opened against, so a
-     * read through this pool cannot reuse one opened with the shared pool -- one per store reading
-     * through it, see OpenArray. A new one each call,
-     * and kept by nothing here: whoever asked holds the only reference, so what the pool decoded is
-     * freed when they let go. The zero-byte pool used to be built once and kept for as long as the
-     * store, which cost nothing at that size and would keep gigabytes at the size a moment asks for.
+     * It keeps its own array table, because a handle carries the pool it was opened against, so a
+     * read through this pool cannot reuse a handle opened with the shared pool; see OpenArray. Each
+     * call makes a new one, and nothing here keeps it: whoever asked holds the only reference, so what
+     * the pool decoded is freed when they let go.
      */
     Result<StoreContextPtr> WithCachePool(std::size_t bytes) const;
 
@@ -97,8 +95,8 @@ private:
     mutable std::map<std::pair<std::uint64_t, std::string>, Opened> _arrays;
 };
 
-// How CachePool's implementation reaches the context it reads through, which is internal and has no
-// business in the public header.
+// How CachePool's implementation reaches the context it reads through, which is internal and does
+// not belong in the public header.
 struct CachePoolAccess {
     static const StoreContextPtr& StoreContextOf(const CachePool& pool);
 };
@@ -129,10 +127,9 @@ inline const StoreContextPtr& CachePoolAccess::StoreContextOf(const CachePool& p
 /**
  * Open the Zarr array held in a located directory.
  *
- * The one place this library says what its arrays are made of -- zarr3 over a file kvstore -- so a
- * transport that reaches bytes some other way has one function to change rather than a search to
- * run. ADR 0004 records why the transport still hands up a filesystem path for one to be built
- * from, and what that costs.
+ * The one place this library says what its arrays are made of (zarr3 over a file kvstore), so a
+ * transport that reaches bytes some other way has one function to change. ADR 0004 records why the
+ * transport still returns a filesystem path to build one from, and what that costs.
  *
  * With a context the handle comes from that context's table and is shared. Without one, TensorStore
  * default resources are used and nothing is kept; that is what a probe gets, and a probe opens no

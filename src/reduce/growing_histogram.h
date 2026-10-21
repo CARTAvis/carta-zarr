@@ -39,9 +39,9 @@ public:
         if (!_seeded) {
             // A first range around the first pixel seen, as narrow as a range can usefully be: one
             // bin per float, at the spacing of the floats there. The range only ever grows, so a
-            // guess that is too wide is permanent while one that is too narrow costs a few merges and
-            // then fits -- each merge doubles it, so reaching any spread the pixels have is a few
-            // dozen, once, against a cube of billions of pixels.
+            // first range that is too wide is permanent, while one that is too narrow costs a few
+            // merges. Each merge doubles it, so reaching any spread takes a few dozen merges, once,
+            // against a cube of billions of pixels.
             //
             // A first pixel of exactly zero seeds at the least denormal, which is as narrow as it
             // gets: about a hundred and fifty merges to reach a spread of one. A range of zero width
@@ -72,11 +72,10 @@ public:
     // Re-aggregate over the range the caller wants, splitting each provisional bin between the
     // target bins it overlaps in proportion to how much of it each one covers.
     //
-    // Giving the whole of it to the bin its center falls in is the obvious thing, but the error
-    // that leaves is a bias rather than a wobble: every provisional bin straddling a target edge
-    // leans the same way, and nothing averages it out. Splitting assumes the pixels are spread
-    // evenly inside one provisional bin, which is the assumption the caller's own percentile
-    // already makes between target bins.
+    // Giving all of it to the bin its center falls in is the obvious choice, but its error is a bias
+    // rather than noise: every provisional bin straddling a target edge leans the same way, and
+    // nothing averages it out. Splitting assumes the pixels are spread evenly inside one provisional
+    // bin, which the caller's own percentile already assumes between target bins.
     //
     // Largest remainder, so the split still adds up: every pixel the walk binned comes out in some
     // target bin, which is what lets the caller compare the total against its own pixel count.
@@ -154,9 +153,8 @@ public:
     }
 
 private:
-    // Not inlined, and that is load-bearing rather than a hint: see the head of this file. It runs
-    // once per doubling of the range against a billion calls to Add, so nothing is lost by the
-    // call.
+    // Not inlined, and that matters: see the top of this file. It runs once per doubling of the
+    // range against a billion calls to Add, so the call costs nothing.
     [[gnu::noinline]] void Grow(bool upward) {
         const std::size_t half = _counts.size() / 2;
         std::vector<std::uint64_t> merged(_counts.size(), 0);

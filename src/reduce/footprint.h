@@ -14,14 +14,13 @@ namespace carta::zarr::internal {
 /**
  * One spatial footprint a run of slabs is read over, in the pass's own axes.
  *
- * `chunks` is what that footprint occupies in one chunk of the spectral axis, and it is doing two
- * jobs: it sizes the slab, because the budget is over chunk data rather than over the pixels kept,
- * and it is the unit progress is counted in. A caller that gets it wrong reads the right pixels and
- * reports a bar that lies.
+ * `chunks` is how many chunks the footprint covers in one chunk of the spectral axis. It does two
+ * jobs: it sizes the slab, because the budget counts chunk data rather than the pixels kept, and it
+ * is the unit progress is counted in. If it is wrong, the right pixels are read but the reported
+ * progress is wrong.
  *
- * In a header of its own because two modules speak it: the walk reads a footprint, and the
- * occupancy is what forms a reduction's. Neither should have to include the other to say what one
- * is.
+ * In a header of its own because two modules use it: the walk reads a footprint, and the occupancy
+ * builds a reduction's. Neither has to include the other.
  */
 struct SlabFootprint {
     std::uint64_t u_start = 0;

@@ -20,20 +20,18 @@
 namespace carta::zarr::internal {
 
 // The seam between a Zarr hierarchy and where its bytes live. A Transport supplies raw access: it
-// hands a node's document up verbatim and never decides what a node means. Keeping interpretation
-// above the seam is deliberate -- it is what stops a test transport and the filesystem transport
-// from disagreeing about the very metadata the tests exist to pin down.
+// returns a node's document verbatim and never decides what a node means. Interpretation stays above
+// the seam so that a test transport and the filesystem transport cannot disagree about the metadata
+// the tests check.
 //
-// One transport does parse, and it is worth naming rather than denying: FilesystemTransport reads
-// `node_type` out of a node's document while listing, to know whether to descend into it. The
-// alternative is walking the chunk files, of which a real dataset has millions. It parses to decide
-// where to walk and never to decide what anything means, and the document it hands up is the bytes
-// it found; a document it cannot parse is passed on for Store to diagnose.
+// One exception: while listing, FilesystemTransport reads `node_type` from a node's document to know
+// whether to descend into it, rather than walk the chunk files, of which a real dataset has millions.
+// It parses only to decide where to walk. The document it returns is the bytes it found, and a
+// document it cannot parse is passed on for Store to diagnose.
 //
-// Node names reaching a Transport have already been validated and normalized by Store -- including
-// through Store::ResolveArrayDirectory, which did not always do so -- so every Transport is held to
-// one rule about what a legal node path is. A Transport may check again; it must not have a second
-// opinion.
+// Store validates and normalizes every node name before it reaches a Transport, so all transports
+// follow one rule for what a legal node path is. A Transport may check again, but must not apply a
+// different rule.
 class Transport {
 public:
     Transport() = default;
@@ -51,25 +49,23 @@ public:
     // carries no consolidated metadata.
     virtual Result<std::vector<std::string>> ListNodes() const = 0;
 
-    // Where a node's array lives, as a filesystem path. This is the one place the seam is not
-    // about bytes: a transport holding no filesystem data reports unsupported_transport rather than
-    // pretending TensorStore or the string decoder can reach it, which means such a transport can
-    // serve a probe and a discovery but cannot open an image. ADR 0004 records what that costs and
-    // why the seam still has this shape.
+    // Where a node's array lives, as a filesystem path. This is the one place the seam is not about
+    // bytes: a transport with no filesystem data reports unsupported_transport, since TensorStore and
+    // the string decoder cannot reach it. Such a transport can serve a probe and a discovery but
+    // cannot open an image. ADR 0004 records what that costs and why the seam keeps this shape.
     //
     // The path is absolute and does not depend on the process's working directory: an image is read
-    // long after it is opened, and a store that answered relatively would hand out locations that
-    // stop meaning the same thing. Nothing above or below this normalizes it again.
+    // long after it is opened, and a relative path could later point somewhere else. Nothing above or
+    // below this normalizes it again.
     virtual Result<std::filesystem::path> ArrayDirectory(std::string_view node) const = 0;
 
     // How many bytes this store occupies where it lives, counting everything: chunks, shards and
     // metadata, not only what the arrays logically hold.
     //
-    // Here rather than above the seam because it is the one question about a store that only the
-    // place the bytes live can answer. A facade that walked a directory itself would be holding a
-    // second opinion about what a location means, and a weaker one -- it would not have the
-    // absolute path OpenFilesystemTransport resolved, so a process that changed directory between
-    // opening the store and asking its size would measure somewhere else.
+    // Here rather than above the seam because only the place the bytes live can answer it. A facade
+    // walking a directory itself would not have the absolute path OpenFilesystemTransport resolved, so
+    // a process that changed directory between opening the store and asking its size would measure
+    // somewhere else.
     //
     // Reports `cancelled` when the deadline passes mid-walk, and `unsupported_transport` when the
     // transport has no stored bytes to count. Pure virtual for the same reason ArrayDirectory is: a

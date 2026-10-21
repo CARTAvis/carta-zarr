@@ -10,11 +10,9 @@
 // The stored layout, in the order the library reads.
 //
 // A StorageLayout is what the array says about itself, in stored order. A ChunkGeometry is the same
-// facts in logical order, which is the order a schema profile chose and the order every read and
-// every pass works in. Turning one into the other is a rule about a descriptor and belongs beside
-// the descriptor rather than in the facade that happened to need it first: no handle, no store, no
-// context is involved, and the two cases worth checking -- a sharded array, and one whose stored
-// order is not the logical one -- needed a directory tree to reach while it lived there.
+// facts in logical order, the order a schema profile chose and every read and pass works in. The
+// conversion needs only a descriptor, with no handle, store or context, so it lives here where it
+// can be tested on its own: a sharded array, and one whose stored order is not the logical one.
 
 #include "carta-zarr/descriptor.h"
 
@@ -30,9 +28,8 @@ namespace carta::zarr::internal {
 // parsed, so a mismatch is a caller that built a layout some other way -- `at` throws, and
 // Dataset::OpenImage is wrapped in Guarded, so it reaches that caller as invalid_metadata.
 //
-// Said with `at` rather than filled in. Falling back to the axis length would turn "no layout here"
-// into a geometry claiming one chunk covers the whole image -- a lie a consumer cannot tell from an
-// image that really is stored that way.
+// It uses `at` rather than filling in a default. Falling back to the axis length would report one
+// chunk covering the whole image, which a consumer cannot tell from an image really stored that way.
 inline ChunkGeometry BuildChunkGeometry(const ImageDescriptor& descriptor, const zarr::StorageLayout& layout) {
     ChunkGeometry geometry;
     geometry.sharded = layout.sharded;

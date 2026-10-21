@@ -19,9 +19,8 @@ namespace carta::zarr::internal {
 // Whether a read of this image folds its pixel mask into the pixels: when the image has one, unless
 // the caller declined it.
 //
-// Stated here, beside what folding it in means, for the reason that is stated once: Image::Read and
-// the pass both ask it, and a read that disagreed with a reduction about which pixels exist is the
-// one failure neither reports. They asked it in two places, each writing out the same conjunction.
+// Image::Read and the pass both ask this, so it is answered once: a read and a reduction that
+// disagreed about which pixels exist would be a failure neither reports.
 inline bool AppliesPixelMask(const ReadOptions& options, const ImageDescriptor& descriptor) noexcept {
     return options.apply_pixel_mask && !descriptor.pixel_mask_id.empty();
 }
@@ -29,17 +28,14 @@ inline bool AppliesPixelMask(const ReadOptions& options, const ImageDescriptor& 
 /**
  * Drop every pixel its mask excludes, by replacing it with NaN.
  *
- * What a byte of a pixel mask means belongs to the schema profile, which is also what chose the
- * flag variable the bytes came from -- see DetermineFlag in schema/xradio/flag.h. The rule
- * is stated once here rather than at each place that reads pixels, so that a profile disagreeing
- * about it has one line to change instead of a search to run. XRADIO writes a flag whose true means
- * the pixel is flagged -- its CASA reader inverts casacore's mask, whose true is a good pixel -- so a
- * nonzero byte is the pixel to drop. See ADR 0019.
+ * What a byte of a pixel mask means is the schema profile's decision, as is which flag variable the
+ * bytes come from (see DetermineFlag in schema/xradio/flag.h). The rule is written once here rather
+ * than at each place that reads pixels. In XRADIO a flag's true means the pixel is flagged (its CASA
+ * reader inverts casacore's mask, whose true is a good pixel), so a nonzero byte is a pixel to drop.
+ * See ADR 0019.
  *
- * Folding the flag into the pixels is what lets everything downstream ignore it: a flagged pixel
- * and a NaN pixel mean the same thing to a statistic, to a histogram, and to the consumer's own
- * arithmetic. Image::Read and the pass both do this, and a read that disagreed with a reduction
- * about which pixels exist is the one failure neither reports.
+ * Folding the flag into the pixels lets everything downstream ignore it: a flagged pixel and a NaN
+ * pixel mean the same thing to a statistic, to a histogram, and to the consumer's own arithmetic.
  */
 inline void ApplyPixelMask(float* pixels, const std::uint8_t* mask, std::size_t count) {
     for (std::size_t i = 0; i < count; ++i) {

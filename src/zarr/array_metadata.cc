@@ -35,9 +35,9 @@ const nlohmann::json* FindCodec(const nlohmann::json* codecs, std::string_view n
     return nullptr;
 }
 
-// Whether every codec in a chain that names itself does so with a string. FindCodec matches codecs
-// by name, and a name of any other type throws out of that lookup rather than failing to match --
-// so a chain is held to this before anything looks a codec up in it.
+// Whether every codec in a chain that has a name has a string one. FindCodec matches codecs by name,
+// and a name of any other type throws out of that lookup rather than failing to match, so a chain is
+// checked for this before any codec is looked up in it.
 bool CodecNamesAreStrings(const nlohmann::json& codecs) {
     return std::all_of(codecs.begin(), codecs.end(), [](const auto& codec) {
         return !codec.is_object() || !codec.contains("name") || codec.at("name").is_string();
@@ -58,7 +58,7 @@ std::string FindCompressor(const nlohmann::json* codecs) {
 
 // The axis order a transpose codec writes in, as the decoded axis each encoded axis is: encoded
 // axis i is decoded axis order[i]. Nothing when the order is not a permutation of `rank` axes. "C"
-// and "F" are the spellings Zarr v3 had before it took a list, and TensorStore still reads them.
+// and "F" are the forms Zarr v3 used before it took a list, and TensorStore still reads them.
 std::optional<std::vector<std::size_t>> TransposeOrder(const nlohmann::json& codec, std::size_t rank) {
     if (!codec.contains("configuration") || !codec.at("configuration").is_object() ||
         !codec.at("configuration").contains("order")) {
@@ -93,14 +93,13 @@ std::optional<std::vector<std::size_t>> TransposeOrder(const nlohmann::json& cod
 
 // Reads the inner chunk shape and the compressor that applies to it out of a sharding codec that
 // ParseArrayMetadata has already accepted: the configuration is an object, its chunk_shape is an
-// array of positive integers, and it has the array's rank. Nothing here checks that again, because
-// the only way to reach this function is through metadata that parse turned away otherwise -- and
-// both live in this file, so there is no seam for a second caller to arrive through.
+// array of positive integers, and it has the array's rank. Nothing here checks that again: this
+// function is only reached through metadata the parse accepted, and both live in this file.
 //
-// The inner chunk shape is of the array as it reaches the sharding codec, which is after every
-// transpose before it in the chain, and is put back on the axes a read names. Taken as it stands, a
-// transposed array's [4,1] was reported for chunks that are [1,4], and a prefetch of a plane decoded
-// a quarter of the chunks the plane is in. Every transpose here was checked by the parse.
+// The inner chunk shape is of the array as it reaches the sharding codec, after every transpose
+// before it in the chain, so it is mapped back onto the axes a read names. Taken as it stands, a
+// transposed array's [4,1] would be reported for chunks that are [1,4], and a prefetch of a plane
+// would decode a quarter of the chunks the plane is in. The parse checked every transpose here.
 void ApplyShardingLayout(const nlohmann::json& codecs, const nlohmann::json& sharding, StorageLayout& layout) {
     layout.sharded = true;
     layout.shard_shape = std::move(layout.chunk_shape);
@@ -356,14 +355,15 @@ Result<ArrayMetadata> ParseArrayMetadata(const nlohmann::json& metadata, std::st
         result.chunk_shape.push_back(chunk.get<std::uint64_t>());
     }
 
-    // A sharded array's chunk_grid describes the shard; the chunks that are actually decoded are
-    // named inside the sharding codec, and they are checked here for the same reason the outer ones
-    // are -- this is where an array that cannot be read is turned away, and an inner chunk shape
-    // that is not a positive extent of the array's rank describes nothing.
+    // A sharded array's chunk_grid describes the shard; the chunks that are actually decoded are named
+    // inside the sharding codec, and they are checked here for the same reason as the outer ones: this
+    // is where an array that cannot be read is turned away, and an inner chunk shape that is not
+    // positive extents of the array's rank describes nothing.
     //
-    // Checked and not kept: ParseStorageLayout reads it out when someone asks how the array is
-    // stored. That is a second walk over a handful of integers, once per array, and the alternative
-    // is a field here that one caller wants.
+    // Checked but not kept: ParseStorageLayout reads it again when asked how the array is stored,
+    // which is a second walk over a few integers, once per array, rather than a field here for one
+    // caller.
+    //
     // A transpose's order says which axis is which from there on, the sharding codec's chunk shape
     // included, so one that is not a permutation of the array's axes describes nothing either.
     for (const auto& codec : result.codecs) {

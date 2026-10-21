@@ -21,8 +21,8 @@
 namespace carta::zarr::internal {
 namespace {
 
-// What a carta-zarr array is, stated once. Every array this library reads -- pixels, flags and
-// coordinate values alike -- is opened through here.
+// How a carta-zarr array is opened, written once. Every array this library reads (pixels, flags and
+// coordinate values alike) is opened here.
 Result<tensorstore::TensorStore<>> OpenZarr3File(const std::string& path, const tensorstore::Context& context,
                                                  std::string_view node) {
     auto spec = tensorstore::Spec::FromJson({
@@ -47,7 +47,7 @@ Result<tensorstore::TensorStore<>> OpenZarr3File(const std::string& path, const 
     return std::move(opened).value();
 }
 
-// A pool of `bytes`, said once for the session's pool and for a read's own.
+// A pool of `bytes`, for the session's pool and for a read's own.
 nlohmann::json CachePoolSpec(std::size_t bytes) {
     return {{"total_bytes_limit", bytes}};
 }
@@ -86,7 +86,7 @@ Result<tensorstore::TensorStore<>> StoreContext::OpenArrayOf(const StoreContext&
     }
 
     const std::scoped_lock lock(_arrays_mutex);
-    // What stores that have closed left here: nothing will ask for it again.
+    // Drop what stores that have closed left here: nothing will ask for it again.
     for (auto entry = _arrays.begin(); entry != _arrays.end();) {
         entry = entry->second.store.expired() ? _arrays.erase(entry) : std::next(entry);
     }
@@ -117,9 +117,8 @@ Result<StoreContextPtr> StoreContext::WithCachePool(std::size_t bytes) const {
 Result<StoreContextPtr> MakeStoreContext(const ContextOptions& options) {
     nlohmann::json spec = nlohmann::json::object();
     if (options.cache_bytes) {
-        // Zero is a size like any other here: it is the pool that holds nothing, which is what a
-        // caller declining the cache asks for. No value at all is the only thing that leaves
-        // TensorStore's default in place.
+        // Zero is a size like any other here: the pool that holds nothing, which a caller declining
+        // the cache asks for. Only no value leaves TensorStore's default in place.
         // NOLINTNEXTLINE(cppcoreguidelines-pro-bounds-avoid-unchecked-container-access)
         spec["cache_pool"] = CachePoolSpec(*options.cache_bytes);
     }

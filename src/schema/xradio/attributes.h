@@ -9,21 +9,18 @@
 
 // Reading a value out of an XRADIO attribute object, without deciding what it means.
 //
-// Shared rather than file-local because the things that interpret those attributes are worth
-// compiling on their own, and each of them needs the same accessors.
+// Shared rather than file-local because the modules that interpret those attributes are compiled on
+// their own, and each needs the same accessors.
 //
-// Two families, and the difference is what absence means to the caller. `Attribute...` answers with
-// a value and spells absence as the empty one, which is what a descriptor field that defaults to
-// empty wants. `Member...` answers with a pointer or an optional, for a caller that has to know
-// whether the attribute was there before it goes further in -- an XRADIO measure nests its number
-// under `data` and its units under `attrs`, so most of this file's callers are walking downwards
-// and need the distinction.
+// Two families, which differ in what absence means. `Attribute...` returns a value, and an empty one
+// when the attribute is absent, which suits a descriptor field that defaults to empty. `Member...`
+// returns a pointer or an optional, for a caller that needs to know whether the attribute is there
+// before going further in: an XRADIO measure nests its number under `data` and its units under
+// `attrs`, so most callers walk downwards.
 //
-// `Member` hands back whatever is under the name; `MemberObject`, `MemberArray` and `MemberNumber`
-// hand back nothing unless it is of that kind. Asking for the kind is the common case -- a caller
-// that reaches into a member is about to assume it is an object -- and stating it here is what
-// keeps that assumption from being a separate `&& member->is_object()` at every call site, where
-// forgetting it throws out of nlohmann rather than reporting anything.
+// `Member` returns whatever is under the name; `MemberObject`, `MemberArray` and `MemberNumber`
+// return nothing unless it is of that kind. Checking the kind here saves a separate
+// `&& member->is_object()` at every call site, where forgetting it would throw out of nlohmann.
 
 #include <nlohmann/json.hpp>
 

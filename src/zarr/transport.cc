@@ -19,18 +19,18 @@
 namespace carta::zarr::internal {
 namespace {
 
-// A walk of the store that follows directory links, and where it must not. What a link points at is
-// in the store as much as what sits there -- a dataset's arrays are as often as not links to where
-// their bytes are, and its consolidated copy names what is under a linked group -- so a walk that
-// stopped at links lost those nodes and that size. A link to a directory the walk is already inside
-// is a cycle: it is neither listed, which would name that directory again, nor followed.
+// A walk of the store that follows directory links, except where it must not. What a link points at
+// is as much part of the store as what sits there: a dataset's arrays are often links to where their
+// bytes are, and its consolidated copy names what is under a linked group. A walk that stopped at
+// links would lose those nodes and their size. A link to a directory the walk is already inside is a
+// cycle: it is neither listed, which would name that directory again, nor followed.
 //
 // Holds the real path of each directory the walk is inside, the root first. An ordinary directory's
-// is its parent's and its name; only a link's is asked of the filesystem.
+// is its parent's plus its name; only a link's is resolved through the filesystem.
 //
-// A directory that refuses to be read is either passed over or the walk's error, as the walk says. A
-// listing passes over it: no node there could be read, and a later read says why. A size cannot: one
-// that leaves a directory out is not the store's size, however it is labeled.
+// A directory that cannot be read is either skipped or fails the walk, as the caller chooses. A
+// listing skips it: no node there could be read, and a later read says why. A size cannot: one that
+// leaves a directory out is not the store's size.
 enum class Unreadable { skipped, failed };
 
 class LinkedWalk {
@@ -44,8 +44,8 @@ public:
                    error),
           _ancestors{root} {}
 
-    // Whether the directory the walk is at is one to take: false, with recursion into it turned off,
-    // for a link back to a directory the walk is inside or one that cannot be resolved.
+    // Whether to take the directory the walk is at: false, with recursion into it turned off, for a
+    // link back to a directory the walk is inside, or one that cannot be resolved.
     bool Enter() {
         const auto& path = iterator->path();
         _ancestors.resize(static_cast<std::size_t>(iterator.depth()) + 1);
@@ -87,11 +87,11 @@ Result<std::filesystem::path> NormalizeLocation(std::string_view location) {
     if (path.empty()) {
         return Error{ErrorCode::invalid_argument, "Zarr location must not be empty"};
     }
-    // Resolved against the working directory here and nowhere else. A store keeps its root for as
-    // long as the images opened from it live, so a root left relative makes every later read depend
-    // on the process still being where it was when the consumer opened the file -- and it is the
-    // pixel reads that would fail, long after the open that looked fine. Doing it once at the root
-    // also keeps it off the per-read path, where it would be a handful of lstat calls per cursor step.
+    // Resolved against the working directory here and nowhere else. A store keeps its root as long as
+    // the images opened from it live, so a relative root would make every later read depend on the
+    // process still being where it was when the consumer opened the file, and the pixel reads would
+    // fail long after an open that looked fine. Doing it once at the root also keeps it off the
+    // per-read path, where it would cost a few lstat calls per cursor step.
     std::error_code error;
     auto resolved = std::filesystem::weakly_canonical(std::filesystem::absolute(path, error), error);
     if (error) {
@@ -115,10 +115,9 @@ public:
             return Error{ErrorCode::not_found, "Zarr node is missing zarr.json", metadata_path.string()};
         }
 
-        // Opened at the end so that the document can be sized, then read in one go. Streaming
-        // rdbuf() into an ostringstream instead moves it a character at a time through two stream
-        // buffers and a growing string, which measured as a quarter of the cost of opening a
-        // consolidated store -- more than the read it was there to perform.
+        // Opened at the end so that the document can be sized, then read in one go. Streaming rdbuf()
+        // into an ostringstream would move it a character at a time through two stream buffers and a
+        // growing string, which measured as a quarter of the cost of opening a consolidated store.
         std::ifstream input(metadata_path, std::ios::binary | std::ios::ate);
         if (!input.is_open()) {
             return Error{ErrorCode::io_error, "Unable to read Zarr metadata", metadata_path.string()};
@@ -130,15 +129,14 @@ public:
         input.seekg(0);
 
         // An empty file is not an I/O failure: it reaches the JSON parser above the seam and is
-        // reported as invalid metadata, which is what it is. Asking for no bytes would set failbit
-        // and say nothing, so it is not asked for.
+        // reported as invalid metadata. Reading zero bytes would set failbit, so it is skipped.
         std::string bytes(static_cast<std::size_t>(size), '\0');
         if (!bytes.empty()) {
             input.read(bytes.data(), static_cast<std::streamsize>(bytes.size()));
             if (input.bad()) {
                 return Error{ErrorCode::io_error, "Unable to read Zarr metadata", metadata_path.string()};
             }
-            // A file that shrank between being sized and being read hands back what was there.
+            // A file that shrank between being sized and being read returns what was there.
             bytes.resize(static_cast<std::size_t>(input.gcount()));
         }
         return bytes;
@@ -156,11 +154,9 @@ public:
                              _root.string()};
             }
 
-            // Only a directory is ever a node, and only the directory is listed. A group's own
-            // zarr.json is a file inside a directory that has already been named, so counting
-            // files as well named every group twice -- once as itself and once as its metadata's
-            // parent. Store sorts and de-duplicates the listing, which is why that cost a second
-            // walk of the tree rather than a wrong answer, and why nothing noticed.
+            // Only a directory is ever a node, so only directories are listed. A group's own
+            // zarr.json is a file inside a directory that has already been named, so counting files
+            // too would name every group twice.
             std::error_code entry_error;
             if (!iterator->is_directory(entry_error) || entry_error) {
                 continue;
@@ -172,16 +168,16 @@ public:
             const auto path = iterator->path();
 
             const auto metadata_path = path / "zarr.json";
-            // A directory carrying no readable zarr.json is not a node. Whether the answer was no
-            // or the question could not be asked makes no difference here: neither is a node, and
-            // a directory that could not be inspected is left for a later read to diagnose.
+            // A directory with no readable zarr.json is not a node, whether it has none or it could
+            // not be checked. A directory that could not be checked is left for a later read to
+            // diagnose.
             std::error_code metadata_error;
             if (!std::filesystem::is_regular_file(metadata_path, metadata_error)) {
                 continue;
             }
 
-            // Named by where it sits in the store, which the walk spelled from the root: relative()
-            // resolves links first, so an array linked in from elsewhere came out as
+            // Named by where it sits in the store, as the walk built it from the root. relative()
+            // would resolve links first, so an array linked in from elsewhere would come out as
             // ../elsewhere/SKY, a name the store refuses.
             const auto relative_path = path.lexically_relative(_root);
             if (relative_path.empty()) {
@@ -223,8 +219,8 @@ public:
         const std::filesystem::recursive_directory_iterator end;
         while (iterator != end) {
             // Checked per entry rather than per directory: a store is mostly chunk files, so the
-            // entries are where the time goes and a deadline checked a level up would overrun a
-            // wide array by however long that array takes.
+            // entries are where the time goes, and a deadline checked a level up would overrun by
+            // however long a wide array takes.
             if (std::chrono::steady_clock::now() >= deadline) {
                 return Error{ErrorCode::cancelled, "The Zarr store size deadline expired", _root.string()};
             }
@@ -256,12 +252,12 @@ public:
         return total;
     }
 
-    // A backslash is refused here although NormalizeNodeName, the store's rule, accepts one: that
-    // is TensorStore's opinion rather than this transport's. Its file kvstore reads a backslash as
-    // a separator, so the array of a node named "SKY\2" would be looked for in "SKY/2". On POSIX the
-    // name is a legal file name and the node's metadata reads, so such a variable is listed and
-    // opens, and every read of it is refused here, saying why. No XRADIO writer names a variable
-    // that way; a listing that knew would need the store to know what TensorStore can locate.
+    // A backslash is refused here although NormalizeNodeName, the store's rule, accepts one, because
+    // TensorStore's file kvstore reads a backslash as a separator: the array of a node named "SKY\2"
+    // would be looked for in "SKY/2". On POSIX the name is a legal file name and the node's metadata
+    // reads, so such a variable is listed and opens, and every read of it is refused here, saying why.
+    // No XRADIO writer names a variable that way; refusing it in the listing would need the store to
+    // know what TensorStore can locate.
     Result<std::filesystem::path> ArrayDirectory(std::string_view node) const override {
         const std::filesystem::path relative(node);
         if (relative.empty() || relative.is_absolute() || relative.has_root_name() ||

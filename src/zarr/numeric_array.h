@@ -23,12 +23,10 @@ namespace carta::zarr::internal::zarr {
  * A numeric Zarr array's values together with the document they were decoded with, addressed by
  * dimension name rather than by offset.
  *
- * Values are read as one flat buffer in C order, so a caller wanting one element of a
- * multi-dimensional array had to derive the strides itself -- which means knowing the array's stored
- * order, the very thing a schema profile should not have to track. And it had to pair the buffer
- * with metadata it fetched separately, which with consolidated metadata was the root's copy rather
- * than the document the values came from. Here the two arrive together and cannot be paired wrongly:
- * Store::ReadNumericArray hands back the array's own document with its values.
+ * Values are read as one flat buffer in C order. Addressing by name means a schema profile does not
+ * have to derive strides from the array's stored order. Store::ReadNumericArray returns the array's
+ * own document with its values, so they cannot be paired with the wrong metadata, such as the root's
+ * consolidated copy.
  *
  * Holds exactly as many values as its shape declares; Make refuses anything else, so an element
  * the shape promises is always there. A dimension the caller does not name is taken at index 0.

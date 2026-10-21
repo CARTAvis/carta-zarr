@@ -20,17 +20,17 @@ namespace carta::zarr::internal {
 namespace {
 
 // A region is bucketed once per chunk its bounding box touches. This bound turns a request whose
-// regions each cover the whole image -- legal, just not what this API is for -- into an error
-// rather than an allocation nothing can serve.
+// regions each cover the whole image (legal, but not what this API is for) into an error rather than
+// an allocation nothing can serve.
 //
-// Not in reduce/tuning.h, which holds the numbers a caller neither sets nor needs: exceeding this
-// one is refused. Not in carta-zarr/reduce.h either, beside the limits a caller does respect,
-// because it counts incidences -- regions times the chunks each occupies -- and a caller holding no
-// chunk shape cannot tell in advance whether it is near it.
+// Not in reduce/tuning.h, which holds numbers a caller never meets: exceeding this one is refused.
+// Not in carta-zarr/reduce.h either, with the limits a caller must respect, because it counts
+// incidences (regions times the chunks each occupies), and a caller without the chunk shape cannot
+// tell in advance whether it is near the limit.
 constexpr std::size_t kMaxChunkIncidences = 1u << 26;
 
 // Why a region cannot be placed on the plane, or nothing when it can: an empty box, one off the
-// plane, or a raster not cut for it. Every one of these would be undefined further on -- an empty box
+// plane, or a raster of the wrong size. Each would be undefined behavior further on: an empty box
 // wraps its extent around zero, and a raster of another length is read past its end.
 Result<void> Placeable(const RegionMask& region, std::size_t index, PlaneExtent plane, const std::string& node) {
     if (region.width == 0 || region.height == 0) {
@@ -57,9 +57,8 @@ Result<void> Placeable(const RegionMask& region, std::size_t index, PlaneExtent 
 Result<Occupancy> Occupancy::Of(BufferView<const RegionMask> regions, PlaneExtent plane, std::uint64_t chunk_u,
                                 std::uint64_t chunk_v, AxisRole fastest_spatial_axis, const std::string& node) {
     const std::size_t region_count = regions.size;
-    // The count first, so that no region past the first is read before it is known to be there to
-    // read. Bounded by what a reduction takes, which also keeps every region numbered by an
-    // incidence's 32 bits.
+    // The count first, so that no region is read before it is known to exist. Bounded by what a
+    // reduction takes, which also keeps every region index within an incidence's 32 bits.
     if (region_count == 0 || regions.data == nullptr) {
         return Error{ErrorCode::invalid_argument, "A spectral reduction needs at least one region", node};
     }
@@ -77,9 +76,9 @@ Result<Occupancy> Occupancy::Of(BufferView<const RegionMask> regions, PlaneExten
         }
     }
 
-    // The walk follows the store. Of the two spatial axes the one written last varies fastest, so
-    // asking for it first is what keeps a plane from being transposed on its way into the
-    // destination; everything below is in terms of that axis (u) and the other one (v).
+    // The walk follows the store. Of the two spatial axes, the one written last varies fastest, so
+    // asking for it first keeps a plane from being transposed on its way into the destination.
+    // Everything below is in terms of that axis (u) and the other one (v).
     const bool swap_spatial = fastest_spatial_axis == AxisRole::spatial_y;
 
     Occupancy occupancy;
@@ -97,9 +96,8 @@ Result<Occupancy> Occupancy::Of(BufferView<const RegionMask> regions, PlaneExten
         region.mask = given.mask.data;
         region.mask_u_stride = swap_spatial ? given.width : 1;
         region.mask_v_stride = swap_spatial ? 1 : given.width;
-        // A raster is given runs, along u: which axis that is was the caller's to know once, and is
-        // not any more. The raster stays beside them for a fragmented one, which comes back refused
-        // and is read as the raster it is.
+        // A raster is turned into runs along u, so the caller need not know which axis that is. The
+        // raster is kept for one too fragmented for runs, which is then read as a raster.
         if (given.mask.data != nullptr) {
             RegionRuns made;
             if (RunsAlongU(given.mask.data, given.width, given.height, !swap_spatial, made)) {
@@ -139,24 +137,23 @@ Result<Occupancy> Occupancy::Of(BufferView<const RegionMask> regions, PlaneExten
     };
 
     // The chunks a region actually occupies, which is not the same as the chunks its bounding box
-    // covers. A thin rectangle laid along the diagonal has a bounding box the size of the image and
-    // sets a thousandth of it; bucketing by the box would read every chunk to reach the band. The
-    // mask decides instead, at the cost of one pass over it -- bytes the caller already holds, and
-    // a fraction of what reading the chunks they would otherwise stand for costs.
+    // covers. A thin rectangle along the diagonal has a bounding box the size of the image and selects
+    // a thousandth of it; bucketing by the box would read every chunk to reach the band. The mask
+    // decides instead, at the cost of one pass over bytes the caller already holds, a fraction of
+    // the cost of reading the chunks.
     //
     // A region that is its whole box has nothing to narrow, and costs one row of each chunk row.
     std::vector<std::uint8_t> occupied;
-    // Set once the incidences pass what one reduction indexes, which ends every scan still going: a
-    // region whose box is the image would otherwise go on visiting cells nothing will keep.
+    // Set once the incidences exceed what one reduction indexes, which ends every scan still running:
+    // a region whose box is the image would otherwise keep visiting cells nothing will keep.
     bool too_many = false;
 
     // Walk one region's chunk rows, marking the columns each row occupies and handing the marked
     // cells over. How a row is marked is `mark_row`, which is the only part for_each_cell supplies.
     //
-    // `found` stops a row scan once every column of the band is accounted for, and the raster
-    // scanner reads `occupied` directly to skip a column already marked: without that it rescans
-    // pixels whose answer is settled, which on a region whose box is the image is tens of megabytes
-    // of them.
+    // `found` stops a row scan once every column of the band is accounted for, and the raster scanner
+    // reads `occupied` directly to skip a column already marked. Without that it would rescan pixels
+    // whose answer is settled, tens of megabytes of them for a region whose box is the image.
     const auto scan_rows = [&](const PlacedRegion& region, auto&& mark_row, auto&& visit) {
         std::uint64_t cx0 = 0;
         std::uint64_t cx1 = 0;
@@ -234,9 +231,9 @@ Result<Occupancy> Occupancy::Of(BufferView<const RegionMask> regions, PlaneExten
             visit);
     };
 
-    // Counting sort needs the counts before it can place anything, but the mask is the most
-    // expensive thing here to look at twice -- a region whose box is the image is tens of megabytes
-    // of it. So the incidences are recorded once, in region order, and the two passes read that.
+    // Counting sort needs the counts before it can place anything, but the mask is the most expensive
+    // thing here to read twice: tens of megabytes for a region whose box is the image. So the
+    // incidences are recorded once, in region order, and the two passes read that.
     std::vector<std::uint64_t> incidence_cells;
     std::vector<std::uint64_t> region_first(region_count + 1, 0);
     for (std::size_t i = 0; i < region_count && !too_many; ++i) {
@@ -287,11 +284,11 @@ Result<Occupancy> Occupancy::Of(BufferView<const RegionMask> regions, PlaneExten
 
     // The occupied runs of each chunk row.
     //
-    // Reading the bounding box would be correct and still wrong: the box of a diagonal cut is the whole
-    // image, while the cut touches one chunk per row. On a 4096^2 image that is 256 chunks decoded to
-    // use 16. The runs are what the walk reads instead, so the cost follows the regions rather than the
-    // rectangle that happens to contain them.
-    // Read off the occupied cells, which are in row order already.
+    // Reading the bounding box would give the right answer at the wrong cost: the box of a diagonal
+    // cut is the whole image, while the cut touches one chunk per row. On a 4096^2 image that is 256
+    // chunks decoded to use 16. The walk reads the runs instead, so the cost follows the regions
+    // rather than the rectangle around them. Read from the occupied cells, which are already in row
+    // order.
     for (const auto cell : occupancy._cells) {
         const std::uint64_t row = cell / occupancy._columns;
         const std::uint64_t column = cell % occupancy._columns;
@@ -320,8 +317,8 @@ std::vector<OccupiedFootprint> Occupancy::Footprints(std::uint64_t chunks_per_re
         const auto& runs = _occupied_rows[at].runs;
 
         // Rows below that repeat this row's runs exactly are read with it, so that a solid rectangle
-        // becomes a few large requests while a diagonal stays one chunk per row -- as many rows as a
-        // read affords at the width of the widest run in them.
+        // becomes a few large requests while a diagonal stays one chunk per row: as many rows as a
+        // read allows at the width of the widest run in them.
         std::uint64_t widest = 0;
         for (const auto& run : runs) {
             widest = std::max(widest, run.last - run.first + 1);
@@ -341,10 +338,9 @@ std::vector<OccupiedFootprint> Occupancy::Footprints(std::uint64_t chunks_per_re
         const std::uint64_t v_begin = std::max(_v0, chunk_cv_begin * _chunk_v);
         const std::uint64_t v_end = std::min(_v1, chunk_cv_end * _chunk_v);
 
-        // A run wider than a read is read in pieces, not in one request. Without this the smallest
-        // request is a whole chunk row of the region: 157 chunks of a 80000-pixel-wide region is
-        // 628 MiB, ten times the budget it was supposed to respect, and nothing to report or cancel
-        // from until all of it lands.
+        // A run wider than a read is read in pieces, not in one request. Otherwise the smallest
+        // request would be a whole chunk row of the region: 157 chunks of an 80000-pixel-wide region
+        // is 628 MiB, ten times the budget, with no progress or cancellation until all of it lands.
         const std::uint64_t segment_limit = UnitsAffordable(chunks_per_read, band_rows);
         for (const auto& whole : runs) {
             for (std::uint64_t first = whole.first; first <= whole.last;) {

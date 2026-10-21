@@ -25,10 +25,10 @@ Result<DescribedImage> DescribeImage(const Store& store, std::string_view image_
 // Every rule that turns an image's metadata and its coordinates' values into a descriptor, with the
 // values handed in rather than read.
 //
-// Split from the reads by ADR 0006's rule -- a module takes the narrowest thing its tests can stand
-// up. Reading a value goes to the filesystem through TensorStore, and the profile tests build with
-// neither, so while this read its own values those tests could reach only the paths that refuse an
-// image. Given the values, they reach the ones that describe it.
+// Split from the reads by ADR 0006's rule: a module takes the narrowest input its tests can build.
+// Reading a value goes to the filesystem through TensorStore, and the profile tests build without
+// either. Given the values, they can test the paths that describe an image, not only those that
+// refuse one.
 Result<DescribedImage> DescribeImageFrom(const Store& store, std::string_view image_id, const CoordinateValues& values);
 Result<std::vector<Beam>> ReadBeams(const Store& store, std::string_view image_id);
 

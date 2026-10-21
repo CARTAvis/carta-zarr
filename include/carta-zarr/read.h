@@ -39,20 +39,19 @@ struct CachePoolAccess;
 
 // A decoded-chunk cache of a read's own, apart from the one its Context shares among every read.
 //
-// What a read keeps decides what the next one has to decode again. The shared cache holds a session's
-// interactive working set -- the planes and profiles being looked at -- and two kinds of read do
-// better elsewhere. A scan that touches every chunk once reuses none of them, so caching what it
-// decodes evicts that working set to no purpose, and rebuilding it costs decompression, which is the
-// resource the scan is already saturating: it reads through a pool of zero bytes. A walk that does
-// come back -- a moment, whose neighboring slabs share the chunks between them -- needs as much as it
-// will come back for, which is more than a session should keep for everything else and is wanted only
-// while the walk lasts: it reads through a pool of that size, and lets go of it when it ends.
+// The shared cache holds a session's interactive working set: the planes and profiles being looked
+// at. Two kinds of read do better with a cache of their own:
 //
-// Made by Context::CreateCachePool, and a shared handle like Context: copying one shares the pool, and
-// it is the last copy let go of that frees what the pool holds. The pool runs on its Context's
-// threads, so a read through it takes its turn among the session's reads rather than competing with
-// them. Arrays are opened per pool, so the first read of an array through a new one pays to open it
-// again -- a few milliseconds, once per array, against a walk that reads all of it.
+// - A scan that touches every chunk once reuses none of them. Caching what it decodes would only
+//   evict the working set, so it reads through a pool of zero bytes.
+// - A walk that comes back to its chunks, such as a moment whose neighboring slabs share chunks,
+//   needs room for all of them, but only while it runs. It reads through a pool of that size and
+//   lets go of it when it ends.
+//
+// Made by Context::CreateCachePool. It is a shared handle like Context: copies share the pool, and the
+// last copy to go frees what it holds. The pool runs on its Context's threads, so its reads take
+// their turn among the session's reads. Arrays are opened once per pool, so the first read of an
+// array through a new pool opens it again, which takes a few milliseconds.
 class CARTA_ZARR_EXPORT CachePool final {
 public:
     CachePool(const CachePool&) = default;
@@ -60,9 +59,9 @@ public:
     // A copy, so that the handle moved from still refers to what it did. See ADR 0013.
     CachePool(CachePool&& other) noexcept : CachePool(other) {}
     CachePool& operator=(CachePool&& other) noexcept { return *this = other; }
-    // Inline, unlike the other handles': ReadControl holds one, and the parts of this library that
-    // are built and tested without the rest of it take a ReadControl. A shared_ptr's deleter is fixed
-    // where it was made, so nothing here needs Impl to be complete.
+    // Inline, unlike the other handles' destructors: ReadControl holds a CachePool, and some parts of
+    // this library are built and tested on their own with a ReadControl. A shared_ptr's deleter is
+    // fixed where it was made, so this does not need Impl to be complete.
     ~CachePool() = default;
 
     // How much decoded chunk data the pool may hold, in bytes, as it was asked for.
@@ -81,31 +80,30 @@ private:
 /// Called as a read advances, with the number of destination elements that are final and the number
 /// the request will produce in total. Returning false cancels the read, which then reports cancelled.
 ///
-/// A read given one is cut into chunk-aligned pieces along the slowest-varying selected axis, as
-/// many as ReadOptions::read_budget_bytes needs and of no more than sixteen chunks unless one chunk
-/// along that axis is more, and this is called as each piece is finished -- about as often on many
-/// decode threads as on few. The destination is dense in logical order with axis 0 fastest, which
-/// is what makes the finished part a prefix rather than a scatter -- a caller can render or forward
-/// it as it arrives. A piece too large to read whole is read in parts and reported when all of them
-/// are in, so the prefix holds -- after a read fails as well as while it runs; see Image::Read.
+/// A read given one is cut into chunk-aligned pieces along the slowest-varying selected axis: as
+/// many as ReadOptions::read_budget_bytes needs, and each decoding at most sixteen chunks in all,
+/// unless one chunk along that axis already spans more. This is called as each piece finishes, about
+/// as often with many decode threads as with few.
 ///
-/// An argument of Image::Read rather than a field of ReadOptions, because it is the only operation
-/// that has anywhere to report from in these terms -- a reduction reports through its sink, and a
-/// cube histogram through a CubeHistogramProgressCallback of its own. As a field it would be one the
-/// other entry points silently ignored; as an argument it is simply not part of what they take.
+/// The destination is dense in logical order with axis 0 fastest, so the finished part is always a
+/// prefix, which a caller can render or forward as it arrives. A piece too large to read at once is
+/// read in parts and reported when all of them are in. The prefix holds after a read fails as well
+/// as while it runs; see Image::Read.
 ///
-/// Supplying one can cut a read finer: every read is cut to the chunks its budget affords, but one
-/// given one is cut to sixteen as well, so that there is a piece to report and the next is not long
-/// coming, and a single plane is read whole only without one.
+/// It is an argument of Image::Read, not a field of ReadOptions, because no other operation reports
+/// progress this way: a reduction reports through its sink, and a cube histogram through its own
+/// CubeHistogramProgressCallback. As a field, the other operations would silently ignore it.
+///
+/// Supplying one can cut a read finer. Every read is cut to fit its budget, but a read with a
+/// callback is also cut to sixteen chunks, so that progress arrives often. A single plane is read
+/// whole only without one.
 using ProgressCallback = std::function<bool(std::size_t elements_written, std::size_t elements_total)>;
 
 // What a read is allowed to do while it runs, whatever it is reading for.
 //
-// These three are the whole of what every path through this library honors: an ordinary read and
-// all three reductions reach the same storage operations underneath and check the same things at
-// the same boundaries. Said in its own type so that an operation which honors only these can take
-// only these -- everything below the pixel source seam does, because that is all any of it ever
-// looked at.
+// Every operation in this library honors these three: an ordinary read and all three reductions
+// reach the same storage operations and check them at the same points. They are a type of their own
+// so that the code below the pixel source seam, which uses nothing else, can take only these.
 struct ReadControl {
     // Cooperative cancellation checked before and after each storage operation. The callback
     // must be safe to invoke from the calling thread.
@@ -117,42 +115,37 @@ struct ReadControl {
     // The cache this read keeps what it decodes in, and finds what an earlier read kept: its Context's
     // shared one when there is none. See CachePool.
     //
-    // One field rather than a policy beside a pool, so that "bypass the cache" and "use this pool"
-    // cannot both be said at once: declining the cache is a pool of zero bytes.
+    // To bypass the cache, pass a pool of zero bytes.
     std::optional<CachePool> cache_pool;
 };
 
 // Everything a read of pixels takes, on top of what any read takes.
 //
-// The two fields here are the ones that mean something only when pixels are being read into a
-// buffer this library sized: whether a flag is folded in on the way, and how much the library may
-// hold at once while doing it. A pixel mask read has neither -- it is the flag, and the destination
-// is the caller's -- which is why it takes a ReadControl and this cannot be handed to it.
+// The two fields here only mean something when pixels are read: whether a flag is applied on the
+// way, and how much the library may hold at once. A pixel mask read has neither, since it reads the
+// flag itself into the caller's buffer, so it takes only a ReadControl.
 //
-// That is the point of the split. Every field of this type is honored by every operation that
-// takes it, so there is no table of which ones apply where, and setting one where it would have
-// been ignored does not compile.
+// Every operation that takes this type honors every field of it, so no field is silently ignored.
 struct ReadOptions {
     ReadControl control;
-    // Write NaN wherever the image's flag marks a pixel -- a nonzero flag value, XRADIO's true, which
-    // means the pixel is bad -- so that one call answers what would otherwise be a pixel read plus a
-    // flag read. On by default: masking during the read costs one pass over data already in hand,
-    // while a caller doing it afterwards pays for a second traversal.
+    // Write NaN wherever the image's flag is true, meaning the pixel is bad, so that one call does
+    // the work of a pixel read and a flag read. On by default: masking during the read costs one pass
+    // over data already in memory, while masking afterwards costs a second pass.
     bool apply_pixel_mask = true;
     /// How much memory one read may hold at once beyond the caller's own destination, in bytes. Zero
     /// means the library's own budget: two chunks for every decode thread of the image's context,
     /// between 256 MiB and 2 GiB.
     ///
-    /// What a read holds is the chunks it is decoding -- each about three times what it decodes to,
-    /// for its compressed bytes and the codec's buffer beside the decoded copy -- and the buffers the
-    /// library allocates for them: the folded-in pixel mask, a byte an element, and the pixels
-    /// themselves wherever the library rather than the caller holds them. Every operation that takes
-    /// these options spends it the same way: Image::Read and Image::Prefetch cut their request into
-    /// pieces that fit, and ReduceSpectral, ComputeHistogram and ComputeCubeHistogram size each read
-    /// of their walk by it. One exception: a single plane read with no progress callback, whose budget
-    /// affords a chunk a decode thread, is read whole, because cut to the budget it runs a quarter
-    /// slower, and what it holds beyond the budget is bounded by the plane; see ProgressCallback and
-    /// ADR 0021.
+    /// A read holds the chunks it is decoding, each about three times its decoded size (the
+    /// compressed bytes, the codec's buffer and the decoded copy), and the buffers the library
+    /// allocates for them: the pixel mask, one byte per element, and the pixels wherever the library
+    /// rather than the caller holds them. Image::Read and Image::Prefetch cut their request into
+    /// pieces that fit. ReduceSpectral, ComputeHistogram and ComputeCubeHistogram size each read of
+    /// their walk by it.
+    ///
+    /// One exception: a single plane read with no progress callback is read whole when the budget
+    /// allows one chunk per decode thread. Cut to the budget it runs a quarter slower, and the plane
+    /// bounds what it holds. See ProgressCallback and ADR 0021.
     ///
     /// A chunk is the smallest thing that can be decoded: asking for part of one decodes all of it.
     /// So a read holds at least one chunk, and under a budget smaller than that it reads one chunk at
@@ -168,9 +161,7 @@ struct ReadOptions {
 // -- its regions and each region's raster -- whose length the library checks rather than assumes.
 //
 // Typed because the element type is not the caller's to choose: pixels arrive as float, and a pixel
-// mask as one byte per pixel. An untyped view with a byte count could express neither fact, so the
-// same field meant "bytes" at one entry point and "elements" at the other, and a buffer of the
-// wrong kind was a run-time error at best.
+// mask as one byte per pixel. A buffer of the wrong type does not compile.
 //
 // The library never holds one past the call it was passed to.
 template <typename T>

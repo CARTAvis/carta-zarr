@@ -17,10 +17,10 @@
 
 namespace carta::zarr::internal {
 
-// Whether a remembered value is to be computed again when it is next asked for: a read that could not
-// be made, rather than an answer about the store. An I/O error may not happen the next time, and a
-// cancelled read was stopped by its caller, not by what it read; neither says anything about the
-// store that the next caller should be held to. Every other value, failures included, is an answer.
+// Whether a remembered value is computed again when it is next asked for: true for a read that could
+// not be made, rather than an answer about the store. An I/O error may not happen next time, and a
+// cancelled read was stopped by its caller; neither says anything about the store. Every other value,
+// failures included, is an answer.
 template <typename Value>
 bool AskAgain(const Value& /*value*/) {
     return false;
@@ -43,11 +43,11 @@ bool AskAgain(const Result<T>& value) {
  * observes does not change under it. A read that could not be made is the exception (AskAgain): it
  * is no answer about the store, so it is computed again when next asked for, until there is one.
  *
- * Values are handed back by reference. An entry is written once and never erased or replaced -- one
- * computed again is added after the one it supersedes, which stays where it was -- and neither a
- * std::map nor a std::list moves the values it already holds, so a reference stays valid for as long
- * as the table does -- which is what makes a table of parsed JSON documents worth
- * having at all. A caller that stores one keeps the table alive for at least as long.
+ * Values are returned by reference. An entry is written once and never erased or replaced: a value
+ * computed again is added after the one it supersedes, which stays where it was. Neither a std::map
+ * nor a std::list moves the values it holds, so a reference stays valid as long as the table does,
+ * which is what makes a table of parsed JSON documents useful. A caller that stores a reference keeps
+ * the table alive at least as long.
  */
 template <typename Key, typename Value>
 class Memo {
@@ -69,10 +69,9 @@ public:
         return answers.back();
     }
 
-    // Put a value in that was not computed here. It is for a table whose entries are already in
-    // hand -- the node metadata a store's consolidated copy arrives holding -- so that they are one
-    // value looked up one way rather than a second copy consulted first. An entry that is already
-    // there wins, because it is the one callers may be holding a reference to.
+    // Put in a value that was not computed here, for entries already in hand, such as the node
+    // metadata in a store's consolidated copy. They are then looked up the same way as computed
+    // ones. An entry already there wins, because callers may hold a reference to it.
     void Insert(Key key, Value value) const {
         std::scoped_lock const lock(_mutex);
         auto& answers = _entries[std::move(key)];

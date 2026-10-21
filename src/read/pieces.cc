@@ -6,10 +6,9 @@
 
 // What a read decides before it reads anything.
 //
-// Separate from pieces_read.cc so that the strategy stays linkable without a store: PlanPieces and
-// the arithmetic beside it reach no further than the descriptor and the geometry, and the test that
-// pins them compiles this translation unit alone. The same division pass.cc and pass_read.cc make,
-// and for the same reason.
+// Separate from pieces_read.cc so that the strategy links without a store: PlanPieces and the
+// arithmetic beside it need only the descriptor and the geometry, and their test compiles this file
+// alone. pass.cc and pass_read.cc are split the same way, for the same reason.
 
 #include "read/pieces.h"
 
@@ -139,26 +138,24 @@ std::vector<Piece> PlanPieces(const ImageDescriptor& descriptor, const ChunkGeom
         return {Piece{request, 0, {}}};
     }
 
-    // The flag is decoded beside the pixels when this read will apply it, so what a chunk holds counts
-    // it, in the flag's own chunks, which a piece decodes whole. The pixels go to the caller's
-    // destination, which the budget does not pay for, segments as much as pieces: a segment is read
-    // straight into its place in it.
+    // The flag is decoded with the pixels when this read applies it, so a chunk's cost counts it, in
+    // the flag's own chunks, which a piece decodes whole. The pixels go straight to the caller's
+    // destination, for segments as for pieces, so the budget does not count them.
     const auto cost = ReadCost::Of(descriptor, geometry, flag_geometry, options, PixelsHeld::by_caller, decode_threads);
     const auto budget = std::max<std::uint64_t>(1, cost.ChunksPerRead(PixelsHeld::by_caller));
-    // A read is cut to its budget, with a progress callback or without, so that what it holds -- the
-    // chunks it decodes, the flag folded in beside them, and the compressed chunks the I/O threads
-    // queue for the decode threads when those fall behind -- is bounded by the budget rather than by
-    // the read's extent. A read with a progress callback is cut to no more than kWatchedPieceChunks as
-    // well, so that its pieces come often, but to no less than one chunk along the cut; past that its
-    // pieces are read in segments, which only its budget bounds, since a segment reports nothing.
+    // A read is cut to its budget, with or without a progress callback, so that what it holds is
+    // bounded by the budget rather than by the read's extent: the chunks it decodes, the flag applied
+    // with them, and the compressed chunks the I/O threads queue for the decode threads when those
+    // fall behind. A read with a progress callback is also cut to at most kWatchedPieceChunks, so that
+    // its pieces come often, but to no less than one chunk along the cut; below that, its pieces are
+    // read in segments, which only its budget bounds, since a segment reports nothing.
     //
     // One exception: a single plane read with no progress callback is read whole once its budget
-    // affords a chunk for every decode thread. Cut into segments it read a quarter slower, one segment
-    // after another -- 0.33 s rather than 0.26 s for a plane of the 7763 x 4742 test cube in
-    // 256 x 256 x 16 chunks on 28 threads, holding no less -- and a plane is what a channel change and
-    // an animation wait on. What it holds beyond its budget is bounded by the plane: its decode
-    // threads' chunks, the queue ahead of them, and a flag of one channel, about 130 MiB on 28 threads
-    // and 370 MiB on four.
+    // allows a chunk for every decode thread. In segments, one after another, it read a quarter slower
+    // (0.33 s rather than 0.26 s for a plane of the 7763 x 4742 test cube in 256 x 256 x 16 chunks on
+    // 28 threads) without holding less, and a channel change and an animation both wait on a plane.
+    // The plane bounds what it holds beyond the budget: its decode threads' chunks, the queue ahead of
+    // them, and a flag of one channel, about 130 MiB on 28 threads and 370 MiB on four.
     //
     // The other axes already contribute whatever they span, so a plane read needs far fewer rows per
     // piece than a single-pixel column needs channels.
@@ -183,9 +180,9 @@ std::vector<Piece> PlanPieces(const ImageDescriptor& descriptor, const ChunkGeom
     std::vector<Piece> pieces;
     CutAlong(geometry, request, *axis, indices, [&](ReadRequest run, std::uint64_t begin) {
         Piece piece{std::move(run), begin * elements_per_index, {}};
-        // The least a piece can be is one chunk along the cut, and the whole of every other axis. When
-        // that is still more than a read affords, it is read in parts that are not runs of the
-        // destination, each straight into its place in the piece's run of it.
+        // The smallest piece is one chunk along the cut and the whole of every other axis. When that is
+        // still more than the budget allows, it is read in segments that are not contiguous runs of the
+        // destination, each straight into its place in the piece's part of it.
         if (ChunksOf(geometry, piece.request) > std::max(affordable, budget)) {
             Segment(geometry, piece.request, budget, piece.segments);
         }

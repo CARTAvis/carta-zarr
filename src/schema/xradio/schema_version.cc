@@ -12,14 +12,17 @@ namespace carta::zarr::internal::xradio {
 
 namespace {
 
-// Why a store naming 0.0.2 is not one, or nothing when it is. Three things schema 0.0.2 requires and
-// this library reads, checked rather than the whole schema, because a store that names the version
-// need not have them: the version is a claim, and these are what reading the store rests on. The sky's own check, that
-// it is an array, applies to a store whose data groups name a sky; whether it is typed as one is the profile's to say
-// of the image, as it says it of every image a data group names (ADR 0001). The schema does not require a sky: an
-// aperture-plane store or a point spread function alone is well formed without it, and is left to the profile, which
-// opens what it can and says why it will not open the rest. The frequency's applies whatever the groups name: schema
-// 0.0.2 requires its frame and units of every store, with a sky or without.
+// Why a store naming 0.0.2 does not conform, or nothing when it does. A store's version is only a
+// claim, so this checks the three things schema 0.0.2 requires that reading the store depends on,
+// rather than the whole schema:
+//
+// - It has data groups.
+// - The sky its data groups name, if they name one, is an array. Whether the sky is typed "sky" is
+//   checked by qualification, as for every image a data group names (ADR 0001). The schema does not
+//   require a sky: a store of aperture-plane images, or of a point spread function alone, is well
+//   formed without one.
+// - Its frequency coordinate, if it has one, gives a frame and units. Schema 0.0.2 requires these of
+//   every store, with or without a sky.
 std::optional<Diagnostic> WhyNot002(const Store& store) {
     const auto not_002 = [](const std::string& why, std::string node_path) {
         return Diagnostic{DiagnosticCode::invalid_metadata,

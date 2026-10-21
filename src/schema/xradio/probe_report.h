@@ -20,14 +20,11 @@ namespace carta::zarr::internal::xradio {
 /**
  * What a probe found, accumulated as it goes.
  *
- * Each requirement has three outcomes -- the read failed, the check failed, or it passed -- and
- * having every call site unpack all three was most of the length of a probe. The report latches
- * instead: once a requirement is unmet or a read errors, later requirements are no-ops, so a probe
- * states what it needs in sequence and resolves the whole thing once at the end.
+ * Each requirement has three outcomes: the read failed, the check failed, or it passed. The report
+ * latches: once a requirement is unmet or a read fails, later requirements do nothing. So a probe
+ * states what it needs in sequence and resolves the result once at the end.
  *
- * Only the first unmet requirement is diagnosed, which is what a probe reported before. Reporting
- * every problem at once would be a different contract, and a deliberate change rather than a
- * consequence of this one.
+ * Only the first unmet requirement is diagnosed.
  */
 class ProbeReport {
 public:

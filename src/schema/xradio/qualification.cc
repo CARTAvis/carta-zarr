@@ -20,9 +20,8 @@ namespace {
 namespace zarr_metadata = ::carta::zarr::internal::zarr;
 
 // Why the flag an image declares cannot mask it, or nothing when it declares none or one that can.
-// DeclaredFlag is what DetermineFlag refuses an image over, asked of the listing so that the two
-// agree; with nothing declared there is no refusal to agree with, because an image with no usable
-// candidate opens unmasked.
+// The listing asks DeclaredFlag, as DetermineFlag does, so that the two agree. With nothing declared
+// there is nothing to refuse, because an image with no usable candidate opens unmasked.
 std::optional<Diagnostic> UnusableDeclaredFlag(const Store& store, const zarr_metadata::ArrayMetadata& image,
                                                std::string_view node) {
     const auto declared = DeclaredFlag(store, image, node);
@@ -35,10 +34,10 @@ std::optional<Diagnostic> UnusableDeclaredFlag(const Store& store, const zarr_me
         std::string(node)};
 }
 
-// Why a data group's word for this node and the node's own type disagree, or nothing when they do
+// Why a data group's role for this node and the node's own type disagree, or nothing when they do
 // not. A group naming a variable as its `sky`, or in another image role, says what it is, and the
-// schema holds the variable to that role's type: a SKY typed "Intensity" is the store contradicting
-// itself, not an image of a type this library does not know.
+// schema requires the variable to have that role's type: a SKY typed "Intensity" is the store
+// contradicting itself, not an image of a type this library does not know.
 std::optional<Diagnostic> RoleContradiction(const Store& store, std::string_view node, const std::string& type) {
     const auto* const groups = MemberObject(store.RootAttributes(), "data_groups");
     if (groups == nullptr) {
@@ -68,24 +67,24 @@ std::optional<Diagnostic> RoleContradiction(const Store& store, std::string_view
 
 NodeQualification QualifyNode(const Store& store, const NodeEntry& entry) {
     const std::string& node = entry.name;
-    // A group is a node in the hierarchy like any other, and nothing is wrong with it. Passed over,
-    // the way everything else that is not an image is passed over.
+    // A group is a node like any other, and nothing is wrong with it. It is passed over, as everything
+    // else that is not an image is.
     if (entry.kind == NodeKind::group) {
         return NodeQualification{};
     }
 
-    // Said rather than passed over, because this is where a node leaves the listing: nothing here
-    // knows whether it was an image, a coordinate or something else in the directory, so a store
-    // whose sky variable lands here reports no images at all. Without this, that reads as a store
-    // this profile does not recognize, with nothing to say which node went missing.
+    // Diagnosed rather than passed over, because this is where a node leaves the listing: nothing here
+    // knows whether it was an image, a coordinate or something else, so a store whose sky variable
+    // lands here reports no images at all. Without a diagnostic, that would look like a store this
+    // profile does not recognize, with nothing to say which node went missing.
     //
     // Not a refusal. A malformed node elsewhere in a store does not stop the images that parsed from
     // opening.
     //
-    // Two codes, because they are two different things to say. unreadable_array is a node that said it
-    // was an array and whose metadata will not parse as one; unrecognised_node is a node that did not
-    // say what it was -- a document that would not parse, or a node_type Zarr does not define -- and
-    // calling that an array would be a guess.
+    // Two codes, for two different problems. unreadable_array is a node that said it was an array and
+    // whose metadata will not parse as one; unrecognised_node is a node that did not say what it was
+    // (a document that would not parse, or a node_type Zarr does not define), and calling that an
+    // array would be a guess.
     if (entry.kind == NodeKind::unrecognized) {
         return NodeQualification{false, false,
                                  Diagnostic{DiagnosticCode::unrecognised_node, entry.reason->message, node}, true};
@@ -97,10 +96,10 @@ NodeQualification QualifyNode(const Store& store, const NodeEntry& entry) {
     }
 
     const auto& array = metadata.value();
-    // What an image is, is its type: schema 0.0.2 types every one. An untyped variable, or one of a
-    // type that is no image's -- a flag, a coordinate, a normalization, a beam table -- is not one,
-    // whatever its dimensions (ADR 0001). Asked after a data group's word for it, which a flag named
-    // as a group's sky contradicts as much as any other type does.
+    // A variable is an image by its type: schema 0.0.2 types every image. An untyped variable, or one
+    // of a type that is not an image type (a flag, a coordinate, a normalization, a beam table), is
+    // not an image, whatever its dimensions (ADR 0001). The data groups are checked first, because a
+    // flag named as a group's sky contradicts the group as much as any other type does.
     const std::string type = AttributeString(array.attributes, "type");
     if (auto contradiction = RoleContradiction(store, node, type); contradiction) {
         return NodeQualification{true, false, std::move(contradiction), true};
@@ -112,8 +111,8 @@ NodeQualification QualifyNode(const Store& store, const NodeEntry& entry) {
     if (plane) {
         const bool sky = *plane == Plane::sky;
         const std::string on_plane = sky ? "sky-plane" : "aperture-plane";
-        // Typed as an image of a plane, it has to be over that plane's coordinates, or it is described
-        // by axes it does not have.
+        // Typed as an image of a plane, it has to be over that plane's coordinates, or it would be
+        // described by axes it does not have.
         if (!CarriesPlane(array, *plane)) {
             return NodeQualification{true, false,
                                      Diagnostic{DiagnosticCode::invalid_metadata,
@@ -124,8 +123,8 @@ NodeQualification QualifyNode(const Store& store, const NodeEntry& entry) {
                                                 std::string(node)},
                                      true};
         }
-        // An image of booleans is not one this library opens: booleans over an image's axes are a flag's
-        // values, and the store is told a flag is typed 'flag'.
+        // This library does not open an image of booleans: booleans over an image's axes are a flag's
+        // values, and the message says a flag is typed 'flag'.
         if (HoldsBooleans(array)) {
             return NodeQualification{
                 true, false,
@@ -134,8 +133,8 @@ NodeQualification QualifyNode(const Store& store, const NodeEntry& entry) {
                            std::string(node)},
                 false};
         }
-        // On either plane: a complex image, a visibility grid above all, is not one this library
-        // opens (ADR 0024).
+        // On either plane, this library does not open a complex image, such as a visibility grid
+        // (ADR 0024).
         if (!zarr_metadata::IsRealDataType(array.data_type)) {
             return NodeQualification{
                 true, false,
@@ -143,8 +142,8 @@ NodeQualification QualifyNode(const Store& store, const NodeEntry& entry) {
                            std::string(node)},
                 false};
         }
-        // The five axes are the whole of what an image is described by, so a sixth would be read with
-        // a selection one rank short -- every read refused, from an image listed as openable.
+        // The five axes are all an image is described by, so a sixth would be read with a selection one
+        // rank short, and every read of an image listed as openable would be refused.
         if (array.dimension_names.size() != AxisCount(*plane)) {
             return NodeQualification{true, false,
                                      Diagnostic{DiagnosticCode::invalid_metadata,
@@ -155,10 +154,10 @@ NodeQualification QualifyNode(const Store& store, const NodeEntry& entry) {
                                                 std::string(node)},
                                      true};
         }
-        // The sky plane's coordinates are the dataset's: the probe closes a dataset missing one. The
-        // aperture plane's belong to its images alone, and an aperture-plane variable written without
-        // them -- a hand-written store's, not XRADIO's -- cannot be described, so it does not open
-        // rather than closing the sky images beside it.
+        // The sky plane's coordinates belong to the dataset: the probe refuses a dataset missing one.
+        // The aperture plane's belong to its images alone, and an aperture-plane variable written
+        // without them (by hand, not by XRADIO) cannot be described, so it does not open, rather than
+        // closing the sky images beside it.
         if (!sky) {
             for (const auto& coordinate : kCoordinates) {
                 if (coordinate.plane != Plane::aperture) {
@@ -181,8 +180,8 @@ NodeQualification QualifyNode(const Store& store, const NodeEntry& entry) {
         if (auto disagreement = ExtentDisagreement(store, array, node); disagreement) {
             return NodeQualification{true, false, std::move(disagreement), true};
         }
-        // A declared flag binds the image to it -- DetermineFlag closes one whose flag cannot mask it --
-        // so the listing has to say so too, or it offers an image that will not open.
+        // A declared flag binds the image to it (DetermineFlag closes an image whose flag cannot mask
+        // it), so the listing has to say so too, or it would offer an image that will not open.
         if (auto unusable = UnusableDeclaredFlag(store, array, node); unusable) {
             return NodeQualification{true, false, std::move(unusable), true};
         }
@@ -194,10 +193,10 @@ NodeQualification QualifyNode(const Store& store, const NodeEntry& entry) {
 }
 
 Result<void> RequireQualified(const Store& store, std::string_view image_id) {
-    // Against the store's listing rather than against whatever is on disk under that name. A Store
-    // is a read-only view, and its listing is the snapshot a dataset's images were enumerated from;
-    // a node written beside them afterwards is not one of them, and reading it by name would reach
-    // it. What a listing offers and what will open are the same set in both directions.
+    // Checked against the store's listing rather than whatever is on disk under that name. A Store is
+    // a read-only view, and its listing is the snapshot a dataset's images were enumerated from; a
+    // node written beside them afterwards is not one of them, but reading it by name would reach it.
+    // What a listing offers and what will open are exactly the same set.
     const auto& inventory = store.Inventory();
     if (!inventory) {
         return inventory.error();
@@ -212,20 +211,20 @@ Result<void> RequireQualified(const Store& store, std::string_view image_id) {
         return {};
     }
     if (qualified.listed) {
-        // The code comes from the refusal rather than from the asking. A store that is wrong about
-        // an image and a library that does not open one are different answers, and a consumer that
-        // shows one to whoever picked the file acts on the difference.
+        // The code comes from the reason for the refusal. A store that is wrong about an image and a
+        // library that does not open one are different answers, and a consumer showing one to
+        // whoever picked the file acts on the difference.
         return Error{qualified.malformed ? ErrorCode::invalid_metadata : ErrorCode::unsupported_data_type,
                      qualified.diagnostic->message, std::string(image_id)};
     }
     if (qualified.diagnostic) {
-        // The node is there and will not parse. It says what is wrong with it rather than being
-        // reported as a name the dataset does not have.
+        // The node is there and will not parse. Report what is wrong with it rather than a name the
+        // dataset does not have.
         return entry->kind == NodeKind::array ? entry->array->error() : *entry->reason;
     }
 
-    // Not an image, and nothing wrong with it: the flag beside one, the coordinate under it, a beam
-    // table, a group. A caller that named one asked for an image this dataset does not have.
+    // Not an image, and nothing wrong with it: a flag, a coordinate, a beam table, a group. A caller
+    // that named one asked for an image this dataset does not have.
     return Error{ErrorCode::not_found, "Image variable was not found", std::string(image_id)};
 }
 

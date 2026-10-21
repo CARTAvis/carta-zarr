@@ -13,7 +13,7 @@ your own. The tools themselves are described in
   and over 100 for 512 x 512 with thousands of channels.
 - **Start from 4 MiB chunks on Lustre; on a local disk 1 MiB are as good.** Depth matters more than
   size: [chunk size matters less than depth](#chunk-size-matters-less-than-depth).
-- **Set `--zarr_file_io_threads 8` on Lustre**, rather than the default of 2:
+- **Set `--zarr_io 8` on Lustre**, rather than the default of min(4, the OpenMP thread count):
   [more file-reading threads](#use-more-file-reading-threads-on-lustre).
 - **For animations, let the cache hold two runs of chunks**, a run being the plane's area times the
   chunk depth times four bytes. With less, the backend reads nothing ahead and stalls where each run
@@ -36,10 +36,12 @@ Two things, by two different people at two different times:
 
   | flag | default | what it sets |
   |---|---|---|
-  | `--zarr_file_io_threads` | 2 | how many reads of chunk files run at once |
-  | `--zarr_data_copy_threads` | every logical core | how many threads decode chunks |
-  | `--zarr_cache_size` | 1024 (MiB) | the decoded-chunk cache each backend process keeps |
-  | `--zarr_histogram_method` | `exact` | how a cube histogram is computed |
+  | `--zarr_io` | min(4, the OpenMP thread count) | how many reads of chunk files run at once |
+  | `--zarr_decode` | the OpenMP thread count, every logical core unless `--omp_threads` says | how many threads decode chunks |
+  | `--zarr_cache` | 1 (GiB; a fraction such as 2.5 too; 0 for none) | the decoded-chunk cache each backend process keeps |
+
+  A cube histogram goes through CARTA's own loop over the channels in v6.1; carta-backend's
+  `test_zarr` branch has the fast path the bench's `cube-histogram` mode times.
 
   carta-controller starts one backend process per user, so every user gets these, and a server with
   sixteen users at once has sixteen caches.
@@ -259,12 +261,13 @@ whole exact cube histogram then takes 16.8 s against 13.6 s at 128 x 128 x 64.
 
 ### Use more file-reading threads on Lustre
 
-`--zarr_file_io_threads 8` was better than the default of 2 on Lustre in every sweep: a plane of the
-128-deep layout went from 146 ms to 104 ms and a spectrum from 222 ms to 157 ms; a region of the
-cube's own layout from 6.35 s to 3.33 s; a plane of the 2048-square cube's 512 x 512 x 16 layout from
-478 ms to 358 ms; and in the 7763 x 4742 cube's own 512 x 512 x 4 chunks a plane from 995 ms to
-838 ms and a spectrum from 240 ms to 167 ms. On BeeGFS the difference was within the noise.
-`--zarr_data_copy_threads` at half the logical cores was as good as all of them.
+`--zarr_io 8` was better than 2, the default of the backend measured, on Lustre in every sweep: a
+plane of the 128-deep layout went from 146 ms to 104 ms and a spectrum from 222 ms to 157 ms; a
+region of the cube's own layout from 6.35 s to 3.33 s; a plane of the 2048-square cube's 512 x 512 x
+16 layout from 478 ms to 358 ms; and in the 7763 x 4742 cube's own 512 x 512 x 4 chunks a plane from
+995 ms to 838 ms and a spectrum from 240 ms to 167 ms. On BeeGFS the difference was within the
+noise. `--zarr_decode` at half the logical cores was as good as all of them. The v6.1 backend's
+default of min(4, the OpenMP thread count) for `--zarr_io` was not measured against 8.
 
 ### Striping and shards
 

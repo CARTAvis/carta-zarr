@@ -4,8 +4,8 @@
    SPDX-License-Identifier: GPL-3.0-or-later
 */
 
-// cube-histogram: a histogram of this process's share of the channels, as carta-backend computes one
-// with the --zarr_histogram_method it is given.
+// cube-histogram: a histogram of this process's share of the channels, as the fast path on
+// carta-backend's test_zarr branch computes one with the --zarr_histogram_method it is given.
 
 #include "cube.h"
 

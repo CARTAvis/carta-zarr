@@ -33,6 +33,7 @@ minor release may change the ABI, and the soname says so ([ADR 0020](docs/adr/00
   * The listing puts the data groups' own images first, the base group's then every other group's by group name, and the default image is the first of the listing that opens. The other images follow in the order they had, and still open.
 * An aperture-plane coordinate without `crval` reports an `invalid_metadata` diagnostic on it; its reference value is still taken as 0.
 * `DiagnosticCode::unrecognised_node` is `unrecognized_node`, and `DiagnosticCodeName` returns `"unrecognized_node"`, in American spelling as the rest of the API is. Its value is unchanged, so this changes the API and not the ABI ([#55](https://github.com/CARTAvis/carta-zarr/issues/55)).
+* The storage tuning docs, `carta-zarr-bench`'s help and `sweep.py`'s recommended configuration name carta-backend v6.1's Zarr settings, `--zarr_io`, `--zarr_decode` and `--zarr_cache` in GiB, rather than those of its `test_zarr` branch, and the sweep compares against v6.1's defaults ([#71](https://github.com/CARTAvis/carta-zarr/issues/71)).
 
 ### Removed
 * Public fields that repeated what another field already says, or that nothing set anymore. This changes the API and the ABI ([#38](https://github.com/CARTAvis/carta-zarr/issues/38)):

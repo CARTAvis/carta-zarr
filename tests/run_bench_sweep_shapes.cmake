@@ -94,7 +94,7 @@ endif()
 
 file(READ "${results}/summary.md" summary)
 foreach(section "## Each shape" "[small](small/summary.md)" "## One layout for every shape"
-        "**One layout for every shape:**" "## One setting for every shape" "--zarr_file_io_threads"
+        "**One layout for every shape:**" "## One setting for every shape" "--zarr_io "
         "## At full depth" "| wide |" "## Configuration" "[[source.shape]]")
     string(FIND "${summary}" "${section}" found)
     if(found EQUAL -1)

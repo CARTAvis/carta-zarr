@@ -100,7 +100,7 @@ endif()
 file(READ "${results}/summary.md" summary)
 foreach(section "## Conclusion" "## Machine and environment" "## Stage 1: layouts" "## Stage 2: reader settings"
         "## Sensitivity to the number of users" "## Validation" "## Reference: one-pass cube histograms"
-        "## Configuration" "--zarr_file_io_threads" "Skipped layout refused" "| binned |"
+        "## Configuration" "--zarr_io " "Skipped layout refused" "| binned |"
         "### animation" "### Plane against spectrum" "animation per frame" "Too few first touches for plane"
         "first touches (2)" "## Warm stage: tuning constants" "Tuning variant same has no overrides")
     string(FIND "${summary}" "${section}" found)

@@ -95,10 +95,10 @@ VALIDATE_DRIFT = 0.20
 # How much faster than the default build a tuning variant must make a mode before the report says so.
 TUNING_GAIN = 0.10
 
-# carta-backend's own defaults for the settings it has: --zarr_file_io_threads 2,
-# --zarr_data_copy_threads the OpenMP thread count (every logical core), --zarr_cache_size 1024 MiB.
-# There is no backend setting for the read budget, so the library's own (0) is the only one it uses.
-BACKEND_DEFAULTS = {"io_threads": 2, "decode_threads": "cores", "cache_mib": 1024, "read_budget": "0"}
+# carta-backend's own defaults for the settings it has: --zarr_io min(4, the OpenMP thread count),
+# --zarr_decode the OpenMP thread count (every logical core), and --zarr_cache 1 GiB. There is no backend
+# setting for the read budget, so the library's own (0) is the only one it uses.
+BACKEND_DEFAULTS = {"io_threads": "min(4, cores)", "decode_threads": "cores", "cache_mib": 1024, "read_budget": "0"}
 
 DEFAULTS: dict[str, Any] = {
     "paths": {"bench": "", "work": "", "generator": str(HERE / "generate.py"), "keep_datasets": False},
@@ -439,12 +439,15 @@ def parse_size(text: str | int) -> int:
 
 
 def resolve_threads(value: Any, cores: int) -> int:
-    """A thread count, or "cores" or "cores/N", resolved on this machine."""
+    """A thread count, or "cores", "cores/N" or "min(N, cores)", resolved on this machine."""
     if isinstance(value, int) and value >= 0:
         return value
-    match = re.fullmatch(r"cores(?:/(\d+))?", str(value).strip())
+    text = str(value).strip()
+    if match := re.fullmatch(r"min\((\d+),\s*cores\)", text):
+        return max(1, min(int(match.group(1)), cores))
+    match = re.fullmatch(r"cores(?:/(\d+))?", text)
     if not match:
-        raise SystemExit(f"{value!r} is not a thread count, cores, or cores/N")
+        raise SystemExit(f"{value!r} is not a thread count, cores, cores/N, or min(N, cores)")
     return max(1, cores // int(match.group(1) or 1))
 
 
@@ -468,13 +471,18 @@ class Setting:
         return ["--io-threads", str(self.io_threads), "--decode-threads", str(self.decode_threads),
                 "--cache-bytes", str(self.cache_mib << 20), "--read-budget-bytes", str(self.read_budget)]
 
+    @property
+    def cache_gib(self) -> int | float:
+        """The cache as carta-backend's --zarr_cache takes it: GiB, a fraction when it is not whole."""
+        gib = self.cache_mib / 1024
+        return int(gib) if gib.is_integer() else gib
+
     def backend_flags(self) -> str:
-        return (f"--zarr_file_io_threads {self.io_threads} --zarr_data_copy_threads {self.decode_threads} "
-                f"--zarr_cache_size {self.cache_mib}")
+        # Exact: a whole number of MiB is a short binary fraction of a GiB, which str() spells in full
+        return f"--zarr_io {self.io_threads} --zarr_decode {self.decode_threads} --zarr_cache {self.cache_gib}"
 
     def settings_json(self) -> str:
-        return json.dumps({"zarr_file_io_threads": self.io_threads, "zarr_data_copy_threads": self.decode_threads,
-                           "zarr_cache_size": self.cache_mib})
+        return json.dumps({"zarr_io": self.io_threads, "zarr_decode": self.decode_threads, "zarr_cache": self.cache_gib})
 
 
 def setting_of(table: dict[str, Any], cores: int) -> Setting:
@@ -1951,7 +1959,7 @@ def tradeoff_section(sweep: Sweep, analysis: Analysis, ranking: list[tuple[Layou
                   "ready by the end of its turn, and the longest stall is the most any frame was late by. A frame "
                   "stalls where it enters a new run of chunks along the spectrum, which costs what a plane does. "
                   "A backend that read the next run in the background would hide most of that for one user, if its "
-                  "cache held two runs: --zarr_cache_size at least twice the chunk run.", ""]
+                  "cache held two runs: --zarr_cache at least twice the chunk run.", ""]
 
     best = ranking[0][0].name if math.isfinite(ranking[0][1]) else None
     steady = []

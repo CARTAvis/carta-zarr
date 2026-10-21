@@ -106,8 +106,8 @@ open. `run` writes one CSV row per operation; `--help` lists its options.
   share the shard's index, a few bytes a chunk, and whether reading ahead in the shard's file brought
   the later one's chunks in is up to the file system. Counting by shard would leave a layout sharded
   across every channel with one first touch a trial to rank.
-- **Cube histograms** are computed as carta-backend computes them by default
-  (`--zarr_histogram_method exact`): a reduction over whole planes for the range, then every plane
+- **Cube histograms** are computed as the cube histogram fast path on carta-backend's `test_zarr`
+  branch computes them by default (its `--zarr_histogram_method exact`; v6.1 has neither): a reduction over whole planes for the range, then every plane
   binned over it -- two passes over the cube, through a cache pool that keeps nothing, as the
   backend's are. `--histogram-method binned` or `sampled:N` times `ComputeCubeHistogram`'s one pass
   instead.

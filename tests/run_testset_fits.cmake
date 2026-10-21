@@ -4,11 +4,11 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 
 # generate.py writes a synthetic cube as FITS, and verify.py checks a Zarr made from it. The test set's
-# Zarr comes from a converter this repository does not have, but generate.py writes the same cube as a
-# dataset too, so verifying the two against each other checks both: the order of the pixels, and what
+# Zarr comes from convert.py, which needs XRADIO, but generate.py writes the same cube as a dataset
+# too, so verifying the two against each other checks both: the order of the pixels, and what
 # verify.py holds a layout to. A Zarr in other chunks than asked for, with a pixel changed, or without
-# the flag it was meant to carry -- or with one carta-zarr would not apply, as the converter's
-# --compute_mask leaves it, or one over a pixel that is data -- must then fail verification.
+# the flag it was meant to carry -- or with one carta-zarr would not apply, because the image does not
+# declare it, or one over a pixel that is data -- must then fail verification.
 
 if(NOT DEFINED UV OR NOT DEFINED SOURCE_DIR OR NOT DEFINED OUTPUT_DIR OR NOT DEFINED BENCH)
     message(FATAL_ERROR "UV, SOURCE_DIR, OUTPUT_DIR and BENCH must be set")
@@ -74,9 +74,9 @@ change("${OUTPUT_DIR}/changed.zarr" "zarr.open_array(root + '/SKY', mode='r+')[0
 refused_for("a Zarr whose pixels differ from the FITS cube" "every pixel" "${fits}" "${OUTPUT_DIR}/changed.zarr" --flag no
             --chunks 32,32,8)
 
-# Copies of the cube with a flag beside it, true where the pixel is NaN, as the converter's
-# --compute_mask computes one. Typed and declared it is the flag carta-zarr applies, and verifies;
-# untyped and undeclared, as xradio's FITS reader leaves it, carta-zarr ignores it, and so must verify.py.
+# Copies of the cube with a flag beside it, true where the pixel is NaN, as --compute_mask computes
+# one. Typed and declared it is the flag carta-zarr applies, and verifies; untyped and undeclared,
+# carta-zarr ignores it, and so must verify.py.
 function(with_flag name typed declared)
     set(copy "${OUTPUT_DIR}/${name}.zarr")
     file(COPY "${cube}/" DESTINATION "${copy}")

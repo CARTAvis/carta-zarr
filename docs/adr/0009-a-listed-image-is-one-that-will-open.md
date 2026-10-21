@@ -15,7 +15,7 @@ the question -- `RequireOpenableDataset` already spelled it that way, and `reada
 place saying the same thing with a different word.
 
 *Since decided:* `openable` is no longer the only thing an entry carries. An openable entry also
-reports `image_role` and the `axes` it will open with -- `ImageDescriptor::axes`, element for
+reports the `axes` it will open with -- `ImageDescriptor::axes`, element for
 element -- because carta-backend refuses more than this library does: it displays one time step,
 and opening every image to learn its axes read every coordinate value to answer a question about
 shapes. Its file list now builds the HDU list from `openable` and those axes together. The promise

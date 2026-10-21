@@ -128,14 +128,14 @@ void Write(std::ostream& out, const std::vector<double>& values) {
 std::string Fingerprint(const carta::zarr::ImageDescriptor& image) {
     std::ostringstream out;
     out << std::setprecision(17);
-    out << image.id << " " << image.image_role << " " << image.sub_type << " " << static_cast<int>(image.stored_type)
-        << " " << image.unit << " " << image.has_pixel_mask << " " << image.pixel_mask_id << "\n";
+    out << image.id << " " << image.sub_type << " " << static_cast<int>(image.stored_type) << " " << image.unit << " "
+        << image.pixel_mask_id << "\n";
     for (const auto& group : image.data_groups) {
         out << "group " << group << "\n";
     }
     for (const auto& axis : image.axes) {
-        out << "axis " << axis.name << " " << static_cast<int>(axis.role) << " " << axis.length << " " << axis.unit
-            << " " << axis.storage_index << "\n";
+        out << "axis " << axis.name << " " << static_cast<int>(axis.role) << " " << axis.length << " "
+            << axis.storage_index << "\n";
     }
     if (const auto& direction = image.direction) {
         out << "direction " << direction->projection << " " << direction->reference_frame << " "

@@ -45,18 +45,13 @@ for every store that opens, and empty for one that declares nothing.
 
 ## Metadata differences that matter to applications
 
-- **Image roles:** a variable typed `sky` that a data group other than `base`
-  names as its sky reports that group's name as its role, such as `model`,
-  `residual` or `dirty`. Other images take their role from their `type`, such
-  as `point_spread_function` or `mask`. Use the reported role instead of
-  inferring it from the ID.
 - **Default image:** the listing puts XRADIO's own image names first (`SKY`,
   `SKY_MODEL`, `SKY_RESIDUAL`, `SKY_DIRTY`, …), and the default is the first
   openable one, so a dataset without `SKY` defaults to, for example,
   `SKY_MODEL`.
 - **Image subtype:** `ImageDescriptor::sub_type` describes what is measured,
-  for example `Intensity`, `SpectralIndex` or `OpticalDepth`. It is separate
-  from `image_role`, and is empty when the image does not name one.
+  for example `Intensity`, `SpectralIndex` or `OpticalDepth`, and is empty
+  when the image does not name one.
   This field is on the opened image descriptor, not `ImageEntry`.
 - **Spectral frame and units:** read from `frequency`'s `frame` and `units`.
   `SpectralCoordinate::reference_frame` is the frame in casacore's names, as 0.0.2

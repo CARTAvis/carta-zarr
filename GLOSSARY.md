@@ -39,12 +39,6 @@ its plane, and not a flag. Identified by its variable name, which is unique with
 Carrying only some of the plane's coordinates makes something an optional coordinate, not an image.
 _Avoid_: image array, HDU, plane, layer
 
-**Image role**:
-The part an image plays in its data group — sky, model, residual, point spread function, primary
-beam, deconvolution mask. Carried on the data variable's own `type` attribute, the same attribute
-that spells `flag` for pixel masks. Descriptive only; it never identifies an image.
-_Avoid_: image type, kind, category
-
 **Sky plane**:
 The tangent plane to the celestial sphere, carrying the `l` and `m` direction-cosine coordinates.
 _Avoid_: image plane, lm plane

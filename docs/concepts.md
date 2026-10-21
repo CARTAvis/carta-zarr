@@ -16,11 +16,9 @@ flowchart LR
 ```
 
 The names above are illustrative: use the IDs the actual listing reports.
-An image role such as sky or residual describes a variable's purpose; it is
-not the ID used to open it.
-For variables typed `sky`, a non-base data group's name can determine the role,
-for example `model`, `residual` or `dirty`. An opened image's `sub_type` instead describes
-what it measures, such as intensity or spectral index. See
+An opened image's `data_groups` name the data groups that reference it, such as
+`base` or `model`, and its `sub_type` describes what it measures, such as
+intensity or spectral index. See
 [schema versions](reference/schema-versions.md) for version-dependent metadata.
 
 | Object | Responsibility |
@@ -31,7 +29,7 @@ what it measures, such as intensity or spectral index. See
 | `Image` | Detailed descriptor, pixel reads, reductions, histograms and beams |
 | `CachePool` | An optional separate decoded-chunk cache for selected operations |
 
-`ImageEntry` contains `id`, `openable`, `diagnostics`, `image_role` and `axes`.
+`ImageEntry` contains `id`, `openable`, `diagnostics` and `axes`.
 The axes match those `OpenImage` would report for an openable image; they are
 empty for an unopenable entry. Descriptors contain metadata, not pixel buffers.
 

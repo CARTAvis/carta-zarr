@@ -107,36 +107,6 @@ std::vector<std::string> FindDataGroups(const nlohmann::json& root_attributes, s
     return data_groups;
 }
 
-// XRADIO writes the role on the variable's own "type" attribute, lowercased; the same attribute
-// spells "flag" for pixel masks, which are never images. Every sky image is typed "sky", and its part
-// is the name of the data group whose sky it is, so a sky image another group than "base" names as
-// its sky, and "base" does not, plays that group's part.
-//
-// One rule for the listing and for describing, so that an entry and the image it opens as cannot
-// disagree about which part the image plays.
-std::string ImageRoleOf(const zarr_metadata::ArrayMetadata& image, std::string_view image_id,
-                        const nlohmann::json& root_attributes) {
-    const std::string role = AttributeString(image.attributes, "type");
-    if (role == "flag") {
-        return {};
-    }
-    const auto* const groups = role == "sky" ? MemberObject(root_attributes, "data_groups") : nullptr;
-    if (groups == nullptr) {
-        return role;
-    }
-    // The base group's sky is the sky, whatever other group shares it.
-    if (const auto* const base = MemberObject(*groups, "base");
-        base != nullptr && AttributeString(*base, "sky") == image_id) {
-        return role;
-    }
-    for (const auto& [group_name, group] : groups->items()) {
-        if (AttributeString(group, "sky") == image_id) {
-            return group_name;
-        }
-    }
-    return role;
-}
-
 std::optional<SpectralCoordinate> DescribeSpectralCoordinate(const Store& store,
                                                              const std::vector<double>& frequency_values,
                                                              ImageDescriptor& descriptor) {
@@ -153,7 +123,6 @@ std::optional<SpectralCoordinate> DescribeSpectralCoordinate(const Store& store,
         }
     }
 
-    // The axis reports the same unit, from the same rule.
     spectral.unit = CoordinateUnit(store, SkyCoordinate(AxisRole::spectral));
     spectral.reference_frame = AttributeString(frequency_attributes, "frame");
     // The channel a linear description is measured from, which is the first one unless the
@@ -236,7 +205,6 @@ Result<Discovered> DiscoverImages(const Store& store) {
 
     Discovered found;
     ImageDiscovery& result = found.discovery;
-    const auto& root_attributes = store.RootAttributes();
     for (const auto& entry : inventory.value()) {
         auto qualified = QualifyNode(store, entry);
         if (qualified.listed || IsKnownImage(entry.name)) {
@@ -260,9 +228,8 @@ Result<Discovered> DiscoverImages(const Store& store) {
         const auto& metadata = entry.array->value();
         // Only for an image that opens: the axes promise what OpenImage would report, and a
         // variable it refuses reports nothing -- an aperture-plane one would have only some of them.
-        auto axes = qualified.openable ? DescribeAxes(store, metadata) : std::vector<AxisDescriptor>{};
-        result.images.push_back(ImageEntry{entry.name, qualified.openable, std::move(said),
-                                           ImageRoleOf(metadata, entry.name, root_attributes), std::move(axes)});
+        auto axes = qualified.openable ? DescribeAxes(metadata) : std::vector<AxisDescriptor>{};
+        result.images.push_back(ImageEntry{entry.name, qualified.openable, std::move(said), std::move(axes)});
     }
 
     const auto sort_images = [](std::vector<ImageEntry>& images) {
@@ -419,10 +386,9 @@ Result<DescribedImage> DescribeImageFrom(const Store& store, std::string_view im
     descriptor.stored_type = zarr_metadata::ParseDataType(image.data_type);
     descriptor.unit = AttributeString(image.attributes, "units");
     const auto& root_attrs = store.RootAttributes();
-    descriptor.image_role = ImageRoleOf(image, image_id, root_attrs);
     descriptor.sub_type = AttributeString(image.attributes, "sub_type");
     descriptor.data_groups = FindDataGroups(root_attrs, image_id);
-    descriptor.axes = DescribeAxes(store, image);
+    descriptor.axes = DescribeAxes(image);
 
     // A direction axis is linear by construction, so its increment is reported even when the samples
     // are not evenly spaced; the fit says so in a diagnostic rather than withholding the value. So is
@@ -467,11 +433,10 @@ Result<DescribedImage> DescribeImageFrom(const Store& store, std::string_view im
         return pixel_mask.error();
     }
     descriptor.pixel_mask_id = pixel_mask.value();
-    descriptor.has_pixel_mask = !descriptor.pixel_mask_id.empty();
     // The flag is read only by a masked read, so an image whose flag disagreed with the root's copy
     // opened, read unmasked, and failed every masked read.
     ChunkGeometry flag_geometry;
-    if (descriptor.has_pixel_mask) {
+    if (!descriptor.pixel_mask_id.empty()) {
         const auto& verified = store.VerifyArray(descriptor.pixel_mask_id);
         if (!verified) {
             return verified.error();

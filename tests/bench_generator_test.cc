@@ -132,7 +132,7 @@ void TestLayoutsHoldTheSamePixels() {
 void TestAFlagMasksWhatNaNWouldHave() {
     const auto plain = OpenDefault(kGenerated + "/plain");
     const auto flagged = OpenDefault(kGenerated + "/flagged");
-    Require(flagged.descriptor().has_pixel_mask, "the flagged layout has no pixel mask");
+    Require(!flagged.descriptor().pixel_mask_id.empty(), "the flagged layout has no pixel mask");
     Require(SameBits(ReadAll(plain), ReadAll(flagged)), "a masked read of the flagged layout differs from NaN");
     const auto unmasked = ReadAll(flagged, false);
     Require(std::isfinite(unmasked.front()), "an unmasked read of a flagged pixel is not the pixel");
@@ -144,7 +144,7 @@ void TestARewriteIsTheWindowItWasCutFrom() {
     const auto original = OpenDefault(CARTA_ZARR_PIXEL_FIXTURE);
     const auto rewritten = OpenDefault(kGenerated + "/rewritten");
     RequireGeometryMatches(kGenerated + "/rewritten", rewritten);
-    Require(rewritten.descriptor().has_pixel_mask, "the rewrite lost the fixture's flag");
+    Require(!rewritten.descriptor().pixel_mask_id.empty(), "the rewrite lost the fixture's flag");
 
     const auto& axes = original.descriptor().axes;
     carta::zarr::ReadRequest window;

@@ -24,6 +24,14 @@ minor release may change the ABI, and the soname says so ([ADR 0020](docs/adr/00
   * `CubeHistogramProgress::progress` is `completeness`, as the blocks report a fraction done.
   * `Dataset::Size`'s parameter is `measure_timeout`, after `SizeBasis::measured`; a parameter name, with no effect on the ABI.
 
+### Removed
+* Public fields that repeated what another field already says, or that nothing set any more. This changes the API and the ABI ([#38](https://github.com/CARTAvis/carta-zarr/issues/38)):
+  * `ImageEntry::image_role` and `ImageDescriptor::image_role`. The variable's `id` and the image's `data_groups` say the same, and no consumer read it. `carta-zarr-bench`'s JSON no longer has a `role` key.
+  * `ImageDescriptor::has_pixel_mask`: an image has a pixel mask exactly when `pixel_mask_id` is not empty. `carta-zarr-bench`'s JSON still reports `has_pixel_mask`, derived the same way.
+  * `AxisDescriptor::unit`. It was the same `units` attribute the coordinates report: `SpectralCoordinate::unit`, `TemporalCoordinate::unit` and `ApertureCoordinate::unit`. It was empty for `l`, `m` and `polarization`.
+  * `ChunkGeometry::grid_shape`, which is each axis's length over `chunk_shape`, rounded up. It counted inner chunks, not shards or files.
+  * `DiagnosticCode::unsupported_coordinate_plane`, no longer emitted since aperture-plane images open. The codes after it are renumbered.
+
 ### Fixed
 * A store naming schema 0.0.2 whose data groups name no sky image is no longer refused as malformed. The schema does not require one, and XRADIO writes such stores: an aperture plane alone (`APERTURE`, `FLAG_APERTURE`), or a point spread function alone. A store of complex aperture-plane variables answers `no_match`, saying they are not openable, and one with an image this library opens matches. A sky a data group names must still be typed `"sky"`, and a frequency coordinate must still have `frame` and `units` whatever the groups name ([#40](https://github.com/CARTAvis/carta-zarr/issues/40)).
 

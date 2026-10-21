@@ -165,7 +165,7 @@ void TestACacheWithoutRoomForTwoRunsIsDeclinedAndSaysWhy() {
 void TestAFlagChunkedOtherwiseIsCountedInItsOwnChunks() {
     const auto context = ContextHolding(0);
     const auto image = OpenSky(context, CARTA_ZARR_PIXEL_FIXTURE_COARSE_FLAG);
-    Require(image.descriptor().has_pixel_mask, "the coarse-flag fixture has no flag to count");
+    Require(!image.descriptor().pixel_mask_id.empty(), "the coarse-flag fixture has no flag to count");
 
     ReadOptions pooled;
     pooled.control.cache_pool = context.CreateCachePool(300).value();
@@ -198,7 +198,7 @@ void TestAFlagShallowerThanARunIsReadAheadForEveryPlaneOfIt() {
     };
     std::vector<float> expected;
     const auto reference = OpenSky(ContextHolding(0), fixture);
-    Require(reference.descriptor().has_pixel_mask, "the deep fixture has no flag to read ahead");
+    Require(!reference.descriptor().pixel_mask_id.empty(), "the deep fixture has no flag to read ahead");
     Require(read(reference, 0, expected), "the deep fixture's first polarization did not read");
 
     const auto copy =

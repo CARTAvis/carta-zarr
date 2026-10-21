@@ -43,7 +43,6 @@ using carta::zarr::testing::Require;
 carta::zarr::ImageDescriptor Image(carta::zarr::DataType type, const std::vector<std::uint64_t>& lengths) {
     carta::zarr::ImageDescriptor image;
     image.stored_type = type;
-    image.has_pixel_mask = true;
     image.pixel_mask_id = "FLAG";
     for (const auto length : lengths) {
         carta::zarr::AxisDescriptor axis;
@@ -123,7 +122,7 @@ void TestAChunkHoldsThreeTimesWhatItDecodesTo() {
     carta::zarr::ChunkGeometry geometry;
     geometry.chunk_shape = {512, 512, 64, 1, 1};
     auto image = Image(carta::zarr::DataType::float32, {7763, 4742, 128, 1, 1});
-    image.has_pixel_mask = false;
+    image.pixel_mask_id.clear();
     const auto cost =
         ReadCost::Of(image, geometry, geometry, carta::zarr::ReadOptions{}, PixelsHeld::by_caller, kManyThreads);
     Require(cost.chunk_bytes == 64 * kMiB, "a 512 x 512 x 64 float32 chunk decodes to 64 MiB");
@@ -144,7 +143,7 @@ void TestAChunkHoldsThreeTimesWhatItDecodesTo() {
             "a budget of what one chunk decodes to affords less than what it holds");
 
     // The folded-in flag is a buffer of a byte an element, beside the flag chunk it decodes.
-    image.has_pixel_mask = true;
+    image.pixel_mask_id = "FLAG";
     const auto masked =
         ReadCost::Of(image, geometry, geometry, carta::zarr::ReadOptions{}, PixelsHeld::by_caller, kManyThreads);
     const std::uint64_t elements = 512ULL * 512ULL * 64ULL;

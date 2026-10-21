@@ -77,7 +77,6 @@ ImageDescriptor MakeImage(bool with_mask = false) {
         axis.storage_index = storage[i];
         descriptor.axes.push_back(axis);
     }
-    descriptor.has_pixel_mask = with_mask;
     if (with_mask) {
         descriptor.pixel_mask_id = "FLAG";
     }

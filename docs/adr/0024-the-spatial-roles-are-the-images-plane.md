@@ -70,7 +70,8 @@ search by dimensions and shape.
 - `ImageDescriptor::aperture` and `ApertureCoordinate` are new public API. This changes the ABI, and
   it is part of the untagged 0.3.0 (ADR 0020).
 - `DiagnosticCode::unsupported_coordinate_plane` is no longer emitted. A complex variable on either
-  plane is `unsupported_data_type`. The enumerator stays, so the codes after it keep their values.
+  plane is `unsupported_data_type`. The enumerator was then removed in the same untagged 0.3.0,
+  which renumbers the codes after it (#38).
 - A consumer that took `spatial_x` and `spatial_y` to be the sky's must look at `direction` and
   `aperture` first. carta-backend builds a casacore `LinearCoordinate` named `UU`/`VV` in `lambda`
   from `aperture`, where it builds a `DirectionCoordinate` from `direction`.

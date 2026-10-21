@@ -1205,23 +1205,6 @@ void TestADescriptionIsBuiltFromTheValuesItIsGiven() {
             "the time's scale and format come from its attributes, uppercased");
 }
 
-// XRADIO writes an image's role on its own "type" attribute. The v2 draft's "image_type" is no
-// XRADIO's, and is not read in its place.
-void TestImageTypeIsNotARole() {
-    using carta::zarr::internal::xradio::CoordinateValues;
-    using carta::zarr::internal::xradio::DescribeImageFrom;
-
-    auto nodes = CompleteStore();
-    nodes["OTHER"] = SkyArray("float32", R"({"units":"Jy/beam","image_type":"residual"})");
-    auto store = Open(nodes);
-    Require(static_cast<bool>(store), "the in-memory store failed to open");
-
-    const auto described = DescribeImageFrom(store.value(), "OTHER", CoordinateValues{});
-    Require(static_cast<bool>(described), "an image with no values handed in is still described");
-    Require(described.value().descriptor.image_role.empty(),
-            "image_type was read as the role, got '" + described.value().descriptor.image_role + "'");
-}
-
 // A numeric array spelled out field by field, for the cases where the array's own document has to
 // differ from the root's copy in one of them and nothing else.
 std::string ArrayDocument(const std::string& shape, const std::string& chunks, const std::string& dimensions,
@@ -1427,43 +1410,6 @@ void TestAPixelReadHoldsItsArrayToItsOwnDocument() {
     RequireRefusedAs(mask.error(), ErrorCode::invalid_metadata, "MASK_0", "a rewritten flag");
 }
 
-// An axis reports the unit its coordinate has, and there is one rule for what that is: its units
-// attribute. When the spectral coordinate and the axis read the unit by different rules, one image
-// reported its spectral axis unitless and its spectral coordinate in Hz. The listing reports the same
-// axes as describing does.
-void TestAnAxisReportsItsCoordinatesUnit() {
-    using carta::zarr::AxisRole;
-    using carta::zarr::internal::xradio::CoordinateValues;
-    using carta::zarr::internal::xradio::DescribeImageFrom;
-
-    auto nodes = CompleteStore();
-    nodes["time"] = NumericArray("[1]", R"(["time"])", "float64", R"({"units":"s"})");
-    auto store = Open(nodes);
-    Require(static_cast<bool>(store), "the in-memory store failed to open");
-
-    const auto unit_of = [](const std::vector<carta::zarr::AxisDescriptor>& axes, AxisRole role) {
-        const auto index = carta::zarr::AxisIndex(axes, role);
-        Require(index.has_value(), "an axis the image carries was not reported");
-        return axes.at(*index).unit;
-    };
-
-    auto discovery = XradioProfile().Discover(store.value());
-    Require(static_cast<bool>(discovery) && !discovery.value().images.empty(), "SKY was not listed");
-    const auto& listed = discovery.value().images.front().axes;
-    Require(unit_of(listed, AxisRole::spectral) == "Hz",
-            "the listing reported the spectral axis in '" + unit_of(listed, AxisRole::spectral) + "', not Hz");
-    Require(unit_of(listed, AxisRole::time) == "s", "the listing lost the time axis's unit");
-
-    CoordinateValues values;
-    values.frequency = {1.4e9, 1.401e9, 1.402e9};
-    const auto described = DescribeImageFrom(store.value(), "SKY", values);
-    Require(static_cast<bool>(described), "SKY was not described");
-    const auto& descriptor = described.value().descriptor;
-    Require(descriptor.spectral && descriptor.spectral->unit == "Hz", "the spectral coordinate lost its unit");
-    Require(unit_of(descriptor.axes, AxisRole::spectral) == descriptor.spectral->unit,
-            "the spectral axis and the spectral coordinate disagree about the unit");
-}
-
 // The coordinates are said once, and every list the profile keeps is read off that table. Each
 // plane's are the five an image of it carries, in the order its axes are reported: its own spatial
 // pair, then the three both planes share. u and v play the spatial roles as l and m do (ADR 0024).
@@ -1550,7 +1496,6 @@ void TestAStoreOfSchema002IsRead() {
     const auto described = DescribeWithChannels(Store002());
     Require(described.descriptor.spectral && described.descriptor.spectral->reference_frame == "GEO",
             "a 0.0.2 store's frame is frequency's own frame");
-    Require(described.descriptor.image_role == "sky", "the base group's sky is the sky");
 }
 
 // What a store that is not read is refused as, by the probe, by opening the dataset and by describing
@@ -1860,9 +1805,6 @@ void TestAnImagesPartAndWhereItIsListed() {
     const auto& images = discovery.value().images;
     Require(ImageIds(images) == std::vector<std::string>{"SKY", "SKY_MODEL", "SKY_DIRTY", "MASK", "EXTRA", "MODEL"},
             "a 0.0.2 store's images were not listed in XRADIO's order, then by name");
-    Require(
-        images.at(0).image_role == "sky" && images.at(1).image_role == "model" && images.at(2).image_role == "dirty",
-        "a 0.0.2 sky's part was not its data group's");
 
     // Without SKY, the dataset opens on a part of the sky rather than on its point spread function.
     auto skyless = Store002();
@@ -1964,14 +1906,12 @@ int main() {
         TestSizeFallsBackWhenTheStoreCannotBeMeasured();
         TestSizeRefusesAStoreWithNoArrays();
         TestADescriptionIsBuiltFromTheValuesItIsGiven();
-        TestImageTypeIsNotARole();
         TestAnArrayDisagreeingWithTheRootsCopyIsRefused();
         TestAnArrayIsNotHeldToHowItsChunksAreEncoded();
         TestCheckingAnArrayReadsItsOwnDocumentOnce();
         TestDescribingAnImageHoldsItsArraysToTheirOwnDocuments();
         TestAPixelReadHoldsItsArrayToItsOwnDocument();
         TestTheCoordinatesAreOneTable();
-        TestAnAxisReportsItsCoordinatesUnit();
         TestAStoreOfSchema002IsRead();
         TestAStoreNamingNoVersionIsRefused();
         TestA002StoreThatIsNotOneIsInvalid();

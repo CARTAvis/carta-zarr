@@ -43,7 +43,6 @@ ImageDescriptor MakeImage(std::uint64_t x, std::uint64_t y, std::uint64_t channe
     ImageDescriptor descriptor;
     descriptor.id = "SKY";
     descriptor.stored_type = carta::zarr::DataType::float32;
-    descriptor.has_pixel_mask = has_mask;
     descriptor.pixel_mask_id = has_mask ? "FLAG" : "";
     const struct {
         const char* name;

@@ -104,7 +104,7 @@ std::string CoordinateUnit(const Store& store, const Coordinate& coordinate) {
     return AttributeString(metadata.value().attributes, "units");
 }
 
-std::vector<AxisDescriptor> DescribeAxes(const Store& store, const zarr_metadata::ArrayMetadata& image) {
+std::vector<AxisDescriptor> DescribeAxes(const zarr_metadata::ArrayMetadata& image) {
     const auto plane = PlaneOf(image).value_or(Plane::sky);
     std::vector<AxisDescriptor> axes;
     axes.reserve(AxisCount(plane));
@@ -116,8 +116,7 @@ std::vector<AxisDescriptor> DescribeAxes(const Store& store, const zarr_metadata
         if (!index) {
             continue;
         }
-        axes.push_back(AxisDescriptor{std::string(coordinate.name), coordinate.role, image.shape.at(*index),
-                                      CoordinateUnit(store, coordinate), *index});
+        axes.push_back(AxisDescriptor{std::string(coordinate.name), coordinate.role, image.shape.at(*index), *index});
     }
     return axes;
 }

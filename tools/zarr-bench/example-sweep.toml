@@ -96,8 +96,8 @@ generator_workers = 0
 [baseline]
 # What the backend runs with now, which every recommendation is compared with. These are the
 # backend's own defaults; put your production settings here if they differ.
-# decode_threads may be a number, "cores" or "cores/N".
-io_threads = 2
+# io_threads and decode_threads may be a number, "cores", "cores/N" or "min(N, cores)".
+io_threads = "min(4, cores)"
 decode_threads = "cores"
 cache_mib = 1024
 read_budget = "0"

@@ -60,9 +60,10 @@ enum class ColdMethod {
 const char* ColdMethodName(ColdMethod method) noexcept;
 std::optional<ColdMethod> ParseColdMethod(std::string_view name) noexcept;
 
-// How a cube histogram is computed, as carta-backend's --zarr_histogram_method names the choices.
+// How a cube histogram is computed, as --zarr_histogram_method on carta-backend's test_zarr branch names
+// the choices; the v6.1 backend has no such setting.
 //
-// exact is the backend's default, and so the bench's: two passes, ReduceSpectral over whole planes
+// exact is that branch's default, and so the bench's: two passes, ReduceSpectral over whole planes
 // for the range and then ComputeHistogram over it, reading the cube twice. binned and sampled are
 // ComputeCubeHistogram's one pass, measured for reference rather than recommended -- they move where
 // the bin edges land, which is a question of accuracy and not one a timing can settle.
@@ -123,7 +124,7 @@ struct RunOptions {
     bool resume = false;
 
     // The cache pool plane and spectrum read each operation through: the size of the context's own,
-    // and carta-backend's default --zarr_cache_size of 1 GiB when that is left to the library. Not
+    // and carta-backend's default --zarr_cache of 1 GiB when that is left to the library. Not
     // none, even then: a sharded layout keeps its shard index in the pool, and one that kept nothing
     // would read the index again for every chunk of a single read.
     std::size_t FirstTouchCacheBytes() const noexcept { return context.cache_bytes.value_or(std::size_t{1} << 30); }

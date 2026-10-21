@@ -1,5 +1,9 @@
 # Tuning constants are measured on other machines, not configured on them
 
+*Amended for 0.3.0 ([#71](https://github.com/CARTAvis/carta-zarr/issues/71)): the backend settings
+named below, `--zarr_file_io_threads` and `--zarr_cache_size`, are `--zarr_io` and `--zarr_cache` in
+carta-backend v6.1. The decision is unchanged.*
+
 `src/reduce/tuning.h` holds the numbers the reductions were tuned to. Four of them were measured on
 one machine and depend on its caches and its core count rather than on what is being computed:
 

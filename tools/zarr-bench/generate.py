@@ -792,11 +792,8 @@ def fill(job: Job, shape: list[int], unit: tuple[int, ...], itemsize: int, args:
 
 
 def holds_booleans(metadata: dict[str, Any]) -> bool:
-    """A Zarr bool, or xarray's encoding of one -- an int8 marked dtype "bool" -- which is what XRADIO
-    writes for every flag. HoldsBooleans in src/schema/xradio/flag.h."""
-    if metadata.get("data_type") == "bool":
-        return True
-    return metadata.get("data_type") == "int8" and metadata.get("attributes", {}).get("dtype") == "bool"
+    """A Zarr bool, which is how XRADIO writes every flag. HoldsBooleans in src/schema/xradio/flag.h."""
+    return metadata.get("data_type") == "bool"
 
 
 def canonical_node(name: str) -> str:
@@ -806,6 +803,18 @@ def canonical_node(name: str) -> str:
     if not parts or name.startswith("/") or ".." in parts:
         return name
     return "/".join(parts)
+
+
+def can_mask(metadata: dict[str, Any], image_metadata: dict[str, Any]) -> bool:
+    """Whether an array can mask the image: a flag-typed boolean array with its dimensions and shape,
+    as RequireUsableFlag in src/schema/xradio/flag.h asks."""
+    return (
+        metadata.get("node_type") == "array"
+        and metadata.get("attributes", {}).get("type") == "flag"
+        and holds_booleans(metadata)
+        and metadata.get("dimension_names") == image_metadata.get("dimension_names")
+        and metadata.get("shape") == image_metadata.get("shape")
+    )
 
 
 def flags_of_data_groups(root_metadata: dict[str, Any], image: str) -> tuple[set[str], set[str]]:
@@ -828,30 +837,29 @@ def find_flag(root: Path, image: str, image_metadata: dict[str, Any], names: lis
     one its own `flag` attribute names, else the one data_groups give it as its sky. A sky image that
     declares none has none; any other image takes FLAG_<image> when that is a flag-typed boolean array
     with its dimensions and shape that no data group gives another image. Two groups giving it
-    different flags is refused, as carta-zarr refuses to open it."""
+    different flags, or a declared flag that cannot mask it, is refused, as carta-zarr refuses to open
+    it."""
+    def declared_flag(name: str) -> str:
+        # A declared flag binds the image: carta-zarr closes an image whose declared flag cannot mask
+        # it, so there is nothing to rewrite beside it.
+        if name not in names or not can_mask(read_metadata(root / name), image_metadata):
+            raise SystemExit(f"{image} declares the flag {name}, which cannot mask it; carta-zarr would not open it")
+        return name
+
     declared = image_metadata.get("attributes", {}).get("flag")
     if isinstance(declared, str) and declared:
-        return canonical_node(declared)
+        return declared_flag(canonical_node(declared))
     own, others = flags_of_data_groups(root_metadata, image)
     if len(own) > 1:
         raise SystemExit(f"data_groups name more than one flag for {image}: {', '.join(sorted(own))}")
     if own:
-        return next(iter(own))
+        return declared_flag(next(iter(own)))
     if image_metadata.get("attributes", {}).get("type") == "sky":
         return None
     named = f"FLAG_{image}"
     if named not in names or named in others:
         return None
-    metadata = read_metadata(root / named)
-    if (
-        metadata.get("node_type") == "array"
-        and metadata.get("attributes", {}).get("type") == "flag"
-        and holds_booleans(metadata)
-        and metadata.get("dimension_names") == image_metadata.get("dimension_names")
-        and metadata.get("shape") == image_metadata.get("shape")
-    ):
-        return named
-    return None
+    return named if can_mask(read_metadata(root / named), image_metadata) else None
 
 
 def default_image(root_metadata: dict[str, Any]) -> str:

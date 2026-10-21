@@ -34,16 +34,10 @@ inline bool IsFlag(const zarr::ArrayMetadata& metadata) {
            metadata.attributes.at("type").get<std::string>() == "flag";
 }
 
-// Whether a variable's values are booleans: a Zarr bool, or xarray's encoding of one, which is an
-// int8 recorded as `dtype: "bool"` in its attributes. xarray encodes every bool that way, so it is
-// what XRADIO's own writer leaves on disk for each flag it converts; a reader taking only a Zarr
-// bool opened those images with no pixel mask at all.
+// Whether a variable's values are booleans: a Zarr bool, which is how XRADIO writes every flag. An
+// int8, whatever its attributes say, is a number.
 inline bool HoldsBooleans(const zarr::ArrayMetadata& metadata) {
-    if (metadata.data_type == "bool") {
-        return true;
-    }
-    return metadata.data_type == "int8" && metadata.attributes.contains("dtype") &&
-           metadata.attributes.at("dtype").is_string() && metadata.attributes.at("dtype").get<std::string>() == "bool";
+    return metadata.data_type == "bool";
 }
 
 /**

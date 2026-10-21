@@ -46,10 +46,10 @@ names): a row held only what differed between versions, and with one version not
 `DiagnosticCode::unversioned_schema` is removed. A dataset that opens always reports
 `schema_version` `"0.0.2"`; a probe still reports what a refused store names, or nothing.
 
-**Rules that are not about versions stay** (ADR 0022's list): a flag as a Zarr `bool` or an `int8`
-declared `dtype: bool`; ADR 0019's flag search, which a point spread function's flag still needs; a
-store without consolidated metadata; beam labels found by name; an untyped boolean not taken for an
-image; and a sky image of any real type. XRADIO's FITS reader still writes an integer FITS image as
+**Rules that are not about versions stay** (ADR 0022's list): a flag as a Zarr `bool` (and, until
+0.3.0, an `int8` declared `dtype: bool`); ADR 0019's flag search, which a point spread function's
+flag still needs; a store without consolidated metadata; beam labels found by name; an image of
+booleans not opened; and a sky image of any real type. XRADIO's FITS reader still writes an integer FITS image as
 an integer sky image, although `schema.py` allows only float, so refusing one would refuse what
 XRADIO's own conversion wrote. Its pixels are read as float32, like any other.
 

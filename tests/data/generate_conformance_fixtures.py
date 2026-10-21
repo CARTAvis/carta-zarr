@@ -141,11 +141,10 @@ def write_masked_casa_image(path: Path, fits_path: Path, masked: list[tuple[int,
 def write_flagged(fits_path: Path, scratch: Path) -> None:
     """Two CASA images with internal masks, converted together.
 
-    This is the shape of what XRADIO writes from CASA images, which the FITS conversion above never
-    produces: each sky image's flag stored as int8 with `dtype: "bool"` in its attributes rather than
-    as a Zarr bool, true where the pixel is bad, and tied to its image only by the root's
-    `data_groups` -- the image itself names no flag. Two of them, of the same shape, so a reader that
-    guesses a flag from its dimensions finds two candidates for each image.
+    This is the shape of what XRADIO writes from CASA images: each sky image's flag a Zarr bool, true
+    where the pixel is bad, and tied to its image only by the root's `data_groups` -- the image itself
+    names no flag. Two of them, of the same shape, so each image's flag can be told only from what its
+    data group declares.
     """
     from xradio.image import open_image, write_image
 

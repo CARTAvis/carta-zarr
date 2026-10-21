@@ -12,15 +12,14 @@ namespace carta::zarr::internal::xradio {
 
 namespace {
 
-// Why a store naming 0.0.2 is not one, or nothing when it is. Three things schema 0.0.2 requires,
-// checked rather than the whole schema, because they are what this library reads that older stores
-// lack: a store XRADIO 1.2.5 upgraded on read is stamped 0.0.2 whether or not the upgrade could
-// reach them. The sky's own check, that it is an array, applies to a store whose data groups name a
-// sky; whether it is typed as one is the profile's to say of the image, as it says it of every image
-// a data group names (ADR 0001). The schema does not require a sky: an aperture-plane store or a point spread function
-// alone is well formed without it, and is left to the profile, which opens what it can and says why it will not open
-// the rest. The frequency's applies whatever the groups name: an older store with no sky, which XRADIO's empty-image
-// factory wrote, is stamped 0.0.2 by the upgrade as readily as one with a sky.
+// Why a store naming 0.0.2 is not one, or nothing when it is. Three things schema 0.0.2 requires and
+// this library reads, checked rather than the whole schema, because a store that names the version
+// need not have them: the version is a claim, and these are what reading the store rests on. The sky's own check, that
+// it is an array, applies to a store whose data groups name a sky; whether it is typed as one is the profile's to say
+// of the image, as it says it of every image a data group names (ADR 0001). The schema does not require a sky: an
+// aperture-plane store or a point spread function alone is well formed without it, and is left to the profile, which
+// opens what it can and says why it will not open the rest. The frequency's applies whatever the groups name: schema
+// 0.0.2 requires its frame and units of every store, with a sky or without.
 std::optional<Diagnostic> WhyNot002(const Store& store) {
     const auto not_002 = [](const std::string& why, std::string node_path) {
         return Diagnostic{DiagnosticCode::invalid_metadata,

@@ -124,8 +124,8 @@ NodeQualification QualifyNode(const Store& store, const NodeEntry& entry) {
                                                 std::string(node)},
                                      true};
         }
-        // An image of booleans is not one this library opens. xarray's int8 encoding of a bool is real,
-        // and would otherwise be offered as an image of zeroes and ones.
+        // An image of booleans is not one this library opens: booleans over an image's axes are a flag's
+        // values, and the store is told a flag is typed 'flag'.
         if (HoldsBooleans(array)) {
             return NodeQualification{
                 true, false,

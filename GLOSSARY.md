@@ -54,7 +54,7 @@ _Avoid_: uv plane, visibility plane, Fourier plane
 **Flag**:
 A boolean data variable marking which pixels of its image are flagged, distinguished by the attribute
 `type: "flag"` rather than by its name. True means the pixel is flagged and dropped. Stored as a Zarr
-`bool`, or as xarray writes one, an `int8` with `dtype: "bool"` in its attributes. Tied to its image by
+`bool`. Tied to its image by
 the image's own `flag` attribute or by a root `data_groups` entry whose `sky` is the image; otherwise
 an image that is not a sky image, whose flag XRADIO cannot declare, takes the flag named `FLAG_<image>`. It becomes
 the image's pixel mask; it is never itself an image.

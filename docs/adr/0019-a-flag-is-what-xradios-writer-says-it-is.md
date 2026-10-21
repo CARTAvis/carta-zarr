@@ -16,6 +16,9 @@ counted as valid.
   boolean variable it writes to Zarr, and XRADIO writes through xarray. Only a Zarr `bool` was taken
   as a flag, so such an image had no pixel mask at all and its masked pixel was read as valid: 20
   instead of 19. Only `int8` carries the encoding, because only `int8` is what xarray writes.
+  *(Since 0.3.0 this encoding is no longer read: XRADIO 1.2.5 and later, the only versions whose
+  stores this library reads, write a flag as a Zarr `bool`, and an `int8` is a number whatever its
+  attributes say; [#60](https://github.com/CARTAvis/carta-zarr/issues/60).)*
 - **The link is in the root's `data_groups`.** A group's `flag` is its `sky` image's flag, by XRADIO's
   schema, and the converted image names no flag of its own. ADR 0001 said flags were linked on the
   image's attributes; they are not. With two sky images and two matching flags, the guess from

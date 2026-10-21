@@ -160,9 +160,9 @@ class FindFlagTest(unittest.TestCase):
     """The flag a rewrite rewrites beside its image is the one carta-zarr masks the image with, by the
     rule of src/schema/xradio/flag.cc: the image's own `flag` attribute, else the one the root's
     data_groups give the image as its sky. A sky image that declares none has none; any other image
-    takes FLAG_<image> when that is a flag-typed boolean array of its shape. A boolean is a Zarr bool
-    or xarray's int8 marked dtype "bool". A flag left behind keeps the source's layout, and the
-    layouts compared would each be a mix."""
+    takes FLAG_<image> when that is a flag-typed boolean array of its shape. A boolean is a Zarr bool;
+    an int8 is a number whatever its attributes say. A flag left behind keeps the source's layout, and
+    the layouts compared would each be a mix."""
 
     def setUp(self) -> None:
         self._directory = tempfile.TemporaryDirectory()
@@ -182,15 +182,22 @@ class FindFlagTest(unittest.TestCase):
         root = {"attributes": {"data_groups": groups}} if groups is not None else {"attributes": {}}
         return generate.find_flag(self.root, name, image, generate.member_names(self.root), root)
 
-    def test_xarrays_encoding_of_a_bool_is_a_flag(self) -> None:
+    def test_an_int8_marked_bool_is_not_a_flag(self) -> None:
         image = self.array("POINT_SPREAD_FUNCTION", type="point_spread_function")
         self.array("FLAG_POINT_SPREAD_FUNCTION", "int8", type="flag", dtype="bool")
-        self.assertEqual(self.find(image, name="POINT_SPREAD_FUNCTION"), "FLAG_POINT_SPREAD_FUNCTION")
-
-    def test_an_int8_that_is_not_marked_bool_is_not(self) -> None:
-        image = self.array("POINT_SPREAD_FUNCTION", type="point_spread_function")
-        self.array("FLAG_POINT_SPREAD_FUNCTION", "int8", type="flag")
         self.assertIsNone(self.find(image, name="POINT_SPREAD_FUNCTION"))
+
+    def test_a_declared_flag_that_cannot_mask_is_refused(self) -> None:
+        """carta-zarr closes an image whose declared flag cannot mask it, by either declaration."""
+        self.array("FLAG_SKY", "int8", type="flag", dtype="bool")
+        own = self.array("SKY", type="sky", flag="FLAG_SKY")
+        with self.assertRaises(SystemExit):
+            self.find(own)
+        grouped = self.array("OTHER_SKY", type="sky")
+        with self.assertRaises(SystemExit):
+            self.find(grouped, {"base": {"sky": "OTHER_SKY", "flag": "FLAG_SKY"}}, name="OTHER_SKY")
+        with self.assertRaises(SystemExit):
+            self.find(grouped, {"base": {"sky": "OTHER_SKY", "flag": "MISSING"}}, name="OTHER_SKY")
 
     def test_a_sky_image_that_declares_no_flag_has_none(self) -> None:
         image = self.array("SKY", type="sky")
@@ -206,7 +213,7 @@ class FindFlagTest(unittest.TestCase):
 
     def test_a_data_group_declares_its_skys_flag(self) -> None:
         image = self.array("SKY", type="sky")
-        self.array("FLAG_SKY", "int8", type="flag", dtype="bool")
+        self.array("FLAG_SKY", "bool", type="flag")
         self.array("OTHER_FLAG", "bool", type="flag")
         self.assertEqual(self.find(image, {"base": {"sky": "SKY", "flag": "FLAG_SKY"}}), "FLAG_SKY")
 

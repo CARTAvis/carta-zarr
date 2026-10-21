@@ -49,8 +49,8 @@ reports where an axis lives in the stored array, which can differ from its logic
 An image's **flag** marks bad pixels: true means excluded. How reads apply it
 is one of the [rules below](#rules-that-apply-to-every-operation); set
 `apply_pixel_mask = false` to read the stored values without it. A flag an
-image declares must be boolean, a Zarr `bool` or the `int8` xarray writes for
-one, and carry the image's own dimensions in order, or the image does not open.
+image declares must be a Zarr `bool` and carry the image's own dimensions in
+order, or the image does not open.
 
 A reduction's **region mask** (`RegionMask`) selects pixels within a bounding
 box: nonzero means included. A deconvolution mask, `MASK`, is neither: it is an image of

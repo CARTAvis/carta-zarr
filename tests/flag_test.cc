@@ -93,24 +93,18 @@ void TestTheFlagMustMatchTheImagesOwnDimensions() {
 }
 
 // The refusal names the variable, because a consumer shows it to whoever picked the file.
-// xarray stores a bool variable as int8 and records `dtype: "bool"` in its attributes, so that is
-// what XRADIO's own writer leaves on disk for every flag it converts. An int8 without that record
-// is a number, not a flag, and so is any other integer carrying it: xarray writes only int8.
-void TestXarraysEncodingOfABoolIsAFlag() {
-    auto encoded = Flag("int8");
-    encoded.attributes["dtype"] = "bool";
-    Require(static_cast<bool>(RequireUsableFlag(encoded, Image(), "FLAG_SKY")),
-            "an int8 flag recorded as bool, which is how XRADIO writes one, was refused");
-
-    const auto bare = RequireUsableFlag(Flag("int8"), Image(), "FLAG_SKY");
-    Require(!bare && bare.error().code == ErrorCode::unsupported_data_type,
-            "an int8 flag with no record that it holds booleans was accepted");
-
-    auto widened = Flag("uint16");
-    widened.attributes["dtype"] = "bool";
-    const auto other = RequireUsableFlag(widened, Image(), "FLAG_SKY");
-    Require(!other && other.error().code == ErrorCode::unsupported_data_type,
-            "an integer other than int8 was taken as xarray's encoding of a bool");
+// A flag is a Zarr bool, as XRADIO 1.2.5 and later write it. An int8 is a number, also when its
+// attributes record `dtype: "bool"`, which is how xarray once wrote a bool to Zarr; no store this
+// library reads holds one.
+void TestOnlyAZarrBoolIsAFlag() {
+    for (const auto& data_type : {"int8", "uint8", "uint16"}) {
+        auto recorded = Flag(data_type);
+        recorded.attributes["dtype"] = "bool";
+        const auto refused = RequireUsableFlag(recorded, Image(), "FLAG_SKY");
+        Require(!refused && refused.error().code == ErrorCode::unsupported_data_type,
+                std::string("a ") + data_type + " recorded as bool was taken as a flag");
+    }
+    Require(static_cast<bool>(RequireUsableFlag(Flag("bool"), Image(), "FLAG_SKY")), "a Zarr bool flag was refused");
 }
 
 void TestTheRefusalNamesTheVariable() {
@@ -126,7 +120,7 @@ int main() {
         TestClassificationIsNotByName();
         TestANumericVariableIsNotAMask();
         TestTheFlagMustMatchTheImagesOwnDimensions();
-        TestXarraysEncodingOfABoolIsAFlag();
+        TestOnlyAZarrBoolIsAFlag();
         TestTheRefusalNamesTheVariable();
         std::cout << "carta-zarr flag tests passed\n";
         return 0;

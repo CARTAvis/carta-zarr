@@ -550,8 +550,8 @@ void TestOneRuleDecidesWhatDatasetIsOpenable() {
         probe.diagnostics.push_back(
             carta::zarr::Diagnostic{carta::zarr::DiagnosticCode::invalid_metadata, "frequency is missing", "SKY"});
         const auto openable = RequireOpenableDataset(probe, "/tmp/store");
-        Require(!openable && openable.error().code == ErrorCode::invalid_metadata,
-                "a malformed store should be refused as invalid metadata");
+        Require(!openable && openable.error().code == ErrorCode::invalid_schema,
+                "a malformed store should be refused as not conforming to its schema");
         Require(openable.error().message == "frequency is missing",
                 "and it should carry what the probe worked out, not a generic refusal");
     }
@@ -570,7 +570,7 @@ void TestOneRuleDecidesWhatDatasetIsOpenable() {
         carta::zarr::internal::ProbeResult probe;
         probe.kind = ProbeKind::supported_dataset;
         const auto openable = RequireOpenableDataset(probe, "/tmp/store");
-        Require(!openable && openable.error().code == ErrorCode::invalid_metadata,
+        Require(!openable && openable.error().code == ErrorCode::invalid_schema,
                 "a matched store with no images should be refused");
     }
 
@@ -1586,7 +1586,7 @@ void TestAStoreNamingNoVersionIsRefused() {
 // which requirement it failed.
 void TestA002StoreThatIsNotOneIsInvalid() {
     const auto invalid = [](const std::map<std::string, std::string>& nodes, const std::string& reason) {
-        RequireRefused(nodes, carta::zarr::DiagnosticCode::invalid_metadata, ErrorCode::invalid_metadata, reason,
+        RequireRefused(nodes, carta::zarr::DiagnosticCode::invalid_metadata, ErrorCode::invalid_schema, reason,
                        "a store naming 0.0.2 that is not one");
     };
 
@@ -1696,7 +1696,7 @@ void TestA002StoreNamingNoSkyIsDecidedByWhatItHolds() {
     Require(static_cast<bool>(unframed_store), "the in-memory store failed to open");
     const auto unframed_psf = carta::zarr::internal::xradio::DescribeImageFrom(
         unframed_store.value(), "POINT_SPREAD_FUNCTION", carta::zarr::internal::xradio::CoordinateValues{});
-    Require(!unframed_psf && unframed_psf.error().code == ErrorCode::invalid_metadata,
+    Require(!unframed_psf && unframed_psf.error().code == ErrorCode::invalid_schema,
             "an image of a store naming no sky whose frequency has no frame was described");
 }
 

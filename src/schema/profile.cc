@@ -22,21 +22,24 @@ Result<void> RequireOpenableDataset(const ProbeResult& probe, std::string_view l
     if (probe.kind != ProbeKind::supported_dataset) {
         // Malformed and unrecognised are different answers, and a consumer acts on the difference:
         // one is a file to complain about, the other is a file this library is not for. A dataset of
-        // a schema version this build does not read is a third: a file a newer build may open.
+        // a schema version this build does not read is a third: a file a newer build may open. And
+        // malformed is invalid_schema, not invalid_metadata, which is also what a root that will not
+        // parse is called: a consumer told the two apart only by probing the store a second time.
         ErrorCode code = ErrorCode::unsupported_schema;
         if (probe.kind == ProbeKind::invalid_dataset) {
             const bool version = !probe.diagnostics.empty() &&
                                  probe.diagnostics.front().code == DiagnosticCode::unsupported_schema_version;
-            code = version ? ErrorCode::unsupported_schema_version : ErrorCode::invalid_metadata;
+            code = version ? ErrorCode::unsupported_schema_version : ErrorCode::invalid_schema;
         }
         return Error{code, RejectionMessage(probe.diagnostics, "No built-in schema profile matched the Zarr store"),
                      std::string(location)};
     }
     // A store the profile recognised and found nothing openable in. Not a rejection -- the profile
     // matched -- so there are no diagnostics to report, and a consumer opening this would get a
-    // dataset it can do nothing with.
+    // dataset it can do nothing with. The XRADIO profile answers no_match or invalid for such a store
+    // rather than match, so this is a profile's mistake, and it is the schema's answer all the same.
     if (probe.images.empty()) {
-        return Error{ErrorCode::invalid_metadata, "Supported schema has no image variables", std::string(location)};
+        return Error{ErrorCode::invalid_schema, "Supported schema has no image variables", std::string(location)};
     }
     return {};
 }

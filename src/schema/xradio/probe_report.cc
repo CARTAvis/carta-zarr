@@ -34,6 +34,7 @@ DiagnosticCode DiagnosticCodeFor(ErrorCode code) {
         case ErrorCode::unsupported_schema_version:
             return DiagnosticCode::unsupported_schema_version;
         case ErrorCode::invalid_metadata:
+        case ErrorCode::invalid_schema:
         case ErrorCode::not_found:
         case ErrorCode::not_zarr:
         case ErrorCode::unsupported_transport:

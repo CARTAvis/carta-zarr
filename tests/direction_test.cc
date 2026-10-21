@@ -6,10 +6,9 @@
 
 // What an image dataset's root attributes and its l and m samples say about where the image points.
 //
-// ADR 0002 rests on all of it reaching casacore intact, and until this file existed almost none of
-// it was checked. Two gaps in particular: DirectionCoordinate::increment was asserted nowhere, and
-// the transformation matrix was asserted nowhere while every fixture in the repository writes the
-// identity -- so the four element copies could be transposed and nothing would notice.
+// ADR 0002 depends on all of it reaching casacore intact. In particular, every fixture in the
+// repository writes the identity transformation matrix, so only these tests would notice its four
+// elements being transposed.
 //
 // None of it needs a store: this takes JSON and two vectors.
 

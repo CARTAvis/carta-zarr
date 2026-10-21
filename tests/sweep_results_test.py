@@ -16,10 +16,9 @@
 """How tools/zarr-bench/sweep.py ranks what carta-zarr-bench measured, asked with rows written out here.
 
 The end-to-end test runs every stage on a fixture far too small to time, and checks that the report has
-every section. What it cannot reach is the ranking itself -- which operations a group is ranked on, which
-mode a slowdown is blamed on, which settings may be recommended -- and that is where both of the bugs
-found on a real cube were: a7db66b and bed82ad. Here a ranking is made from rows, so every answer is one
-the test chose."""
+every section. What it cannot reach is the ranking itself: which operations a group is ranked on, which
+mode a slowdown is blamed on, and which settings may be recommended. Here a ranking is made from rows, so
+every answer is one the test chose."""
 
 from __future__ import annotations
 
@@ -76,9 +75,9 @@ def row(on: sweep.Layout, mode: str, seconds: float, stage: str = "stage1", sett
 
 class RankingOnFirstTouches(unittest.TestCase):
     """A group is ranked on its first touches -- operations that read no chunk another read before them
-    -- while it has enough of them, and on every operation otherwise. a7db66b: when one layout's group
-    has too few, every group it is compared with has to be ranked on every operation too, or that layout
-    is ranked on cache hits its rivals were spared."""
+    -- while it has enough of them, and on every operation otherwise. When one layout's group has too
+    few, every group it is compared with has to be ranked on every operation too, or that layout would
+    be ranked on cache hits its rivals were spared."""
 
     def test_a_short_group_ranks_the_whole_comparison_on_every_operation(self) -> None:
         shallow, deep = layout("shallow"), layout("deep")
@@ -110,8 +109,8 @@ class RankingOnFirstTouches(unittest.TestCase):
 
 
 class WhatASlowdownIsBlamedOn(unittest.TestCase):
-    """bed82ad: a warning that a choice gave up some mode names the mode furthest from its own best,
-    among the modes that count -- not the one with the largest time."""
+    """A warning that a choice gave up some mode names the mode furthest from its own best, among the
+    modes that count, not the one with the largest time."""
 
     def test_the_worst_mode_is_measured_against_its_own_best(self) -> None:
         medians = {"plane": 2.0, "spectrum": 30.0}
@@ -296,8 +295,8 @@ class Recommending(unittest.TestCase):
 
     def test_nothing_is_recommended_while_checksums_disagree(self) -> None:
         """Two layouts reading one position differently means one of them read wrongly, and which is not
-        known: the faster of the two used to be recommended under a warning that it might be the wrong
-        one. Until the bytes agree there is no recommendation, and nothing confirmed or validated for one."""
+        known, so recommending the faster one, even with a warning, could recommend the wrong one. Until the
+        bytes agree there is no recommendation, and nothing confirmed or validated for one."""
         first, second = layout("first"), layout("second")
         rows = [row(first, "plane", 2.0, stage="stage2", checksum="aa"),
                 row(second, "plane", 1.0, stage="stage2", checksum="bb")]

@@ -6,13 +6,9 @@
 
 // A whole reduction, over pixels that were never written down.
 //
-// This target links no TensorStore and no Store. That is the point of it as much as the assertions
-// are: until the pass took a PixelSource, a reduction could only be reached through a directory tree,
-// so its arithmetic was pinned against the one committed fixture large enough to reach the parallel
-// paths -- 512x520x4 -- and the oracle had to be written out beside it each time.
-//
-// Here the oracle is the formula the pixels come from, so the image can be whatever size the
-// question needs.
+// This target links no TensorStore and no Store. The oracle is the formula the pixels come from, so
+// the image can be whatever size the question needs, rather than the one committed fixture large
+// enough to reach the parallel paths.
 
 #include "reduce/pass.h"
 #include "reduce/plane_histogram.h"
@@ -471,8 +467,7 @@ void TestAMaskedRegionReadsOnlyTheChunksItOccupies() {
                     std::string(described) + ": the diagonal's sum");
         }
 
-        // The assertion the fixture-driven pair could only reach by inference. Four chunks of the
-        // grid, one channel chunk, each decoded once.
+        // Four chunks of the grid, one channel chunk, each decoded once.
         Require(source.chunks_touched() == kGrid,
                 std::string(described) + ": read " + std::to_string(source.chunks_touched()) +
                     " chunks rather than the " + std::to_string(kGrid) + " the mask occupies");
@@ -651,7 +646,7 @@ std::vector<Spread> Spreads() {
 // double, from a mean found first.
 template <typename Selected>
 double CenteredReference(const SyntheticPixelSource::Formula& value, std::uint64_t channels_from,
-                        std::uint64_t channels_to, std::uint64_t x, std::uint64_t y, const Selected& in) {
+                         std::uint64_t channels_to, std::uint64_t x, std::uint64_t y, const Selected& in) {
     long double count = 0.0L;
     long double sum = 0.0L;
     for (std::uint64_t z = channels_from; z < channels_to; ++z) {
@@ -769,9 +764,9 @@ void TestACubeSpreadIsCenteredWhateverTheMagnitude() {
         Require(static_cast<bool>(outcome),
                 std::string("the cube histogram failed: ") + (outcome ? "" : outcome.error().message));
         RequireCentered(outcome.value().totals.sum_sq_dev,
-                       CenteredReference(spread.value, 0, kSplitZ, kSplitX, kSplitY,
-                                        [](std::uint64_t, std::uint64_t) { return true; }),
-                       std::string(spread.name) + ", the cube");
+                        CenteredReference(spread.value, 0, kSplitZ, kSplitX, kSplitY,
+                                          [](std::uint64_t, std::uint64_t) { return true; }),
+                        std::string(spread.name) + ", the cube");
     }
 }
 

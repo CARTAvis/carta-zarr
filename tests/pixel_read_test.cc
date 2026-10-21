@@ -33,7 +33,7 @@
 
 namespace {
 
-// The same image written both ways round: one store puts m last, the other l. Every test below runs
+// The same image written both ways around: one store puts m last, the other l. Every test below runs
 // against both, because a reader that decides anything from where an axis sits rather than from
 // what it is named gets a different answer for one of the two.
 const char* const kFixtures[]{CARTA_ZARR_PIXEL_FIXTURE, CARTA_ZARR_PIXEL_FIXTURE_L_FASTEST};
@@ -697,7 +697,7 @@ using Rewrite = std::function<std::string(std::string)>;
 // A copy of a fixture with the root's consolidated metadata written in, as zarr-python writes it --
 // every child's own document copied into the root -- and removed again with this object. `copies`
 // rewrites what the root's copy says about a node and leaves the node's own document as it was;
-// rewriting a node's own document afterwards makes the two disagree the other way round.
+// rewriting a node's own document afterwards makes the two disagree the other way around.
 class ConsolidatedCopy {
 public:
     ConsolidatedCopy(const char* fixture, const std::string& name,
@@ -808,10 +808,10 @@ void TestAnImageWhoseArraysDisagreeWithTheirCopiesDoesNotOpen(const char* fixtur
     RequireRefusedAtOpen(flag.OpenSky(), "FLAG", "a flag whose own document holds another data type");
 }
 
-// Labels are decoded by this library rather than by TensorStore, and were held to nothing. Decoded
-// with the root's copy of their document, a copy saying one label a chunk over chunks of three read
-// the first label and then the fill value for the rest, and a label array whose directory was gone
-// read as nothing but fill. Both opened an image with labels that were not the store's.
+// Labels are decoded by this library rather than by TensorStore, with their own document. Decoded
+// with the root's copy, a copy saying one label per chunk over chunks of three would read the first
+// label and then the fill value for the rest, and a label array whose directory was gone would read
+// as nothing but fill. Both would open an image with labels that were not the store's.
 void TestLabelsAreHeldToTheirOwnDocument(const char* fixture) {
     const ConsolidatedCopy rechunked(
         fixture, "label-copy",

@@ -10,8 +10,7 @@
 // the schema describes. The contract is that a field it cannot read is skipped and the rest is kept
 // -- nothing here can close an image. This takes JSON, so no store is written.
 //
-// The geodetic-to-cartesian conversion is asserted here for the first time. It was reachable only
-// through a store, and no fixture wrote a position that would show a swapped axis.
+// The geodetic-to-cartesian conversion is checked here directly, from JSON.
 
 #include "schema/xradio/observation.h"
 
@@ -55,8 +54,8 @@ void TestTheReadableFieldsAreReported() {
     Require(observation.telescope_name == "Test scope", "the telescope name was not read");
 }
 
-// longitude, latitude and radius become OBSGEO-X, Y, Z. Nothing in the repository wrote a position
-// where swapping two of the three would change the answer, so this one is deliberately asymmetric.
+// longitude, latitude and radius become OBSGEO-X, Y, Z. The position is deliberately asymmetric, so
+// that swapping any two of the three changes the answer.
 void TestTheTelescopePositionBecomesCartesian() {
     const double lon = 0.5;
     const double lat = 0.25;

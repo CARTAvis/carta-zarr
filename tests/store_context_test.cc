@@ -90,9 +90,8 @@ void TestAPoolRunsOnTheSessionsThreads() {
             "a pool of its own is the session's pool");
 }
 
-// Nothing keeps a pool once its holder lets go, and two asked for are two. The bypass this replaces
-// was built once and kept for as long as the store, which cost nothing at zero bytes and would keep
-// gigabytes of decoded chunks at the size a moment asks for.
+// Nothing keeps a pool once its holder lets go, and two pools asked for are two. A pool kept for as
+// long as the store would hold gigabytes of decoded chunks at the size a moment asks for.
 void TestNothingKeepsAPoolItsHolderLetGo() {
     const auto session = Session();
     std::weak_ptr<const carta::zarr::internal::StoreContext> first;

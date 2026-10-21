@@ -737,8 +737,8 @@ void TestThreadCountDoesNotChangeTheCounts(const char* fixture) {
 }
 
 // A result nobody filled in has found no range, which is what the extrema say for a walk that read no
-// finite pixel. A zero read as a range from zero to zero. The default is SpectralTotals' own now,
-// which is the point: it is written once, for this and for every spectral block.
+// finite pixel; a zero would read as a range from zero to zero. The default is SpectralTotals' own,
+// written once, for this and for every spectral block.
 void TestAnUnfilledResultHasFoundNoRange() {
     const carta::zarr::CubeHistogramResult unfilled;
     Require(std::isnan(unfilled.totals.min) && std::isnan(unfilled.totals.max),

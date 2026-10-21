@@ -34,7 +34,7 @@ Two sources of pixels:
                    pixels.
 
   --synthetic      A continuum-subtracted HI cube from a mosaic, like ASKAP's, by default: noise
-                   that varies by channel and rises towards the footprint's edge, faint line
+                   that varies by channel and rises toward the footprint's edge, faint line
                    sources, NaN outside the footprint and runs of flagged channels; continuum
                    sources on request. The coordinates are built from a template XRADIO wrote (the
                    conformance fixture by default), stretched to --shape, on ASKAP's frequency axis
@@ -105,7 +105,7 @@ DEFAULT_TEMPLATE = REPO_ROOT / "tests" / "data" / "images" / "zarr" / "xradio" /
 NOISE_TILE = 128
 
 # A synthetic cube's defaults are an ASKAP HI cube's: its first channel, its channel width, HI's rest
-# frequency, and the noise, in Jy/beam, that with the rise towards the footprint's edge comes to
+# frequency, and the noise, in Jy/beam, that with the rise toward the footprint's edge comes to
 # ASKAP Hydra's median plane rms of 2.1 mJy/beam.
 ASKAP_FREQUENCY_START = 1.2955e9
 ASKAP_CHANNEL_WIDTH = 18518.518518518518
@@ -373,7 +373,7 @@ class Synthetic:
     """A cube whose every pixel is a function of its position and the seed.
 
     By default it looks like a continuum-subtracted HI cube from a mosaic, such as ASKAP's: noise
-    whose rms varies from channel to channel and rises towards the edge of the footprint, with heavy
+    whose rms varies from channel to channel and rises toward the edge of the footprint, with heavy
     tails; faint line sources, each present in a few hundred km/s of the band; NaN outside an
     irregular footprint; and runs of channels flagged in part or in whole. Continuum sources, point
     and extended, can be added.
@@ -546,7 +546,7 @@ class Synthetic:
                                 la - tl * tile : lb - tl * tile, ma - tm * tile : mb - tm * tile
                             ]
         block *= self.channel_rms[f0:f1][None, :, None, None, None]
-        # Primary-beam correction raises the noise towards the edge of the footprint.
+        # Primary-beam correction raises the noise toward the edge of the footprint.
         within = self.within(range(l0, l1), range(m0, m1))
         if within is not None:
             block *= (1 + EDGE_GAIN * np.minimum(within, 1.0) ** 8).astype(np.float32)
@@ -1592,8 +1592,7 @@ class Output:
     Claiming is the only way this script deletes or creates an output, and it refuses an output over
     any dataset the run reads before it does either: --force deletes what is at the output, so an
     output that is the source, an alias of it or a directory around it would take the source with
-    it, and one inside it would be written into the dataset being read. That used to be two
-    statements of main() that had to stay in that order.
+    it, and one inside it would be written into the dataset being read.
     """
 
     path: Path

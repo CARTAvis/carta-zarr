@@ -1086,8 +1086,8 @@ class Stats:
 
 def frames_played(row: dict[str, str]) -> int:
     """The frames an animation played, as carta-zarr-bench counted them: as many as asked for, or every
-    channel of a cube with fewer. It used to be read back out of the position the row describes, which
-    tied the ranking to how a human is shown where an operation read."""
+    channel of a cube with fewer. Read from its own column rather than from the position the row
+    describes, so the ranking does not depend on how a position is shown to a human."""
     return int(row.get("frames_played") or 0)
 
 
@@ -1265,7 +1265,7 @@ class Choice:
 
 
 class Analysis:
-    """What the results say, as far as the sweep has got.
+    """What the results say, as far as the sweep has gone.
 
     Everything it reads is handed to it -- the configuration, the datasets the sweep has written, the
     results and the cores the reader grid resolves against -- so a ranking can be checked against rows

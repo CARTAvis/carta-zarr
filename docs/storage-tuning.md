@@ -79,9 +79,9 @@ A synthetic 2048 x 2048 x 2048 cube on the same Lustre:
 | 256 x 256 x 32 | 1.08 s | 838 ms | 4.12 s |
 | 128 x 128 x 128 | 2.81 s | 246 ms | 4.04 s |
 
-On the 512-square plane eight users' spectra and regions could not all read chunks of their own --
-there are too few chunks across it -- so those columns include some reads the page cache answered,
-which if anything flatters the layouts with large chunks across the sky.
+On the 512-square plane, eight users' spectra and regions could not all read chunks of their own,
+since there are too few chunks across it, so those columns include some reads the page cache
+answered. If anything, that flatters the layouts with large chunks across the sky.
 
 A real 7763 x 4742 x 128 ASKAP cube on the same Lustre, in the 512 x 512 x 4 chunks it was written in
 and in others:
@@ -102,8 +102,8 @@ each way: for a plane this size, 4 MiB chunks four channels deep are about as go
 
 With every mode weighted alike, 128 x 128 x 128 served the 512-square cube best, and 512 x 512 x 16
 the 2048-square one, where the same 128-deep chunks made a plane take nearly three seconds. A chunk
-one plane deep -- what a cube converted plane by plane gets -- gives the fastest channel changes and
-the slowest spectra by a factor of ten or more. Which to prefer is a judgment about how a site's
+one plane deep, which is what a cube converted plane by plane gets, gives the fastest channel changes
+and the slowest spectra by a factor of ten or more. Which to prefer is a judgment about how a site's
 users work; the sweep's `[weights]` makes it explicit, and its report says when doubling the weight of
 planes or of spectra would change the answer. For the 512-square cube it would: weighting planes
 twice as heavily brings the cube's own layout back to first place.
@@ -121,8 +121,8 @@ it was fitted to two cubes.
 
 For the 7763 x 4742 x 128 cube the rule gives about 4 for chunks of 4 million pixels and about 2 for
 chunks of a million; 1024 x 1024 x 4 measured best, and the million-pixel chunks one and four deep
-came close behind. By the rule a million-pixel chunk -- 4 MiB, the size CARTA's own tests have mostly
-used, as 512 x 512 x 4 or 256 x 256 x 16 -- suits a 2048-square, 2048-channel cube at about 22 channels
+came close behind. By the rule, a million-pixel chunk (4 MiB, the size CARTA's own tests have mostly
+used, as 512 x 512 x 4 or 256 x 256 x 16) suits a 2048-square, 2048-channel cube at about 22 channels
 deep, close to 256 x 256 x 16, and a 512-square, 4096-channel one at about 126, far deeper than
 512 x 512 x 4. Put the chunk shapes a site already uses into its sweep's grid, so that the report
 compares every candidate against them.
@@ -131,7 +131,7 @@ compares every candidate against them.
 
 A later set of measurements, [chunk size and depth](measurements/chunk-size.md), read synthetic cubes
 in chunks of 1 to 16 MiB at several depths, on a Mac's SSD, a local NVMe disk and this Lustre. A cold
-plane took time in proportion to the pixels it decoded -- the plane's area times the chunk's depth --
+plane took time in proportion to the pixels it decoded (the plane's area times the chunk's depth),
 plus a small cost for each chunk; the report gives each machine's rate and cost. So depth decides what
 a channel change costs; between 1 and 16 MiB at the same depth, size changed it by less than a factor
 of two.
@@ -182,8 +182,8 @@ or 1008 for the 16-deep chunks:
 
 At CARTA's 5 frames a second it cut the 4-deep chunks' late frames by more than half. In the 16-deep
 chunks it shortened the longest stall from 1.3 s to 1.2 s but made 11 more frames late. At 10 frames
-a second it made every case worse, because the one prefetch each animation made before
-stopping still decoded a whole run while the machine had no time over. Stopping on the second
+a second it made every case worse, because the one prefetch each animation made before stopping
+still decoded a whole run while the machine had no time to spare. Stopping on the second
 prefetch the animation caught up with, an earlier rule, was worse still: 541 late in the last row.
 So a backend that prefetches should do it only while the cache holds two runs for each cube being
 animated, and the sweep's trade-off table gives the run size of each layout.
@@ -246,14 +246,16 @@ so carta-backend reads it past the cache and moving the cursor reads every chunk
 chunks it is 118, 472 MiB, which the cache keeps, so moving the cursor within the same chunks reads
 nothing. The cost is on the plane: one channel decodes 64 chunks of 256 channels, 256 MiB, to show
 1 MiB. That is still under 30 ms a frame on average without a cache, 40 ms at most, which leaves most of
-an animation's 200 ms a frame for the rest of a frame's work -- these times are the plane's read alone,
-over the 32 frames of one chunk's depth -- and a 1 GiB cache holds the run of chunks it reads ahead.
+an animation's 200 ms a frame for the rest of a frame's work. (These times are the plane's read alone,
+over the 32 frames of one chunk's depth.) A 1 GiB cache holds the run of chunks it reads ahead.
 
 The exact cube histogram took 27 s against 14 s. Its plane histograms woke the worker pool once per
-channel of each band a read was cut into, which narrow chunks made small (#6); carta-zarr since #7
-splits a read of many channels by channel instead, and those plane histograms take 5.7 s rather than
-10.7 s, as long as at 128 x 128 x 64 (called directly, without a cache). Through carta-backend, with the
-1 GiB cache, the whole exact cube histogram then takes 16.8 s against 13.6 s at 128 x 128 x 64.
+channel of each band a read was cut into, which narrow chunks made small
+([#6](https://github.com/CARTAvis/carta-zarr/issues/6)). Since
+[#7](https://github.com/CARTAvis/carta-zarr/pull/7), carta-zarr splits a read of many channels by
+channel instead, and those plane histograms take 5.7 s rather than 10.7 s, as long as at
+128 x 128 x 64 (called directly, without a cache). Through carta-backend, with the 1 GiB cache, the
+whole exact cube histogram then takes 16.8 s against 13.6 s at 128 x 128 x 64.
 
 ### Use more file-reading threads on Lustre
 
@@ -270,8 +272,9 @@ Striping a dataset's directory across one OST or across eight made no difference
 of a few megabytes: a chunk file smaller than the stripe size lives on one OST either way. What
 striping cannot change is the number of files, which every open and every stat sends to the metadata
 server that all clients share: a 32 GiB cube in 128-deep chunks is 4,000 files, and a terabyte cube in
-the same chunks would be over 100,000. Shards -- chunks gathered into one file, a read taking from it only the
-chunks it needs -- are the remedy, and are worth including in a sweep on a busy file system. The sweep accepts
+the same chunks would be over 100,000. Shards, which gather chunks into one file from which a read
+takes only the chunks it needs, are the remedy, and are worth including in a sweep on a busy file
+system. The sweep accepts
 them relative to the chunk, `frequency*8` or `l*4,m*4`. The sweep ranks only first touches, operations
 that read no chunk another operation of the same trial read before or alongside them. A sharded
 layout's first touches are counted by chunk, as an unsharded one's are, so a read that finds its
@@ -295,7 +298,7 @@ Lustre. What follows is what the measurements so far taught about measuring.
 A read that finds its data in memory measures memory. Between a CARTA server and the disks there are
 at least three caches: carta-zarr's own (each read in the bench starts without it), the client's page
 cache, and the storage servers'. On that server's Lustre a whole-cube read took 1.24 s with everything
-cached, 2.0 s with the client's page cache emptied, and 5.5 s with the servers' emptied too -- but
+cached, 2.0 s with the client's page cache emptied, and 5.5 s with the servers' emptied too, but
 11.9 s the first time after the cube was written. Something below what an ordinary user can empty
 keeps data that was read recently, and no later read was as slow as the first.
 

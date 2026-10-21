@@ -48,7 +48,7 @@ Each Zarr is about 21 GB.
 - The pancake is chunked two ways at that size. 256 x 256 x 16 is what sites have used; 512 x 512 x 4
   is a shallower chunk, which decodes 4 channels to read one where the other decodes 16, at the cost
   of four times as many chunks along a spectrum.
-- The cigar is chunked two ways the other way round. 128 x 128 x 64 is shaped as sites have shaped
+- The cigar is chunked two ways the other way around. 128 x 128 x 64 is shaped as sites have shaped
   their chunks; 64 x 64 x 256 is a deeper chunk, nearer the depth `docs/storage-tuning.md` points to
   for a cube this long, which reads a spectrum from a quarter as many chunks at the cost of decoding
   256 channels to read one.
@@ -71,7 +71,7 @@ HI cube from an ASKAP mosaic:
 - ASKAP's frequency axis: 1295.5 MHz plus 18.5 kHz a channel, rest frequency HI's. The cigar's
   30000 channels span 556 MHz.
 - Noise of about 2 mJy/beam whose rms varies by about 15 % from channel to channel and doubles
-  towards the footprint's edge, as primary-beam correction makes it, with a heavy tail: 4 % of
+  toward the footprint's edge, as primary-beam correction makes it, with a heavy tail: 4 % of
   pixels drawn six times as wide.
 - Faint line sources, one per 10^8 pixels (94 in the pancake, 79 in the cigar): an elliptical
   Gaussian on the sky with a Gaussian or double-horned profile 50 to 500 km/s wide, peaking at 1 to

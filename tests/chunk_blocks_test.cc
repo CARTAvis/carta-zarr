@@ -4,11 +4,11 @@
    SPDX-License-Identifier: GPL-3.0-or-later
 */
 
-// How large one request is allowed to be. This has been wrong three times -- once as a fixed chunk
-// count that ignored how far chunk sizes vary, once as a byte budget alone that gave a 16 MiB-chunk
-// image four chunks per request where a 4 MiB one got sixteen, once as eight chunks a read that left
-// most of a twenty-eight-thread machine idle -- so the policy is pinned here in the unit that matters,
-// which is chunks a decode thread, across the chunk sizes XRADIO actually writes.
+// How large one request is allowed to be, checked in the unit that matters, chunks per decode thread,
+// across the chunk sizes XRADIO actually writes. A fixed chunk count would ignore how far chunk sizes
+// vary; a byte budget alone would give a 16 MiB-chunk image four chunks per request where a 4 MiB one
+// gets sixteen; and a fixed eight chunks per read would leave most of a twenty-eight-thread machine
+// idle.
 
 #include "chunk_blocks.h"
 

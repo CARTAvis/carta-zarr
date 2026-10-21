@@ -18,11 +18,10 @@
 
 """What tools/zarr-bench/generate.py may do to the place it writes a dataset, asked of Output directly.
 
---force deletes whatever is at the output, and the dataset being read must survive that whatever the
-output is spelled as. That used to hold because main() checked for an overlap before it deleted: two
-statements whose order was the guarantee. Output.claim is now the only way to delete or create the
-output, and it refuses an overlap first; this asks it, on directories made here, what it does with
-each kind of output, and what is left when writing fails part-way."""
+--force deletes whatever is at the output, and the dataset being read must survive that however the
+output is written. Output.claim is the only way to delete or create the output, and it refuses an
+overlap first; this asks it, on directories made here, what it does with each kind of output, and
+what is left when writing fails part-way."""
 
 from __future__ import annotations
 

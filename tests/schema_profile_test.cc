@@ -227,9 +227,9 @@ void TestNonMatch() {
 }
 
 // A store whose only images are ones this library does not open is still one no profile matched,
-// and the reason is the profile's own: it recognized the images and refused them. That reason used
-// to be dropped on the way out of ProbeStore, so the refusal a consumer saw was "no profile matched"
-// with nothing to say which variable, or why.
+// and the reason is the profile's own: it recognized the images and refused them. ProbeStore passes
+// that reason on: the probe's diagnostics name the variable, and the refusal on opening keeps the
+// reason rather than saying only "no profile matched".
 void TestNothingOpenableSaysWhy() {
     using carta::zarr::internal::ProbeStore;
     using carta::zarr::internal::RequireOpenableDataset;
@@ -843,8 +843,7 @@ void TestAnArrayWithAMalformedCodecIsDiagnosedNotRefused() {
 }
 
 // The report latches: once a requirement is unmet, later ones are no-ops. A store with two faults
-// is therefore diagnosed once, by the first fault reached -- the behavior a probe had when every
-// check returned early, now stated somewhere rather than emerging from the control flow.
+// is therefore diagnosed once, by the first fault reached.
 //
 // Both faults have to be ones the probe still reaches. A coordinate of the wrong length is not:
 // agreeing with it is part of being an image this profile opens, so a store with one has no
@@ -1208,9 +1207,8 @@ void TestSizeRefusesAStoreWithNoArrays() {
 }
 
 // Every rule that turns metadata and coordinate values into a descriptor, reached with the values
-// handed in. This build reads no values, so while describing an image read its own, everything
-// below was reachable only from a store written to disk -- and the image_type fallback and the time
-// axis's scale and format were not reached at all.
+// passed in. This build reads no values, so passing them in is the only way to reach these rules,
+// the time axis's scale and format included, without a store on disk.
 void TestADescriptionIsBuiltFromTheValuesItIsGiven() {
     using carta::zarr::internal::xradio::CoordinateValues;
     using carta::zarr::internal::xradio::DescribeImageFrom;

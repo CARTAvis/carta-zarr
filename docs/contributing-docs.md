@@ -97,7 +97,5 @@ organization's own domain; `cartavis.github.io/carta-zarr/` redirects there.
 Pages is enabled in the repository settings with GitHub Actions as its source,
 and the `github-pages` environment accepts deployments from `dev` only.
 
-Until the first release, the site explicitly describes development code. At the
-first release, introduce versioned publication of immutable tagged documentation
-alongside the development guide. The current workflow does not yet publish
-multiple versions.
+The site describes the development code on `dev`. The workflow does not yet
+publish a separate, fixed copy of the documentation for each tagged release.

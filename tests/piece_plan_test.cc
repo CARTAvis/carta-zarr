@@ -7,9 +7,8 @@
 // What an ordinary read decides before it reads anything: whether to cut itself into pieces, where,
 // and how big each one should be.
 //
-// Until this existed those decisions could only be observed through a read against a directory tree
-// -- a test would count progress callbacks and reason backwards to how the read must have been cut.
-// None of this needs a store, a transport or a fixture, which is the point.
+// None of this needs a store, a transport or a fixture, so the decisions are checked directly
+// rather than inferred from the progress callbacks of a read.
 
 #include "chunk_blocks.h"
 #include "read/pieces.h"
@@ -433,8 +432,8 @@ void TestChunksAStrideStepsOverCostNothing() {
 }
 
 // The same along the axis the read is cut on: every eighth channel of a spectrum chunked four deep is
-// one chunk a channel, so a budget of two chunks is two channels a piece -- not the one it was when a
-// piece's length was its chunks times the chunk depth divided by the stride.
+// one chunk per channel, so a budget of two chunks is two channels per piece, not the one that
+// dividing the chunk depth by the stride would give.
 void TestAStrideOverWholeChunksAlongTheCutIsAChunkAnElement() {
     const auto image = MakeImage(64, 64, 32);
     const auto geometry = MakeGeometry(64, 64, 4);

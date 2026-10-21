@@ -25,7 +25,7 @@
 
 namespace {
 
-// The same image written both ways round: XRADIO puts m last, so a plane is contiguous along m,
+// The same image written both ways around: XRADIO puts m last, so a plane is contiguous along m,
 // and the other one puts l last. Everything below runs against both, because the walk decides what
 // to ask the store for from which axis it varies fastest -- a decision only one of the two can
 // exercise at a time, and the wrong answer for either is a silently transposed read.

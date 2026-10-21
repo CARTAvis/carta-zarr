@@ -7,9 +7,8 @@
 // An ordinary read against pixels that were never written down.
 //
 // tests/piece_plan_test.cc covers what a read decides before it reads anything. This covers what it
-// does once it starts, which until ReadInPieces took a PixelSource could only be asked of a
-// directory tree -- and three of the four things below could not be asked at all, because a fixture
-// on disk cannot be told to fail one read and not another.
+// does once it starts. Three of the four things below need a source that can fail one read and not
+// another, which a fixture on disk cannot do.
 //
 // Links no Store and no TensorStore.
 
@@ -129,9 +128,9 @@ void RequireCubeMatchesTheFormula(const std::vector<float>& destination, const s
 }
 
 // The flag is read before the pixels so that a mask the read cannot get leaves the caller's
-// destination alone. This is the contract ADR 0005 names as the opposite of the pass's, and the
-// reason Image::Read stays outside one -- and it was checked nowhere, because showing it needs a
-// source that fails the flag read while the pixel read would have succeeded.
+// destination alone. ADR 0005 names this contract as the opposite of the pass's, and as the reason
+// Image::Read stays outside one. Showing it needs a source that fails the flag read while the pixel
+// read would succeed.
 void TestAFailedFlagLeavesTheDestinationAlone() {
     const auto image = MakeImage(true);
     const auto geometry = MakeGeometry();

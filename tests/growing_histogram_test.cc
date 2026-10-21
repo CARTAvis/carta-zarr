@@ -71,10 +71,10 @@ void TestTheRangeSeedsAndGrowsBothWays() {
 }
 
 // Pixels close together far from zero keep the resolution between them. The first range is as
-// narrow as the floats around the first pixel are apart, and grows only as far as the pixels need;
-// seeded as wide as the pixel's own magnitude, it was 2000 wide around 1000 and never shrank, so a
-// pixel a sixteenth above thirty-nine others shared their provisional bin and was spread evenly over
-// all four target bins.
+// narrow as the floats around the first pixel are apart, and grows only as far as the pixels need.
+// Seeded as wide as the pixel's own magnitude, it would be 2000 wide around 1000 and never shrink,
+// so a pixel a sixteenth above thirty-nine others would share their provisional bin and be spread
+// evenly over all four target bins.
 void TestANarrowDistributionFarFromZeroKeepsItsResolution() {
     GrowingHistogram histogram(64);
     for (int i = 0; i < 39; ++i) {

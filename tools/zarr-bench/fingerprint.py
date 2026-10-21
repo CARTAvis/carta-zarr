@@ -23,7 +23,7 @@ def reached(root: Path) -> Iterator[Path]:
     """Every file and directory under `root`, spelled as reached through it, with directory links
     followed: a dataset's arrays are as often as not links to where their bytes are, and what is
     behind them is the dataset as much as what is not. Each directory is entered once, so a link back
-    up the tree is listed and not followed round again."""
+    up the tree is listed and not followed around again."""
     entered = {os.path.realpath(root)}
     for directory, directories, files in os.walk(root, followlinks=True):
         here = Path(directory)

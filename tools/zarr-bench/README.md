@@ -38,7 +38,7 @@ Or synthesize one, when there is no real cube to hand:
   compress.
 - **The synthetic cube** is a continuum-subtracted HI cube from a mosaic, calibrated against
   ASKAP's (`tools/testset/README.md` has the calibration):
-  - noise varying by channel and rising towards the footprint's edge;
+  - noise varying by channel and rising toward the footprint's edge;
   - faint line sources (`--line-sources`);
   - NaN outside an irregular footprint (`--footprint-fill`);
   - runs of flagged channels (`--flagged-channels`);
@@ -116,7 +116,7 @@ open. `run` writes one CSV row per operation; `--help` lists its options.
 - **Processes.** `--processes N` stands for N users, since carta-controller starts one backend per
   user: N processes, each with its own context, released together. They read different positions;
   a cube histogram splits the channels between them. When there are not enough positions to go
-  round, the rows that share one say `overlap`.
+  around, the rows that share one say `overlap`.
 - **Trials.** Each trial empties the caches, then forks fresh processes, so no trial inherits a cache
   or a thread pool from the one before. Within a trial a process keeps its context, as a backend
   would: a region or an animation may find chunks an earlier operation decoded, and an `open` after

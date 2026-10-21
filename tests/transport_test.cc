@@ -127,10 +127,10 @@ void TestALinkedArrayIsNamedWhereItSits(const std::filesystem::path& root) {
     RequireListing(root / "alias", {"GROUP", "SKY"}, "the same store reached through a link");
 }
 
-// What is under a linked group is in the store as much as the group is: listed, the group's children
-// were not, so an unconsolidated store lost every node below a link and the same dataset consolidated
-// had them. A link back up the tree is listed once and not followed round again, whichever directory
-// it climbs to -- the group it is in, or the store's own root.
+// What is under a linked group is as much part of the store as the group is: its children are listed,
+// so an unconsolidated store lists the same nodes below a link as the same dataset consolidated. A link
+// back up the tree is neither listed nor followed, whichever directory it climbs to: the group it is in,
+// or the store's own root.
 void TestALinkedGroupIsWalkedIntoOnce(const std::filesystem::path& root) {
     const auto store = root / "store";
     WriteNode(store, "group");

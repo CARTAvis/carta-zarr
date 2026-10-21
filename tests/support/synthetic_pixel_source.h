@@ -21,15 +21,9 @@ namespace carta::zarr::testing {
 /**
  * The pass's second adapter: pixels computed from their own coordinates, never written down.
  *
- * The filesystem adapter is the one production uses, and until this existed it was the only thing
- * that could answer a pass at all -- so every question about how the pass walks a cube had to be
- * asked of a directory tree. That put two limits on what could be asked. A fixture large enough to
- * reach the parallel paths had to be committed, so there is exactly one and it is 512x520x4; and
- * the pass's own reads could not be observed, so the tests count how many times a result was handed
- * over and reason backwards to what must have been read, and say in three places that they stop
- * testing anything if the chunk shape ever changes.
- *
- * This one states a cube of any size in a line, and counts what was asked of it.
+ * The filesystem adapter is the one production uses. Tested through it alone, a pass could only be
+ * asked about committed fixtures, and its own reads could not be observed. This one describes a cube
+ * of any size in a line, and counts what was asked of it.
  */
 class SyntheticPixelSource final : public carta::zarr::internal::PixelSource {
 public:

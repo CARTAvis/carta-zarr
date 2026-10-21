@@ -9,7 +9,7 @@
 //
 // A comparison between layouts rests on three things this pins. Every layout is asked for the same
 // positions, which depend on the cube's shape and the seed and nothing else. Processes standing for
-// different users never share a position while there are enough to go round, and say so when there
+// different users never share a position while there are enough to go around, and say so when there
 // are not. And the fingerprint of what an operation read agrees between layouts holding the same
 // pixels, so that a layout read wrongly shows up in the CSV rather than as a fast time.
 //

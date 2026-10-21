@@ -108,9 +108,9 @@ void RepeatedRunsDoNotLeak() {
 //
 // The pool belongs to a Context, and a Context is shared for the whole process, so a cube histogram
 // on one thread and a region profile on another really do arrive here together. The pool holds the
-// body, the task counter and the running count in one set of fields; before those calls were
-// serialized, the second caller overwrote them while the first caller's workers were still reading
-// them, and a worker would run one body with the other's task count.
+// body, the task counter and the running count in one set of fields, so the calls are serialized.
+// Otherwise the second caller would overwrite them while the first caller's workers were still
+// reading them, and a worker would run one body with the other's task count.
 //
 // Each job checks its own arithmetic: every task of its own run happens exactly once, and no task
 // index arrives that its own run did not ask for.

@@ -43,6 +43,7 @@ def create_string_array(
     write_values: bool = True,
     values: np.ndarray = STRING_VALUES,
     fill_value: str = "",
+    dimension_names: tuple[str, ...] | None = None,
 ) -> zarr.Array:
     array = zarr.create_array(
         store=path,
@@ -50,6 +51,7 @@ def create_string_array(
         chunks=chunks,
         dtype=values.dtype,
         zarr_format=3,
+        dimension_names=dimension_names,
         chunk_key_encoding=chunk_key_encoding
         or {"name": "default", "configuration": {"separator": "/"}},
         serializer=serializer,
@@ -329,8 +331,8 @@ def generate_xradio_fixture(path: Path, *, uniform_beams: bool = False, times: i
         path / "polarization",
         serializer=BytesCodec(endian="little"),
         values=np.asarray(["I", "Q"], dtype="U1"),
+        dimension_names=("polarization",),
     )
-    polarization.attrs.update({"dimension_names": ["polarization"]})
 
     parameter_labels = create_string_array(
         path / "beam_params_label",
@@ -338,8 +340,8 @@ def generate_xradio_fixture(path: Path, *, uniform_beams: bool = False, times: i
         shape=(3,),
         chunks=(3,),
         values=np.asarray(["minor", "pa", "major"], dtype="U5"),
+        dimension_names=("beam_params_label",),
     )
-    parameter_labels.attrs.update({"dimension_names": ["beam_params_label"]})
 
     # A table with one row per plane holding the same beam on every one of them is what a
     # converter writes for an image that was restored with a single beam. It has to stay
@@ -593,8 +595,8 @@ def generate_pixel_fixture(
         shape=(polarization_size,),
         chunks=(polarization_size,),
         values=np.asarray(["I", "Q", "U"], dtype="U1"),
+        dimension_names=("polarization",),
     )
-    polarization.attrs.update({"dimension_names": ["polarization"]})
 
 
 def generate_wide_pixel_fixture(path: Path) -> None:
@@ -703,8 +705,8 @@ def generate_wide_pixel_fixture(path: Path) -> None:
         shape=(polarization_size,),
         chunks=(polarization_size,),
         values=np.asarray(["I", "Q"], dtype="U1"),
+        dimension_names=("polarization",),
     )
-    polarization.attrs.update({"dimension_names": ["polarization"]})
 
 
 def main() -> None:

@@ -140,7 +140,6 @@ std::string PolarizationArray() {
   "shape": [2],
   "data_type": {"name": "fixed_length_utf32", "configuration": {"length_bytes": 4}},
   "chunk_grid": {"name": "regular", "configuration": {"chunk_shape": [2]}},
-  "attributes": {"dimension_names": ["polarization"]},
   "dimension_names": ["polarization"],
   "zarr_format": 3,
   "node_type": "array"
@@ -951,6 +950,40 @@ void TestImageDatasetWithoutSky(const std::filesystem::path& root) {
             "the only image of a SKY-less dataset could not be opened");
 }
 
+// A sky variable whose dimension names sit under its attributes, not at the top level where Zarr
+// v3 puts them, names no dimensions, so it is not over the sky plane's axes and does not open. The
+// same variable with them at the top level does.
+void TestDimensionNamesUnderAttributesDoNotOpen(const std::filesystem::path& root) {
+    const auto residual = [](bool top_level) {
+        const std::string names = R"("dimension_names":["time","frequency","polarization","l","m"])";
+        return R"({"shape":[1,3,2,4,5],"data_type":"float32",)"
+               R"("chunk_grid":{"name":"regular","configuration":{"chunk_shape":[1,1,1,2,5]}},)"
+               R"("attributes":{"units":"Jy/beam","type":"sky")" +
+               (top_level ? "}," + names : "," + names + "}") + R"(,"zarr_format":3,"node_type":"array"})";
+    };
+    for (const bool top_level : {true, false}) {
+        const auto store = root / (top_level ? "top-level" : "attributes");
+        CreateValidStore(store);
+        Write(store / "SKY_RESIDUAL" / "zarr.json", residual(top_level));
+
+        const auto context = carta::zarr::Context::Create();
+        Require(static_cast<bool>(context), "Context::Create failed");
+        const auto dataset = carta::zarr::Dataset::Open(context.value(), store.string());
+        Require(static_cast<bool>(dataset), "Dataset::Open failed");
+        const auto& images = dataset.value().descriptor().images;
+        const auto entry =
+            std::find_if(images.begin(), images.end(), [](const auto& image) { return image.id == "SKY_RESIDUAL"; });
+        Require(entry != images.end(), "the residual was not listed");
+        if (top_level) {
+            Require(entry->openable, "a residual with its dimension names at the top level did not open");
+        } else {
+            Require(!entry->openable, "a variable whose dimension names are only under its attributes opened");
+            Require(HasDiagnostic(entry->diagnostics, carta::zarr::DiagnosticCode::invalid_metadata),
+                    "a variable whose dimension names are only under its attributes was not reported as malformed");
+        }
+    }
+}
+
 // Every image dataset must carry a coordinate array for every axis its image uses, time included:
 // both XRADIO readers always write one. A missing coordinate is malformed metadata, and must be
 // reported as such rather than as "not this schema".
@@ -1116,6 +1149,7 @@ int main() {
         TestDiscoveryDoesNotDescendIntoArrayChunks(root / "array-chunks");
         TestImageDatasetWithoutSky(root / "image-no-sky");
         TestImageDatasetMissingTimeCoordinate(root / "image-no-time");
+        TestDimensionNamesUnderAttributesDoNotOpen(root / "image-attribute-dimension-names");
         TestShardedStorageLayout(root / "sharded");
         TestAShardingCodecThatDescribesNoChunks(root / "unusable-shard");
         TestEmptyAndOversizedMetadata(root / "metadata-bytes");

@@ -186,6 +186,17 @@ void TestACodecNamedByANonStringIsRefused() {
             "a codec inside the shard named by a non-string should be invalid metadata");
 }
 
+// Zarr v3 puts dimension_names at the top level of an array's document. The same field under
+// attributes is a user attribute: it names no dimensions and stays among the attributes.
+void TestDimensionNamesAreReadOnlyFromTheTopLevel() {
+    const auto metadata =
+        Parsed(R"({"shape":[2],"data_type":"float32","chunk_grid":{"name":"regular","configuration":)"
+               R"({"chunk_shape":[2]}},"attributes":{"dimension_names":["polarization"]},"zarr_format":3,)"
+               R"("node_type":"array"})");
+    Require(metadata.dimension_names.empty(), "dimension_names under attributes were read as the array's own");
+    Require(metadata.attributes.contains("dimension_names"), "dimension_names under attributes were dropped");
+}
+
 }  // namespace
 
 int main() {
@@ -197,6 +208,7 @@ int main() {
         TestAShardedArraysChunksAreUntransposed();
         TestAShardingCodecWithAnUnusableChunkShapeIsRefused();
         TestACodecNamedByANonStringIsRefused();
+        TestDimensionNamesAreReadOnlyFromTheTopLevel();
     } catch (const std::exception& error) {
         std::fprintf(stderr, "array metadata test failed: %s\n", error.what());
         return 1;

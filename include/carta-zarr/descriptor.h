@@ -38,7 +38,8 @@ enum class DiagnosticCode {
     unrecognised_node,
     // An array whose metadata would not parse.
     unreadable_array,
-    // An image-shaped variable on the aperture plane (u, v) rather than the sky plane.
+    // No longer emitted: a real image of the aperture plane opens, and a complex one on either plane
+    // is unsupported_data_type (ADR 0024). Kept so that the codes after it keep their values.
     unsupported_coordinate_plane,
     // More than one flag variable claims the same image.
     ambiguous_pixel_mask,
@@ -224,6 +225,19 @@ struct DirectionCoordinate {
     std::array<double, 2> native_pole_direction{0.0, 0.0};  // longPole/latPole in degrees
 };
 
+// The linear coordinate of an image of the aperture plane, the Fourier conjugate of the sky's: its
+// spatial_x and spatial_y axes are u and v rather than l and m, in wavelengths. Both axes share the
+// unit, and each array holds u's value first.
+//
+// Linear by construction, as a direction axis is, so the increment is reported even when the samples
+// are not evenly spaced; a diagnostic says so.
+struct ApertureCoordinate {
+    std::string unit;                                 // "lambda", as XRADIO writes it
+    std::array<double, 2> reference_pixel{0.0, 0.0};  // 1-based, as DirectionCoordinate::reference_pixel
+    std::array<double, 2> reference_value{0.0, 0.0};
+    std::array<double, 2> increment{0.0, 0.0};
+};
+
 struct SpectralCoordinate {
     std::string unit;
     std::string
@@ -362,7 +376,10 @@ struct ImageDescriptor {
     // The flag variable supplying this image's pixel mask, empty when it has none. Reported for the
     // same reason `id` is: it names a data variable the consumer may want to see in diagnostics.
     std::string pixel_mask_id;
+    // Which plane the image is on: an image of the sky has a direction, and one of the aperture plane
+    // an aperture coordinate. Never both. The spatial_x and spatial_y axes are that plane's (ADR 0024).
     std::optional<DirectionCoordinate> direction;
+    std::optional<ApertureCoordinate> aperture;
     std::optional<SpectralCoordinate> spectral;
     std::optional<PolarizationCoordinate> polarization;
     std::optional<TemporalCoordinate> temporal;

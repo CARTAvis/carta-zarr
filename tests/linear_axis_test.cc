@@ -23,6 +23,7 @@
 
 namespace {
 
+using carta::zarr::internal::xradio::FitApertureAxis;
 using carta::zarr::internal::xradio::FitDirectionAxis;
 using carta::zarr::internal::xradio::FitLinearAxis;
 using carta::zarr::internal::xradio::FitSpectralAxis;
@@ -190,6 +191,27 @@ void TestADegenerateDirectionAxisSaysSo() {
             "an uneven axis is described, not refused");
 }
 
+// An aperture-plane axis is a transform's grid: linear by construction, as a direction axis is, and
+// in wavelengths, so nothing is scaled. It is measured from its crval, which need not be zero, and u
+// runs downward as XRADIO writes it.
+void TestAnApertureAxisIsMeasuredFromItsCrval() {
+    const std::vector<double> u{2000.0, 1000.0, 0.0, -1000.0, -2000.0};
+    const auto centred = FitApertureAxis(u, 0.0, "u");
+    Require(centred.increment && Near(*centred.increment, -1000.0), "u's increment was scaled or lost its sign");
+    Require(centred.reference_pixel && Near(*centred.reference_pixel, 3.0), "u was not measured from zero");
+    Require(centred.diagnostics.empty(), "an even aperture axis said something");
+
+    const auto shifted = FitApertureAxis(u, 1000.0, "u");
+    Require(shifted.reference_pixel && Near(*shifted.reference_pixel, 2.0), "u was not measured from its crval");
+    const auto unstated = FitApertureAxis(u, std::nullopt, "u");
+    Require(unstated.reference_pixel && Near(*unstated.reference_pixel, 3.0),
+            "an axis with no crval was not measured from the centre of the plane");
+
+    const auto one = FitApertureAxis({0.0}, 0.0, "v");
+    Require(!one.reference_pixel && Diagnosed(one, carta::zarr::DiagnosticCode::degenerate_axis),
+            "a degenerate aperture axis did not say so");
+}
+
 // The opposite rule: unevenly spaced channels get no linear description at all, because a consumer
 // that received one could not tell it was an approximation. See ADR 0002.
 void TestASpectralAxisWithholdsWhatItCannotDescribe() {
@@ -261,6 +283,7 @@ int main() {
         TestADirectionAxisReportsDegrees();
         TestADirectionAxisKeepsAnUnevenIncrement();
         TestADegenerateDirectionAxisSaysSo();
+        TestAnApertureAxisIsMeasuredFromItsCrval();
         TestASpectralAxisWithholdsWhatItCannotDescribe();
         TestTheDroppedDiagnosticWasReallyThere();
         TestAnEvenSpectralAxisKeepsItsDescription();

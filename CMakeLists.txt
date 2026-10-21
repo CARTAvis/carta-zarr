@@ -613,6 +613,7 @@ if(CARTA_ZARR_BUILD_TESTS AND BUILD_TESTING)
                     CARTA_ZARR_CONFORMANCE_FLAGGED_FIXTURE="${CARTA_ZARR_FIXTURE_DIR}/xradio/conformance_flagged"
                     CARTA_ZARR_CONFORMANCE_CONTINUUM_FIXTURE="${CARTA_ZARR_FIXTURE_DIR}/xradio/conformance_continuum"
                     CARTA_ZARR_CONFORMANCE_KEYWORDS_FIXTURE="${CARTA_ZARR_FIXTURE_DIR}/xradio/conformance_keywords"
+                    CARTA_ZARR_CONFORMANCE_APERTURE_FIXTURE="${CARTA_ZARR_FIXTURE_DIR}/xradio/conformance_aperture"
                     CARTA_ZARR_CONFORMANCE_SCHEMA_VERSION="0.0.2")
 
     # Pixel reads run against a fixture whose values encode their own logical coordinates, so the

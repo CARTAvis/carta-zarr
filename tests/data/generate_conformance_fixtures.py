@@ -63,6 +63,13 @@ KEYWORD_CARDS = {
     "PBCOR": True,
 }
 
+# The amplitude of the cube's Fourier transform, a real image of the aperture plane as CASA's
+# `ia.fft` makes one (UVamp in CARTA's test images is another), with a mask over a few known pixels.
+# XRADIO 1.2.5 writes it as APERTURE on (u, v) in wavelengths, its mask as FLAG_APERTURE that no data
+# group names, and no coordinate_system_info.
+APERTURE_FIXTURE_NAME = "conformance_aperture"
+APERTURE_MASKED_PIXELS = [(0, 0, 0, 0), (2, 1, 1, 1)]
+
 # The pixels each CASA image's mask marks bad, as (x, y, stokes, frequency) -- casacore's axis order.
 # casacore's mask is true for a good pixel and XRADIO's flag is true for a bad one, so these are the
 # pixels the converted flags mark true. Every value of the FITS image is finite and unique, so a
@@ -152,6 +159,31 @@ def write_flagged(fits_path: Path, scratch: Path) -> None:
     write_store(write_image, xds, fixture)
 
 
+def write_aperture(fits_path: Path, scratch: Path) -> None:
+    """The amplitude of the cube's transform over its two direction axes, masked, and converted."""
+    from casatools import image as image_tool
+    from xradio.image import open_image, write_image
+
+    sky_path = scratch / "aperture_sky.im"
+    amplitude_path = scratch / "aperture_amp.im"
+    image = image_tool()
+    try:
+        image.fromfits(outfile=str(sky_path), infile=str(fits_path), overwrite=True)
+        image.fft(amp=str(amplitude_path), axes=[0, 1])
+    finally:
+        image.done()
+    amplitude = image_tool()
+    try:
+        amplitude.open(str(amplitude_path))
+        good = np.ones(amplitude.shape(), dtype=bool)
+        for pixel in APERTURE_MASKED_PIXELS:
+            good[pixel] = False
+        amplitude.putregion(pixelmask=good)
+    finally:
+        amplitude.done()
+    write_store(write_image, open_image(str(amplitude_path)), OUTPUT_DIR / APERTURE_FIXTURE_NAME)
+
+
 def write_store(write_image, xds, fixture: Path) -> None:
     """Writes an image store at `fixture`. XRADIO names an image store `<name>.img.zarr`, which the
     fixture's path is not, so it is written under that name and moved."""
@@ -189,6 +221,7 @@ def main() -> None:
         write_store(write_image, open_image(str(continuum_path)), OUTPUT_DIR / CONTINUUM_FIXTURE_NAME)
 
         write_keywords(scratch)
+        write_aperture(fits_path, scratch)
     finally:
         shutil.rmtree(scratch, ignore_errors=True)
 

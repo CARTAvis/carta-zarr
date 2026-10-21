@@ -422,9 +422,14 @@ void TestReferenceFixture() {
         Require(!dataset.value().OpenImage(coordinate),
                 std::string("optional coordinate ") + coordinate + " was openable as an image");
     }
-    Require(HasDiagnostic(dataset.value().descriptor().diagnostics,
-                          carta::zarr::DiagnosticCode::unsupported_coordinate_plane),
-            "aperture-plane diagnostic was not reported");
+    // The fixture's APERTURE is real-valued and on the aperture plane, but the fixture writes no u or v:
+    // it cannot be described, so it is listed and does not open, and the sky images beside it do.
+    const auto& listed = dataset.value().descriptor().images;
+    const auto aperture_entry =
+        std::find_if(listed.begin(), listed.end(), [](const auto& entry) { return entry.id == "APERTURE"; });
+    Require(aperture_entry != listed.end() && !aperture_entry->openable &&
+                HasDiagnostic(aperture_entry->diagnostics, carta::zarr::DiagnosticCode::invalid_metadata),
+            "an aperture-plane variable without its coordinates was not listed as one that does not open");
     Require(HasDiagnostic(dataset.value().descriptor().diagnostics, carta::zarr::DiagnosticCode::unsupported_data_type),
             "complex-dtype diagnostic was not reported");
     Require(desc.direction.has_value(), "DirectionCoordinate missing in reference fixture");
@@ -480,8 +485,8 @@ void TestReferenceFixture() {
     const auto mask = dataset.value().OpenImage("MASK");
     Require(static_cast<bool>(mask), "MASK was incorrectly treated as a flag");
     const auto aperture = dataset.value().OpenImage("APERTURE");
-    Require(!aperture && aperture.error().code == ErrorCode::unsupported_data_type,
-            "aperture-plane variable was openable");
+    Require(!aperture && aperture.error().code == ErrorCode::invalid_metadata,
+            "an aperture-plane variable without its coordinates was openable");
     const auto complex = dataset.value().OpenImage("COMPLEX");
     Require(!complex && complex.error().code == ErrorCode::unsupported_data_type, "complex variable was openable");
     const auto flag = dataset.value().OpenImage("MASK_0");

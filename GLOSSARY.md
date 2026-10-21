@@ -50,8 +50,9 @@ The tangent plane to the celestial sphere, carrying the `l` and `m` direction-co
 _Avoid_: image plane, lm plane
 
 **Aperture plane**:
-The Fourier-conjugate plane, carrying the `u` and `v` coordinates. Variables on it are outside this
-library's supported set.
+The Fourier-conjugate plane, carrying the `u` and `v` coordinates in wavelengths. A real-valued
+variable on it is an image, whose `u` and `v` play the spatial roles and whose descriptor has an
+`aperture` coordinate in place of a direction (ADR 0024). A complex one is not opened, on either plane.
 _Avoid_: uv plane, visibility plane, Fourier plane
 
 **Flag**:

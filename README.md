@@ -28,9 +28,10 @@ its public headers, which need only the C++ standard library.
   ([ADR 0023](docs/adr/0023-only-xradio-image-schema-0-0-2-is-read.md)). The conformance fixtures
   are written by XRADIO 1.2.5 itself (see [tests/data/README.md](tests/data/README.md)), and
   following a later XRADIO means pinning that generator to it and seeing which assumption breaks.
-- **Images**: real-valued variables carrying all five of `time`, `frequency`, `polarization`, `l`
-  and `m`. Complex and aperture-plane (`u`, `v`) variables are listed with a diagnostic saying why
-  they cannot be opened.
+- **Images**: real-valued variables carrying all five of `time`, `frequency`, `polarization` and
+  either `l` and `m`, the sky plane, or `u` and `v`, the aperture plane, as CASA's `ia.fft` writes
+  an amplitude or a phase ([ADR 0024](docs/adr/0024-the-spatial-roles-are-the-images-plane.md)).
+  Complex variables are listed with a diagnostic saying why they cannot be opened.
 - **Local filesystem stores.** Every node carries its own metadata document; a root
   `consolidated_metadata` copy, which is what zarr-python writes for a consolidated dataset, is used
   to answer for them without reading each one. An array's own document is still read, and held to

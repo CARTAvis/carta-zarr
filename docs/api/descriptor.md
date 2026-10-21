@@ -62,6 +62,11 @@
 :undoc-members:
 ```
 
+```{doxygenstruct} carta::zarr::ApertureCoordinate
+:members:
+:undoc-members:
+```
+
 ```{doxygenstruct} carta::zarr::SpectralCoordinate
 :members:
 :undoc-members:

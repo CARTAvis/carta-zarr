@@ -33,8 +33,9 @@ names): a row held only what differed between versions, and with one version not
 - A store whose data groups name no sky image is not malformed for that
   ([#40](https://github.com/CARTAvis/carta-zarr/issues/40)). The schema does not require one: XRADIO
   writes data groups of an aperture plane, and of a point spread function alone. Such a store is
-  decided by ADR 0009's rule as any other is: one of aperture-plane variables answers `no_match`,
-  saying they are not openable, and one with an image this library opens matches. Its frequency
+  decided by ADR 0009's rule as any other is: one of complex aperture-plane variables answers
+  `no_match`, saying they are not openable, and one with an image this library opens matches, a real
+  aperture-plane image among them (ADR 0024). Its frequency
   coordinate is still checked: an older store with no sky is stamped 0.0.2 by XRADIO 1.2.5's upgrade
   as readily as one with a sky.
 - Zarr that is not an image dataset is not refused at all, whether it names a version or not, as

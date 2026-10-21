@@ -148,7 +148,7 @@ void TestWholeImage(const carta::zarr::Image& sky) {
 
 void TestSubsetAndStride(const carta::zarr::Image& sky) {
     // Every other l, every other m, one plane. A stride the reader silently ignored would return
-    // neighbouring values instead of these.
+    // neighboring values instead of these.
     carta::zarr::ReadRequest request;
     request.axes = {{0, 2, 2}, {1, 2, 2}, {0, 1, 1}, {1, 1, 1}, {0, 1, 1}};
     std::vector<float> pixels(4);

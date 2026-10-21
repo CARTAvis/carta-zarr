@@ -41,7 +41,7 @@ explains how to produce one.
 ## What each stage does
 
 1. `Context::Create` creates shared cache and execution resources.
-2. `Dataset::Open` opens the Zarr hierarchy, recognises the schema and lists
+2. `Dataset::Open` opens the Zarr hierarchy, recognizes the schema and lists
    image candidates. The example prints its declared schema version and
    diagnostics. It does not load every
    image's pixels.

@@ -117,14 +117,14 @@ void TestDirection(const carta::zarr::ImageDescriptor& sky) {
     RequireClose(direction.reference_value.at(1), 30.0, 1.0e-9, "reference latitude");
 }
 
-// A FITS file with no OBSRA or OBSDEC: XRADIO writes its reference direction as the pointing centre,
+// A FITS file with no OBSRA or OBSDEC: XRADIO writes its reference direction as the pointing center,
 // and that is what is reported. Nothing else of its header is left over for `user`.
-void TestPointingCentreWithoutObsra(const carta::zarr::ImageDescriptor& sky) {
-    Require(sky.observation && sky.observation->pointing_center, "no pointing centre was reported");
+void TestPointingCenterWithoutObsra(const carta::zarr::ImageDescriptor& sky) {
+    Require(sky.observation && sky.observation->pointing_center, "no pointing center was reported");
     const auto& pointing = *sky.observation->pointing_center;
     RequireClose(pointing.value.at(0), 45.0, 1.0e-9, "pointing longitude, from the reference direction");
     RequireClose(pointing.value.at(1), 30.0, 1.0e-9, "pointing latitude, from the reference direction");
-    Require(pointing.reference_frame == "FK5", "the pointing centre's frame was not named as the reference frame is");
+    Require(pointing.reference_frame == "FK5", "the pointing center's frame was not named as the reference frame is");
     Require(sky.user_keywords.empty(), "a FITS file with no uninterpreted cards reported user keywords");
 }
 
@@ -321,7 +321,7 @@ void TestKeywordsConversion() {
     const auto& pointing = *sky.observation->pointing_center;
     RequireClose(pointing.value.at(0), 45.5, 1.0e-9, "OBSRA");
     RequireClose(pointing.value.at(1), 30.25, 1.0e-9, "OBSDEC");
-    Require(pointing.reference_frame == "FK5", "the pointing centre's frame was not FK5");
+    Require(pointing.reference_frame == "FK5", "the pointing center's frame was not FK5");
 
     const auto value_of = [&](const std::string& name) -> const carta::zarr::UserKeyword& {
         for (const auto& keyword : sky.user_keywords) {
@@ -382,7 +382,7 @@ void TestApertureConversion() {
     const auto unmasked = ReadPlane(image, 0, 0, false);
     const auto masked = ReadPlane(image, 0, 0, true);
     Require(std::isfinite(unmasked.at(0)) && std::isnan(masked.at(0)), "the masked pixel was not masked");
-    RequireClose(masked.at(2 + (5 * 2)), 190.0, 1.0e-3, "the amplitude at the centre of the plane");
+    RequireClose(masked.at(2 + (5 * 2)), 190.0, 1.0e-3, "the amplitude at the center of the plane");
     const auto first = CountedPerChannel(image, 0);
     const auto second = CountedPerChannel(image, 1);
     Require(first.at(0) == 19.0 && first.at(1) == 20.0 && second.at(0) == 20.0 && second.at(1) == 19.0,
@@ -400,7 +400,7 @@ int main() {
         const auto& sky = image.descriptor();
         TestIdentityAndAxes(sky);
         TestDirection(sky);
-        TestPointingCentreWithoutObsra(sky);
+        TestPointingCenterWithoutObsra(sky);
         TestSpectralAndPolarization(sky);
         TestTemporalAndStorage(sky, image.chunk_geometry());
 

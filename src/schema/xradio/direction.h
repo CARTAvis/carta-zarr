@@ -19,7 +19,7 @@ namespace carta::zarr::internal::xradio {
 
 // A sky direction measure as XRADIO writes one (SkyDirectionArray): two angles in radians under
 // `data`, its frame and, for an equatorial frame, its equinox under `attrs`. Nothing when it has no
-// two numeric angles. The reference direction and the pointing centre are both read by it, so the
+// two numeric angles. The reference direction and the pointing center are both read by it, so the
 // two name a frame the same way.
 std::optional<SkyDirection> ReadSkyDirection(const nlohmann::json* measure);
 

@@ -77,7 +77,7 @@ NodeQualification QualifyNode(const Store& store, const NodeEntry& entry) {
     // Said rather than passed over, because this is where a node leaves the listing: nothing here
     // knows whether it was an image, a coordinate or something else in the directory, so a store
     // whose sky variable lands here reports no images at all. Without this, that reads as a store
-    // this profile does not recognise, with nothing to say which node went missing.
+    // this profile does not recognize, with nothing to say which node went missing.
     //
     // Not a refusal. A malformed node elsewhere in a store does not stop the images that parsed from
     // opening.
@@ -86,7 +86,7 @@ NodeQualification QualifyNode(const Store& store, const NodeEntry& entry) {
     // was an array and whose metadata will not parse as one; unrecognised_node is a node that did not
     // say what it was -- a document that would not parse, or a node_type Zarr does not define -- and
     // calling that an array would be a guess.
-    if (entry.kind == NodeKind::unrecognised) {
+    if (entry.kind == NodeKind::unrecognized) {
         return NodeQualification{false, false,
                                  Diagnostic{DiagnosticCode::unrecognised_node, entry.reason->message, node}, true};
     }

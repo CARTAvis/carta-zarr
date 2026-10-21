@@ -42,7 +42,7 @@ enum class NodeKind {
     array,
     // A document that would not say: one that would not parse at all, one that is not an object, or
     // one whose node_type is missing, not a string, or something Zarr does not define.
-    unrecognised,
+    unrecognized,
 };
 
 /**
@@ -56,12 +56,12 @@ enum class NodeKind {
  */
 struct NodeEntry {
     std::string name;
-    NodeKind kind = NodeKind::unrecognised;
+    NodeKind kind = NodeKind::unrecognized;
     // The array's metadata, parsed or refused, as the store holds it -- the object ReadArrayMetadata
     // hands back, so it lives as long as the store does. Null unless kind is array: a group is never
     // parsed as one.
     const Result<zarr::ArrayMetadata>* array = nullptr;
-    // Why the node is unrecognised. Absent unless it is.
+    // Why the node is unrecognized. Absent unless it is.
     std::optional<Error> reason;
 };
 
@@ -129,7 +129,7 @@ public:
     // may have been an image. Flag selection passes over one, because a mask candidate that cannot be
     // read is simply not the mask. The declared size refuses one, because a total that leaves out an
     // array it knows is there is a wrong total -- and counts neither a group nor a node it does not
-    // recognise, because neither is an array. Three policies about one fact; this is where the fact
+    // recognize, because neither is an array. Three policies about one fact; this is where the fact
     // is decided, once.
     const Result<std::vector<NodeEntry>>& Inventory() const;
     // One node's entry by canonical name, or null when the inventory holds no such node -- and null

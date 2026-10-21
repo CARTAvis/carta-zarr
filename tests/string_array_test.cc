@@ -112,7 +112,7 @@ void TestSupportedLayouts() {
     ExpectValues("dot_key", expected);
 }
 
-// The bytes codec endianness must be honoured, including for multi-byte code points.
+// The bytes codec endianness must be honored, including for multi-byte code points.
 void TestBigEndian() {
     ExpectValues("big_endian", std::vector<std::string>{"\xCE\xA9", "\xF0\x9F\x99\x82"});
 }

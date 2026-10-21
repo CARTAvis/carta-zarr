@@ -524,7 +524,7 @@ def generate_pixel_fixture(
             "object_name": "Zarr pixel source",
             "observer": "CARTA",
             "obsdate": {"data": 59000.0, "attrs": {"format": "MJD", "scale": "UTC"}},
-            # direction is (longitude, latitude) in radians and distance is a radius in metres.
+            # direction is (longitude, latitude) in radians and distance is a radius in meters.
             # Both are needed before an observatory position exists at all, and the values are
             # deliberately off-axis so that a consumer mixing up x, y and z cannot still agree.
             "telescope": {

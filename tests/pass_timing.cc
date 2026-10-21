@@ -7,7 +7,7 @@
 // What stands in for a regression test on the pass.
 //
 // Nothing in the suite asserts a duration, and the one change that made the accumulation loop
-// vectorise was worth about a quarter of a whole-region reduction while measuring as exactly
+// vectorize was worth about a quarter of a whole-region reduction while measuring as exactly
 // nothing in a Debug build -- see ADR 0005. So the guard against collapsing the three walks into
 // one and quietly paying that back is this: run it against build-release/ before and after, and
 // compare.

@@ -401,10 +401,10 @@ const Result<std::vector<NodeEntry>>& Store::Inventory() const {
                 if (metadata.error().code != ErrorCode::invalid_metadata) {
                     return metadata.error();
                 }
-                entries.push_back(NodeEntry{std::move(node), NodeKind::unrecognised, nullptr, metadata.error()});
+                entries.push_back(NodeEntry{std::move(node), NodeKind::unrecognized, nullptr, metadata.error()});
                 continue;
             }
-            NodeEntry entry{std::move(node), NodeKind::unrecognised, nullptr, std::nullopt};
+            NodeEntry entry{std::move(node), NodeKind::unrecognized, nullptr, std::nullopt};
 
             // Looked up rather than taken with a default, because a node_type that is present and
             // not a string is a document that does not say what it is -- and asking for it as a

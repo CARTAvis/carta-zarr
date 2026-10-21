@@ -44,7 +44,7 @@ struct CachePoolAccess;
 // better elsewhere. A scan that touches every chunk once reuses none of them, so caching what it
 // decodes evicts that working set to no purpose, and rebuilding it costs decompression, which is the
 // resource the scan is already saturating: it reads through a pool of zero bytes. A walk that does
-// come back -- a moment, whose neighbouring slabs share the chunks between them -- needs as much as it
+// come back -- a moment, whose neighboring slabs share the chunks between them -- needs as much as it
 // will come back for, which is more than a session should keep for everything else and is wanted only
 // while the walk lasts: it reads through a pool of that size, and lets go of it when it ends.
 //
@@ -101,9 +101,9 @@ using ProgressCallback = std::function<bool(std::size_t elements_written, std::s
 
 // What a read is allowed to do while it runs, whatever it is reading for.
 //
-// These three are the whole of what every path through this library honours: an ordinary read and
+// These three are the whole of what every path through this library honors: an ordinary read and
 // all three reductions reach the same storage operations underneath and check the same things at
-// the same boundaries. Said in its own type so that an operation which honours only these can take
+// the same boundaries. Said in its own type so that an operation which honors only these can take
 // only these -- everything below the pixel source seam does, because that is all any of it ever
 // looked at.
 struct ReadControl {
@@ -129,7 +129,7 @@ struct ReadControl {
 // hold at once while doing it. A pixel mask read has neither -- it is the flag, and the destination
 // is the caller's -- which is why it takes a ReadControl and this cannot be handed to it.
 //
-// That is the point of the split. Every field of this type is honoured by every operation that
+// That is the point of the split. Every field of this type is honored by every operation that
 // takes it, so there is no table of which ones apply where, and setting one where it would have
 // been ignored does not compile.
 struct ReadOptions {

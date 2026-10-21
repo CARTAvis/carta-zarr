@@ -7,7 +7,7 @@
 
     summarize.py MACHINE=RESULTS_DIR ... > medians.csv
 
-Each RESULTS_DIR holds a CUBE.csv per cube, which carta-zarr-bench wrote with --csv and labelled
+Each RESULTS_DIR holds a CUBE.csv per cube, which carta-zarr-bench wrote with --csv and labeled
 --label "LAYOUT|users=N|cache=SIZE", with "|warm" after the planes read without emptying any cache.
 plane, spectrum and region take the median of their first touches -- operations that read no chunk
 another operation of the trial read before or alongside them -- as sweep.py ranks them, and leave it

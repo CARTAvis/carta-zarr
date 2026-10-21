@@ -76,7 +76,7 @@ DirectionAxisFit FitDirectionAxis(const std::vector<double>& cosines, std::strin
  * Linear by construction, as a direction axis is -- a Fourier transform's grid -- so the increment is
  * kept whether or not the samples came back evenly spaced, and a degenerate axis is said to be one.
  * `reference` is the value the reference pixel lands on, XRADIO's `crval`; nothing asks for 0.0, the
- * centre of the plane. Nothing is scaled: the unit is the coordinate's own.
+ * center of the plane. Nothing is scaled: the unit is the coordinate's own.
  */
 DirectionAxisFit FitApertureAxis(const std::vector<double>& values, std::optional<double> reference,
                                  std::string_view axis_name);
@@ -92,7 +92,7 @@ struct SpectralAxisFit {
 /**
  * The linear description of a spectral coordinate, from its channel frequencies.
  *
- * The opposite rule to a direction axis, and for the opposite reason: XRADIO warns that neighbouring
+ * The opposite rule to a direction axis, and for the opposite reason: XRADIO warns that neighboring
  * channels need not be evenly spaced, so unevenly spaced ones get no linear description at all and
  * the consumer builds a tabular axis instead. See ADR 0002.
  *

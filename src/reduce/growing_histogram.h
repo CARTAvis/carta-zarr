@@ -72,7 +72,7 @@ public:
     // Re-aggregate over the range the caller wants, splitting each provisional bin between the
     // target bins it overlaps in proportion to how much of it each one covers.
     //
-    // Giving the whole of it to the bin its centre falls in is the obvious thing, but the error
+    // Giving the whole of it to the bin its center falls in is the obvious thing, but the error
     // that leaves is a bias rather than a wobble: every provisional bin straddling a target edge
     // leans the same way, and nothing averages it out. Splitting assumes the pixels are spread
     // evenly inside one provisional bin, which is the assumption the caller's own percentile
@@ -112,7 +112,7 @@ public:
                 continue;
             }
 
-            // Normalised by what the target range actually covers, not by the provisional width: a
+            // Normalized by what the target range actually covers, not by the provisional width: a
             // bin hanging over either end would otherwise leave a remainder the size of the part
             // outside, and those pixels are inside the range by construction.
             shares.assign(static_cast<std::size_t>(last - first + 1), 0.0);

@@ -103,7 +103,7 @@ each way: for a plane this size, 4 MiB chunks four channels deep are about as go
 With every mode weighted alike, 128 x 128 x 128 served the 512-square cube best, and 512 x 512 x 16
 the 2048-square one, where the same 128-deep chunks made a plane take nearly three seconds. A chunk
 one plane deep -- what a cube converted plane by plane gets -- gives the fastest channel changes and
-the slowest spectra by a factor of ten or more. Which to prefer is a judgement about how a site's
+the slowest spectra by a factor of ten or more. Which to prefer is a judgment about how a site's
 users work; the sweep's `[weights]` makes it explicit, and its report says when doubling the weight of
 planes or of spectra would change the answer. For the 512-square cube it would: weighting planes
 twice as heavily brings the cube's own layout back to first place.

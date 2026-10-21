@@ -343,7 +343,7 @@ std::vector<std::string> ParseCsvLine(const std::string& line) {
     return fields;
 }
 
-std::optional<RowSummary> SummariseRow(const std::string& line) {
+std::optional<RowSummary> SummarizeRow(const std::string& line) {
     static const auto run_key = ColumnIndex("run_key");
     static const auto trial = ColumnIndex("trial");
     static const auto status = ColumnIndex("status");
@@ -439,7 +439,7 @@ std::optional<CsvOutput> CsvOutput::Open(const std::string& path, std::string& e
             has_header = true;
         }
         for (std::size_t number = 2; std::getline(existing, line); ++number) {
-            const auto row = SummariseRow(line);
+            const auto row = SummarizeRow(line);
             // Every line left ends in a newline, so none was cut short by a write stopping; one that
             // is still not a row is something else, and appending to the file would bury it.
             if (!row) {
@@ -505,7 +505,7 @@ void CsvOutput::Remove(const std::string& run_key, unsigned trial) {
         std::ifstream existing(_path);
         std::ofstream kept(replacement, std::ios::trunc);
         for (std::string line; std::getline(existing, line);) {
-            const auto row = SummariseRow(line);
+            const auto row = SummarizeRow(line);
             if (!row || row->run_key != run_key || row->trial != trial) {
                 kept << line << '\n';
             }

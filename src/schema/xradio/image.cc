@@ -230,7 +230,7 @@ struct Discovered {
     ImageDiscovery discovery;
     std::optional<std::size_t> first_malformation;
     // A malformed node says the store is broken, not what it is. An image variable this profile
-    // recognised, openable or not, or a node bearing one of XRADIO's image names, says it is an
+    // recognized, openable or not, or a node bearing one of XRADIO's image names, says it is an
     // image dataset; so does a root that says so, which InspectImages asks.
     bool image_evidence = false;
 };
@@ -349,7 +349,7 @@ Result<SchemaInspection> InspectImages(const Store& store) {
         // Nothing here this profile will open, and which answer that is depends on why. A store of
         // complex images, on either plane, is well formed and simply not for this library. One
         // whose images disagree with their coordinates, or whose metadata will not parse, is a
-        // store this profile recognised and found broken -- and reporting that as a non-match tells
+        // store this profile recognized and found broken -- and reporting that as a non-match tells
         // whoever picked the file that nothing knew what it was, which is untrue and no use. But only
         // a store with something of an image about it.
         return finish(found.value().first_malformation && image_dataset ? SchemaMatchKind::invalid

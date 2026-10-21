@@ -107,8 +107,8 @@ Hydra (`askap_hydra_extragalactic_256`), converted the same way at 256 x 256 x 1
 | channels wholly NaN | 0 | 66 |
 
 The synthetic cube compresses about 10 % worse. Its noise is independent from pixel to pixel, where
-a restored image's is correlated over the beam (ASKAP Hydra: 0.90 between neighbouring pixels, 0.66
-two apart), and neighbours that are alike shuffle and compress better. That is left as it is: the
+a restored image's is correlated over the beam (ASKAP Hydra: 0.90 between neighboring pixels, 0.66
+two apart), and neighbors that are alike shuffle and compress better. That is left as it is: the
 test set is for comparing layouts and formats on one set of pixels, not for passing as real data.
 
 The synthetic cube flags more than ASKAP Hydra does, on purpose: a run that covers whole chunks

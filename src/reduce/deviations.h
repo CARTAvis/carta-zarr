@@ -13,7 +13,7 @@
 // Made in two steps because the per-pixel loop cannot afford a division per pixel, which is what
 // updating a running mean costs. Within one span the loop sums the pixels' distances from a shift,
 // one of the span's own pixels, and their squares -- one subtraction and one multiply-add more than
-// it already does, and still vectorised. A span's pixels are close to that shift against their
+// it already does, and still vectorized. A span's pixels are close to that shift against their
 // spread, so the subtraction that turns those sums into a sum of squared deviations loses next to
 // nothing. Everything above a span -- the spans of a row, the rows of a region, the partials of a
 // task, the reads of a block -- is put together pairwise as a Spread, which subtracts nothing large.

@@ -49,7 +49,7 @@ void RequireCounts(const std::vector<std::uint64_t>& got, const std::vector<std:
 //
 // The grid here is chosen so that aggregating onto it is the identity -- the target bins are the
 // provisional ones -- which is what makes these exact rather than approximate. The first pixel is
-// 2^24, where a float's spacing is 2, so the seed is four bins of 2 centred on it.
+// 2^24, where a float's spacing is 2, so the seed is four bins of 2 centered on it.
 void TestTheRangeSeedsAndGrowsBothWays() {
     GrowingHistogram histogram(4);
     constexpr double kAt = 16777216.0;

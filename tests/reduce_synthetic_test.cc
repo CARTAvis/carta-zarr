@@ -650,7 +650,7 @@ std::vector<Spread> Spreads() {
 // The sum of squared deviations over the pixels `in` selects, worked out the slow way: in long
 // double, from a mean found first.
 template <typename Selected>
-double CentredReference(const SyntheticPixelSource::Formula& value, std::uint64_t channels_from,
+double CenteredReference(const SyntheticPixelSource::Formula& value, std::uint64_t channels_from,
                         std::uint64_t channels_to, std::uint64_t x, std::uint64_t y, const Selected& in) {
     long double count = 0.0L;
     long double sum = 0.0L;
@@ -679,12 +679,12 @@ double CentredReference(const SyntheticPixelSource::Formula& value, std::uint64_
     return static_cast<double>(deviations);
 }
 
-void RequireCentred(double actual, double expected, const std::string& where) {
+void RequireCentered(double actual, double expected, const std::string& where) {
     Require(std::abs(actual - expected) <= 1e-10 * std::max(1.0, std::abs(expected)),
             where + ": sum_sq_dev " + std::to_string(actual) + ", the pixels' own " + std::to_string(expected));
 }
 
-void TestASpectralSpreadIsCentredWhateverTheMagnitude() {
+void TestASpectralSpreadIsCenteredWhateverTheMagnitude() {
     const auto image = MakeImage(kX, kY, kZ);
     const auto geometry = MakeGeometry(64, 65, 2);
     // A region with holes in it, so that its rows are several spans and take the masked loop.
@@ -743,9 +743,9 @@ void TestASpectralSpreadIsCentredWhateverTheMagnitude() {
 
         for (std::size_t r = 0; r < regions.size(); ++r) {
             for (std::uint64_t z = 0; z < kZ; ++z) {
-                const auto expected = CentredReference(
+                const auto expected = CenteredReference(
                     spread.value, z, z + 1, kX, kY, [&](std::uint64_t l, std::uint64_t m) { return inside(r, l, m); });
-                RequireCentred(
+                RequireCentered(
                     deviations.at((r * kZ) + z), expected,
                     std::string(spread.name) + ", region " + std::to_string(r) + ", channel " + std::to_string(z));
             }
@@ -753,7 +753,7 @@ void TestASpectralSpreadIsCentredWhateverTheMagnitude() {
     }
 }
 
-void TestACubeSpreadIsCentredWhateverTheMagnitude() {
+void TestACubeSpreadIsCenteredWhateverTheMagnitude() {
     const auto image = MakeImage(kSplitX, kSplitY, kSplitZ);
     const auto geometry = MakeGeometry(64, 65, 2);
     for (const auto& spread : Spreads()) {
@@ -768,8 +768,8 @@ void TestACubeSpreadIsCentredWhateverTheMagnitude() {
         const auto outcome = carta::zarr::internal::ComputeCubeHistogram(reducible, request, options, {});
         Require(static_cast<bool>(outcome),
                 std::string("the cube histogram failed: ") + (outcome ? "" : outcome.error().message));
-        RequireCentred(outcome.value().totals.sum_sq_dev,
-                       CentredReference(spread.value, 0, kSplitZ, kSplitX, kSplitY,
+        RequireCentered(outcome.value().totals.sum_sq_dev,
+                       CenteredReference(spread.value, 0, kSplitZ, kSplitX, kSplitY,
                                         [](std::uint64_t, std::uint64_t) { return true; }),
                        std::string(spread.name) + ", the cube");
     }
@@ -1085,8 +1085,8 @@ int main() {
         TestAMaskedRegionReadsOnlyTheChunksItOccupies();
         TestAPlaneHistogramSplitAcrossWorkers();
         TestACubeHistogramSplitAcrossWorkers();
-        TestASpectralSpreadIsCentredWhateverTheMagnitude();
-        TestACubeSpreadIsCentredWhateverTheMagnitude();
+        TestASpectralSpreadIsCenteredWhateverTheMagnitude();
+        TestACubeSpreadIsCenteredWhateverTheMagnitude();
         TestProgressNeverClaimsTheWholeRunBeforeItsLastRead();
         TestAPlaneHistogramHandsOverAtEveryReadOfItsBlock();
         TestARegionCoveringThePlaneHandsOverAsThePlaneDoes();

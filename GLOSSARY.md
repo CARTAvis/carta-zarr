@@ -102,10 +102,10 @@ _Avoid_: driver, backend, kvstore, store
 
 **Node inventory**:
 What a store's hierarchy holds: every node under its one canonical name, whether it is a group, an
-array, or something the library does not recognise, and for an array, whether its metadata parses.
+array, or something the library does not recognize, and for an array, whether its metadata parses.
 Taken once for the life of a store, which is what makes a dataset's listing a snapshot. It decides
 what each node is; what to do about one that is not a usable array stays with whoever asked.
-_Avoid_: listing, node list, catalogue, manifest
+_Avoid_: listing, node list, catalog, manifest
 
 **Descriptor**:
 The immutable metadata the library reports for a dataset or an image. It never contains pixels.

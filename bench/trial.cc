@@ -400,7 +400,7 @@ TrialOutcome RunTrial(const RunOptions& options, Mode mode, unsigned trial, Cold
             process.rows.push_back(FormatRow(missing));
         }
         for (auto& line : process.rows) {
-            if (const auto summary = SummariseRow(line)) {
+            if (const auto summary = SummarizeRow(line)) {
                 if (summary->status == "ok") {
                     ++outcome.ok;
                 } else if (summary->status == "timeout") {

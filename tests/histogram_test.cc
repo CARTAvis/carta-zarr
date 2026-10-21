@@ -177,7 +177,7 @@ void TestCountsMatchTheOracle(const carta::zarr::Image& sky) {
 }
 
 // The narrow case: a range that excludes most of the plane, which is what tells a walk that counts
-// every pixel from one that honours the bounds.
+// every pixel from one that honors the bounds.
 void TestPixelsOutsideTheRangeAreNotCounted(const carta::zarr::Image& sky) {
     const auto request = WholeSpectrum(0, 10.0F, 25.0F, 4);
     const auto collected = Collect(sky, request, {});
@@ -481,7 +481,7 @@ void TestAWidePlaneSplitsAndStillCounts(const char* fixture) {
     const std::uint32_t bins = 64;
 
     // Channel by channel: a slab split by channel writes each channel's counts itself, and one
-    // written into its neighbour's would leave totals over the cube unchanged.
+    // written into its neighbor's would leave totals over the cube unchanged.
     std::vector<std::vector<std::uint64_t>> oracle(kFrequency, std::vector<std::uint64_t>(bins, 0));
     const double width = (upper - lower) / bins;
     for (std::uint64_t f = 0; f < kFrequency; ++f) {

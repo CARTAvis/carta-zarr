@@ -18,7 +18,7 @@ did, and every one of those checks is gone.
 ## The empty state was the library's, not the consumer's
 
 A state a consumer can reach only by moving from a handle and then using it anyway is a state the
-library created and then defended against. The defence was not free, and it was not uniform: before
+library created and then defended against. The defense was not free, and it was not uniform: before
 the checks were gathered into `WithReadableImage`, two entry points refused an empty handle and
 three also refused a null store that `Image::Impl`'s constructor cannot produce, so which of the two
 a reader was looking at took working out.

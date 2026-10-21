@@ -67,7 +67,7 @@ each image's flag can be told only from what its data group declares. Importing 
 direction and four cards XRADIO keeps uninterpreted, a string, a number, an integer and a boolean
 (`INSTRUME`, `DISTANCE`, `NCOMBINE`, `PBCOR`). XRADIO writes the first as the image's
 `pointing_center` and the rest, lower-cased, as its `user`; the cube has neither, so its pointing
-centre is its reference direction and its `user` is empty.
+center is its reference direction and its `user` is empty.
 
 `images/zarr/xradio/conformance_aperture` is the amplitude of the cube's Fourier transform over its
 two direction axes, as CASA's `ia.fft` makes it, with a mask over two known pixels: a real image of

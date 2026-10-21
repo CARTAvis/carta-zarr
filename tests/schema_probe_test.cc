@@ -253,7 +253,7 @@ void TestNonMatchAndInvalid(const std::filesystem::path& root) {
 // something else -- here a visibility dataset, whose one-dimensional weights will not parse -- is a
 // store this profile does not match, and calling it a malformed image sent CARTA's file browser to
 // list it as one. Only a store with something of an image about it is a broken image store: an
-// image variable this profile recognised, a node bearing an image's name, or a root that says it
+// image variable this profile recognized, a node bearing an image's name, or a root that says it
 // is an image dataset.
 void TestAMalformedStoreIsAnImageOnlyOnEvidence(const std::filesystem::path& root) {
     // An array with no chunk grid, which no Zarr reader can read.
@@ -313,7 +313,7 @@ void TestOpenSaysWhyItRefused(const std::filesystem::path& root) {
     Require(unclaimed_probe && unclaimed_probe.value().diagnostics.empty(),
             "an unclaimed Zarr store was reported with a diagnostic nothing produced");
 
-    // Zarr that no profile claims either, but whose only image the profile recognised and will not
+    // Zarr that no profile claims either, but whose only image the profile recognized and will not
     // open. That is a reason, and the caller is told it rather than that nothing matched.
     const auto complex = root / "complex";
     CreateValidStore(complex);
@@ -764,7 +764,7 @@ void TestAnIntegerSkyImageReadsAsFloat(const std::filesystem::path& root) {
 // A sharding codec whose inner chunk shape describes nothing leaves the array unreadable, and this
 // pins where that is noticed: at the parse, not after it.
 //
-// Refused before the image opens. Otherwise it would open reporting a chunk geometry synthesised
+// Refused before the image opens. Otherwise it would open reporting a chunk geometry synthesized
 // from its own shape -- one chunk covering the whole image, unsharded, uncompressed, with no
 // diagnostic -- and that geometry is what the reduction plans its blocks from, so a walk would take
 // the cube as a single chunk.

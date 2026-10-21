@@ -34,7 +34,7 @@ profile used to feed was unreachable and has been deleted.
 Consolidated metadata is a copy that saves those reads, not a substitute for the documents it
 copies. zarr-python writes it with `must_understand: false`, which says a reader may ignore it and
 still read the same hierarchy, and it never removes the children when it writes one. This library
-could not honour the other reading anyway: the array data behind those names is opened by
+could not honor the other reading anyway: the array data behind those names is opened by
 TensorStore from each array's own metadata, so a store whose children exist only in the root
 describes images that nothing — this library included — can read pixels from. Such a store is
 malformed, and the error it earns names the document that is missing. What the saving is worth is

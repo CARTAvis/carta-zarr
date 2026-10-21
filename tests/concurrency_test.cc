@@ -10,11 +10,11 @@
 //
 // Each test computes its answers serially first, on a context of their own, and then has several
 // threads ask the same questions at once of a fresh context, released together so that they overlap
-// rather than take turns. A fresh context and dataset matter: what is computed lazily and memoised is
+// rather than take turns. A fresh context and dataset matter: what is computed lazily and memoized is
 // then computed under contention, which is where a race would be.
 //
 // Agreement with the serial answer is what this can check. That no two threads touched the same
-// memory unsynchronised is what ThreadSanitizer checks, and this test is written to be run under it,
+// memory unsynchronized is what ThreadSanitizer checks, and this test is written to be run under it,
 // configured with CARTA_ZARR_THREAD_SANITIZER: see "Run the tests" in docs/installation.md.
 
 #include "support/check.h"

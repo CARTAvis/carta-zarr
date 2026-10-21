@@ -50,10 +50,10 @@ FLAGGED_FIXTURE_NAME = "conformance_flagged"
 # the cube above cannot show.
 CONTINUUM_FIXTURE_NAME = "conformance_continuum"
 CONTINUUM_BTYPE = "Spectral index"
-# The same cube with a pointing centre apart from its reference direction, and FITS cards XRADIO
+# The same cube with a pointing center apart from its reference direction, and FITS cards XRADIO
 # carries along uninterpreted, one of each kind of value it keeps: XRADIO 1.3.0 writes the first as
 # the image's `pointing_center` and the rest, lower-cased, as its `user`. The cube above has neither,
-# so its pointing centre is its reference direction and its `user` is empty.
+# so its pointing center is its reference direction and its `user` is empty.
 KEYWORDS_FIXTURE_NAME = "conformance_keywords"
 KEYWORD_CARDS = {
     "OBSRA": 45.5,

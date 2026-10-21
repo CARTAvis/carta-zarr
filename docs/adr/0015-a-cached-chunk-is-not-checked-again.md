@@ -32,7 +32,7 @@ which TensorStore does not recheck after opening either, and of the opened array
 for the life of a context. A CARTA session does not write the data it views, and rewriting a dataset
 under a running viewer was never something a read could rely on noticing.
 
-`tests/store_context_test.cc` pins the behaviour: once a copy's chunks are truncated, the handle that
+`tests/store_context_test.cc` pins the behavior: once a copy's chunks are truncated, the handle that
 read them reads the same values again, and a handle opened afresh cannot read them at all.
 
 ## What it was measured to gain

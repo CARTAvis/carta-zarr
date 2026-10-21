@@ -42,7 +42,7 @@ struct ArrayMetadata {
     // `dimension_names` and the outer `chunk_grid`, asked at the same gate, and it keeps nothing.
     //
     // Checked here rather than in ParseStorageLayout, which is infallible: an array with a malformed
-    // sharding codec must not open and report a chunk geometry synthesised from its own shape -- an
+    // sharding codec must not open and report a chunk geometry synthesized from its own shape -- an
     // image that says every one of its chunks is the whole image. Checking at the gate makes that
     // unreachable rather than guarded against.
     nlohmann::json codecs = nlohmann::json::array();

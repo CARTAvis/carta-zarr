@@ -19,7 +19,7 @@
 """What tools/zarr-bench/generate.py may do to the place it writes a dataset, asked of Output directly.
 
 --force deletes whatever is at the output, and the dataset being read must survive that whatever the
-output is spelt as. That used to hold because main() checked for an overlap before it deleted: two
+output is spelled as. That used to hold because main() checked for an overlap before it deleted: two
 statements whose order was the guarantee. Output.claim is now the only way to delete or create the
 output, and it refuses an overlap first; this asks it, on directories made here, what it does with
 each kind of output, and what is left when writing fails part-way."""
@@ -233,9 +233,9 @@ class FindFlagTest(unittest.TestCase):
     def test_a_flag_a_data_group_gives_another_image_is_not_this_ones(self) -> None:
         image = self.array("POINT_SPREAD_FUNCTION", type="point_spread_function")
         self.array("FLAG_POINT_SPREAD_FUNCTION", "bool", type="flag")
-        for spelt in ("FLAG_POINT_SPREAD_FUNCTION", "./FLAG_POINT_SPREAD_FUNCTION"):
-            with self.subTest(spelt=spelt):
-                self.assertIsNone(self.find(image, {"model": {"sky": "MODEL", "flag": spelt}},
+        for spelled in ("FLAG_POINT_SPREAD_FUNCTION", "./FLAG_POINT_SPREAD_FUNCTION"):
+            with self.subTest(spelled=spelled):
+                self.assertIsNone(self.find(image, {"model": {"sky": "MODEL", "flag": spelled}},
                                             name="POINT_SPREAD_FUNCTION"))
 
     def test_the_committed_conversion_names_its_flag(self) -> None:
@@ -459,12 +459,12 @@ class SyntheticPixelsTest(unittest.TestCase):
             if spectrum is None:
                 continue
             inside = np.flatnonzero(spectrum)
-            centre, width = cube.lines["centre"][index], cube.lines["width"][index]
+            center, width = cube.lines["center"][index], cube.lines["width"][index]
             # A Gaussian reaches five sigma either side, 4.25 widths in all; a double horn its width
             # and soft edges. Either way a few hundred km/s, not the band.
             self.assertLessEqual(inside.max() - inside.min() + 1, 4.25 * width + 3)
             if 0 < inside.min() and inside.max() < 2999:
-                self.assertLessEqual(abs((inside.max() + inside.min()) / 2 - centre), 1.0)
+                self.assertLessEqual(abs((inside.max() + inside.min()) / 2 - center), 1.0)
 
     def test_the_frequency_axis_is_askaps_unless_told(self) -> None:
         import numpy as np

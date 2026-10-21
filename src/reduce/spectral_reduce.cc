@@ -30,10 +30,10 @@ namespace {
 
 constexpr double kInfinity = std::numeric_limits<double>::infinity();
 
-// The per-pixel loop, written so that a compiler can vectorise it.
+// The per-pixel loop, written so that a compiler can vectorize it.
 //
 // Both template parameters are loop invariants rather than runtime tests, because each one on its
-// own is enough to stop vectorisation: the u stride is 1 for every image, since the walk runs
+// own is enough to stop vectorization: the u stride is 1 for every image, since the walk runs
 // along the axis the store varies fastest, but the compiler cannot know that and pays a multiply
 // per pixel for the possibility; and a mask cost a branch per pixel. Only a raster too fragmented to
 // be worth runs still takes that branch -- every other masked region reaches here as runs, which

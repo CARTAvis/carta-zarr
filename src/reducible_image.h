@@ -24,8 +24,8 @@ namespace carta::zarr::internal {
 /**
  * One image, opened, with everything a reduction needs before a request arrives.
  *
- * Four things travelled together to every reduction -- where the pixels come from, what the image
- * is, how it is laid out, and what may run the arithmetic -- and the descriptor travelled twice,
+ * Four things traveled together to every reduction -- where the pixels come from, what the image
+ * is, how it is laid out, and what may run the arithmetic -- and the descriptor traveled twice,
  * once on its own and once inside the source. Three entry points took six or seven arguments of
  * which six were the same six in the same order.
  *

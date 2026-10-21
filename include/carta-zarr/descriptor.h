@@ -34,7 +34,7 @@ enum class DiagnosticCode {
     invalid_metadata,
     unsupported_data_type,
     ambiguous_schema,
-    // A node the store holds that is neither a group nor an array this library recognises.
+    // A node the store holds that is neither a group nor an array this library recognizes.
     unrecognised_node,
     // An array whose metadata would not parse.
     unreadable_array,
@@ -106,7 +106,7 @@ struct ContextOptions {
     // Three answers, and one field because they are one question: no value leaves TensorStore's own
     // default alone, zero asks for a pool that holds nothing, and any other number sizes it. It was
     // two fields -- a size where zero meant "default" and a separate disable_cache -- which made
-    // "no cache" sayable twice and, when both were set, resolved silently in favour of the size.
+    // "no cache" sayable twice and, when both were set, resolved silently in favor of the size.
     std::optional<std::size_t> cache_bytes;
     unsigned int io_threads = 0;
     unsigned int decode_threads = 0;

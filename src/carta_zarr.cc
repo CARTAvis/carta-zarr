@@ -181,7 +181,7 @@ public:
     // beside the pixels'. See DescribedImage.
     ChunkGeometry flag_geometry;
     // Built once, from members rather than from the constructor's arguments, and declared last so
-    // that both of those are already initialised. A PixelSource cannot be copied or moved, which is
+    // that both of those are already initialized. A PixelSource cannot be copied or moved, which is
     // why it lives here rather than being made at each entry point.
     internal::StorePixelSource source;
 

@@ -65,7 +65,7 @@ public:
      * accumulator indexed by it needs no lock. Tasks are claimed from a shared counter rather than
      * divided up front, so an uneven one does not leave workers waiting on the slowest slice.
      *
-     * Safe to call from more than one thread: calls are serialised, and one of them waits. That is
+     * Safe to call from more than one thread: calls are serialized, and one of them waits. That is
      * not a detail a caller can ignore on a pool it does not own -- see `_run` below.
      *
      * If a body throws, no task not yet claimed is started, the ones already running finish, and

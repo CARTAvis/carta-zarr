@@ -66,7 +66,7 @@ void WorkPool::DrainTasks(const std::function<void(std::size_t, std::size_t)>& b
             task = _next++;
         }
         // Outside the lock: a body is the arithmetic a reduction came for, and holding the counter
-        // across it would serialise the very thing the pool exists to spread.
+        // across it would serialize the very thing the pool exists to spread.
         try {
             body(task, worker);
         } catch (...) {
@@ -123,7 +123,7 @@ void WorkPool::Run(std::size_t tasks, const std::function<void(std::size_t, std:
 
     // Everything below writes the pool's one set of fields and then waits for workers reading
     // them, so only one call may be inside it at a time. See _run.
-    std::lock_guard<std::mutex> serialised(_run);
+    std::lock_guard<std::mutex> serialized(_run);
     std::exception_ptr failure;
 
     {

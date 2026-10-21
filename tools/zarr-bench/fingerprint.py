@@ -20,7 +20,7 @@ from pathlib import Path
 
 
 def reached(root: Path) -> Iterator[Path]:
-    """Every file and directory under `root`, spelt as reached through it, with directory links
+    """Every file and directory under `root`, spelled as reached through it, with directory links
     followed: a dataset's arrays are as often as not links to where their bytes are, and what is
     behind them is the dataset as much as what is not. Each directory is entered once, so a link back
     up the tree is listed and not followed round again."""

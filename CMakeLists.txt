@@ -308,7 +308,7 @@ if(CARTA_ZARR_BUILD_TESTS AND BUILD_TESTING)
 
     # The schema profile's structural decisions read metadata only, so they run against an in-memory
     # transport instead of a directory tree. This target compiles the internals directly and links no
-    # TensorStore: the value reader is stubbed, which is also the honest behaviour of a transport
+    # TensorStore: the value reader is stubbed, which is also the honest behavior of a transport
     # holding no array data.
     carta_zarr_add_test(carta_zarr_profile_tests INTERNAL
         TEST_NAME carta-zarr-schema-profile
@@ -410,7 +410,7 @@ if(CARTA_ZARR_BUILD_TESTS AND BUILD_TESTING)
         SOURCES tests/linear_axis_test.cc src/schema/xradio/linear_axis.cc)
 
     # What an image's own attributes say about the observation, and its user keywords. Pure
-    # JSON-to-struct functions, so this links no store, only the direction reader the pointing centre
+    # JSON-to-struct functions, so this links no store, only the direction reader the pointing center
     # shares with the coordinate system: the geodetic conversion and the obsdate split used to be
     # reachable only by opening a store, and the conversion was asserted nowhere at all.
     carta_zarr_add_test(carta_zarr_observation_tests INTERNAL
@@ -480,7 +480,7 @@ if(CARTA_ZARR_BUILD_TESTS AND BUILD_TESTING)
 
     # The one-pass histogram's arithmetic, against chosen values and exact counts. Links nothing:
     # the class takes floats and gives back counts, and its three past fixes were each a defect in
-    # one of these four behaviours that could only be seen as a tolerance over a fixture.
+    # one of these four behaviors that could only be seen as a tolerance over a fixture.
     carta_zarr_add_test(carta_zarr_growing_histogram_tests INTERNAL
         TEST_NAME carta-zarr-growing-histogram
         SOURCES tests/growing_histogram_test.cc)

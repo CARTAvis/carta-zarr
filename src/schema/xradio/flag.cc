@@ -53,8 +53,8 @@ DeclaredFlags FlagsOfDataGroups(const nlohmann::json& root_attributes, std::stri
 }
 
 Result<std::string> RequireDeclaredFlag(const Store& store, const zarr::ArrayMetadata& image,
-                                        const std::string& spelt) {
-    const std::string declared = Canonical(spelt);
+                                        const std::string& spelled) {
+    const std::string declared = Canonical(spelled);
     const auto& flag_array = store.ReadArrayMetadata(declared);
     if (!flag_array) {
         return flag_array.error();

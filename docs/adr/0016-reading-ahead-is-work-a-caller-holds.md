@@ -13,7 +13,7 @@ Which planes share the chunks a frame decodes, how much those chunks occupy once
 decodes beside the pixels at a byte an element -- and how much the cache they go into holds are all
 questions an `Image` answers. carta-backend answered them for itself, through its own reading of the
 chunk shape and its own copy of the decoded-size rule, and the benchmark answered them a third way:
-it modelled the backend's reading ahead and had drifted from it, deciding runs along the spectrum
+it modeled the backend's reading ahead and had drifted from it, deciding runs along the spectrum
 alone and never asking whether the cache could hold what it decoded.
 
 What a caller does know is when a frame was played, whether it was late by the caller's own

@@ -20,7 +20,7 @@ std::string RejectionMessage(const std::vector<Diagnostic>& diagnostics, std::st
 
 Result<void> RequireOpenableDataset(const ProbeResult& probe, std::string_view location) {
     if (probe.kind != ProbeKind::supported_dataset) {
-        // Malformed and unrecognised are different answers, and a consumer acts on the difference:
+        // Malformed and unrecognized are different answers, and a consumer acts on the difference:
         // one is a file to complain about, the other is a file this library is not for. A dataset of
         // a schema version this build does not read is a third: a file a newer build may open. And
         // malformed is invalid_schema, not invalid_metadata, which is also what a root that will not
@@ -34,7 +34,7 @@ Result<void> RequireOpenableDataset(const ProbeResult& probe, std::string_view l
         return Error{code, RejectionMessage(probe.diagnostics, "No built-in schema profile matched the Zarr store"),
                      std::string(location)};
     }
-    // A store the profile recognised and found nothing openable in. Not a rejection -- the profile
+    // A store the profile recognized and found nothing openable in. Not a rejection -- the profile
     // matched -- so there are no diagnostics to report, and a consumer opening this would get a
     // dataset it can do nothing with. The XRADIO profile answers no_match or invalid for such a store
     // rather than match, so this is a profile's mistake, and it is the schema's answer all the same.
@@ -95,7 +95,7 @@ Result<ProbeResult> ProbeStore(const Store& store) {
     std::vector<SchemaInspection> matches;
     std::vector<SchemaProbeResult> invalid;
     // What a profile that did not match had to say about the store anyway: a store of nothing but
-    // complex images is one the profile recognised the images of and will not open, and that is the
+    // complex images is one the profile recognized the images of and will not open, and that is the
     // reason to give, not "nothing matched". A profile that found nothing it knew says nothing, so a
     // store this library is simply not for still carries no diagnostic. The first profile to say
     // anything is the one heard, as the first invalid one is below.

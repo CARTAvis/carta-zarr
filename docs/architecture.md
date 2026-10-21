@@ -54,7 +54,7 @@ flowchart TB
         Transport["Filesystem Transport"]
         Reader["Zarr readers / TensorStore"]
     end
-    API -->|"recognise and describe"| Profile
+    API -->|"recognize and describe"| Profile
     Profile -->|"inspect metadata and coordinates"| Store
     API -->|"Read / Prefetch"| Pieces
     API -->|"statistics / histograms"| Pass

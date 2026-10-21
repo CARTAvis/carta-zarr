@@ -40,7 +40,7 @@ namespace carta::zarr {
 // it from the mask.
 //
 // sum_sq_dev is the sum of the squared deviations of those same pixels from their own mean -- the
-// centred second moment, Σ(v − mean)² -- so that a sample variance is sum_sq_dev / (num_pixels − 1).
+// centered second moment, Σ(v − mean)² -- so that a sample variance is sum_sq_dev / (num_pixels − 1).
 // It is here because the variance cannot be had from sum and sum_sq once the pixels are far from zero
 // against their spread: sum_sq − sum²/n subtracts two numbers that agree in every digit a double
 // holds, and what is left is rounding. See ADR 0018. What to say for one pixel is the caller's, as
@@ -108,7 +108,7 @@ inline constexpr StatisticSet operator|(Statistic a, Statistic b) noexcept {
 // zero and nothing else: index 0 of an axis an image does not have is the image itself, and any
 // other index names a plane that does not exist.
 struct PlaneSelection {
-    // The channels the reduction is over, along the image's spectral axis. Strides are honoured.
+    // The channels the reduction is over, along the image's spectral axis. Strides are honored.
     Range spectral;
     std::uint64_t polarization = 0;
     std::uint64_t time = 0;
@@ -209,7 +209,7 @@ using HistogramSink = std::function<bool(const HistogramBlock&)>;
 // In a SpectralBlock, a statistic the block does not carry reads the same way. A caller that has to
 // tell "not asked for" from "nothing there" asks the block, with Carries.
 //
-// One type for both, rather than a set of fields per result, so that the same statistic is spelt and
+// One type for both, rather than a set of fields per result, so that the same statistic is spelled and
 // defaulted the same way wherever it is reported.
 struct SpectralTotals {
     double num_pixels = 0.0;
@@ -255,7 +255,7 @@ struct CubeHistogramProgress {
 // An argument of Image::ComputeCubeHistogram, as ProgressCallback is of Image::Read, rather than a
 // field of CubeHistogramRequest. A request says what to compute and is data; this is the caller's
 // code, run while it is computed. As a field it was the one request in the library that carried
-// behaviour, which the reasoning for ProgressCallback had already ruled out.
+// behavior, which the reasoning for ProgressCallback had already ruled out.
 using CubeHistogramProgressCallback = std::function<bool(const CubeHistogramProgress&)>;
 
 // One histogram for the whole selection in a single pass, for a caller that does not know the range
@@ -307,14 +307,14 @@ struct CubeHistogramRequest {
 
 // The largest number of bins one histogram accepts. CARTA's automatic bin count is the square root
 // of the plane's pixel count, which is 32,768 for the largest image anyone has; this is a guard
-// against an uninitialised count, not a capacity estimate.
+// against an uninitialized count, not a capacity estimate.
 inline constexpr std::uint32_t kMaxHistogramBins = 1u << 20;
 
 // The largest number of regions one reduction accepts.
 //
 // This is a structural guard, not a capacity estimate: the largest legitimate request is one box
 // per pixel along an image diagonal, which is 46,341 for a 32768^2 image. The bound exists so that
-// a caller passing an uninitialised count gets invalid_argument instead of a 16 GB allocation.
+// a caller passing an uninitialized count gets invalid_argument instead of a 16 GB allocation.
 inline constexpr std::size_t kMaxSpectralRegions = 1u << 20;
 
 struct SpectralReduceRequest {

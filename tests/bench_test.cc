@@ -462,7 +462,7 @@ void TestARowIsOneLine() {
     Require(std::find(fields.begin(), fields.end(), "io_error: \"a\", then b") != fields.end(),
             "a quoted field did not survive the round trip");
 
-    const auto summary = SummariseRow(line);
+    const auto summary = SummarizeRow(line);
     Require(summary.has_value() && summary->run_key == row.run_key && summary->trial == 3 &&
                 summary->status == "error" && summary->seconds == 1.25,
             "a row does not read back as what was written");
@@ -596,7 +596,7 @@ void TestResumingDropsARowCutShort() {
         const auto lines = lines_of();
         Require(!lines.empty() && lines.front() == CsvHeader(), what + ": the header is not the first line");
         for (std::size_t i = 1; i < lines.size(); ++i) {
-            Require(SummariseRow(lines[i]).has_value(), what + ": line " + std::to_string(i + 1) + " is not a row");
+            Require(SummarizeRow(lines[i]).has_value(), what + ": line " + std::to_string(i + 1) + " is not a row");
         }
         return lines.size() - 1;
     };

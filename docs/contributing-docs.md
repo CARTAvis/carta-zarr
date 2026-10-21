@@ -61,7 +61,7 @@ stay under the ignored `build-docs/` directory.
 
 - Edit Markdown under `docs/` for tutorials and guides.
 - Edit public header comments for API contracts. A small Doxygen input filter
-  recognises the existing `//` prose without changing the installed headers.
+  recognizes the existing `//` prose without changing the installed headers.
 - Glossary and changelog pages read the root files rather than maintaining
   copies. The storage-tuning page is edited in place, like any guide. During
   the site build, repository-only links in the changelog and storage guide
@@ -93,7 +93,7 @@ source. Deployment uses the `github-pages` environment and scoped permissions;
 pull requests do not receive deployment permissions.
 
 The site is published at <https://cartavis.org/carta-zarr/>, the CARTAvis
-organisation's own domain; `cartavis.github.io/carta-zarr/` redirects there.
+organization's own domain; `cartavis.github.io/carta-zarr/` redirects there.
 Pages is enabled in the repository settings with GitHub Actions as its source,
 and the `github-pages` environment accepts deployments from `dev` only.
 

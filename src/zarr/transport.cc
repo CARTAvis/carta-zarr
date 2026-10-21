@@ -30,7 +30,7 @@ namespace {
 //
 // A directory that refuses to be read is either passed over or the walk's error, as the walk says. A
 // listing passes over it: no node there could be read, and a later read says why. A size cannot: one
-// that leaves a directory out is not the store's size, however it is labelled.
+// that leaves a directory out is not the store's size, however it is labeled.
 enum class Unreadable { skipped, failed };
 
 class LinkedWalk {
@@ -180,7 +180,7 @@ public:
                 continue;
             }
 
-            // Named by where it sits in the store, which the walk spelt from the root: relative()
+            // Named by where it sits in the store, which the walk spelled from the root: relative()
             // resolves links first, so an array linked in from elsewhere came out as
             // ../elsewhere/SKY, a name the store refuses.
             const auto relative_path = path.lexically_relative(_root);

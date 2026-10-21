@@ -1615,13 +1615,13 @@ def write_report(sweep: Sweep, layouts: list[Layout], invalid: list[tuple[Layout
     conclusion: list[str] = []
     if after:
         if now and now.layout == after.layout:
-            labelled = [("For the data as it is, which is already in the recommended layout", now)]
+            labeled = [("For the data as it is, which is already in the recommended layout", now)]
         elif now and now.setting == after.setting:
-            labelled = [("For the data as it is, and in the recommended layout too", now)]
+            labeled = [("For the data as it is, and in the recommended layout too", now)]
         else:
-            labelled = [("For the data as it is (current layout)", now),
+            labeled = [("For the data as it is (current layout)", now),
                         ("Once the data is in the recommended layout", after)]
-        for label, choice in labelled:
+        for label, choice in labeled:
             if choice is None:
                 continue
             conclusion += [f"**{label}:** {choice.setting.describe()}", "", "```", f"{choice.setting.backend_flags()}",

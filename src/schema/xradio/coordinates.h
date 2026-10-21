@@ -42,9 +42,9 @@ enum class CoordinateKind {
     labels,   // fixed-length UTF-32 strings, decoded by this library: polarization
 };
 
-// Which plane's variables carry a coordinate. A variable carrying every coordinate of a plane is on
-// that plane, and a real-valued one is an image of it: the sky's, or the aperture plane's, its
-// Fourier conjugate (ADR 0024).
+// Which plane's variables carry a coordinate. An image is on the plane its `type` belongs to, and
+// carries every coordinate of it: the sky's, or the aperture plane's, its Fourier conjugate
+// (ADR 0024).
 enum class Plane {
     both,
     sky,
@@ -105,8 +105,11 @@ std::size_t AxisCount(Plane plane) noexcept;
 // Whether a variable names every coordinate of `plane` among its dimensions.
 bool CarriesPlane(const zarr::ArrayMetadata& variable, Plane plane);
 
-// The plane a variable is on: the sky when it carries the sky's coordinates, the aperture plane when
-// it carries that plane's and not the sky's, and nothing when it carries neither whole.
+// The plane an image of this `type` is on, or nothing when schema 0.0.2 has no image of that type.
+std::optional<Plane> ImagePlane(std::string_view type);
+
+// The plane an image is on: the one its `type` belongs to, when it carries every coordinate of that
+// plane, and nothing when its type is no image's or it does not.
 std::optional<Plane> PlaneOf(const zarr::ArrayMetadata& variable);
 
 // Whether a coordinate array is well formed in itself: one-dimensional, over an axis of its own name,

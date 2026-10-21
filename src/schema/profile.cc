@@ -95,10 +95,10 @@ Result<ProbeResult> ProbeStore(const Store& store) {
     std::vector<SchemaInspection> matches;
     std::vector<SchemaProbeResult> invalid;
     // What a profile that did not match had to say about the store anyway: a store of nothing but
-    // complex or aperture-plane variables is one the profile recognised the images of and will not
-    // open, and that is the reason to give, not "nothing matched". A profile that found nothing it
-    // knew says nothing, so a store this library is simply not for still carries no diagnostic.
-    // The first profile to say anything is the one heard, as the first invalid one is below.
+    // complex images is one the profile recognised the images of and will not open, and that is the
+    // reason to give, not "nothing matched". A profile that found nothing it knew says nothing, so a
+    // store this library is simply not for still carries no diagnostic. The first profile to say
+    // anything is the one heard, as the first invalid one is below.
     std::vector<Diagnostic> unmatched;
     for (const auto& entry : SchemaProfile::BuiltIn()) {
         auto inspection = entry.inspect(store);

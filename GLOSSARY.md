@@ -34,9 +34,11 @@ _Avoid_: image group, group, dataset group
 ### What can be opened
 
 **Image**:
-A data variable a consumer can open and read pixels from: real-valued, carrying every coordinate of
-its plane, and not a flag. Identified by its variable name, which is unique within the dataset.
-Carrying only some of the plane's coordinates makes something an optional coordinate, not an image.
+A data variable a consumer can open and read pixels from: typed as one of schema 0.0.2's images
+(`sky`, `point_spread_function`, `primary_beam` or `mask` on the sky plane; `aperture`, `visibility` or
+`uv_sampling` on the aperture plane), carrying every coordinate of that plane, and real-valued.
+Identified by its variable name, which is unique within the dataset. An untyped variable is not an
+image, whatever its dimensions.
 _Avoid_: image array, HDU, plane, layer
 
 **Sky plane**:
@@ -45,7 +47,7 @@ _Avoid_: image plane, lm plane
 
 **Aperture plane**:
 The Fourier-conjugate plane, carrying the `u` and `v` coordinates in wavelengths. A real-valued
-variable on it is an image, whose `u` and `v` play the spatial roles and whose descriptor has an
+image on it has `u` and `v` play the spatial roles and whose descriptor has an
 `aperture` coordinate in place of a direction (ADR 0024). A complex one is not opened, on either plane.
 _Avoid_: uv plane, visibility plane, Fourier plane
 
@@ -53,7 +55,8 @@ _Avoid_: uv plane, visibility plane, Fourier plane
 A boolean data variable marking which pixels of its image are flagged, distinguished by the attribute
 `type: "flag"` rather than by its name. True means the pixel is flagged and dropped. Stored as a Zarr
 `bool`, or as xarray writes one, an `int8` with `dtype: "bool"` in its attributes. Tied to its image by
-the image's own `flag` attribute or by a root `data_groups` entry whose `sky` is the image. It becomes
+the image's own `flag` attribute or by a root `data_groups` entry whose `sky` is the image; otherwise
+an image that is not a sky image, whose flag XRADIO cannot declare, takes the flag named `FLAG_<image>`. It becomes
 the image's pixel mask; it is never itself an image.
 _Avoid_: mask, internal mask, blanking
 

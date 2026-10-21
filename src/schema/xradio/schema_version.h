@@ -22,8 +22,8 @@ namespace carta::zarr::internal::xradio {
 
 inline constexpr std::string_view kSchemaVersion = "0.0.2";
 
-// XRADIO's names for a dataset's images, in the order they are listed. Any other is listed after
-// them, by name.
+// XRADIO's names for a dataset's images, in the order the images no data group has as its own are
+// listed. Any other is listed after them, by name.
 inline constexpr std::array<std::string_view, 7> kKnownImages{
     "SKY", "SKY_MODEL", "SKY_RESIDUAL", "SKY_DIRTY", "POINT_SPREAD_FUNCTION", "PRIMARY_BEAM", "MASK"};
 
@@ -36,7 +36,8 @@ struct SchemaVersionCheck {
 };
 
 // A store is read when it names 0.0.2 and is one: it has data groups, the sky image they name, if they
-// name one, is typed "sky", and its frequency coordinate, if it has one, gives a frame and units. One naming no
+// name one, is an array, and its frequency coordinate, if it has one, gives a frame and units. Whether
+// that sky is typed "sky" is said of the image by qualification. One naming no
 // version or another is refused with unsupported_schema_version, and one naming 0.0.2 that is not one
 // with invalid_metadata.
 SchemaVersionCheck CheckSchemaVersion(const Store& store);

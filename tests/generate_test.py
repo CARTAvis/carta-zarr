@@ -159,9 +159,10 @@ class ClaimTest(unittest.TestCase):
 class FindFlagTest(unittest.TestCase):
     """The flag a rewrite rewrites beside its image is the one carta-zarr masks the image with, by the
     rule of src/schema/xradio/flag.cc: the image's own `flag` attribute, else the one the root's
-    data_groups give the image as its sky, else the only flag-typed boolean array of its shape. A
-    boolean is a Zarr bool or xarray's int8 marked dtype "bool", which is what XRADIO writes. A flag
-    left behind keeps the source's layout, and the layouts compared would each be a mix."""
+    data_groups give the image as its sky. A sky image that declares none has none; any other image
+    takes FLAG_<image> when that is a flag-typed boolean array of its shape. A boolean is a Zarr bool
+    or xarray's int8 marked dtype "bool". A flag left behind keeps the source's layout, and the
+    layouts compared would each be a mix."""
 
     def setUp(self) -> None:
         self._directory = tempfile.TemporaryDirectory()
@@ -177,22 +178,34 @@ class FindFlagTest(unittest.TestCase):
         (self.root / name / "zarr.json").write_text(json.dumps(metadata))
         return metadata
 
-    def find(self, image: dict[str, Any], groups: dict[str, Any] | None = None) -> str | None:
+    def find(self, image: dict[str, Any], groups: dict[str, Any] | None = None, name: str = "SKY") -> str | None:
         root = {"attributes": {"data_groups": groups}} if groups is not None else {"attributes": {}}
-        return generate.find_flag(self.root, "SKY", image, generate.member_names(self.root), root)
+        return generate.find_flag(self.root, name, image, generate.member_names(self.root), root)
 
     def test_xarrays_encoding_of_a_bool_is_a_flag(self) -> None:
-        image = self.array("SKY")
-        self.array("FLAG_SKY", "int8", type="flag", dtype="bool")
-        self.assertEqual(self.find(image), "FLAG_SKY")
+        image = self.array("POINT_SPREAD_FUNCTION", type="point_spread_function")
+        self.array("FLAG_POINT_SPREAD_FUNCTION", "int8", type="flag", dtype="bool")
+        self.assertEqual(self.find(image, name="POINT_SPREAD_FUNCTION"), "FLAG_POINT_SPREAD_FUNCTION")
 
     def test_an_int8_that_is_not_marked_bool_is_not(self) -> None:
-        image = self.array("SKY")
-        self.array("FLAG_SKY", "int8", type="flag")
+        image = self.array("POINT_SPREAD_FUNCTION", type="point_spread_function")
+        self.array("FLAG_POINT_SPREAD_FUNCTION", "int8", type="flag")
+        self.assertIsNone(self.find(image, name="POINT_SPREAD_FUNCTION"))
+
+    def test_a_sky_image_that_declares_no_flag_has_none(self) -> None:
+        image = self.array("SKY", type="sky")
+        self.array("FLAG_SKY", "bool", type="flag")
         self.assertIsNone(self.find(image))
 
+    def test_another_image_takes_only_the_flag_xradio_names_for_it(self) -> None:
+        image = self.array("POINT_SPREAD_FUNCTION", type="point_spread_function")
+        self.array("FLAG_OTHER", "bool", type="flag")
+        self.assertIsNone(self.find(image, name="POINT_SPREAD_FUNCTION"))
+        self.array("FLAG_POINT_SPREAD_FUNCTION", "bool", type="flag")
+        self.assertEqual(self.find(image, name="POINT_SPREAD_FUNCTION"), "FLAG_POINT_SPREAD_FUNCTION")
+
     def test_a_data_group_declares_its_skys_flag(self) -> None:
-        image = self.array("SKY")
+        image = self.array("SKY", type="sky")
         self.array("FLAG_SKY", "int8", type="flag", dtype="bool")
         self.array("OTHER_FLAG", "bool", type="flag")
         self.assertEqual(self.find(image, {"base": {"sky": "SKY", "flag": "FLAG_SKY"}}), "FLAG_SKY")
@@ -210,10 +223,13 @@ class FindFlagTest(unittest.TestCase):
         with self.assertRaises(SystemExit):
             self.find(image, {"one": {"sky": "SKY", "flag": "A"}, "two": {"sky": "SKY", "flag": "B"}})
 
-    def test_another_images_flag_is_not_guessed_to_be_this_ones(self) -> None:
-        image = self.array("SKY")
-        self.array("FLAG_MODEL", "bool", type="flag")
-        self.assertIsNone(self.find(image, {"model": {"sky": "MODEL", "flag": "FLAG_MODEL"}}))
+    def test_a_flag_a_data_group_gives_another_image_is_not_this_ones(self) -> None:
+        image = self.array("POINT_SPREAD_FUNCTION", type="point_spread_function")
+        self.array("FLAG_POINT_SPREAD_FUNCTION", "bool", type="flag")
+        for spelt in ("FLAG_POINT_SPREAD_FUNCTION", "./FLAG_POINT_SPREAD_FUNCTION"):
+            with self.subTest(spelt=spelt):
+                self.assertIsNone(self.find(image, {"model": {"sky": "MODEL", "flag": spelt}},
+                                            name="POINT_SPREAD_FUNCTION"))
 
     def test_the_committed_conversion_names_its_flag(self) -> None:
         fixture = Path(__file__).resolve().parent / "data" / "images" / "zarr" / "xradio" / "conformance_flagged"

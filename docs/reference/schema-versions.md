@@ -23,8 +23,10 @@ write.
 | An image dataset that declares no version, as XRADIO 1.2.4 and earlier wrote | Refused | `unsupported_schema_version` |
 | An image dataset that declares another version, an empty string or a non-string value | Refused | `unsupported_schema_version` |
 
-The 0.0.2 checks require data groups; when they name a sky, a sky array typed
-`sky`; and, when the frequency coordinate is readable, its `frame` and `units`.
+The 0.0.2 checks require data groups; when they name a sky, an array of that
+name; and, when the frequency coordinate is readable, its `frame` and `units`.
+An image a data group names must be typed as the role it is named in: a `sky`
+typed otherwise is malformed, with an `invalid_metadata` diagnostic on it.
 They apply even to a store that declares 0.0.2: XRADIO 1.2.5 stamps 0.0.2 on an
 older store it upgrades on read, whether or not the upgrade reached those
 fields. A store whose data groups name no sky, such as an aperture plane or a
@@ -45,10 +47,18 @@ for every store that opens, and empty for one that declares nothing.
 
 ## Metadata differences that matter to applications
 
-- **Default image:** the listing puts XRADIO's own image names first (`SKY`,
-  `SKY_MODEL`, `SKY_RESIDUAL`, `SKY_DIRTY`, …), and the default is the first
-  openable one, so a dataset without `SKY` defaults to, for example,
-  `SKY_MODEL`.
+- **Default image:** the listing puts the data groups' own images first: the
+  base group's `sky` (or `aperture`), then every other group's by group name.
+  The other images follow, XRADIO's own names (`SKY`, `SKY_MODEL`, …) first,
+  then by name. The default is the first openable one, so a dataset whose
+  base sky does not open defaults to another group's sky.
+- **Which variables are images:** those typed as one of schema 0.0.2's images
+  (`sky`, `point_spread_function`, `primary_beam`, `mask`, `aperture`,
+  `visibility`, `uv_sampling`). An untyped variable is not listed.
+- **Flags:** an image's flag is the one its own `flag` attribute declares, or
+  for a sky image the one its data group declares. With none declared, a sky
+  image has no flag, and any other image's is the variable named
+  `FLAG_<image>`, when it can mask the image.
 - **Image subtype:** `ImageDescriptor::sub_type` describes what is measured,
   for example `Intensity`, `SpectralIndex` or `OpticalDepth`, and is empty
   when the image does not name one.

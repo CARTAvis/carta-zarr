@@ -29,9 +29,15 @@ In this order, the first that answers deciding:
    own statement and outranks a group's.
 2. A `data_groups` entry whose `sky` is this image. Groups that share a sky and name the same flag
    are one declaration; naming two different ones is refused as invalid metadata, not chosen between.
-3. A guess from dimensions, as before, leaving out every flag a data group declares for some other
-   image. A flag XRADIO writes for a point spread function is not linked by any group, and this is
-   what still finds it once the sky's flag is accounted for.
+3. For an image that is not a sky image, the array XRADIO names `FLAG_<image>`, when it can mask the
+   image and no data group declares it for some other image. XRADIO cannot link the flag of a point
+   spread function or of an aperture-plane image to its image (a data group's `flag` is its sky's,
+   casangi/xradio#659), and names it so. A sky image that declares no flag has none.
+
+Until 0.3.0 the third step was a guess from dimensions, for every image: the one array typed `flag`
+with the image's dimensions and shape, whatever its name, and none when two fitted. It found a sky
+image's flag in a store that left the declaration out, and took for a point spread function any flag
+of its shape. Neither is a statement the store made ([#59](https://github.com/CARTAvis/carta-zarr/issues/59)).
 
 A declared flag, by either route, is binding: one that cannot serve closes the image rather than
 opening it unmasked, as ADR 0001's rule for declared flags already said.

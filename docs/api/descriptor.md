@@ -77,7 +77,17 @@
 :undoc-members:
 ```
 
+```{doxygenstruct} carta::zarr::SkyDirection
+:members:
+:undoc-members:
+```
+
 ```{doxygenstruct} carta::zarr::ObservationInfo
+:members:
+:undoc-members:
+```
+
+```{doxygenstruct} carta::zarr::UserKeyword
 :members:
 :undoc-members:
 ```

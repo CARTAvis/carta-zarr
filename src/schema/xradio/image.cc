@@ -405,6 +405,7 @@ Result<DescribedImage> DescribeImageFrom(const Store& store, std::string_view im
 
     // Parse Observation & Telescope Metadata from the selected image's attributes.
     descriptor.observation = DescribeObservation(image);
+    descriptor.user_keywords = DescribeUserKeywords(root_attrs, image, image_id, descriptor.diagnostics);
 
     // Read from the metadata already in hand rather than asked of the store again, and assigned
     // unconditionally: every array ParseArrayMetadata accepted has a layout, so there is no failure

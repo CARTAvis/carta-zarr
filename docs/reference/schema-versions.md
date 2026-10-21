@@ -71,6 +71,14 @@ for every store that opens, and empty for one that declares nothing.
   `date_obs` has been removed; string-valued observation dates and numeric
   equinox forms not written by XRADIO are not interpreted, and neither is a
   numeric date without a format.
+- **Pointing centre:** read from the image's `pointing_center` into
+  `ObservationInfo::pointing_center`, in degrees, its frame named as the
+  reference direction's is. XRADIO's FITS reader writes `OBSRA`/`OBSDEC`, or
+  the reference direction when the file has neither; both are reported.
+- **User keywords:** the dataset's `user` and the image's, merged with the
+  image's winning, are `ImageDescriptor::user_keywords`, sorted by name. A
+  boolean, an integer, a number or a string is reported; any other value is
+  left out with an `unsupported_data_type` diagnostic naming it.
 
 - **Integer sky images:** XRADIO's FITS reader keeps an integer FITS image's
   type, although the schema allows only float32 and float64. Such an image

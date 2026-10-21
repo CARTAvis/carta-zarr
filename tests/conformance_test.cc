@@ -19,7 +19,9 @@
 #include <exception>
 #include <filesystem>
 #include <iostream>
+#include <stdexcept>
 #include <string>
+#include <variant>
 #include <vector>
 
 #include <carta-zarr/carta_zarr.h>
@@ -114,6 +116,17 @@ void TestDirection(const carta::zarr::ImageDescriptor& sky) {
     RequireClose(direction.native_pole_direction.at(1), 30.0, 1.0e-9, "native pole latitude");
     RequireClose(direction.reference_value.at(0), 45.0, 1.0e-9, "reference longitude");
     RequireClose(direction.reference_value.at(1), 30.0, 1.0e-9, "reference latitude");
+}
+
+// A FITS file with no OBSRA or OBSDEC: XRADIO writes its reference direction as the pointing centre,
+// and that is what is reported. Nothing else of its header is left over for `user`.
+void TestPointingCentreWithoutObsra(const carta::zarr::ImageDescriptor& sky) {
+    Require(sky.observation && sky.observation->pointing_center, "no pointing centre was reported");
+    const auto& pointing = *sky.observation->pointing_center;
+    RequireClose(pointing.value.at(0), 45.0, 1.0e-9, "pointing longitude, from the reference direction");
+    RequireClose(pointing.value.at(1), 30.0, 1.0e-9, "pointing latitude, from the reference direction");
+    Require(pointing.reference_frame == "FK5", "the pointing centre's frame was not named as the reference frame is");
+    Require(sky.user_keywords.empty(), "a FITS file with no uninterpreted cards reported user keywords");
 }
 
 void TestSpectralAndPolarization(const carta::zarr::ImageDescriptor& sky) {
@@ -302,6 +315,39 @@ void TestContinuumConversion() {
             "the increment was not measured from the one channel");
 }
 
+// The same cube with OBSRA and OBSDEC apart from its reference direction, and cards XRADIO keeps
+// uninterpreted: each is reported, by its lower-cased name, with the kind of value it was written as.
+void TestKeywordsConversion() {
+    const std::filesystem::path fixture{CARTA_ZARR_CONFORMANCE_KEYWORDS_FIXTURE};
+    const auto context = carta::zarr::Context::Create();
+    Require(static_cast<bool>(context), "Context::Create failed");
+    auto dataset = carta::zarr::Dataset::Open(context.value(), fixture.string());
+    Require(static_cast<bool>(dataset), "Dataset::Open failed on XRADIO's image with keywords");
+    auto image = dataset.value().OpenImage("SKY");
+    Require(static_cast<bool>(image), "the SKY with keywords could not be opened");
+    const auto& sky = image.value().descriptor();
+
+    Require(sky.observation && sky.observation->pointing_center, "OBSRA and OBSDEC were not reported");
+    const auto& pointing = *sky.observation->pointing_center;
+    RequireClose(pointing.value.at(0), 45.5, 1.0e-9, "OBSRA");
+    RequireClose(pointing.value.at(1), 30.25, 1.0e-9, "OBSDEC");
+    Require(pointing.reference_frame == "FK5", "the pointing centre's frame was not FK5");
+
+    const auto value_of = [&](const std::string& name) -> const carta::zarr::UserKeyword& {
+        for (const auto& keyword : sky.user_keywords) {
+            if (keyword.name == name) {
+                return keyword;
+            }
+        }
+        throw std::runtime_error("user keyword '" + name + "' was not reported");
+    };
+    Require(std::get<std::string>(value_of("instrume").value) == "Test instrument", "INSTRUME was not a string");
+    Require(std::get<double>(value_of("distance").value) == 101.5, "DISTANCE was not a number");
+    Require(std::get<std::int64_t>(value_of("ncombine").value) == 3, "NCOMBINE was not an integer");
+    Require(std::get<bool>(value_of("pbcor").value), "PBCOR was not a boolean");
+    Require(sky.user_keywords.size() == 4, "a card XRADIO interprets was reported as a user keyword");
+}
+
 }  // namespace
 
 int main() {
@@ -310,6 +356,7 @@ int main() {
         const auto& sky = image.descriptor();
         TestIdentityAndAxes(sky);
         TestDirection(sky);
+        TestPointingCentreWithoutObsra(sky);
         TestSpectralAndPolarization(sky);
         TestTemporalAndStorage(sky, image.chunk_geometry());
 
@@ -319,6 +366,7 @@ int main() {
 
         TestFlaggedConversion();
         TestContinuumConversion();
+        TestKeywordsConversion();
 
         std::cout << "carta-zarr XRADIO conformance tests passed\n";
         return 0;

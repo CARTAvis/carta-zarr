@@ -19,15 +19,19 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdint>
 #include <exception>
 #include <iostream>
 #include <optional>
 #include <string>
+#include <variant>
+#include <vector>
 
 namespace {
 
 using carta::zarr::ObservationInfo;
 using carta::zarr::internal::xradio::DescribeObservation;
+using carta::zarr::internal::xradio::DescribeUserKeywords;
 using ArrayMetadata = carta::zarr::internal::zarr::ArrayMetadata;
 
 using carta::zarr::testing::Require;
@@ -129,6 +133,86 @@ void TestNothingToDescribe() {
             "an image with no observation attributes reported some");
     Require(!observation.observatory_position.has_value() && !observation.observation_mjd.has_value(),
             "an image with no observation attributes reported a position or a date");
+    Require(!observation.pointing_center.has_value(), "an image with no pointing centre reported one");
+}
+
+// Where the telescope pointed, in degrees and in the frame named as the reference direction's is,
+// equinox included. XRADIO writes it in radians, from OBSRA and OBSDEC or from the reference
+// direction; either way it is reported.
+void TestThePointingCentreIsReportedInDegrees() {
+    const double pi = std::acos(-1.0);
+    const auto observation = Describe(nlohmann::json{
+        {"pointing_center",
+         {{"data", {pi / 4.0, pi / 6.0}},
+          {"attrs", {{"frame", "fk5"}, {"type", "sky_coord"}, {"units", "rad"}, {"equinox", "j2000.0"}}}}}});
+    Require(observation.pointing_center.has_value(), "the pointing centre was not read");
+    const auto& pointing = *observation.pointing_center;
+    Require(Near(pointing.value.at(0), 45.0) && Near(pointing.value.at(1), 30.0),
+            "the pointing centre was not converted to degrees");
+    Require(pointing.reference_frame == "FK5", "the pointing centre's frame was not named as a reference frame is");
+    Require(pointing.equinox && Near(*pointing.equinox, 2000.0), "the pointing centre's equinox was not read");
+
+    Require(!Describe(nlohmann::json{{"pointing_center", {{"data", {1.0}}}}}).pointing_center,
+            "a pointing centre of one angle was reported");
+    Require(!Describe(nlohmann::json{{"pointing_center", "somewhere"}}).pointing_center,
+            "a pointing centre that is not a measure was reported");
+}
+
+// The dataset's keywords and the image's, the image's winning; each kind of value XRADIO can carry,
+// and those it cannot report left out by name, without failing anything else.
+void TestUserKeywordsAreMergedAndTyped() {
+    ArrayMetadata image;
+    image.data_type = "float32";
+    image.attributes = nlohmann::json::parse(R"({"user": {
+        "instrume": "ALMA", "distance": 101.5, "nchunk": 3, "offset": -2, "flagged": true,
+        "shared": "image", "miscinfo": {"a": 1}, "history": [1, 2], "nothing": null,
+        "huge": 18446744073709551615}})");
+    const auto root = nlohmann::json::parse(R"({"user": {"shared": "dataset", "origin": "root"}})");
+    std::vector<carta::zarr::Diagnostic> diagnostics;
+    const auto keywords = DescribeUserKeywords(root, image, "SKY", diagnostics);
+
+    const auto find = [&](const std::string& name) -> const carta::zarr::UserKeyword* {
+        const auto found = std::find_if(keywords.begin(), keywords.end(),
+                                        [&](const carta::zarr::UserKeyword& keyword) { return keyword.name == name; });
+        return found == keywords.end() ? nullptr : &*found;
+    };
+    const auto* const instrume = find("instrume");
+    Require(instrume && std::get<std::string>(instrume->value) == "ALMA", "a string keyword was not reported");
+    const auto* const distance = find("distance");
+    Require(distance && std::holds_alternative<double>(distance->value) && std::get<double>(distance->value) == 101.5,
+            "a number keyword was not reported as a number");
+    const auto* const nchunk = find("nchunk");
+    Require(nchunk && std::holds_alternative<std::int64_t>(nchunk->value) && std::get<std::int64_t>(nchunk->value) == 3,
+            "an integer keyword was not reported as an integer");
+    const auto* const offset = find("offset");
+    Require(offset && std::get<std::int64_t>(offset->value) == -2, "a negative integer keyword was not reported");
+    const auto* const flagged = find("flagged");
+    Require(flagged && std::get<bool>(flagged->value), "a boolean keyword was not reported as a boolean");
+    const auto* const shared = find("shared");
+    Require(shared && std::get<std::string>(shared->value) == "image", "the image's keyword did not win");
+    const auto* const origin = find("origin");
+    Require(origin && std::get<std::string>(origin->value) == "root", "the dataset's own keyword was not reported");
+    Require(std::is_sorted(keywords.begin(), keywords.end(),
+                           [](const auto& left, const auto& right) { return left.name < right.name; }),
+            "the keywords were not sorted by name");
+
+    for (const std::string left_out : {"miscinfo", "history", "nothing", "huge"}) {
+        Require(find(left_out) == nullptr, "keyword '" + left_out + "' was reported though it cannot be");
+        const auto said = std::any_of(diagnostics.begin(), diagnostics.end(), [&](const auto& diagnostic) {
+            return diagnostic.code == carta::zarr::DiagnosticCode::unsupported_data_type &&
+                   diagnostic.node_path == "SKY" && diagnostic.message.find("'" + left_out + "'") != std::string::npos;
+        });
+        Require(said, "keyword '" + left_out + "' was left out without a diagnostic naming it");
+    }
+    Require(diagnostics.size() == 4, "a keyword that was reported was also said to be left out");
+
+    // One left out of the dataset's own is said to come from the dataset.
+    std::vector<carta::zarr::Diagnostic> root_said;
+    ArrayMetadata bare;
+    bare.data_type = "float32";
+    DescribeUserKeywords(nlohmann::json::parse(R"({"user": {"miscinfo": {}}})"), bare, "SKY", root_said);
+    Require(root_said.size() == 1 && root_said.front().node_path == "/attributes/user",
+            "a keyword left out of the dataset's own was not said to come from the dataset");
 }
 
 }  // namespace
@@ -142,6 +226,8 @@ int main() {
         TestObsdateSplitsIntoScaleAndValue();
         TestObsdateSpellings();
         TestNothingToDescribe();
+        TestThePointingCentreIsReportedInDegrees();
+        TestUserKeywordsAreMergedAndTyped();
         std::cout << "carta-zarr observation tests passed\n";
         return 0;
     } catch (const std::exception& error) {

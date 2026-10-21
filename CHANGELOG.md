@@ -8,6 +8,7 @@ minor release may change the ABI, and the soname says so ([ADR 0020](docs/adr/00
 ## [Unreleased]
 
 ### Added
+* `ObservationInfo::pointing_center`: where the telescope pointed, FITS `OBSRA`/`OBSDEC`, as a `SkyDirection` in degrees with its frame named as `DirectionCoordinate::reference_frame` names one. Reported whenever the image has one, including when it equals the reference direction, which is what XRADIO writes for a FITS file without `OBSRA`. `ImageDescriptor::user_keywords`: the dataset's and the image's `user` keywords, the image's winning, each a boolean, an integer, a number or a string; any other value is left out with a diagnostic. This changes the ABI ([#34](https://github.com/CARTAvis/carta-zarr/issues/34)).
 * `CARTA_ZARR_THREAD_SANITIZER` builds the library and everything it links, TensorStore included, with ThreadSanitizer, for running the threading tests under it. It patches one memory order in TensorStore's task queue that ThreadSanitizer cannot follow; no other build is patched ([#26](https://github.com/CARTAvis/carta-zarr/issues/26)).
 
 ### Changed

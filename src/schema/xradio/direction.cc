@@ -41,24 +41,12 @@ bool ReadAnglePair(const nlohmann::json* measure, std::array<double, 2>& into) {
 
 }  // namespace
 
-Result<DirectionCoordinate> ReadCoordinateSystem(const nlohmann::json& root_attributes) {
-    const auto* const coordinate_system = MemberObject(root_attributes, "coordinate_system_info");
-    if (coordinate_system == nullptr) {
-        return Malformed("XRADIO requires coordinate_system_info metadata");
+std::optional<SkyDirection> ReadSkyDirection(const nlohmann::json* measure) {
+    SkyDirection direction;
+    if (!ReadAnglePair(measure, direction.value)) {
+        return std::nullopt;
     }
-    const auto& cs_info = *coordinate_system;
-
-    DirectionCoordinate direction;
-    direction.projection = Upper(AttributeString(cs_info, "projection"));
-    if (direction.projection.empty()) {
-        return Malformed("coordinate_system_info requires a projection");
-    }
-
-    const auto* const reference_direction = MemberObject(cs_info, "reference_direction");
-    if (!ReadAnglePair(reference_direction, direction.reference_value)) {
-        return Malformed("coordinate_system_info requires a two-value reference direction");
-    }
-    if (const auto* const attributes = MemberObject(*reference_direction, "attrs")) {
+    if (const auto* const attributes = MemberObject(*measure, "attrs")) {
         direction.reference_frame = Upper(AttributeString(*attributes, "frame"));
         // As XRADIO writes it, a string naming the epoch: "j2000.0", "b1950.0".
         if (const std::string value = AttributeString(*attributes, "equinox"); !value.empty()) {
@@ -72,6 +60,29 @@ Result<DirectionCoordinate> ReadCoordinateSystem(const nlohmann::json& root_attr
             }
         }
     }
+    return direction;
+}
+
+Result<DirectionCoordinate> ReadCoordinateSystem(const nlohmann::json& root_attributes) {
+    const auto* const coordinate_system = MemberObject(root_attributes, "coordinate_system_info");
+    if (coordinate_system == nullptr) {
+        return Malformed("XRADIO requires coordinate_system_info metadata");
+    }
+    const auto& cs_info = *coordinate_system;
+
+    DirectionCoordinate direction;
+    direction.projection = Upper(AttributeString(cs_info, "projection"));
+    if (direction.projection.empty()) {
+        return Malformed("coordinate_system_info requires a projection");
+    }
+
+    auto reference_direction = ReadSkyDirection(MemberObject(cs_info, "reference_direction"));
+    if (!reference_direction) {
+        return Malformed("coordinate_system_info requires a two-value reference direction");
+    }
+    direction.reference_value = reference_direction->value;
+    direction.reference_frame = std::move(reference_direction->reference_frame);
+    direction.equinox = reference_direction->equinox;
 
     if (!ReadAnglePair(MemberObject(cs_info, "native_pole_direction"), direction.native_pole_direction)) {
         return Malformed("coordinate_system_info requires a two-value native pole direction");

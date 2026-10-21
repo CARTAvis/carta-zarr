@@ -7,11 +7,16 @@
 #include "observation.h"
 
 #include "attributes.h"
+#include "direction.h"
 
 #include <array>
 #include <cmath>
+#include <cstdint>
+#include <limits>
+#include <map>
 #include <optional>
 #include <string>
+#include <utility>
 
 namespace carta::zarr::internal::xradio {
 
@@ -71,7 +76,61 @@ ObservationInfo DescribeObservation(const zarr::ArrayMetadata& image) {
             observation.observation_mjd = MjdOfNumber(*value, format);
         }
     }
+    observation.pointing_center = ReadSkyDirection(MemberObject(image.attributes, "pointing_center"));
     return observation;
+}
+
+std::vector<UserKeyword> DescribeUserKeywords(const nlohmann::json& root_attributes, const zarr::ArrayMetadata& image,
+                                              std::string_view image_id, std::vector<Diagnostic>& diagnostics) {
+    // The dataset's first, then the image's over them, as XRADIO's writer merges the two. Where each
+    // came from is kept for the diagnostic, which names the node the value was read from.
+    nlohmann::json merged = nlohmann::json::object();
+    std::map<std::string, std::string> source;
+    const auto merge = [&](const nlohmann::json& attributes, const std::string& node) {
+        if (const auto* const user = MemberObject(attributes, "user")) {
+            for (const auto& [name, value] : user->items()) {
+                merged[name] = value;
+                source[name] = node;
+            }
+        }
+    };
+    merge(root_attributes, "/attributes/user");
+    merge(image.attributes, std::string(image_id));
+
+    std::vector<UserKeyword> keywords;
+    for (const auto& item : merged.items()) {
+        // Named rather than bound: a lambda capturing a structured binding is C++20.
+        const std::string& name = item.key();
+        const auto& value = item.value();
+        const auto left_out = [&](const std::string& why) {
+            diagnostics.push_back(Diagnostic{DiagnosticCode::unsupported_data_type,
+                                             "User keyword '" + name + "' " + why + ", and is not reported",
+                                             source.at(name)});
+        };
+        if (value.is_boolean()) {
+            keywords.push_back(UserKeyword{name, value.get<bool>()});
+        } else if (value.is_number_unsigned()) {
+            // A positive integer, which is how JSON is parsed whatever it was written as; one past what
+            // a signed 64-bit integer holds is not given as a number it is not.
+            const auto unsigned_value = value.get<std::uint64_t>();
+            if (unsigned_value > static_cast<std::uint64_t>(std::numeric_limits<std::int64_t>::max())) {
+                left_out("holds an integer too large for a signed 64-bit integer");
+                continue;
+            }
+            keywords.push_back(UserKeyword{name, static_cast<std::int64_t>(unsigned_value)});
+        } else if (value.is_number_integer()) {
+            keywords.push_back(UserKeyword{name, value.get<std::int64_t>()});
+        } else if (value.is_number_float()) {
+            keywords.push_back(UserKeyword{name, value.get<double>()});
+        } else if (value.is_string()) {
+            keywords.push_back(UserKeyword{name, value.get<std::string>()});
+        } else {
+            left_out(std::string("holds ") + (value.is_object()  ? "a dictionary"
+                                              : value.is_array() ? "a list"
+                                                                 : "no value"));
+        }
+    }
+    return keywords;
 }
 
 }  // namespace carta::zarr::internal::xradio

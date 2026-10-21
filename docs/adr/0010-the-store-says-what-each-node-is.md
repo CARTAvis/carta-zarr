@@ -1,5 +1,9 @@
 # The store says what each node is, and its callers decide what to do about it
 
+*Amended for 0.3.0 ([#55](https://github.com/CARTAvis/carta-zarr/issues/55)):
+`DiagnosticCode::unrecognised_node` is spelled `unrecognized_node`, as the rest of the API is. The
+decision below is unchanged.*
+
 ADR 0004 put the seam at the transport and gave `Store` everything that turns bytes into meaning:
 "node path validation, JSON parsing, consolidated metadata, array metadata, storage layout, and the
 caches". The listing was the one place that rule was not followed. `Store::ListNodes` read every

@@ -804,9 +804,9 @@ void TestANodeThatWillNotParseIsDiagnosedNotRefused() {
             return diagnostic.node_path == node && diagnostic.code == code;
         });
     };
-    Require(said_of("JUNK", carta::zarr::DiagnosticCode::unrecognised_node),
+    Require(said_of("JUNK", carta::zarr::DiagnosticCode::unrecognized_node),
             "a document that will not parse was not diagnosed as such");
-    Require(said_of("ODD", carta::zarr::DiagnosticCode::unrecognised_node),
+    Require(said_of("ODD", carta::zarr::DiagnosticCode::unrecognized_node),
             "a node_type Zarr does not define was not diagnosed as such");
     Require(!HasDiagnostic(said, carta::zarr::DiagnosticCode::unreadable_array),
             "a node that never said it was an array was called one");

@@ -34,7 +34,7 @@ enum class DiagnosticCode {
     unsupported_data_type,
     ambiguous_schema,
     // A node the store holds that is neither a group nor an array this library recognizes.
-    unrecognised_node,
+    unrecognized_node,
     // An array whose metadata would not parse.
     unreadable_array,
     // A coordinate whose samples are not evenly spaced, so it has no linear description.
@@ -57,8 +57,8 @@ inline const char* DiagnosticCodeName(DiagnosticCode code) noexcept {
             return "unsupported_data_type";
         case DiagnosticCode::ambiguous_schema:
             return "ambiguous_schema";
-        case DiagnosticCode::unrecognised_node:
-            return "unrecognised_node";
+        case DiagnosticCode::unrecognized_node:
+            return "unrecognized_node";
         case DiagnosticCode::unreadable_array:
             return "unreadable_array";
         case DiagnosticCode::nonuniform_axis:

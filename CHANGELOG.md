@@ -30,6 +30,7 @@ minor release may change the ABI, and the soname says so ([ADR 0020](docs/adr/00
   * A sky image's flag is the one it declares, by its `flag` attribute or its data group, or none: a flag that only has its shape is no longer taken. Any other image, with no flag of its own declared, takes the flag XRADIO names `FLAG_<image>` when that can mask it, and no other.
   * The listing puts the data groups' own images first, the base group's then every other group's by group name, and the default image is the first of the listing that opens. The other images follow in the order they had, and still open.
 * An aperture-plane coordinate without `crval` reports an `invalid_metadata` diagnostic on it; its reference value is still taken as 0.
+* `DiagnosticCode::unrecognised_node` is `unrecognized_node`, and `DiagnosticCodeName` returns `"unrecognized_node"`, in American spelling as the rest of the API is. Its value is unchanged, so this changes the API and not the ABI ([#55](https://github.com/CARTAvis/carta-zarr/issues/55)).
 
 ### Removed
 * Public fields that repeated what another field already says, or that nothing set anymore. This changes the API and the ABI ([#38](https://github.com/CARTAvis/carta-zarr/issues/38)):

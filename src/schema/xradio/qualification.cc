@@ -82,12 +82,12 @@ NodeQualification QualifyNode(const Store& store, const NodeEntry& entry) {
     // opening.
     //
     // Two codes, for two different problems. unreadable_array is a node that said it was an array and
-    // whose metadata will not parse as one; unrecognised_node is a node that did not say what it was
+    // whose metadata will not parse as one; unrecognized_node is a node that did not say what it was
     // (a document that would not parse, or a node_type Zarr does not define), and calling that an
     // array would be a guess.
     if (entry.kind == NodeKind::unrecognized) {
         return NodeQualification{false, false,
-                                 Diagnostic{DiagnosticCode::unrecognised_node, entry.reason->message, node}, true};
+                                 Diagnostic{DiagnosticCode::unrecognized_node, entry.reason->message, node}, true};
     }
     const auto& metadata = *entry.array;
     if (!metadata) {

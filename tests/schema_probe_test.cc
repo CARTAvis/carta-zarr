@@ -661,7 +661,7 @@ void TestADatasetWithAnUnparseableNodeStillOpens(const std::filesystem::path& ro
 
     const auto& said = dataset.value().descriptor().diagnostics;
     const auto junk = std::find_if(said.begin(), said.end(), [](const carta::zarr::Diagnostic& diagnostic) {
-        return diagnostic.code == carta::zarr::DiagnosticCode::unrecognised_node &&
+        return diagnostic.code == carta::zarr::DiagnosticCode::unrecognized_node &&
                diagnostic.node_path.find("JUNK") != std::string::npos;
     });
     Require(junk != said.end(), "the dataset opened without saying which node it could not read");

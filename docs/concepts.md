@@ -48,7 +48,9 @@ reports where an axis lives in the stored array, which can differ from its logic
 
 An image's **flag** marks bad pixels: true means excluded. How reads apply it
 is one of the [rules below](#rules-that-apply-to-every-operation); set
-`apply_pixel_mask = false` to read the stored values without it.
+`apply_pixel_mask = false` to read the stored values without it. A flag an
+image declares must be boolean, a Zarr `bool` or the `int8` xarray writes for
+one, and carry the image's own dimensions in order, or the image does not open.
 
 A reduction's **region mask** (`RegionMask`) selects pixels within a bounding
 box: nonzero means included. A deconvolution mask, `MASK`, is neither: it is an image of
@@ -62,7 +64,10 @@ These hold for all reads, reductions and histograms; the guides link here
 rather than repeating them.
 
 - **Check every `Result`** before using its value. Failures carry an error
-  code, message and node path.
+  code, message and node path. No public entry point throws: a malformed value
+  in the metadata, or a length no allocator can serve, is reported as an error.
+  `Result` is `[[nodiscard]]` and reads like `std::expected`: `has_value`,
+  `value`, `value_or`, `*`, `->` and `error`.
 - **A failed or cancelled read keeps only its reported prefix.** The elements
   a progress callback last reported as written are final; discard the rest of
   the destination. Without a progress callback, discard all of it.

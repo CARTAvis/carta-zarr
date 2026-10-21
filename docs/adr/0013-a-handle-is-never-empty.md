@@ -55,11 +55,11 @@ carta-backend's `GetZarrContext` returned a `shared_ptr<const Context>`, two lay
 around one TensorStore context. It returns the `Context` by value now, and keeps the process-wide
 one in a `std::optional` that is empty only before the first call.
 
-The README states the rule among what the API promises, and `carta_zarr.h` says it above the three
-classes.
+`docs/concepts.md` states the rule under results, diagnostics and lifetimes, and `carta_zarr.h`
+says it above the three classes.
 
 ## What this does not decide
 
 **Concurrent assignment to one handle.** A handle is a value. Reading through one handle from
-several threads is safe, as the README says; assigning to the same handle object from one thread
+several threads is safe, as `docs/concepts.md` says; assigning to the same handle object from one thread
 while another reads it is a race, exactly as it is for the `shared_ptr` inside it.

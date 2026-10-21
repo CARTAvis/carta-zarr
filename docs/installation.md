@@ -2,10 +2,28 @@
 
 ## Prerequisites
 
-Use `cmake` 3.24 or newer, a C++17 compiler, `python` 3.10 or newer, `nasm` and `patch`.
-The first configure downloads TensorStore and its pinned dependencies, so it needs
-network access unless you follow the [offline build](#build-without-network-access)
-steps. Python is needed for TensorStore's configure step.
+Use `cmake` 3.24 or newer, a C++17 compiler (GCC 10, Clang 8 or Apple Xcode
+11.3.1, or newer, as TensorStore supports), `python` 3.10 or newer, `nasm` and
+`patch`. Python is needed only for TensorStore's configure step, NASM because
+that step enables the assembler, and `patch` because TensorStore patches some
+of its dependencies as it unpacks them.
+
+The first configure downloads TensorStore 0.1.84 and the 42 libraries it
+declares, 43 archives of 169 MiB that unpack to about 0.8 GiB of source, so it
+needs network access unless you follow the [offline
+build](#build-without-network-access) steps. Only ten are compiled --
+TensorStore, Abseil, riegeli, re2, zstd, zlib, blosc, snappy, lz4 and
+nlohmann_json -- and they are linked into the library statically, with none of
+their symbols exported, so they cannot collide with copies your application
+links. A release build tree takes about 1.3 GB. The storage benchmark,
+`-DCARTA_ZARR_BUILD_BENCH=ON`, also needs [`uv`](https://docs.astral.sh/uv/).
+
+The library is built and tested on macOS 26 on Apple silicon (Apple clang 21,
+CMake 4.0, Python 3.13, NASM 3.01), Ubuntu 24.04 (GCC 13.3, CMake 3.28,
+Python 3.12, NASM 2.16) and AlmaLinux 8.10 (gcc-toolset-13's GCC 13.3,
+CMake 3.26, Python 3.12). CI
+builds and tests every change on macOS 15 on Apple silicon, Ubuntu 24.04 and
+AlmaLinux 8.
 
 On macOS, install the Xcode command line tools, which provide the Apple clang C++
 compiler and the macOS SDK, then:
@@ -134,8 +152,10 @@ library; TensorStore is a private library dependency.
 
 Before 1.0, `find_package(CartaZarr 0.2)` accepts only 0.2.x: a different minor
 version, such as 0.3, is not compatible. Record the exact library version your
-application uses, and rebuild when you change minor versions. Binary distributions must carry `LICENSE` and the installed
-`THIRD_PARTY_NOTICES`.
+application uses, and rebuild when you change minor versions. Binary distributions must carry `LICENSE` and
+`THIRD_PARTY_NOTICES`, which the build writes from the sources of the ten
+libraries linked in and of the header-only `half`, and installs beside
+`LICENSE`.
 
 The current development version is 0.2.0. Applications built for 0.1 must update
 their CMake version requirement and rebuild against 0.2, because public descriptor

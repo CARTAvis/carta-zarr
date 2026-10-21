@@ -79,3 +79,10 @@ with `std::isfinite` when calculating your own statistics. Reductions exclude
 non-finite values and report their count separately.
 
 See the [read API](../api/read.md) for range, buffer and option contracts.
+
+## Restoring beams
+
+`Image::ReadBeams()` returns the restoring beam fitted on each plane, one
+`Beam` per time, channel and polarization, each with its major and minor axes
+and position angle in its `unit`. An image without a beam table, and every
+image of the aperture plane, returns an empty list.

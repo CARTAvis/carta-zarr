@@ -45,8 +45,8 @@ DeclaredFlags FlagsOfDataGroups(const nlohmann::json& root_attributes, std::stri
         if (flag.empty()) {
             continue;
         }
-        // Canonical on both sides: compared as written, another group's "./FLAG" was not the FLAG the
-        // inventory lists, and the guess below took a flag another image owns.
+        // Canonical on both sides: compared as written, another group's "./FLAG" is not the FLAG the
+        // inventory lists, and an image would take a flag another image owns.
         (Canonical(AttributeString(group, "sky")) == image_id ? declared.own : declared.others).insert(Canonical(flag));
     }
     return declared;
@@ -84,41 +84,32 @@ Result<std::string> DeclaredFlag(const Store& store, const zarr::ArrayMetadata& 
     return std::string{};
 }
 
-Result<std::string> DetermineFlag(const Store& store, const zarr::ArrayMetadata& image, std::string_view image_id,
-                                  std::vector<Diagnostic>& diagnostics) {
+Result<std::string> DetermineFlag(const Store& store, const zarr::ArrayMetadata& image, std::string_view image_id) {
     // A declared flag is the image's own statement that its pixels need a mask, so a flag that
     // cannot serve as one closes the image rather than opening it unmasked.
     auto declared = DeclaredFlag(store, image, image_id);
     if (!declared || !declared.value().empty()) {
         return declared;
     }
-    const auto groups = FlagsOfDataGroups(store.RootAttributes(), image_id);
-
+    // A sky image's flag is declared wherever XRADIO writes one, so a sky image that declares none
+    // has none. Another image's cannot be declared by a data group -- a group's `flag` is its sky's --
+    // and XRADIO names it FLAG_<image>, which is the one array taken, and only if it can mask the
+    // image. A flag a data group declares for a sky image is that image's, whatever its name.
+    if (AttributeString(image.attributes, "type") == "sky") {
+        return std::string{};
+    }
     const auto& inventory = store.Inventory();
     if (!inventory) {
         return inventory.error();
     }
-    std::vector<std::string> matching_flags;
-    for (const auto& entry : inventory.value()) {
-        // Nothing declared one, so this is a guess from the metadata alone. A node that is not an
-        // array, or whose metadata will not parse, or that does not match exactly, is simply not
-        // this image's mask -- which is not an error in the store, and not this module's to report.
-        // A flag a data group declares for another image is that image's, however well it fits.
-        if (entry.kind != NodeKind::array || !*entry.array || groups.others.count(entry.name) != 0 ||
-            !RequireUsableFlag(entry.array->value(), image, entry.name)) {
-            continue;
-        }
-        matching_flags.push_back(entry.name);
+    const std::string named = "FLAG_" + std::string(image_id);
+    const auto* const entry = store.FindNode(named);
+    if (entry == nullptr || entry->kind != NodeKind::array || !*entry->array ||
+        FlagsOfDataGroups(store.RootAttributes(), image_id).others.count(named) != 0 ||
+        !RequireUsableFlag(entry->array->value(), image, named)) {
+        return std::string{};
     }
-    if (matching_flags.size() == 1) {
-        return matching_flags.front();
-    }
-    if (matching_flags.size() > 1) {
-        diagnostics.push_back(Diagnostic{DiagnosticCode::ambiguous_pixel_mask,
-                                         "More than one flag variable matches the image; no pixel mask was selected",
-                                         std::string(image_id)});
-    }
-    return std::string{};
+    return named;
 }
 
 }  // namespace carta::zarr::internal::xradio

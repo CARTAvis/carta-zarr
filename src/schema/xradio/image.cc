@@ -22,7 +22,10 @@
 #include <cmath>
 #include <cstddef>
 #include <iterator>
+#include <limits>
+#include <map>
 #include <optional>
+#include <tuple>
 #include <utility>
 
 #include <carta-zarr/descriptor.h>
@@ -32,7 +35,8 @@ namespace {
 
 namespace zarr_metadata = ::carta::zarr::internal::zarr;
 
-// Where an image is listed: XRADIO's own names in their order, then every other name after them.
+// Where an image no data group has as its own is listed: XRADIO's own names in their order, then every
+// other name after them.
 std::size_t KnownImageRank(std::string_view image_id) {
     return static_cast<std::size_t>(std::find(kKnownImages.begin(), kKnownImages.end(), image_id) -
                                     kKnownImages.begin());
@@ -40,6 +44,38 @@ std::size_t KnownImageRank(std::string_view image_id) {
 
 bool IsKnownImage(std::string_view image_id) {
     return KnownImageRank(image_id) < kKnownImages.size();
+}
+
+// Where each data group's own image is listed: the base group's first, which is the store's main
+// image, then every other group's by group name. A group's own image is its `sky`, or its
+// `aperture` when it has no sky. The group order is by name because the JSON object holding the
+// groups keeps no order this library reads; XRADIO writes `base` first.
+std::map<std::string, std::size_t> GroupImageRanks(const nlohmann::json& root_attributes) {
+    std::map<std::string, std::size_t> ranks;
+    const auto* const groups = MemberObject(root_attributes, "data_groups");
+    if (groups == nullptr) {
+        return ranks;
+    }
+    const auto rank_of = [&](const nlohmann::json& group, std::size_t rank) {
+        std::string image = AttributeString(group, "sky");
+        if (image.empty()) {
+            image = AttributeString(group, "aperture");
+        }
+        auto named = NormalizeNodeName(image);
+        if (!image.empty() && named) {
+            ranks.emplace(std::move(named).value(), rank);
+        }
+    };
+    if (const auto* const base = MemberObject(*groups, "base")) {
+        rank_of(*base, 0);
+    }
+    std::size_t rank = 1;
+    for (const auto& [name, group] : groups->items()) {
+        if (name != "base" && group.is_object()) {
+            rank_of(group, rank++);
+        }
+    }
+    return ranks;
 }
 
 // The dataset carries a well-formed array for every coordinate of each plane it has an image of. Both
@@ -64,6 +100,11 @@ ApertureCoordinate DescribeAperture(const Store& store, const std::vector<double
         std::optional<double> reference;
         if (const auto& metadata = store.ReadArrayMetadata(name); metadata) {
             reference = MemberNumber(metadata.value().attributes, "crval");
+        }
+        if (!reference) {
+            diagnostics.push_back(Diagnostic{DiagnosticCode::invalid_metadata,
+                                             "Aperture coordinate has no crval; its reference value is taken as 0",
+                                             std::string(name)});
         }
         auto fit = FitApertureAxis(values, reference, name);
         aperture.reference_value.at(axis) = reference.value_or(0.0);
@@ -232,14 +273,17 @@ Result<Discovered> DiscoverImages(const Store& store) {
         result.images.push_back(ImageEntry{entry.name, qualified.openable, std::move(said), std::move(axes)});
     }
 
-    const auto sort_images = [](std::vector<ImageEntry>& images) {
-        std::sort(images.begin(), images.end(), [](const auto& left, const auto& right) {
-            const auto left_rank = KnownImageRank(left.id);
-            const auto right_rank = KnownImageRank(right.id);
-            return left_rank == right_rank ? left.id < right.id : left_rank < right_rank;
-        });
+    // The data groups' own images first, as the store ranks them; then the rest, XRADIO's names in
+    // their order and every other name after them. The first that opens is the default.
+    const auto group_ranks = GroupImageRanks(store.RootAttributes());
+    const auto rank_of = [&](const std::string& id) {
+        const auto found = group_ranks.find(id);
+        return std::tuple<std::size_t, std::size_t, const std::string&>(
+            found == group_ranks.end() ? std::numeric_limits<std::size_t>::max() : found->second, KnownImageRank(id),
+            id);
     };
-    sort_images(result.images);
+    std::sort(result.images.begin(), result.images.end(),
+              [&](const ImageEntry& left, const ImageEntry& right) { return rank_of(left.id) < rank_of(right.id); });
     const auto openable = std::find_if(result.images.begin(), result.images.end(),
                                        [](const ImageEntry& image) { return image.openable; });
     if (openable != result.images.end()) {
@@ -303,7 +347,7 @@ Result<SchemaInspection> InspectImages(const Store& store) {
     if (!discovery.default_image_id) {
         report.SetDiagnostics(discovery.diagnostics);
         // Nothing here this profile will open, and which answer that is depends on why. A store of
-        // complex or aperture-plane variables is well formed and simply not for this library. One
+        // complex images, on either plane, is well formed and simply not for this library. One
         // whose images disagree with their coordinates, or whose metadata will not parse, is a
         // store this profile recognised and found broken -- and reporting that as a non-match tells
         // whoever picked the file that nothing knew what it was, which is untrue and no use. But only
@@ -428,7 +472,7 @@ Result<DescribedImage> DescribeImageFrom(const Store& store, std::string_view im
     // here to handle and no absence to represent.
     const auto layout = zarr_metadata::ParseStorageLayout(image);
 
-    auto pixel_mask = DetermineFlag(store, image, image_id, descriptor.diagnostics);
+    auto pixel_mask = DetermineFlag(store, image, image_id);
     if (!pixel_mask) {
         return pixel_mask.error();
     }

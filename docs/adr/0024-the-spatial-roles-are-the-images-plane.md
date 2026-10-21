@@ -18,9 +18,11 @@ The two versions write the same metadata, compression aside.
 
 ## Decision
 
-**A real-valued variable on either plane is an image.** A variable is on the plane whose coordinates it
-names among its dimensions: the sky's if it names `l` and `m`, the aperture plane's if it names `u` and
-`v` and not the sky's. It is held to the same rules on either:
+**A real-valued image on either plane opens.** An image is on the plane its `type` belongs to, and
+names that plane's coordinates among its dimensions: `l` and `m` for `sky`, `point_spread_function`,
+`primary_beam` and `mask`; `u` and `v` for `aperture`, `visibility` and `uv_sampling` (as amended for
+0.3.0, [#59](https://github.com/CARTAvis/carta-zarr/issues/59); until then the dimensions alone
+decided). It is held to the same rules on either:
 
 - five axes;
 - extents that agree with its coordinates;
@@ -62,8 +64,8 @@ malformed. The sky images beside it still open. This rule is for hand-written st
 **The aperture plane has no beams.** XRADIO 1.2.5 and 1.3.0 name a `BEAM_FIT_PARAMS_APERTURE` on the
 image and write no such array, so `ReadBeams` answers with none rather than reading the name.
 
-**A flag is found as on the sky.** No data group names `FLAG_APERTURE`, so it is found by ADR 0019's
-search by dimensions and shape.
+**A flag is found by its name.** No data group can name `FLAG_APERTURE`, so it is found by ADR 0019's
+third step, as the flag XRADIO names `FLAG_<image>`.
 
 ## Consequences
 

@@ -3,7 +3,10 @@
 *Its two rows are superseded by [ADR 0023](0023-only-xradio-image-schema-0-0-2-is-read.md): only
 schema 0.0.2 is read, and a store naming no version is refused. Its checks, its refusal of an unknown
 version and what the schema is held to stand. Its sky checks apply to a store whose data groups name a
-sky image ([#40](https://github.com/CARTAvis/carta-zarr/issues/40)): the schema requires none.*
+sky image ([#40](https://github.com/CARTAvis/carta-zarr/issues/40)): the schema requires none. Since
+0.3.0 the sky's type is not one of them: a variable a data group names in an image role and types
+otherwise is malformed as an image, which closes that image and refuses the store only when nothing
+else in it opens ([#59](https://github.com/CARTAvis/carta-zarr/issues/59)).*
 
 XRADIO 1.2.5 gives its image format a version. `IMAGE_SCHEMA_VERSION = "0.0.2"` in
 `xradio/image/schema.py` is written to every store's root as `schema_version`, `schema.py` defines
@@ -67,8 +70,9 @@ than against any version's layout:
 
 - a boolean on the sky plane that is not typed `flag` is not offered as an image;
 - a flag may be a Zarr `bool` or an `int8` declared `dtype: bool`;
-- an image's flag is found by ADR 0019's three steps, including the guess by dimensions, which
-  XRADIO 1.2.5's `FLAG_POINT_SPREAD_FUNCTION` needs because nothing links it to its image;
+- an image's flag is found by ADR 0019's three steps, the last of which takes `FLAG_<image>` for an
+  image that is not a sky image, which XRADIO's `FLAG_POINT_SPREAD_FUNCTION` needs because nothing
+  links it to its image;
 - a store need not have consolidated metadata;
 - beam labels are found by name, in any order;
 - a time's scale and format are read in any case;

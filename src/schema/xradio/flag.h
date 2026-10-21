@@ -89,15 +89,14 @@ Result<std::string> DeclaredFlag(const Store& store, const zarr::ArrayMetadata& 
  * whose `sky` is this image -- which is the only place XRADIO's writer records it. A declared flag
  * is binding: an image naming one that cannot serve is closed rather than opened unmasked, because
  * reads apply the mask by default and an unusable mask reported as no mask would show flagged pixels
- * as valid -- the one failure a consumer has no way to notice. With nothing declared the store is
- * inspected instead, leaving out any flag a data group declares for another image, and more than one
- * match is refused rather than guessed at, as a diagnostic on the image. See ADR 0019.
+ * as valid -- the one failure a consumer has no way to notice. With nothing declared, a sky image has
+ * no flag, and any other image's is the array XRADIO names FLAG_<image> when it can mask the image;
+ * nothing is found by its shape alone. See ADR 0019.
  *
  * Takes the whole Store rather than a narrower interface: what varies underneath is the transport,
  * which already has two adapters, and a seam here would have exactly one. See ADR 0006.
  */
-Result<std::string> DetermineFlag(const Store& store, const zarr::ArrayMetadata& image, std::string_view image_id,
-                                  std::vector<Diagnostic>& diagnostics);
+Result<std::string> DetermineFlag(const Store& store, const zarr::ArrayMetadata& image, std::string_view image_id);
 
 }  // namespace carta::zarr::internal::xradio
 

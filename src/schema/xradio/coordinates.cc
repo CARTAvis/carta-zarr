@@ -50,14 +50,25 @@ bool CarriesPlane(const zarr_metadata::ArrayMetadata& variable, Plane plane) {
     });
 }
 
-std::optional<Plane> PlaneOf(const zarr_metadata::ArrayMetadata& variable) {
-    if (CarriesPlane(variable, Plane::sky)) {
+std::optional<Plane> ImagePlane(std::string_view type) {
+    // Schema 0.0.2's image arrays, by the dimensions each is defined over.
+    static constexpr std::array<std::string_view, 4> kSky{"sky", "point_spread_function", "primary_beam", "mask"};
+    static constexpr std::array<std::string_view, 3> kAperture{"aperture", "visibility", "uv_sampling"};
+    if (std::find(kSky.begin(), kSky.end(), type) != kSky.end()) {
         return Plane::sky;
     }
-    if (CarriesPlane(variable, Plane::aperture)) {
+    if (std::find(kAperture.begin(), kAperture.end(), type) != kAperture.end()) {
         return Plane::aperture;
     }
     return std::nullopt;
+}
+
+std::optional<Plane> PlaneOf(const zarr_metadata::ArrayMetadata& variable) {
+    const auto plane = ImagePlane(AttributeString(variable.attributes, "type"));
+    if (!plane || !CarriesPlane(variable, *plane)) {
+        return std::nullopt;
+    }
+    return plane;
 }
 
 Result<void> CheckCoordinate(const zarr_metadata::ArrayMetadata& array, const Coordinate& coordinate) {

@@ -66,7 +66,8 @@ probe now checks the five outright, and the rules for both halves live in one mo
 
 Ordering and default selection stayed where they were. Ranking `SKY` first is presentation, and the
 default is "the first qualified image", which is a consequence of qualification rather than part of
-it. `DescribeAxes`'s logical axis order is untouched: it is a third list of axis names, but it
+it. (Since 0.3.0 the data groups' own images are ranked first, the base group's before the rest;
+ADR 0001.) `DescribeAxes`'s logical axis order is untouched: it is a third list of axis names, but it
 describes the order this library reports, which is a public contract and a separate question.
 
 *Since decided:* the order is not a public contract. [ADR 0012](0012-an-axis-is-reached-by-its-role.md)
@@ -91,8 +92,8 @@ different thing from an image in it.
 
 Qualification distinguishes two things the code did not:
 
-- **This library does not do that.** A complex sky-plane variable, an aperture-plane variable. The
-  store is well formed and the answer would not change if it were rewritten.
+- **This library does not do that.** A complex sky-plane variable, an aperture-plane variable (since
+  ADR 0024, a complex one only: real aperture-plane images open). The store is well formed and the answer would not change if it were rewritten.
 - **This store is malformed.** A variable whose extent disagrees with its coordinate, a node whose
   metadata will not parse as an array.
 

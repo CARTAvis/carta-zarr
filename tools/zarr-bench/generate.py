@@ -799,51 +799,68 @@ def holds_booleans(metadata: dict[str, Any]) -> bool:
     return metadata.get("data_type") == "int8" and metadata.get("attributes", {}).get("dtype") == "bool"
 
 
+def canonical_node(name: str) -> str:
+    """A node a document names, as the store files it: "./FLAG" is FLAG, as NormalizeNodeName in
+    src/store.cc reads it. A name that is no node is kept as written."""
+    parts = [part for part in name.split("/") if part not in ("", ".")]
+    if not parts or name.startswith("/") or ".." in parts:
+        return name
+    return "/".join(parts)
+
+
 def flags_of_data_groups(root_metadata: dict[str, Any], image: str) -> tuple[set[str], set[str]]:
-    """The flags the root's data groups give this image as its sky, and those they give any other."""
+    """The flags the root's data groups give this image as its sky, and those they give any other,
+    each as the node it names."""
     own, others = set(), set()
     groups = root_metadata.get("attributes", {}).get("data_groups")
     for group in (groups.values() if isinstance(groups, dict) else ()):
         flag = group.get("flag") if isinstance(group, dict) else None
         if isinstance(flag, str) and flag:
-            (own if group.get("sky") == image else others).add(flag)
+            sky = group.get("sky")
+            mine = isinstance(sky, str) and canonical_node(sky) == image
+            (own if mine else others).add(canonical_node(flag))
     return own, others
 
 
 def find_flag(root: Path, image: str, image_metadata: dict[str, Any], names: list[str],
               root_metadata: dict[str, Any]) -> str | None:
     """The flag carta-zarr would mask this image with, by the rule of src/schema/xradio/flag.cc: the
-    one its own `flag` attribute names, else the one data_groups give it as its sky, else the only
-    flag-typed boolean array with its dimensions and shape that no data group gives another image.
-    Two groups giving it different flags is refused, as carta-zarr refuses to open it."""
+    one its own `flag` attribute names, else the one data_groups give it as its sky. A sky image that
+    declares none has none; any other image takes FLAG_<image> when that is a flag-typed boolean array
+    with its dimensions and shape that no data group gives another image. Two groups giving it
+    different flags is refused, as carta-zarr refuses to open it."""
     declared = image_metadata.get("attributes", {}).get("flag")
     if isinstance(declared, str) and declared:
-        return declared
+        return canonical_node(declared)
     own, others = flags_of_data_groups(root_metadata, image)
     if len(own) > 1:
         raise SystemExit(f"data_groups name more than one flag for {image}: {', '.join(sorted(own))}")
     if own:
         return next(iter(own))
-    matches = []
-    for name in names:
-        if name == image or name in others:
-            continue
-        metadata = read_metadata(root / name)
-        if (
-            metadata.get("node_type") == "array"
-            and metadata.get("attributes", {}).get("type") == "flag"
-            and holds_booleans(metadata)
-            and metadata.get("dimension_names") == image_metadata.get("dimension_names")
-            and metadata.get("shape") == image_metadata.get("shape")
-        ):
-            matches.append(name)
-    return matches[0] if len(matches) == 1 else None
+    if image_metadata.get("attributes", {}).get("type") == "sky":
+        return None
+    named = f"FLAG_{image}"
+    if named not in names or named in others:
+        return None
+    metadata = read_metadata(root / named)
+    if (
+        metadata.get("node_type") == "array"
+        and metadata.get("attributes", {}).get("type") == "flag"
+        and holds_booleans(metadata)
+        and metadata.get("dimension_names") == image_metadata.get("dimension_names")
+        and metadata.get("shape") == image_metadata.get("shape")
+    ):
+        return named
+    return None
 
 
 def default_image(root_metadata: dict[str, Any]) -> str:
+    """The base data group's own image, its sky or else its aperture, as carta-zarr lists it first."""
     groups = root_metadata.get("attributes", {}).get("data_groups", {})
     base = groups.get("base", {}) if isinstance(groups, dict) else {}
-    return base.get("sky", "SKY") if isinstance(base, dict) else "SKY"
+    if not isinstance(base, dict):
+        return "SKY"
+    return base.get("sky") or base.get("aperture") or "SKY"
 
 
 def member_names(root: Path) -> list[str]:

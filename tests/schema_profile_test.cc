@@ -33,6 +33,7 @@
 #include <exception>
 #include <iostream>
 #include <map>
+#include <optional>
 #include <set>
 #include <string>
 #include <tuple>
@@ -271,9 +272,11 @@ void TestNothingOpenableSaysWhy() {
     refused(encoded, carta::zarr::DiagnosticCode::unsupported_data_type,
             "Boolean sky-plane variables are not openable; a flag is typed 'flag'");
 
-    // A real aperture-plane variable is an image (ADR 0024); a complex one is not, on either plane.
+    // A real image typed for the aperture plane opens (ADR 0024); a complex one does not, on either plane.
+    // Named SKY only so that the reason is found where the others' is; typed and grouped as what it is.
     auto aperture = CompleteStore();
-    aperture["SKY"] = SkyArray("complex64", R"({"type":"sky"})", R"(["time","frequency","polarization","u","v"])");
+    aperture[""] = RootWith(R"("schema_version":"0.0.2","data_groups":{"base":{"aperture":"SKY"}})");
+    aperture["SKY"] = SkyArray("complex64", R"({"type":"aperture"})", R"(["time","frequency","polarization","u","v"])");
     refused(aperture, carta::zarr::DiagnosticCode::unsupported_data_type,
             "Complex aperture-plane variables are not openable");
 }
@@ -349,31 +352,46 @@ void TestAMissingCoordinateSystemIsInvalid() {
             "the refusal should name the attribute that is missing");
 }
 
-// Discovery only recognizes complete image planes. An incomplete SKY-only store is simply a
-// non-match because it offers no complete image plane.
-void TestIncompleteImageIsNotMatch() {
+// A variable typed as a sky image is held to the sky plane's axes. One without them is not quietly
+// passed over as something else: the store says SKY is an image and gives it axes it cannot be read
+// by, which is the store being wrong about itself.
+void TestAnImageWithoutItsPlanesAxesIsInvalid() {
+    const auto refused = [](std::map<std::string, std::string> nodes, const std::string& what) {
+        const auto probe = Probe(nodes);
+        Require(probe.kind == SchemaMatchKind::invalid, what + " was not refused as invalid");
+        Require(!probe.diagnostics.empty() && probe.diagnostics.front().node_path == "SKY" &&
+                    probe.diagnostics.front().code == carta::zarr::DiagnosticCode::invalid_metadata,
+                what + " was refused without saying SKY is why");
+    };
     auto missing_axis = CompleteStore();
     missing_axis["SKY"] =
         SkyArray("float32", R"({"units":"Jy/beam","type":"sky"})", R"(["time","frequency","polarization","l","x"])");
-    const auto renamed = Probe(missing_axis);
-    Require(renamed.kind == SchemaMatchKind::no_match, "an incomplete SKY was treated as an image dataset");
+    refused(missing_axis, "a SKY with x in place of m");
 
     auto wrong_rank = CompleteStore();
     wrong_rank["SKY"] = NumericArray("[1,3,2,4]", R"(["time","frequency","polarization","l"])", "float32",
                                      R"({"units":"Jy/beam","type":"sky"})");
-    const auto four = Probe(wrong_rank);
-    Require(four.kind == SchemaMatchKind::no_match, "a four-dimensional SKY was treated as an image dataset");
+    refused(wrong_rank, "a four-dimensional SKY");
 }
 
-// Discovery reports every variable carrying a whole plane's axes, and says why the ones it cannot
-// open are closed. Flags and the optional (l, m) coordinates are never images at all.
+// Discovery reports every variable typed as an image, and says why the ones it cannot open are
+// closed. Flags, the optional (l, m) coordinates and an untyped variable over a whole plane's axes
+// are never images at all: what an image is, is its type (ADR 0001).
 void TestDiscoveryClassifiesVariables() {
     auto nodes = CompleteStore();
     nodes["SKY_MODEL"] = SkyArray();
     nodes["COMPLEX"] = SkyArray("complex64");
-    nodes["APERTURE"] = SkyArray("float32", "{}", R"(["time","frequency","polarization","u","v"])");
-    nodes["VISIBILITY"] = SkyArray("complex64", "{}", R"(["time","frequency","polarization","u","v"])");
+    nodes["APERTURE"] = SkyArray("float32", R"({"type":"aperture"})", R"(["time","frequency","polarization","u","v"])");
+    nodes["VISIBILITY"] =
+        SkyArray("complex64", R"({"type":"visibility"})", R"(["time","frequency","polarization","u","v"])");
     nodes["MASK_0"] = SkyArray("bool", R"({"type":"flag"})");
+    nodes["UNTYPED"] = SkyArray("float32", "{}");
+    nodes["PRIMARY_BEAM"] = SkyArray("float32", R"({"type":"primary_beam"})");
+    nodes["UV_SAMPLING"] =
+        SkyArray("float32", R"({"type":"uv_sampling"})", R"(["time","frequency","polarization","u","v"])");
+    // Typed as an image of the other plane: listed, and malformed.
+    nodes["SKY_ON_UV"] = SkyArray("float32", R"({"type":"sky"})", R"(["time","frequency","polarization","u","v"])");
+    nodes["APERTURE_ON_LM"] = SkyArray("float32", R"({"type":"aperture"})");
     nodes["right_ascension"] = NumericArray("[4,5]", R"(["l","m"])");
     nodes["u"] = NumericArray("[4]", R"(["u"])");
     nodes["v"] = NumericArray("[5]", R"(["v"])");
@@ -383,11 +401,21 @@ void TestDiscoveryClassifiesVariables() {
     auto discovery = XradioProfile().Discover(store.value());
     Require(static_cast<bool>(discovery), "profile discovery reported an error");
 
-    Require(ImageIds(discovery.value().images) ==
-                std::vector<std::string>{"SKY", "SKY_MODEL", "APERTURE", "COMPLEX", "VISIBILITY"},
+    Require(ImageIds(discovery.value().images) == std::vector<std::string>{"SKY", "SKY_MODEL", "PRIMARY_BEAM",
+                                                                           "APERTURE", "APERTURE_ON_LM", "COMPLEX",
+                                                                           "SKY_ON_UV", "UV_SAMPLING", "VISIBILITY"},
             "discovery did not enumerate the images in display order");
-    Require(OpenableImageIds(discovery.value().images) == std::vector<std::string>{"SKY", "SKY_MODEL", "APERTURE"},
-            "discovery did not restrict the openable images to real variables of either plane");
+    Require(OpenableImageIds(discovery.value().images) ==
+                std::vector<std::string>{"SKY", "SKY_MODEL", "PRIMARY_BEAM", "APERTURE", "UV_SAMPLING"},
+            "discovery did not restrict the openable images to real images of either plane");
+    for (const auto& id : {"SKY_ON_UV", "APERTURE_ON_LM"}) {
+        const auto& images = discovery.value().images;
+        const auto entry =
+            std::find_if(images.begin(), images.end(), [&](const auto& image) { return image.id == id; });
+        Require(
+            entry != images.end() && HasDiagnostic(entry->diagnostics, carta::zarr::DiagnosticCode::invalid_metadata),
+            std::string(id) + ", typed as an image of the other plane, was not listed as malformed");
+    }
     Require(discovery.value().default_image_id == "SKY", "discovery did not select the default openable image");
     for (const auto& id : {"COMPLEX", "VISIBILITY"}) {
         const auto& images = discovery.value().images;
@@ -429,7 +457,7 @@ void TestAnImageDisagreeingWithACoordinateIsNotOpenable() {
     auto nodes = CompleteStore();
     // Seven channels of pixels where the dataset's frequency coordinate has three.
     nodes["MODEL"] = NumericArray("[1,7,2,4,5]", R"(["time","frequency","polarization","l","m"])", "float32",
-                                  R"({"units":"Jy/beam"})");
+                                  R"({"units":"Jy/beam","type":"sky"})");
 
     auto store = Open(nodes);
     Require(static_cast<bool>(store), "the disagreeing-image store failed to open");
@@ -462,13 +490,15 @@ void TestNothingOpenableIsInvalidOnlyWhenSomethingIsMalformed() {
                                     R"({"units":"Jy/beam","type":"sky"})");
     // Enumerated before SKY, and a limitation rather than a defect: without the reason for the
     // refusal being put first, this is the diagnostic a consumer would be shown.
-    malformed["APERTURE"] = NumericArray("[1,3,2,4,5]", R"(["time","frequency","polarization","u","v"])", "complex64");
+    malformed["APERTURE"] = NumericArray("[1,3,2,4,5]", R"(["time","frequency","polarization","u","v"])", "complex64",
+                                         R"({"type":"aperture"})");
 
     const auto broken = Probe(malformed);
     Require(broken.kind == SchemaMatchKind::invalid,
             "a store whose only image disagrees with a coordinate was reported as unrecognised");
-    Require(broken.diagnostics.front().node_path == "SKY",
-            "the refusal did not lead with the reason the store was refused");
+    Require(broken.diagnostics.size() == 2 && broken.diagnostics.front().node_path == "SKY" &&
+                broken.diagnostics.back().node_path == "APERTURE",
+            "the refusal did not lead with the reason the store was refused, and keep the other");
 }
 
 // A group is a node in the hierarchy, and a store is free to hold one. It was being read as an
@@ -860,17 +890,15 @@ void TestADeclaredFlagIsBinding() {
     Require(static_cast<bool>(present), "the declared-flag store did not open");
     const auto& present_image = present.value().ReadArrayMetadata("SKY");
     Require(static_cast<bool>(present_image), "SKY was not readable in the declared-flag store");
-    std::vector<carta::zarr::Diagnostic> diagnostics;
-    auto declared = DetermineFlag(present.value(), present_image.value(), "SKY", diagnostics);
+    auto declared = DetermineFlag(present.value(), present_image.value(), "SKY");
     Require(static_cast<bool>(declared), "a well-formed declared flag was refused");
     Require(declared.value() == "MASK_0", "the declared flag was not the one selected");
-    Require(diagnostics.empty(), "selecting a declared flag produced a diagnostic");
 
     auto absent = Open(with_declared_flag(false));
     Require(static_cast<bool>(absent), "the missing-flag store did not open");
     const auto& absent_image = absent.value().ReadArrayMetadata("SKY");
     Require(static_cast<bool>(absent_image), "SKY was not readable in the missing-flag store");
-    auto missing = DetermineFlag(absent.value(), absent_image.value(), "SKY", diagnostics);
+    auto missing = DetermineFlag(absent.value(), absent_image.value(), "SKY");
     Require(!missing, "an image declaring a flag variable that does not exist was opened");
 }
 
@@ -943,7 +971,7 @@ void TestADeclaredFlagThatCannotMaskClosesTheImageInTheListing() {
 void TestAnImageWithAnAxisBeyondTheFiveIsNotOpenable() {
     auto nodes = CompleteStore();
     nodes["MODEL"] = NumericArray("[1,3,2,4,5,1]", R"(["time","frequency","polarization","l","m","extra"])", "float32",
-                                  R"({"units":"Jy/beam"})");
+                                  R"({"units":"Jy/beam","type":"sky"})");
 
     auto store = Open(nodes);
     Require(static_cast<bool>(store), "the extra-axis store failed to open");
@@ -962,18 +990,17 @@ void TestAnImageWithAnAxisBeyondTheFiveIsNotOpenable() {
             "an image with an axis this profile cannot describe was not refused as invalid metadata");
 }
 
-carta::zarr::Result<std::string> FlagOfSky(const std::map<std::string, std::string>& nodes,
-                                           std::vector<carta::zarr::Diagnostic>& diagnostics) {
+carta::zarr::Result<std::string> FlagOfSky(const std::map<std::string, std::string>& nodes) {
     auto store = Open(nodes);
     Require(static_cast<bool>(store), "the data-group store did not open");
     const auto& image = store.value().ReadArrayMetadata("SKY");
     Require(static_cast<bool>(image), "SKY was not readable in the data-group store");
-    return DetermineFlag(store.value(), image.value(), "SKY", diagnostics);
+    return DetermineFlag(store.value(), image.value(), "SKY");
 }
 
 // XRADIO's writer ties a flag to its sky image in the root's data_groups and nowhere else: the
-// image names no flag. That link is a declaration, taken before any guess from dimensions, and two
-// flags fitting the image equally are then no ambiguity at all.
+// image names no flag. That link is the declaration, and a sky image that has none has no flag,
+// however well another fits it.
 void TestADataGroupDeclaresItsSkysFlag() {
     const std::string sky_dimensions = R"(["time","frequency","polarization","l","m"])";
     auto nodes = CompleteStore();
@@ -982,60 +1009,46 @@ void TestADataGroupDeclaresItsSkysFlag() {
 
     nodes[""] =
         RootGroupWithDataGroups(R"({"base":{"sky":"SKY","flag":"FLAG_2"},"other":{"sky":"OTHER","flag":"FLAG_1"}})");
-    std::vector<carta::zarr::Diagnostic> diagnostics;
-    auto declared = FlagOfSky(nodes, diagnostics);
+    auto declared = FlagOfSky(nodes);
     Require(declared && declared.value() == "FLAG_2", "the flag data_groups names for SKY was not the one chosen");
-    Require(diagnostics.empty(), "a flag data_groups names was reported as ambiguous");
 
-    // A flag another image's group declares is that image's, so the guess leaves it out.
+    // A sky image whose group names no flag has none: FLAG_2 fits it and is no one's, and is not taken.
     nodes[""] = RootGroupWithDataGroups(R"({"base":{"sky":"SKY"},"other":{"sky":"OTHER","flag":"FLAG_1"}})");
-    diagnostics.clear();
-    auto guessed = FlagOfSky(nodes, diagnostics);
-    Require(guessed && guessed.value() == "FLAG_2", "a flag declared for another image was a candidate for SKY");
-    Require(diagnostics.empty(), "one remaining candidate was reported as ambiguous");
+    auto undeclared = FlagOfSky(nodes);
+    Require(undeclared && undeclared.value().empty(), "a sky image that declares no flag was given one");
 
     // The image's own attribute is its own statement, and outranks a group's.
     auto own = nodes;
     own["SKY"] = SkyArray("float32", R"({"units":"Jy/beam","type":"sky","flag":"FLAG_1"})");
     own[""] = RootGroupWithDataGroups(R"({"base":{"sky":"SKY","flag":"FLAG_2"}})");
-    diagnostics.clear();
-    auto attribute = FlagOfSky(own, diagnostics);
+    auto attribute = FlagOfSky(own);
     Require(attribute && attribute.value() == "FLAG_1", "a data group outranked the image's own flag attribute");
 
     // Declared flags are binding: one that cannot serve closes the image rather than leaving it unmasked.
     nodes["FLAG_3"] = NumericArray("[1,3,2,4,5]", sky_dimensions, "float32", R"({"type":"flag"})");
     nodes[""] = RootGroupWithDataGroups(R"({"base":{"sky":"SKY","flag":"FLAG_3"}})");
-    diagnostics.clear();
-    auto unusable = FlagOfSky(nodes, diagnostics);
+    auto unusable = FlagOfSky(nodes);
     Require(!unusable && unusable.error().code == ErrorCode::unsupported_data_type,
             "an unusable flag data_groups declares did not close the image");
 
     // Two groups of the same sky naming different flags contradict each other.
     nodes[""] =
         RootGroupWithDataGroups(R"({"base":{"sky":"SKY","flag":"FLAG_1"},"robust":{"sky":"SKY","flag":"FLAG_2"}})");
-    diagnostics.clear();
-    auto contradictory = FlagOfSky(nodes, diagnostics);
+    auto contradictory = FlagOfSky(nodes);
     Require(!contradictory && contradictory.error().code == ErrorCode::invalid_metadata,
             "two different flags declared for one image were not refused");
 
     // The same flag named by both is one declaration.
     nodes[""] =
         RootGroupWithDataGroups(R"({"base":{"sky":"SKY","flag":"FLAG_1"},"robust":{"sky":"SKY","flag":"FLAG_1"}})");
-    diagnostics.clear();
-    auto agreeing = FlagOfSky(nodes, diagnostics);
+    auto agreeing = FlagOfSky(nodes);
     Require(agreeing && agreeing.value() == "FLAG_1", "two groups naming the same flag were refused");
 
-    // "./FLAG_1" names the node FLAG_1, and every rule above holds of it however it is spelt. Compared
-    // as written, another group's "./FLAG_1" was not FLAG_1 the listing had, so the guess took a flag
-    // another image owns -- and masked this image's valid pixels with it.
+    // "./FLAG_1" names the node FLAG_1, and every rule above holds of it however it is spelt.
     const auto spelt = [&](const std::string& data_groups) {
         nodes[""] = RootGroupWithDataGroups(data_groups);
-        diagnostics.clear();
-        return FlagOfSky(nodes, diagnostics);
+        return FlagOfSky(nodes);
     };
-    auto others = spelt(R"({"base":{"sky":"SKY"},"other":{"sky":"OTHER","flag":"./FLAG_1"}})");
-    Require(others && others.value() == "FLAG_2",
-            "a flag another image's group spells ./FLAG_1 was a candidate for SKY");
     auto dotted = spelt(R"({"base":{"sky":"SKY","flag":"./FLAG_2"}})");
     Require(dotted && dotted.value() == "FLAG_2", "a declared ./FLAG_2 was not chosen as the node FLAG_2");
     auto aliases = spelt(R"({"base":{"sky":"SKY","flag":"FLAG_1"},"robust":{"sky":"SKY","flag":"./FLAG_1"}})");
@@ -1045,43 +1058,74 @@ void TestADataGroupDeclaresItsSkysFlag() {
     auto own_dotted = nodes;
     own_dotted["SKY"] = SkyArray("float32", R"({"units":"Jy/beam","type":"sky","flag":"./FLAG_1"})");
     own_dotted[""] = RootGroup();
-    diagnostics.clear();
-    auto attribute_dotted = FlagOfSky(own_dotted, diagnostics);
+    auto attribute_dotted = FlagOfSky(own_dotted);
     Require(attribute_dotted && attribute_dotted.value() == "FLAG_1",
             "an image's own ./FLAG_1 was not named as the node it is");
 }
 
-// With nothing declared the store is inspected instead, and a store offering two equally good
-// candidates is refused rather than guessed at. The refusal is a diagnostic on the image: the image
-// is still readable, just unmasked.
-void TestAmbiguousFlagsSelectNone() {
+// With nothing declared, an image that is not a sky image takes the flag XRADIO names FLAG_<image>,
+// and nothing else: not a flag that merely has its shape, however many or few there are. XRADIO
+// cannot declare such an image's flag (casangi/xradio#659), and names it so.
+void TestAnUndeclaredFlagIsTakenOnlyByItsName() {
     const std::string sky_dimensions = R"(["time","frequency","polarization","l","m"])";
     auto nodes = CompleteStore();
-    nodes["FLAG_1"] = NumericArray("[1,3,2,4,5]", sky_dimensions, "bool", R"({"type":"flag"})");
-    nodes["FLAG_2"] = NumericArray("[1,3,2,4,5]", sky_dimensions, "bool", R"({"type":"flag"})");
+    nodes["POINT_SPREAD_FUNCTION"] = SkyArray("float32", R"({"type":"point_spread_function"})");
+    nodes["FLAG_POINT_SPREAD_FUNCTION"] = NumericArray("[1,3,2,4,5]", sky_dimensions, "bool", R"({"type":"flag"})");
+    nodes["FLAG_OTHER"] = NumericArray("[1,3,2,4,5]", sky_dimensions, "bool", R"({"type":"flag"})");
+    const auto flag_of = [](const std::map<std::string, std::string>& store_nodes, const std::string& image_id) {
+        auto store = Open(store_nodes);
+        Require(static_cast<bool>(store), "the undeclared-flag store did not open");
+        const auto& image = store.value().ReadArrayMetadata(image_id);
+        Require(static_cast<bool>(image), image_id + " was not readable in the undeclared-flag store");
+        return DetermineFlag(store.value(), image.value(), image_id);
+    };
 
-    auto store = Open(nodes);
-    Require(static_cast<bool>(store), "the ambiguous-flag store did not open");
-    const auto& image = store.value().ReadArrayMetadata("SKY");
-    Require(static_cast<bool>(image), "SKY was not readable in the ambiguous-flag store");
+    auto named = flag_of(nodes, "POINT_SPREAD_FUNCTION");
+    Require(named && named.value() == "FLAG_POINT_SPREAD_FUNCTION",
+            "the flag XRADIO names for a point spread function was not taken, beside another of its shape");
 
-    std::vector<carta::zarr::Diagnostic> diagnostics;
-    auto chosen = DetermineFlag(store.value(), image.value(), "SKY", diagnostics);
-    Require(static_cast<bool>(chosen), "ambiguous flags reported an error rather than no mask");
-    Require(chosen.value().empty(), "ambiguous flags selected a pixel mask");
-    Require(HasDiagnostic(diagnostics, carta::zarr::DiagnosticCode::ambiguous_pixel_mask),
-            "ambiguous flags did not produce a diagnostic");
+    // The sky declares none, so it has none, though both fit it.
+    auto sky = flag_of(nodes, "SKY");
+    Require(sky && sky.value().empty(), "a sky image that declares no flag took one that fits it");
 
-    // One candidate is not ambiguous: the same store with FLAG_2 removed selects FLAG_1.
-    nodes.erase("FLAG_2");
-    auto single = Open(nodes);
-    Require(static_cast<bool>(single), "the single-flag store did not open");
-    const auto& single_image = single.value().ReadArrayMetadata("SKY");
-    Require(static_cast<bool>(single_image), "SKY was not readable in the single-flag store");
-    std::vector<carta::zarr::Diagnostic> single_diagnostics;
-    auto only = DetermineFlag(single.value(), single_image.value(), "SKY", single_diagnostics);
-    Require(static_cast<bool>(only) && only.value() == "FLAG_1", "one matching flag was not selected");
-    Require(single_diagnostics.empty(), "one matching flag produced an ambiguity diagnostic");
+    // Without its own, the point spread function has none: a flag of its shape is not its flag.
+    auto without = nodes;
+    without.erase("FLAG_POINT_SPREAD_FUNCTION");
+    auto shaped = flag_of(without, "POINT_SPREAD_FUNCTION");
+    Require(shaped && shaped.value().empty(), "a flag that only has the image's shape was taken as its flag");
+
+    // Its own, of another shape, cannot mask it, and is not taken.
+    auto other_shape = nodes;
+    other_shape["FLAG_POINT_SPREAD_FUNCTION"] =
+        NumericArray("[1,3,2,4,4]", sky_dimensions, "bool", R"({"type":"flag"})");
+    auto mismatched = flag_of(other_shape, "POINT_SPREAD_FUNCTION");
+    Require(mismatched && mismatched.value().empty(), "a FLAG_<image> of another shape was taken as its flag");
+
+    // The image's own flag attribute is its declaration, and outranks the name.
+    auto own = nodes;
+    own["POINT_SPREAD_FUNCTION"] = SkyArray("float32", R"({"type":"point_spread_function","flag":"FLAG_OTHER"})");
+    auto declared = flag_of(own, "POINT_SPREAD_FUNCTION");
+    Require(declared && declared.value() == "FLAG_OTHER",
+            "a point spread function's own flag attribute was outranked by FLAG_<image>");
+
+    // Nor one that is not typed a flag, nor one that is not boolean.
+    for (const auto& [replacement, what] : std::vector<std::pair<std::string, std::string>>{
+             {NumericArray("[1,3,2,4,5]", sky_dimensions, "bool", "{}"), "an untyped FLAG_<image>"},
+             {NumericArray("[1,3,2,4,5]", sky_dimensions, "uint8", R"({"type":"flag"})"), "a FLAG_<image> of uint8"}}) {
+        auto replaced = nodes;
+        replaced["FLAG_POINT_SPREAD_FUNCTION"] = replacement;
+        auto refused = flag_of(replaced, "POINT_SPREAD_FUNCTION");
+        Require(refused && refused.value().empty(), what + " was taken as the image's flag");
+    }
+
+    // Nor one a data group gives a sky image as its flag, however the group spells it.
+    for (const std::string& spelt : {"FLAG_POINT_SPREAD_FUNCTION", "./FLAG_POINT_SPREAD_FUNCTION"}) {
+        auto owned = nodes;
+        owned[""] = RootGroupWithDataGroups(R"({"base":{"sky":"SKY","flag":")" + spelt + R"("}})");
+        auto taken = flag_of(owned, "POINT_SPREAD_FUNCTION");
+        Require(taken && taken.value().empty(),
+                "a flag a data group gives the sky, spelt " + spelt + ", was taken as the point spread function's");
+    }
 }
 
 // A root that says its consolidated metadata is null has none, which is how zarr-python reads it:
@@ -1500,8 +1544,11 @@ void TestAStoreOfSchema002IsRead() {
 
 // What a store that is not read is refused as, by the probe, by opening the dataset and by describing
 // one of its images, which must agree.
+// `described` is what describing SKY on its own is refused as, when that is not what the dataset is:
+// an image the store contradicts itself about is malformed metadata of the image.
 void RequireRefused(const std::map<std::string, std::string>& nodes, carta::zarr::DiagnosticCode diagnostic,
-                    ErrorCode error, const std::string& reason, const std::string& what) {
+                    ErrorCode error, const std::string& reason, const std::string& what,
+                    std::optional<ErrorCode> described_as = std::nullopt) {
     using carta::zarr::internal::ProbeStore;
     using carta::zarr::internal::RequireOpenableDataset;
 
@@ -1519,7 +1566,8 @@ void RequireRefused(const std::map<std::string, std::string>& nodes, carta::zarr
 
     const auto described = carta::zarr::internal::xradio::DescribeImageFrom(
         store.value(), "SKY", carta::zarr::internal::xradio::CoordinateValues{});
-    Require(!described && described.error().code == error, "an image of " + what + " was described");
+    Require(!described && described.error().code == described_as.value_or(error),
+            "an image of " + what + " was described, or refused as something else");
 }
 
 // A store naming no version is what XRADIO 1.2.4 and earlier wrote, and is refused for its version,
@@ -1542,18 +1590,41 @@ void TestAStoreNamingNoVersionIsRefused() {
 // upgrades on read whether or not the upgrade reached everything -- is refused as malformed, and says
 // which requirement it failed.
 void TestA002StoreThatIsNotOneIsInvalid() {
-    const auto invalid = [](const std::map<std::string, std::string>& nodes, const std::string& reason) {
+    const auto invalid = [](const std::map<std::string, std::string>& nodes, const std::string& reason,
+                            std::optional<ErrorCode> described_as = std::nullopt) {
         RequireRefused(nodes, carta::zarr::DiagnosticCode::invalid_metadata, ErrorCode::invalid_schema, reason,
-                       "a store naming 0.0.2 that is not one");
+                       "a store naming 0.0.2 that is not one", described_as);
     };
 
     auto no_groups = Store002();
     no_groups[""] = RootWith(R"("schema_version":"0.0.2")");
     invalid(no_groups, "it has no data_groups");
 
+    // The sky its data group names, typed otherwise, is the store contradicting itself, and is said
+    // of the image.
     auto intensity = Store002();
     intensity["SKY"] = SkyArray("float32", R"({"units":"Jy/beam","type":"Intensity"})");
-    invalid(intensity, "its sky image SKY is not typed \"sky\"");
+    invalid(intensity, "Data group 'base' names it as its sky, but it is typed 'Intensity'",
+            ErrorCode::invalid_metadata);
+
+    // A flag is no image, but the group naming it as its sky says it is one: the same contradiction.
+    auto flag_sky = Store002();
+    flag_sky["SKY"] = SkyArray("bool", R"({"type":"flag"})");
+    invalid(flag_sky, "Data group 'base' names it as its sky, but it is typed 'flag'", ErrorCode::invalid_metadata);
+    // Beside an image that opens, the store matches, and the sky is listed with why it will not.
+    auto beside = flag_sky;
+    beside["EXTRA"] = SkyArray();
+    const auto beside_probe = Probe(beside);
+    Require(beside_probe.kind == SchemaMatchKind::match, "a flag-typed sky beside an openable image closed the store");
+    auto beside_store = Open(beside);
+    Require(static_cast<bool>(beside_store), "the in-memory store failed to open");
+    const auto listed = XradioProfile().Discover(beside_store.value());
+    Require(static_cast<bool>(listed) && ImageIds(listed.value().images) == std::vector<std::string>{"SKY", "EXTRA"} &&
+                OpenableImageIds(listed.value().images) == std::vector<std::string>{"EXTRA"},
+            "a flag-typed sky was not listed unopenable beside the image that opens");
+    const auto described = XradioProfile().Describe(beside_store.value(), "SKY");
+    Require(!described && described.error().code == ErrorCode::invalid_metadata,
+            "describing a flag-typed sky was not refused as invalid metadata");
 
     auto no_frame = Store002();
     no_frame["frequency"] = FrequencyArray("[3]", R"({"units":"Hz"})");
@@ -1701,6 +1772,24 @@ void TestAnApertureImageIsDescribedOnItsPlane() {
                 aperture.reference_pixel == std::array<double, 2>{3.0, 3.0} &&
                 aperture.increment == std::array<double, 2>{-100.0, 10.0},
             "the aperture coordinate was not measured from u's and v's crval");
+    Require(descriptor.diagnostics.empty(), "an aperture coordinate with its crval was described with a diagnostic");
+
+    // XRADIO writes crval on u and v. Without it, the reference value is taken as 0 and that is said.
+    auto no_crval = nodes;
+    no_crval["u"] = NumericArray("[4]", R"(["u"])", "float64", R"({"units":"lambda"})");
+    auto no_crval_store = Open(no_crval);
+    Require(static_cast<bool>(no_crval_store), "the in-memory store failed to open");
+    const auto uncentred = DescribeImageFrom(no_crval_store.value(), "APERTURE", values);
+    Require(static_cast<bool>(uncentred), "an aperture-plane image whose u has no crval was not described");
+    Require(uncentred.value().descriptor.aperture->reference_value.at(0) == 0.0,
+            "a u with no crval was not given 0 as its reference value");
+    const auto& said = uncentred.value().descriptor.diagnostics;
+    Require(std::any_of(said.begin(), said.end(),
+                        [](const carta::zarr::Diagnostic& diagnostic) {
+                            return diagnostic.code == carta::zarr::DiagnosticCode::invalid_metadata &&
+                                   diagnostic.node_path == "u";
+                        }),
+            "a u with no crval was taken as 0 without saying so");
 
     // Its plane's coordinates are the dataset's to carry.
     auto no_frequency = nodes;
@@ -1787,8 +1876,9 @@ void TestAnotherDatasetNamingAVersionIsNotAnImage() {
             "a dataset that is not an image was said to have an unsupported schema version");
 }
 
-// A sky image's part is the data group whose sky it is. XRADIO's own names are listed first, in its
-// order, and any other after them by name.
+// The data groups' own images are listed first: the base group's, then every other group's by group
+// name. The rest follow, XRADIO's own names in its order and any other by name, and still open. A
+// variable typed "model", which schema 0.0.2 has no image of, is not one.
 void TestAnImagesPartAndWhereItIsListed() {
     auto nodes = Store002();
     nodes[""] = RootWith(R"("schema_version":"0.0.2",
@@ -1803,8 +1893,71 @@ void TestAnImagesPartAndWhereItIsListed() {
     const auto discovery = XradioProfile().Discover(store.value());
     Require(static_cast<bool>(discovery), "a 0.0.2 store was not listed");
     const auto& images = discovery.value().images;
-    Require(ImageIds(images) == std::vector<std::string>{"SKY", "SKY_MODEL", "SKY_DIRTY", "MASK", "EXTRA", "MODEL"},
-            "a 0.0.2 store's images were not listed in XRADIO's order, then by name");
+    Require(ImageIds(images) == std::vector<std::string>{"SKY", "SKY_DIRTY", "SKY_MODEL", "MASK", "EXTRA"},
+            "a 0.0.2 store's images were not listed by their data groups, then in XRADIO's order, then by name");
+    Require(OpenableImageIds(images) == ImageIds(images), "an image no data group names did not open");
+    Require(discovery.value().default_image_id == "SKY", "the base group's sky was not the default");
+
+    // The base group's image does not open, so the default is the next group's, by group name.
+    auto base_refused = nodes;
+    base_refused["SKY"] = SkyArray("complex64");
+    auto refused_store = Open(base_refused);
+    Require(static_cast<bool>(refused_store), "the in-memory store failed to open");
+    const auto refused = XradioProfile().Discover(refused_store.value());
+    Require(static_cast<bool>(refused) && refused.value().default_image_id == "SKY_DIRTY",
+            "with the base group's image unopenable, the default was not the next group's");
+
+    // Groups that share one image, and a group with none, rank no image after a group's own: ZED is
+    // the z group's, so it comes before SKY_MODEL, which no group has as its own.
+    auto shared = Store002();
+    shared[""] = RootWith(R"("schema_version":"0.0.2",
+        "data_groups":{"base":{"sky":"SKY"},"a":{"sky":"SKY"},"b":{"sky":"SKY"},"c":{"sky":"SKY"},
+                       "empty":{},"z":{"sky":"ZED"}})");
+    shared["SKY"] = SkyArray("complex64");
+    shared["ZED"] = SkyArray();
+    shared["SKY_MODEL"] = SkyArray();
+    auto shared_store = Open(shared);
+    Require(static_cast<bool>(shared_store), "the in-memory store failed to open");
+    const auto sharing = XradioProfile().Discover(shared_store.value());
+    Require(static_cast<bool>(sharing) &&
+                ImageIds(sharing.value().images) == std::vector<std::string>{"SKY", "ZED", "SKY_MODEL"},
+            "groups sharing an image put an image no group has as its own before a group's");
+    Require(sharing.value().default_image_id == "ZED",
+            "with the base group's image unopenable, the default was not the next group's own");
+
+    // The base group's image comes first whatever its name: ZED before group a's SKY, and a base
+    // aperture before another group's sky.
+    auto base_first = Store002();
+    base_first[""] = RootWith(R"("schema_version":"0.0.2","data_groups":{"base":{"sky":"ZED"},"a":{"sky":"SKY"}})");
+    base_first["ZED"] = SkyArray();
+    auto base_first_store = Open(base_first);
+    Require(static_cast<bool>(base_first_store), "the in-memory store failed to open");
+    const auto zed = XradioProfile().Discover(base_first_store.value());
+    Require(static_cast<bool>(zed) && ImageIds(zed.value().images) == std::vector<std::string>{"ZED", "SKY"} &&
+                zed.value().default_image_id == "ZED",
+            "the base group's ZED was not listed and chosen before group a's SKY");
+    auto base_aperture = Store002();
+    base_aperture[""] =
+        RootWith(R"("schema_version":"0.0.2","data_groups":{"base":{"aperture":"APERTURE"},"a":{"sky":"SKY"}})");
+    base_aperture["APERTURE"] =
+        SkyArray("float32", R"({"type":"aperture"})", R"(["time","frequency","polarization","u","v"])");
+    base_aperture["u"] = NumericArray("[4]", R"(["u"])", "float64", R"({"units":"lambda","crval":0.0})");
+    base_aperture["v"] = NumericArray("[5]", R"(["v"])", "float64", R"({"units":"lambda","crval":0.0})");
+    auto base_aperture_store = Open(base_aperture);
+    Require(static_cast<bool>(base_aperture_store), "the in-memory store failed to open");
+    const auto aperture_first = XradioProfile().Discover(base_aperture_store.value());
+    Require(static_cast<bool>(aperture_first) && aperture_first.value().default_image_id == "APERTURE",
+            "the base group's aperture was not the default before another group's sky");
+
+    // No group names an image that opens, so the default is the first of the rest.
+    auto ungrouped = Store002();
+    ungrouped["SKY"] = SkyArray("complex64");
+    ungrouped["EXTRA"] = SkyArray();
+    auto ungrouped_store = Open(ungrouped);
+    Require(static_cast<bool>(ungrouped_store), "the in-memory store failed to open");
+    const auto rest = XradioProfile().Discover(ungrouped_store.value());
+    Require(static_cast<bool>(rest) && rest.value().default_image_id == "EXTRA",
+            "an image no data group names was not the default when no group's opens");
 
     // Without SKY, the dataset opens on a part of the sky rather than on its point spread function.
     auto skyless = Store002();
@@ -1881,7 +2034,7 @@ int main() {
         TestMalformedCoordinateSystemIsInvalid();
         TestAMissingCoordinateSystemIsInvalid();
         TestFirstFaultIsTheOnlyDiagnostic();
-        TestIncompleteImageIsNotMatch();
+        TestAnImageWithoutItsPlanesAxesIsInvalid();
         TestDiscoveryClassifiesVariables();
         TestOpenableGate();
         TestAnImageDisagreeingWithACoordinateIsNotOpenable();
@@ -1899,7 +2052,7 @@ int main() {
         TestADeclaredFlagIsBinding();
         TestADeclaredFlagThatCannotMaskClosesTheImageInTheListing();
         TestAnImageWithAnAxisBeyondTheFiveIsNotOpenable();
-        TestAmbiguousFlagsSelectNone();
+        TestAnUndeclaredFlagIsTakenOnlyByItsName();
         TestADataGroupDeclaresItsSkysFlag();
         TestStoreRejections();
         TestANullConsolidatedBlockIsNoConsolidation();

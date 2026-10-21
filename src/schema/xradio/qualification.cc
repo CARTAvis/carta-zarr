@@ -35,6 +35,35 @@ std::optional<Diagnostic> UnusableDeclaredFlag(const Store& store, const zarr_me
         std::string(node)};
 }
 
+// Why a data group's word for this node and the node's own type disagree, or nothing when they do
+// not. A group naming a variable as its `sky`, or in another image role, says what it is, and the
+// schema holds the variable to that role's type: a SKY typed "Intensity" is the store contradicting
+// itself, not an image of a type this library does not know.
+std::optional<Diagnostic> RoleContradiction(const Store& store, std::string_view node, const std::string& type) {
+    const auto* const groups = MemberObject(store.RootAttributes(), "data_groups");
+    if (groups == nullptr) {
+        return std::nullopt;
+    }
+    for (const auto& [group_name, group] : groups->items()) {
+        if (!group.is_object()) {
+            continue;
+        }
+        for (const auto& [role, value] : group.items()) {
+            if (!ImagePlane(role) || !value.is_string() || role == type) {
+                continue;
+            }
+            const auto named = NormalizeNodeName(value.get<std::string>());
+            if (named && named.value() == node) {
+                return Diagnostic{
+                    DiagnosticCode::invalid_metadata,
+                    "Data group '" + group_name + "' names it as its " + role + ", but it is typed '" + type + "'",
+                    std::string(node)};
+            }
+        }
+    }
+    return std::nullopt;
+}
+
 }  // namespace
 
 NodeQualification QualifyNode(const Store& store, const NodeEntry& entry) {
@@ -68,18 +97,35 @@ NodeQualification QualifyNode(const Store& store, const NodeEntry& entry) {
     }
 
     const auto& array = metadata.value();
+    // What an image is, is its type: schema 0.0.2 types every one. An untyped variable, or one of a
+    // type that is no image's -- a flag, a coordinate, a normalization, a beam table -- is not one,
+    // whatever its dimensions (ADR 0001). Asked after a data group's word for it, which a flag named
+    // as a group's sky contradicts as much as any other type does.
+    const std::string type = AttributeString(array.attributes, "type");
+    if (auto contradiction = RoleContradiction(store, node, type); contradiction) {
+        return NodeQualification{true, false, std::move(contradiction), true};
+    }
     if (IsFlag(array)) {
         return NodeQualification{};
     }
-
-    const auto plane = PlaneOf(array);
+    const auto plane = ImagePlane(type);
     if (plane) {
         const bool sky = *plane == Plane::sky;
         const std::string on_plane = sky ? "sky-plane" : "aperture-plane";
-        // A boolean here is a flag that was not typed one, which XRADIO 1.2.2's FITS reader writes. It is
-        // not an image, and was called complex for being not real; xarray's int8 encoding of a bool is
-        // real and was offered as an image of zeroes and ones. Listed, so that the store says why its
-        // image opens with no pixel mask.
+        // Typed as an image of a plane, it has to be over that plane's coordinates, or it is described
+        // by axes it does not have.
+        if (!CarriesPlane(array, *plane)) {
+            return NodeQualification{true, false,
+                                     Diagnostic{DiagnosticCode::invalid_metadata,
+                                                "Typed '" + type + "', an image of the " + (sky ? "sky" : "aperture") +
+                                                    " plane, but its dimensions are not time, frequency, "
+                                                    "polarization, " +
+                                                    (sky ? "l and m" : "u and v"),
+                                                std::string(node)},
+                                     true};
+        }
+        // An image of booleans is not one this library opens. xarray's int8 encoding of a bool is real,
+        // and would otherwise be offered as an image of zeroes and ones.
         if (HoldsBooleans(array)) {
             return NodeQualification{
                 true, false,

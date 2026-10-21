@@ -414,8 +414,8 @@ void TestReferenceFixture() {
     Require(image_ids == std::vector<std::string>{"SKY", "SKY_MODEL", "SKY_RESIDUAL", "MASK", "APERTURE", "COMPLEX"},
             "discovery did not enumerate the multi-image fixture in display order");
     Require(dataset.value().descriptor().default_image_id == "SKY", "default image was not the first openable image");
-    // right_ascension and declination are float64 over (l, m) with no type attribute. Matching only
-    // "has l and m" would list them as openable images; matching the whole axis set never reads them.
+    // right_ascension and declination are float64 over (l, m) with no type attribute, so they are no
+    // images: an image is what its type says it is, and its axes are then held to that type's plane.
     for (const auto& coordinate : {"right_ascension", "declination", "velocity", "beam_params_label"}) {
         Require(std::find(image_ids.begin(), image_ids.end(), coordinate) == image_ids.end(),
                 std::string("optional coordinate ") + coordinate + " was listed as an image");
@@ -476,7 +476,8 @@ void TestReferenceFixture() {
     Require(static_cast<bool>(model), "SKY_MODEL image could not be opened");
     Require(model.value().descriptor().data_groups == std::vector<std::string>{"model"},
             "SKY_MODEL data group metadata was not isolated");
-    Require(!model.value().descriptor().pixel_mask_id.empty(), "SKY_MODEL did not use the unique shape-matching flag");
+    // MASK_0 fits it, and is SKY's: a sky image whose group declares no flag has none.
+    Require(model.value().descriptor().pixel_mask_id.empty(), "SKY_MODEL took a flag it does not declare");
 
     const auto residual = dataset.value().OpenImage("SKY_RESIDUAL");
     Require(static_cast<bool>(residual), "SKY_RESIDUAL image could not be opened");
@@ -622,7 +623,7 @@ void TestADisagreeingImageIsRefusedThroughTheDataset(const std::filesystem::path
     CreateValidStore(root);
     Write(root / "MODEL" / "zarr.json",
           "{\"shape\":[1,7,2,4,5],\"data_type\":\"float32\",\"chunk_grid\":{\"name\":\"regular\","
-          "\"configuration\":{\"chunk_shape\":[1,1,1,2,5]}},\"attributes\":{\"units\":\"Jy/beam\"},"
+          "\"configuration\":{\"chunk_shape\":[1,1,1,2,5]}},\"attributes\":{\"units\":\"Jy/beam\",\"type\":\"sky\"},"
           "\"dimension_names\":[\"time\",\"frequency\",\"polarization\",\"l\",\"m\"],"
           "\"zarr_format\":3,\"node_type\":\"array\"}");
 

@@ -88,5 +88,5 @@ FITS reader needs a `CTYPE` on every axis, and without `DATE-OBS` or `MJD-OBS` t
 MJD 0. Both generators are deterministic, so regenerating produces no diff unless a pinned dependency
 changed.
 
-Cases XRADIO cannot or will not produce — malformed metadata, an ambiguous flag, sharded storage,
-and corrupted string chunks — stay in the synthetic fixtures.
+Cases XRADIO cannot or will not produce — malformed metadata, sharded storage and corrupted string
+chunks — stay in the synthetic fixtures.

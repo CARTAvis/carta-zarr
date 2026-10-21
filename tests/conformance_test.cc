@@ -61,7 +61,7 @@ carta::zarr::Image OpenSky() {
     Require(static_cast<bool>(dataset), "Dataset::Open failed on XRADIO's own output");
 
     // XRADIO writes right_ascension, declination and velocity as coordinates alongside SKY. Only
-    // SKY carries the full sky axis set, so only SKY is an image.
+    // SKY is typed as an image, so only SKY is one.
     Require(dataset.value().descriptor().images.size() == 1 &&
                 dataset.value().descriptor().images.front().id == "SKY" &&
                 dataset.value().descriptor().images.front().openable,
@@ -231,11 +231,6 @@ void TestFlagsMaskTheirOwnImage(const carta::zarr::Dataset& dataset, const std::
     Require(descriptor.pixel_mask_id == flag_id, image_id + " should take " + flag_id +
                                                      ", which data_groups names as its flag, and took '" +
                                                      descriptor.pixel_mask_id + "'");
-    Require(std::none_of(descriptor.diagnostics.begin(), descriptor.diagnostics.end(),
-                         [](const carta::zarr::Diagnostic& diagnostic) {
-                             return diagnostic.code == carta::zarr::DiagnosticCode::ambiguous_pixel_mask;
-                         }),
-            image_id + " reported an ambiguous flag although data_groups names one");
 
     for (std::uint64_t polarization = 0; polarization < 3; ++polarization) {
         const auto counted = CountedPerChannel(image, polarization);
@@ -346,7 +341,7 @@ void TestKeywordsConversion() {
 // The amplitude of the cube's transform, an image of the aperture plane as CASA's ia.fft makes one,
 // converted by XRADIO 1.3.0. u and v play the spatial roles, so the reads and reductions reach them
 // as they reach l and m; it has an aperture coordinate and no direction; its mask is FLAG_APERTURE,
-// found by its shape since no data group names it; and it has no beams.
+// found by the name XRADIO gives it since no data group can name it; and it has no beams.
 void TestApertureConversion() {
     const std::filesystem::path fixture{CARTA_ZARR_CONFORMANCE_APERTURE_FIXTURE};
     const auto context = carta::zarr::Context::Create();

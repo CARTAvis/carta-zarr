@@ -38,8 +38,6 @@ enum class DiagnosticCode {
     unrecognised_node,
     // An array whose metadata would not parse.
     unreadable_array,
-    // More than one flag variable claims the same image.
-    ambiguous_pixel_mask,
     // A coordinate whose samples are not evenly spaced, so it has no linear description.
     nonuniform_axis,
     // A coordinate with no sample at its reference world value, so its reference pixel was
@@ -64,8 +62,6 @@ inline const char* DiagnosticCodeName(DiagnosticCode code) noexcept {
             return "unrecognised_node";
         case DiagnosticCode::unreadable_array:
             return "unreadable_array";
-        case DiagnosticCode::ambiguous_pixel_mask:
-            return "ambiguous_pixel_mask";
         case DiagnosticCode::nonuniform_axis:
             return "nonuniform_axis";
         case DiagnosticCode::inexact_reference_pixel:

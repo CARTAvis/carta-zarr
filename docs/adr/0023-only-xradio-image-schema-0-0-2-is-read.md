@@ -26,8 +26,10 @@ names): a row held only what differed between versions, and with one version not
   diagnostics and `ErrorCode::unsupported_schema_version` from `Dataset::Open`, as any other
   version is, and the message says to write it again with XRADIO 1.2.5 or later.
 - A store that names 0.0.2 but fails ADR 0022's checks -- it has data groups, the sky image they
-  name, if they name one, is typed `"sky"`, and its frequency coordinate, if it has one, gives a frame
-  and units -- is malformed: `invalid`, with `invalid_metadata` and the reason. The checks stay
+  name, if they name one, is an array, and its frequency coordinate, if it has one, gives a frame and
+  units -- is malformed: `invalid`, with `invalid_metadata` and the reason. (That sky had to be typed
+  `"sky"` here until 0.3.0; since [#59](https://github.com/CARTAvis/carta-zarr/issues/59) a sky typed
+  otherwise is malformed as an image, which refuses the store only when nothing else in it opens.) The checks stay
   because the version alone does not say a store conforms: XRADIO 1.2.5 stamps 0.0.2 on any store it
   upgrades on read, including stores its own `check_image` rejects.
 - A store whose data groups name no sky image is not malformed for that

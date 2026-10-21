@@ -1,5 +1,9 @@
 # An array is held to its own document once, by the store, and an image when it opens
 
+*Amended for 0.3.0 ([#63](https://github.com/CARTAvis/carta-zarr/issues/63)): the parser no longer
+takes `dimension_names` from the attributes, only from the top level, as TensorStore does. The
+decision below is unchanged.*
+
 A store that consolidated its metadata describes every array twice: once in the root's copy, which
 is what the store reads, and once in the array's own `zarr.json`, which is what the values are
 decoded from -- TensorStore opens an array from its own document, and so does the label decoder. The

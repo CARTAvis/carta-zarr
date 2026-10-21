@@ -31,11 +31,10 @@
       }
     }
   ],
-  "attributes": {
-    "dimension_names": [
-      "beam_params_label"
-    ]
-  },
+  "attributes": {},
+  "dimension_names": [
+    "beam_params_label"
+  ],
   "zarr_format": 3,
   "node_type": "array",
   "storage_transformers": []

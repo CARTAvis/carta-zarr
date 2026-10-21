@@ -274,19 +274,12 @@ Result<ArrayMetadata> ParseArrayMetadata(const nlohmann::json& metadata, std::st
         result.shape.push_back(dimension.get<std::uint64_t>());
     }
 
-    const nlohmann::json* dimensions = nullptr;
     if (metadata.contains("dimension_names")) {
-        dimensions = &metadata.at("dimension_names");
-    } else if (metadata.contains("attributes") && metadata.at("attributes").is_object() &&
-               metadata.at("attributes").contains("dimension_names")) {
-        // Some XRADIO v1.2 coordinate fixtures store this field in attributes.
-        dimensions = &metadata.at("attributes").at("dimension_names");
-    }
-    if (dimensions != nullptr) {
-        if (!dimensions->is_array() || dimensions->size() != result.shape.size()) {
+        const auto& dimensions = metadata.at("dimension_names");
+        if (!dimensions.is_array() || dimensions.size() != result.shape.size()) {
             return Error{ErrorCode::invalid_metadata, "Array dimension_names must match shape rank", node_path};
         }
-        for (const auto& dimension : *dimensions) {
+        for (const auto& dimension : dimensions) {
             if (!dimension.is_string()) {
                 return Error{ErrorCode::invalid_metadata, "Array dimension names must be strings", node_path};
             }

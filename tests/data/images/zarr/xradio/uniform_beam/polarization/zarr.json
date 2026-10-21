@@ -31,11 +31,10 @@
       }
     }
   ],
-  "attributes": {
-    "dimension_names": [
-      "polarization"
-    ]
-  },
+  "attributes": {},
+  "dimension_names": [
+    "polarization"
+  ],
   "zarr_format": 3,
   "node_type": "array",
   "storage_transformers": []

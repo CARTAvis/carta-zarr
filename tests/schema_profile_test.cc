@@ -259,18 +259,22 @@ void TestNothingOpenableSaysWhy() {
     refused(complex, carta::zarr::DiagnosticCode::unsupported_data_type,
             "Complex sky-plane variables are not openable");
 
-    // A boolean on the sky plane is a flag that was not typed one -- XRADIO 1.2.2's FITS reader leaves
-    // FLAG_SKY so -- and it is said to be one, not called complex, whatever it is typed. xarray's
-    // encoding of a bool, an int8 that records its dtype, is a boolean too, and is not offered as an
-    // image of zeroes and ones.
+    // An image of booleans holds a flag's values, and is said to, not called complex.
     auto boolean = CompleteStore();
     boolean["SKY"] = SkyArray("bool");
     refused(boolean, carta::zarr::DiagnosticCode::unsupported_data_type,
             "Boolean sky-plane variables are not openable; a flag is typed 'flag'");
-    auto encoded = CompleteStore();
-    encoded["SKY"] = SkyArray("int8", R"({"type":"sky","dtype":"bool"})");
-    refused(encoded, carta::zarr::DiagnosticCode::unsupported_data_type,
-            "Boolean sky-plane variables are not openable; a flag is typed 'flag'");
+
+    // An int8 is a number, whatever its attributes record: typed as a sky image, it is one, and opens.
+    auto int8_sky = CompleteStore();
+    int8_sky["SKY"] = SkyArray("int8", R"({"type":"sky","dtype":"bool"})");
+    auto int8_store = Open(int8_sky);
+    Require(static_cast<bool>(int8_store), "the in-memory store failed to open");
+    const auto int8_listing = XradioProfile().Discover(int8_store.value());
+    Require(static_cast<bool>(int8_listing) &&
+                OpenableImageIds(int8_listing.value().images) == std::vector<std::string>{"SKY"},
+            "an int8 sky image recorded as bool was not listed openable as the number it is");
+    Require(Probe(int8_sky).kind == SchemaMatchKind::match, "a store of an int8 sky image did not match");
 
     // A real image typed for the aperture plane opens (ADR 0024); a complex one does not, on either plane.
     // Named SKY only so that the reason is found where the others' is; typed and grouped as what it is.
@@ -1005,7 +1009,7 @@ void TestADataGroupDeclaresItsSkysFlag() {
     const std::string sky_dimensions = R"(["time","frequency","polarization","l","m"])";
     auto nodes = CompleteStore();
     nodes["FLAG_1"] = NumericArray("[1,3,2,4,5]", sky_dimensions, "bool", R"({"type":"flag"})");
-    nodes["FLAG_2"] = NumericArray("[1,3,2,4,5]", sky_dimensions, "int8", R"({"type":"flag","dtype":"bool"})");
+    nodes["FLAG_2"] = NumericArray("[1,3,2,4,5]", sky_dimensions, "bool", R"({"type":"flag"})");
 
     nodes[""] =
         RootGroupWithDataGroups(R"({"base":{"sky":"SKY","flag":"FLAG_2"},"other":{"sky":"OTHER","flag":"FLAG_1"}})");
@@ -1506,7 +1510,7 @@ void TestTheCoordinatesAreOneTable() {
 
 // A store of schema 0.0.2: it names the version, its base data group names SKY, SKY is typed "sky",
 // and its frequency coordinate gives a frame and units. Its reference frequency carries an observer
-// as well, as XRADIO 1.2.5 writes, which is not read.
+// as well, as XRADIO writes, which is not read.
 std::map<std::string, std::string> Store002() {
     auto nodes = CompleteStore();
     nodes[""] = RootWith(R"("schema_version":"0.0.2","data_groups":{"base":{"sky":"SKY"}})");
@@ -1586,9 +1590,9 @@ void TestAStoreNamingNoVersionIsRefused() {
             "Zarr that is not an image and names no version was refused");
 }
 
-// A store naming 0.0.2 that is not one -- XRADIO 1.2.5 stamps the version on an older store it
-// upgrades on read whether or not the upgrade reached everything -- is refused as malformed, and says
-// which requirement it failed.
+// A store naming 0.0.2 that is not one -- the version is a claim, which an older store upgraded on
+// read can carry without what it requires -- is refused as malformed, and says which requirement it
+// failed.
 void TestA002StoreThatIsNotOneIsInvalid() {
     const auto invalid = [](const std::map<std::string, std::string>& nodes, const std::string& reason,
                             std::optional<ErrorCode> described_as = std::nullopt) {
@@ -1715,8 +1719,8 @@ void TestA002StoreNamingNoSkyIsDecidedByWhatItHolds() {
                 psf_store.value(), "POINT_SPREAD_FUNCTION", carta::zarr::internal::xradio::CoordinateValues{})),
             "a point spread function in a store naming no sky was not described");
 
-    // An older store with no sky, as XRADIO 1.2.3's empty-image factory wrote it, is stamped 0.0.2 by
-    // the upgrade as readily as one with a sky, and its frequency is held to 0.0.2 all the same.
+    // A store with no sky is held to 0.0.2's frequency all the same: the schema requires its frame and
+    // units of every store.
     auto no_frame = psf;
     no_frame["frequency"] = FrequencyArray("[3]", R"({"units":"Hz"})");
     const auto unframed = probe_of(no_frame);

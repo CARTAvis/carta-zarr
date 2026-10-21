@@ -168,8 +168,8 @@ void TestTemporalAndStorage(const carta::zarr::ImageDescriptor& sky, const carta
 }
 
 // The flagged fixture is the same FITS image, made into two CASA images with internal masks and
-// converted together, which is what XRADIO writes from CASA: each flag an int8 with `dtype: "bool"`,
-// true where the pixel is bad, and tied to its sky image only through the root's `data_groups`.
+// converted together, which is what XRADIO writes from CASA: each flag a Zarr bool, true where the
+// pixel is bad, and tied to its sky image only through the root's `data_groups`.
 //
 // Every pixel of the FITS image is finite, and its value is f*60 + s*20 + y*5 + x for frequency f,
 // Stokes s and casacore pixel (x, y), so a pixel's value names it. The generator's MASKED_PIXELS

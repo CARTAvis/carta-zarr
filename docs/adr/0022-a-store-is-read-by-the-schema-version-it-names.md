@@ -68,8 +68,9 @@ unversioned row, which reads what the code of XRADIO 1.2 wrote, until that row i
 Some rules are kept for every version, because they defend against stores found in practice rather
 than against any version's layout:
 
-- a boolean on the sky plane that is not typed `flag` is not offered as an image;
-- a flag may be a Zarr `bool` or an `int8` declared `dtype: bool`;
+- an image of booleans is not offered as an image;
+- a flag is a Zarr `bool` (until 0.3.0 an `int8` declared `dtype: bool` was one too, which no store
+  of schema 0.0.2 holds; [#60](https://github.com/CARTAvis/carta-zarr/issues/60));
 - an image's flag is found by ADR 0019's three steps, the last of which takes `FLAG_<image>` for an
   image that is not a sky image, which XRADIO's `FLAG_POINT_SPREAD_FUNCTION` needs because nothing
   links it to its image;

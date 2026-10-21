@@ -54,10 +54,9 @@ XRADIO version reports which assumption the new version broke.
 
 `images/zarr/xradio/conformance_flagged` is the same FITS image made into two CASA images with
 casatools, each given an internal mask over a few known pixels, and converted together as `sky` and
-`sky_other`. It is what XRADIO writes from CASA and the FITS conversion never does: each flag an
-`int8` with `dtype: "bool"`, true where casacore's mask was false, and tied to its image only by the
-root's `data_groups`. Two flags of the same shape mean a reader guessing from dimensions finds two
-candidates for each image. Importing casatools downloads CASA's runtime data (about 340 MB, into
+`sky_other`. It is what XRADIO writes from CASA: each flag a Zarr `bool`, true where casacore's mask
+was false, and tied to its image only by the root's `data_groups`. Two flags of the same shape mean
+each image's flag can be told only from what its data group declares. Importing casatools downloads CASA's runtime data (about 340 MB, into
 `~/.casa/data`) the first time.
 
 `images/zarr/xradio/conformance_continuum` is the same FITS image cut to one channel, with `BTYPE =

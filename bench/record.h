@@ -30,7 +30,9 @@ namespace carta::zarr::bench {
 
 // 10: region and exact cube-histogram operations ask for sum_sq_dev, as carta-backend does, so their
 // timings are of a heavier reduction than those of version 9.
-inline constexpr int kCsvVersion = 10;
+// 11: region operations say when their blocks arrived and how long a stop took, with the hint and
+// the stop that shaped them as settings.
+inline constexpr int kCsvVersion = 11;
 
 // What a dataset's bench-manifest.json says, for the columns the library cannot answer. Empty for a
 // dataset the generator did not write, which the bench reads as well as any other.
@@ -78,6 +80,8 @@ struct Row {
     unsigned ops = 0;
     // Each only for the mode it shapes, and empty for the others.
     std::string region_fraction;
+    std::string region_emit_chunks;
+    std::string region_stop_after_s;
     std::string histogram_method;
     std::string animation_frames;
     std::string animation_fps;
@@ -115,6 +119,17 @@ struct Row {
     std::optional<double> late_max_s;
     std::optional<unsigned> prefetches;
     std::optional<unsigned> late_prefetches;
+    // How a region's results arrived: the sink's calls, the finished blocks among them, when the first
+    // finished block arrived, and the longest wait between two calls and between two finished blocks,
+    // empty for fewer than two. See HandOvers.
+    std::optional<unsigned> handovers;
+    std::optional<unsigned> blocks;
+    std::optional<double> block_first_s;
+    std::optional<double> handover_gap_max_s;
+    std::optional<double> block_gap_max_s;
+    // From when a region was told to stop to when the reduction returned, cancelled or finished. Empty
+    // for one that returned first, or was never told.
+    std::optional<double> stop_s;
 };
 
 // The settings columns of a row, from the options and the dataset: everything a row says before

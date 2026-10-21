@@ -9,6 +9,7 @@
 #include <algorithm>
 #include <array>
 #include <charconv>
+#include <cmath>
 #include <cstdlib>
 #include <limits>
 #include <utility>
@@ -36,7 +37,7 @@ constexpr std::array<std::pair<ColdMethod, std::string_view>, 4> kColdMethods{{
 
 // The options of run that take a value, so that one it does not know is reported as unknown rather
 // than as missing its value.
-constexpr std::array<std::string_view, 19> kRunOptions{
+constexpr std::array<std::string_view, 21> kRunOptions{
     "--image",
     "--mode",
     "--trials",
@@ -53,6 +54,8 @@ constexpr std::array<std::string_view, 19> kRunOptions{
     "--csv",
     "--label",
     "--region-fraction",
+    "--region-emit-chunks",
+    "--region-stop-after",
     "--histogram-method",
     "--animation-frames",
     "--animation-fps",
@@ -91,6 +94,10 @@ frame rate through the shared one, as CARTA's animator does, and records which f
                              chunks decoded in the background, stopping once a frame is late while
                              one is under way, and nothing unless the cache holds two runs
   --region-fraction F        the share of the plane a region box covers (0.05)
+  --region-emit-chunks N     ask for blocks of about N pixel chunks through emit_every_channels, as
+                             a caller could; 0 leaves the block to the library (0)
+  --region-stop-after S      tell a region to stop S seconds after it starts, and record how long it
+                             took to; 0 never stops one (0)
   --histogram-method METHOD  exact, binned or sampled:N, as the backend's --zarr_histogram_method (exact)
   --seed N                   where the random positions come from (1)
   --io-threads N             ContextOptions::io_threads, the backend's --zarr_file_io_threads (0)
@@ -290,6 +297,20 @@ Command ParseRun(Arguments& arguments) {
                 return bad();
             }
             options.region.fraction = fraction;
+        } else if (word == "--region-emit-chunks") {
+            const auto chunks = ParseNumber<unsigned>(*value);
+            if (!chunks) {
+                return bad();
+            }
+            options.region.emit_chunks = *chunks;
+        } else if (word == "--region-stop-after") {
+            char* end = nullptr;
+            const std::string text(*value);
+            const double seconds = std::strtod(text.c_str(), &end);
+            if (text.empty() || end != text.c_str() + text.size() || !(seconds >= 0.0 && std::isfinite(seconds))) {
+                return bad();
+            }
+            options.region.stop_after_s = seconds;
         } else if (word == "--histogram-method") {
             const auto method = HistogramMethod::Parse(*value);
             if (!method) {

@@ -270,8 +270,8 @@ Striping a dataset's directory across one OST or across eight made no difference
 of a few megabytes: a chunk file smaller than the stripe size lives on one OST either way. What
 striping cannot change is the number of files, which every open and every stat sends to the metadata
 server that all clients share: a 32 GiB cube in 128-deep chunks is 4,000 files, and a terabyte cube in
-the same chunks would be over 100,000. Shards -- chunks gathered into one file, each still read on its
-own -- are the remedy, and are worth including in a sweep on a busy file system. The sweep accepts
+the same chunks would be over 100,000. Shards -- chunks gathered into one file, a read taking from it only the
+chunks it needs -- are the remedy, and are worth including in a sweep on a busy file system. The sweep accepts
 them relative to the chunk, `frequency*8` or `l*4,m*4`. The sweep ranks only first touches, operations
 that read no chunk another operation of the same trial read before or alongside them. A sharded
 layout's first touches are counted by chunk, as an unsharded one's are, so a read that finds its

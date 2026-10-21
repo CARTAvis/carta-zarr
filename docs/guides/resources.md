@@ -46,8 +46,10 @@ auto result = image.Read(request, {pixels.data(), pixels.size()}, options,
 
 Here `stop` is a live `std::atomic<bool>`. Cancellation and deadlines are checked
 at storage-operation boundaries; an in-flight decode is not forcibly interrupted.
-On failure, including cancellation, discard the destination. During progress
-callbacks, the reported prefix is complete.
+The prefix a progress callback reports is complete, and stays complete if the
+read then fails or is cancelled: keep it and discard the rest of the
+destination. A read without a progress callback has no such prefix; discard
+its whole destination on failure.
 
 `ReduceSpectral` and `ComputeHistogram` deliver results to a callback, their
 sink, which cancels the operation by returning false. A cube histogram reports

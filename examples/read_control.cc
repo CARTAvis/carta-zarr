@@ -62,7 +62,8 @@ int main(int argc, char** argv) {
             return true;
         });
     if (!read) {
-        return examples::Report(read.error());  // Discard pixels on every failure.
+        // Only what progress last reported is final; this example keeps none of it.
+        return examples::Report(read.error());
     }
     if (read.value() != elements.value() || completed != elements.value()) {
         std::cerr << "The read did not report its complete output\n";

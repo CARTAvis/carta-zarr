@@ -234,6 +234,36 @@ void TestProgressCanStopTheRead() {
     Require(source.pixel_reads() == 1, "the read carried on past the piece its caller stopped it at");
 }
 
+// What a progress callback reported before a read was stopped is final, which Image::Read promises
+// so that a caller can keep the channels read before a cancel. Stopped after the second of three
+// pieces, the first two pieces are what a read that finished would have written.
+void TestAStoppedReadKeepsWhatItReported() {
+    const auto image = MakeImage();
+    const auto geometry = MakeGeometry();
+    SyntheticPixelSource source(image, geometry, Value);
+
+    ReadOptions options;
+    options.read_budget_bytes = kThreePieces;
+    std::size_t reports = 0;
+    std::size_t kept = 0;
+    const ProgressCallback progress = [&](std::size_t written, std::size_t) {
+        kept = written;
+        return ++reports < 2;
+    };
+
+    std::vector<float> destination(kElements, kUntouched);
+    const auto read =
+        ReadInPieces(source, image, geometry, geometry, WholeCube(),
+                     BufferView<float>{destination.data(), destination.size()}, options, kDecodeThreads, progress);
+    Require(!read && read.error().code == ErrorCode::cancelled, "a progress callback returning false did not cancel");
+    Require(kept > 0 && kept < kElements, "the read was not stopped partway through");
+    for (std::size_t at = 0; at < kept; ++at) {
+        // The formula's value at a dense offset is the offset itself.
+        Require(destination.at(at) == static_cast<float>(at),
+                "the element at " + std::to_string(at) + ", before the reported count, is not final");
+    }
+}
+
 // Splitting is supposed to change how the read is issued and nothing else. The oracle is the
 // formula, so this is not two implementations agreeing with each other.
 void TestASplitReadAgreesWithAnUnsplitOne() {
@@ -549,6 +579,7 @@ int main() {
         TestACeilingTooLowToFitIsReadAChunkAtATime();
         TestProgressCountsElementsAndFinishesAtTheTotal();
         TestProgressCanStopTheRead();
+        TestAStoppedReadKeepsWhatItReported();
         TestASplitReadAgreesWithAnUnsplitOne();
         TestEachPieceIsHandedTheRestOfTheBuffer();
         TestAReadWithoutProgressIsCutToItsBudgetButAPlane();

@@ -98,7 +98,7 @@ void TestTheFastSpatialAxisIsWhicheverWasStoredLast() {
     Require(l_last.fastest_spatial_axis == AxisRole::spatial_x, "and l stored last makes it l");
 }
 
-// A chunk is what must be decoded to reach a byte; a shard is what one request fetches. They are
+// A chunk is what must be decoded to reach a byte; a shard is the file that holds several. They are
 // separate granularities and a sharded array is the case where they differ, which is the reason the
 // two fields exist rather than one.
 void TestASharedArrayKeepsBothGranularities() {

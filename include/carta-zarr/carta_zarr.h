@@ -74,14 +74,19 @@ public:
     // The overloads said nothing but "and the rest are defaults", three times over for Read, and a
     // reader had to open each to see that it forwarded.
 
-    // Reads a densely packed result in logical axis order, axis 0 fastest-varying. Returns the
-    // number of elements written. Safe to call concurrently on one handle. On failure, the
-    // destination may be unchanged, partially written, or fully written; callers must discard it.
-    //
-    // float is the only output this library produces. It is said in the destination's type rather
-    // than asked for in the request, because a request that could name a type the buffer was not
-    // shaped for is a mistake worth making unspellable.
-    //
+    /// Reads a densely packed result in logical axis order, axis 0 fastest-varying. Returns the
+    /// number of elements written. Safe to call concurrently on one handle.
+    ///
+    /// On failure, cancellation and a passed deadline included, the elements a progress callback last
+    /// reported as written are final: the destination before that count holds what a read that
+    /// succeeded would have put there. Everything after it may be unchanged, partially written or
+    /// fully written, and a caller discards it. A read given no progress callback reports no such
+    /// count, so on failure a caller discards all of its destination.
+    ///
+    /// float is the only output this library produces. It is said in the destination's type rather
+    /// than asked for in the request, because a request that could name a type the buffer was not
+    /// shaped for is a mistake worth making unspellable.
+    ///
     /// It is read in pieces that keep to ReadOptions::read_budget_bytes, and a progress callback
     /// watches them as they finish. See ProgressCallback.
     Result<std::size_t> Read(const ReadRequest& request, BufferView<float> destination, const ReadOptions& options = {},

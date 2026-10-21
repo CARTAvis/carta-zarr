@@ -13,6 +13,7 @@
 
 #include <cstddef>
 #include <string>
+#include <utility>
 
 namespace carta::zarr::internal::xradio {
 namespace {
@@ -53,10 +54,13 @@ std::optional<Diagnostic> RoleContradiction(const Store& store, std::string_view
             }
             const auto named = NormalizeNodeName(value.get<std::string>());
             if (named && named.value() == node) {
-                return Diagnostic{
-                    DiagnosticCode::invalid_metadata,
-                    "Data group '" + group_name + "' names it as its " + role + ", but it is typed '" + type + "'",
-                    std::string(node)};
+                std::string message = "Data group '" + group_name;
+                message.append("' names it as its ")
+                    .append(role)
+                    .append(", but it is typed '")
+                    .append(type)
+                    .append("'");
+                return Diagnostic{DiagnosticCode::invalid_metadata, std::move(message), std::string(node)};
             }
         }
     }

@@ -103,9 +103,10 @@ std::vector<UserKeyword> DescribeUserKeywords(const nlohmann::json& root_attribu
         const std::string& name = item.key();
         const auto& value = item.value();
         const auto left_out = [&](const std::string& why) {
-            diagnostics.push_back(Diagnostic{DiagnosticCode::unsupported_data_type,
-                                             "User keyword '" + name + "' " + why + ", and is not reported",
-                                             source.at(name)});
+            std::string message = "User keyword '" + name;
+            message.append("' ").append(why).append(", and is not reported");
+            diagnostics.push_back(
+                Diagnostic{DiagnosticCode::unsupported_data_type, std::move(message), source.at(name)});
         };
         if (value.is_boolean()) {
             keywords.push_back(UserKeyword{name, value.get<bool>()});
@@ -125,9 +126,13 @@ std::vector<UserKeyword> DescribeUserKeywords(const nlohmann::json& root_attribu
         } else if (value.is_string()) {
             keywords.push_back(UserKeyword{name, value.get<std::string>()});
         } else {
-            left_out(std::string("holds ") + (value.is_object()  ? "a dictionary"
-                                              : value.is_array() ? "a list"
-                                                                 : "no value"));
+            const char* held = "no value";
+            if (value.is_object()) {
+                held = "a dictionary";
+            } else if (value.is_array()) {
+                held = "a list";
+            }
+            left_out(std::string("holds ") + held);
         }
     }
     return keywords;

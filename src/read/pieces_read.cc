@@ -38,7 +38,7 @@ Result<zarr::PixelSelection> CheckRead(const ImageDescriptor& descriptor, const 
         return selection.error();
     }
     if (selection.value().elements() > destination_size) {
-        return Error{ErrorCode::invalid_argument, "Destination buffer is too small for the request", descriptor.id};
+        return Error{ErrorCode::buffer_too_small, "Destination buffer is too small for the request", descriptor.id};
     }
 
     // Before allocating a mask or starting any storage work. A cancelled request must not consume

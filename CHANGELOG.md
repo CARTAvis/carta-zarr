@@ -10,6 +10,9 @@ minor release may change the ABI, and the soname says so ([ADR 0020](docs/adr/00
 ### Added
 * `CARTA_ZARR_THREAD_SANITIZER` builds the library and everything it links, TensorStore included, with ThreadSanitizer, for running the threading tests under it. It patches one memory order in TensorStore's task queue that ThreadSanitizer cannot follow; no other build is patched ([#26](https://github.com/CARTAvis/carta-zarr/issues/26)).
 
+### Changed
+* A read, a prefetch or a reduction whose request does not fit the image's axes reports `ErrorCode::invalid_slice`, and a read whose destination is smaller than its selection reports `ErrorCode::buffer_too_small`, as `docs/troubleshooting.md` already said; both were `invalid_argument`. That covers a range past an axis's end, a zero stride or count, the wrong number of ranges, a spectral, polarization or time index outside the image, and a reduction's region that is empty or falls off the image. `invalid_argument` stays for other caller mistakes, such as a missing sink, no regions or too many, or a region's mask whose length is not its box's ([#36](https://github.com/CARTAvis/carta-zarr/issues/36)).
+
 ### Fixed
 * A store naming schema 0.0.2 whose data groups name no sky image is no longer refused as malformed. The schema does not require one, and XRADIO writes such stores: an aperture plane alone (`APERTURE`, `FLAG_APERTURE`), or a point spread function alone. A store of aperture-plane variables now answers `no_match`, saying they are not openable, and one with an image this library opens matches. A sky a data group names must still be typed `"sky"`, and a frequency coordinate must still have `frame` and `units` whatever the groups name ([#40](https://github.com/CARTAvis/carta-zarr/issues/40)).
 

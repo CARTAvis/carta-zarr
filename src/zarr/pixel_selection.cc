@@ -26,7 +26,7 @@ Result<PixelSelection> BuildSelection(const ImageDescriptor& descriptor, const R
     const auto rank = descriptor.axes.size();
     if (request.axes.size() != rank) {
         return Error{
-            ErrorCode::invalid_argument,
+            ErrorCode::invalid_slice,
             "Request has " + std::to_string(request.axes.size()) + " axes but the image has " + std::to_string(rank),
             descriptor.id};
     }
@@ -41,17 +41,17 @@ Result<PixelSelection> BuildSelection(const ImageDescriptor& descriptor, const R
         const auto& axis = descriptor.axes.at(logical);
         const auto& range = request.axes.at(logical);
         if (range.stride == 0) {
-            return Error{ErrorCode::invalid_argument, "Axis '" + axis.name + "' has a zero stride", descriptor.id};
+            return Error{ErrorCode::invalid_slice, "Axis '" + axis.name + "' has a zero stride", descriptor.id};
         }
         if (range.count == 0) {
-            return Error{ErrorCode::invalid_argument, "Axis '" + axis.name + "' selects no elements", descriptor.id};
+            return Error{ErrorCode::invalid_slice, "Axis '" + axis.name + "' selects no elements", descriptor.id};
         }
         // The last selected index is what has to fall inside the axis. It is compared by dividing
         // the room that is left rather than by multiplying out the span, because the span
         // overflows: a count and a stride of about 2^32 each multiply to a small number, which
         // passed this check and went on to size a buffer and drive the loops.
         if (range.start >= axis.length || range.count - 1 > (axis.length - 1 - range.start) / range.stride) {
-            return Error{ErrorCode::invalid_argument,
+            return Error{ErrorCode::invalid_slice,
                          "Axis '" + axis.name + "' request exceeds its length of " + std::to_string(axis.length),
                          descriptor.id};
         }
@@ -81,8 +81,7 @@ Result<PixelSelection> BuildSelection(const ImageDescriptor& descriptor, const R
     std::uint64_t elements = 1;
     for (const auto count : selection._count) {
         if (elements > std::numeric_limits<std::uint64_t>::max() / count) {
-            return Error{ErrorCode::invalid_argument, "Request selects more elements than can be counted",
-                         descriptor.id};
+            return Error{ErrorCode::invalid_slice, "Request selects more elements than can be counted", descriptor.id};
         }
         elements *= count;
     }

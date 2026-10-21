@@ -42,7 +42,7 @@ Result<void> ReadInto(const std::filesystem::path& array_path, const StoreContex
     // read writes through it as far as the selection reaches. Holding the one to the other is what
     // stands between a caller's mistake and a write past the end of its buffer.
     if (selection.destination_extent() > destination.size) {
-        return Error{ErrorCode::invalid_argument, "Destination buffer is too small", std::string(node)};
+        return Error{ErrorCode::buffer_too_small, "Destination buffer is too small", std::string(node)};
     }
 
     if (!context) {

@@ -217,8 +217,8 @@ void TestRejectedRequests(const carta::zarr::Image& sky) {
     const auto expect_rejected = [&](const carta::zarr::ReadRequest& request, const std::string& what) {
         const auto read = sky.Read(request, buffer);
         Require(!read, what + " should be rejected");
-        Require(read.error().code == carta::zarr::ErrorCode::invalid_argument,
-                what + " should be reported as an invalid argument, not an I/O failure");
+        Require(read.error().code == carta::zarr::ErrorCode::invalid_slice,
+                what + " should be reported as a slice that does not fit, not an I/O failure");
     };
 
     auto past_end = whole;
@@ -257,8 +257,8 @@ void TestRejectedRequests(const carta::zarr::Image& sky) {
     std::vector<float> small(2);
     const auto short_buffer = sky.Read(whole, {small.data(), small.size()});
     Require(!short_buffer, "a destination that is too small should be rejected");
-    Require(short_buffer.error().code == carta::zarr::ErrorCode::invalid_argument,
-            "a short destination is an invalid argument");
+    Require(short_buffer.error().code == carta::zarr::ErrorCode::buffer_too_small,
+            "a short destination is a buffer too small");
 }
 
 void TestReadControls(const carta::zarr::Image& sky) {

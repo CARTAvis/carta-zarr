@@ -154,7 +154,7 @@ private:
     // refused.
     static carta::zarr::Result<void> Fits(std::uint64_t total, std::size_t destination_elements) {
         if (total > destination_elements) {
-            return carta::zarr::Error{carta::zarr::ErrorCode::invalid_argument, "Destination buffer is too small",
+            return carta::zarr::Error{carta::zarr::ErrorCode::buffer_too_small, "Destination buffer is too small",
                                       "SKY"};
         }
         return carta::zarr::Result<void>{};

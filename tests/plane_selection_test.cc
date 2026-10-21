@@ -81,7 +81,7 @@ void Accepts(const ImageDescriptor& descriptor, const PlaneSelection& planes, co
 void Refuses(const ImageDescriptor& descriptor, const PlaneSelection& planes, const std::string& what) {
     const auto checked = Check(descriptor, planes);
     Require(!checked, what + " should have been refused");
-    Require(checked.error().code == ErrorCode::invalid_argument, what + " should be refused as invalid_argument");
+    Require(checked.error().code == ErrorCode::invalid_slice, what + " should be refused as invalid_slice");
 }
 
 // A selection that fits comes back saying what it was asked for, and saying it once, so a caller

@@ -291,22 +291,24 @@ void TestSinkCancels(const carta::zarr::Image& sky) {
 }
 
 void TestRejectedRequests(const carta::zarr::Image& sky) {
-    const auto rejects = [&](const carta::zarr::HistogramRequest& request, const std::string& what) {
+    const auto rejects = [&](const carta::zarr::HistogramRequest& request, const std::string& what,
+                             carta::zarr::ErrorCode code = carta::zarr::ErrorCode::invalid_argument) {
         const auto result = sky.ComputeHistogram(request, [](const carta::zarr::HistogramBlock&) { return true; });
-        Require(!result && result.error().code == carta::zarr::ErrorCode::invalid_argument, what);
+        Require(!result && result.error().code == code, what);
     };
     rejects(WholeSpectrum(0, 0.0F, 2000.0F, 0), "zero bins should be rejected");
     rejects(WholeSpectrum(0, 5.0F, 5.0F, 8), "an empty range should be rejected rather than divided by");
     rejects(WholeSpectrum(0, 10.0F, 1.0F, 8), "an inverted range should be rejected");
     auto outside = WholeSpectrum(0, 0.0F, 10.0F, 8);
     outside.planes.spectral = {0, kFrequency + 1, 1};
-    rejects(outside, "a spectral range outside the image should be rejected");
+    rejects(outside, "a spectral range outside the image should be rejected", carta::zarr::ErrorCode::invalid_slice);
     // As in a pixel read: (count - 1) * stride wraps to zero here, so a selection running far past
     // the spectral axis looks like it ends at its first channel. It is refused either way -- by the
     // slab read, once it gets there -- and this asks for it to be refused by the axis it names.
     auto overflowing = WholeSpectrum(0, 0.0F, 10.0F, 8);
     overflowing.planes.spectral = {0, (std::uint64_t{1} << 32U) + 1, std::uint64_t{1} << 32U};
-    rejects(overflowing, "a spectral count and stride whose span overflows should be rejected");
+    rejects(overflowing, "a spectral count and stride whose span overflows should be rejected",
+            carta::zarr::ErrorCode::invalid_slice);
 
     // Pixels are binned in float, so bounds that do not fit one leave nothing to bin against. What
     // else narrowing does to a range -- one float for both bounds, a width that underflows or

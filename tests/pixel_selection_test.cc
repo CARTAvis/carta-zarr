@@ -183,7 +183,7 @@ void TestASelectionKnowsHowManyElementsItProduces() {
 void TestAMalformedRequestNeverBecomesASelection() {
     const auto refused = [](const ImageDescriptor& image, const ReadRequest& request, const std::string& what) {
         const auto built = BuildSelection(image, request, DestinationOrder::logical);
-        Require(!built && built.error().code == carta::zarr::ErrorCode::invalid_argument, what + " was accepted");
+        Require(!built && built.error().code == carta::zarr::ErrorCode::invalid_slice, what + " was accepted");
     };
 
     ReadRequest short_request = Whole();
@@ -220,7 +220,7 @@ void TestAMalformedRequestNeverBecomesASelection() {
     everything.axes.at(1) = Range{0, std::uint64_t{1} << 32, 1};
     everything.axes.at(2) = Range{0, std::uint64_t{1} << 32, 1};
     const auto counted = BuildSelection(huge, everything, DestinationOrder::logical);
-    Require(!counted && counted.error().code == carta::zarr::ErrorCode::invalid_argument &&
+    Require(!counted && counted.error().code == carta::zarr::ErrorCode::invalid_slice &&
                 counted.error().message.find("more elements than can be counted") != std::string::npos,
             "a selection too large to count was not refused as one");
 }

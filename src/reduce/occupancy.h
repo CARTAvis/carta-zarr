@@ -180,8 +180,9 @@ struct PlaneExtent {
  */
 class Occupancy {
 public:
-    // Reports invalid_argument for a region set it cannot place: none, or more than
-    // kMaxSpectralRegions; a region that is empty, falls off `plane`, or carries a raster that is not
+    // Reports invalid_slice for a region that is empty or falls off `plane`, which does not fit the
+    // image as a read range past an axis does not. Reports invalid_argument for a region set it cannot
+    // place otherwise: none, or more than kMaxSpectralRegions; a region carrying a raster that is not
     // width * height bytes; and a set touching more chunks than one reduction can index. Nothing is
     // assumed of the regions, so nothing has to be checked before this is called.
     //

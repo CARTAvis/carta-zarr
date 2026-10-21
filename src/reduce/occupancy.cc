@@ -34,11 +34,11 @@ constexpr std::size_t kMaxChunkIncidences = 1u << 26;
 // wraps its extent around zero, and a raster of another length is read past its end.
 Result<void> Placeable(const RegionMask& region, std::size_t index, PlaneExtent plane, const std::string& node) {
     if (region.width == 0 || region.height == 0) {
-        return Error{ErrorCode::invalid_argument, "Region " + std::to_string(index) + " is empty", node};
+        return Error{ErrorCode::invalid_slice, "Region " + std::to_string(index) + " is empty", node};
     }
     if (region.x_start >= plane.width || region.width > plane.width - region.x_start ||
         region.y_start >= plane.height || region.height > plane.height - region.y_start) {
-        return Error{ErrorCode::invalid_argument, "Region " + std::to_string(index) + " falls outside the image", node};
+        return Error{ErrorCode::invalid_slice, "Region " + std::to_string(index) + " falls outside the image", node};
     }
     // Both inside the plane, so their product is a pixel count and cannot overflow.
     const auto box = region.width * region.height;

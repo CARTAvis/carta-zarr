@@ -318,8 +318,19 @@ struct SpectralReduceRequest {
     BufferView<const RegionMask> regions;
     StatisticSet statistics;
     // How often to hand results back, as a hint. Zero lets the library choose, which is what most
-    // callers want: it emits as often as it can without making the reads any smaller. A region
-    // covering the image then reports a chunk layer at a time, and a cursor-sized one far less often.
+    // callers want: a block is as many channels as one read affords for the regions' chunks, so the
+    // sink is called about once a read. The default read budget aims at two chunks for each decode
+    // thread, held between 256 MiB and 2 GiB, so a faster machine reads more at once: from a local
+    // disk, a read took 25-65 ms on four threads and on twenty-eight of one machine. From storage
+    // slower than decoding it takes longer, about 0.3 s from Lustre on thirty-two. A region whose chunk
+    // layer is more than a read -- one covering a large image -- hands its block over unfinished once a
+    // read and finished once a layer, which can take seconds.
+    //
+    // A smaller hint can shorten the reads too, since a read never crosses its block's end, unless
+    // the reads were already that short. What that does depends on the region and the storage: from
+    // Lustre, blocks of about sixteen chunks came every 0.1 s rather than 0.3 s and took large regions
+    // of the 30000-channel test cube 23-30% longer, with fewer chunks in flight at once, while a small
+    // region of the 256-channel one took a quarter less. ADR 0021 has the measurements.
     //
     // The library lowers a hint to fit a 64 MiB block budget and then to a whole number of
     // spectral chunks, because a block boundary inside a chunk would split one decode's results
@@ -415,8 +426,15 @@ private:
     std::size_t _statistic_count = 0;
 };
 
-// Called once per block, on the thread that called ReduceSpectral. Returning false cancels the
-// reduction, which then reports cancelled.
+// Called once per block, on the thread that called ReduceSpectral, and before each read of a block
+// after its first with the block unfinished (see SpectralBlock::complete). Returning false cancels
+// the reduction, which then reports cancelled.
+//
+// So does ReadControl::cancellation_requested, which is checked before each read and before and after
+// each storage operation. Neither interrupts a storage operation in flight or the accumulation of what
+// it read: a stop takes effect at the next check, which was within 0.1 s in the measurements of
+// ADR 0021. cancellation_requested set while the last read is accumulated is not checked again: the
+// reduction finishes unless the sink, handed the last block, returns false.
 using SpectralSink = std::function<bool(const SpectralBlock&)>;
 
 }  // namespace carta::zarr

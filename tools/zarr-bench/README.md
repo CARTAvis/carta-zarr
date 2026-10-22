@@ -93,6 +93,17 @@ open. `run` writes one CSV row per operation; `--help` lists its options.
   random pixel, `region` reduces every statistic over a box covering `--region-fraction` of the plane
   (5%), `cube-histogram` bins the cube, and `open` times `Context::Create`, `Dataset::Open` and
   `OpenImage` together. `--ops 8,spectrum=64` sets how many operations each makes per trial.
+- **Regions' blocks.** A `region` row says how its results arrived, as carta-backend draws a region's
+  spectral profile from them: `handovers` and `blocks` count the sink's calls and the finished blocks
+  among them, `block_first_s` is when the first finished block arrived, and `handover_gap_max_s` and
+  `block_gap_max_s` are the longest waits between two calls and between two finished blocks, empty
+  when there were fewer than two. `--region-emit-chunks N` asks for blocks of about N pixel chunks: an
+  `emit_every_channels` of `max(1, floor(N / F))` spectral chunk layers for a box that occupies F
+  chunks of a plane. `--region-stop-after S` tells each region to stop S seconds in, through
+  `ReadControl::cancellation_requested` and the sink, as a backend whose region changed would;
+  `stop_s` is how long the reduction took to return after that, even when it finished rather than
+  stopped, and is empty for one that returned first. A stopped region reads as 0 elements and
+  fingerprints as nothing read, since how far it got depends on the layout.
 - **First touches.** `plane` and `spectrum` read each operation through a cache pool of its own, made
   before the clock starts and the size of `--cache-bytes` (1 GiB for `default`, the backend's own
   default). Otherwise a layout whose chunks are 128 channels deep would answer most of a trial's

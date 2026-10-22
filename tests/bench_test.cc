@@ -211,6 +211,22 @@ void TestTheCommandLine() {
         Require(Get<Usage>(Parse({"run", "cube.zarr", "--region-fraction", bad})).error,
                 std::string("--region-fraction accepted ") + bad);
     }
+    const auto paced =
+        Get<RunOptions>(Parse({"run", "cube.zarr", "--region-emit-chunks", "16", "--region-stop-after", "0.25"}));
+    Require(paced.region.emit_chunks == 16, "--region-emit-chunks was lost");
+    Require(paced.region.stop_after_s == 0.25, "--region-stop-after was lost");
+    Require(defaults.region.emit_chunks == 0 && defaults.region.stop_after_s == 0.0,
+            "a region asks for a hint or a stop by default");
+    for (const char* bad : {"-1", "x", "1.5", ""}) {
+        Require(Get<Usage>(Parse({"run", "cube.zarr", "--region-emit-chunks", bad})).error,
+                std::string("--region-emit-chunks accepted ") + bad);
+    }
+    Require(Get<RunOptions>(Parse({"run", "cube.zarr", "--region-stop-after", "1e300"})).region.stop_after_s == 1e300,
+            "a stop far off was refused");
+    for (const char* bad : {"-0.1", "x", "nan", "inf", ""}) {
+        Require(Get<Usage>(Parse({"run", "cube.zarr", "--region-stop-after", bad})).error,
+                std::string("--region-stop-after accepted ") + bad);
+    }
 
     const auto unknown = Get<Usage>(Parse({"run", "cube.zarr", "--bogus"}));
     Require(unknown.error && unknown.message.find("unknown option") != std::string::npos,
@@ -423,6 +439,17 @@ void TestTheRunKeyIsTheSettings() {
     Require(RowTemplate(options, Mode::region, ColdMethod::fadvise, facts, "run-a").run_key !=
                 RowTemplate(wider, Mode::region, ColdMethod::fadvise, facts, "run-a").run_key,
             "the region fraction does not change the region's run key");
+    auto hinted = options;
+    hinted.region.emit_chunks = 16;
+    auto stopping = options;
+    stopping.region.stop_after_s = 0.5;
+    for (const auto& [changed, what] : {std::pair{hinted, "emit chunks"}, std::pair{stopping, "stop"}}) {
+        Require(RowTemplate(options, Mode::region, ColdMethod::fadvise, facts, "run-a").run_key !=
+                    RowTemplate(changed, Mode::region, ColdMethod::fadvise, facts, "run-a").run_key,
+                std::string("the region's ") + what + " does not change its run key");
+        Require(key == RowTemplate(changed, Mode::plane, ColdMethod::fadvise, facts, "run-a").run_key,
+                std::string("the region's ") + what + " changed the plane's run key");
+    }
     Require(RowTemplate(options, Mode::cube_histogram, ColdMethod::fadvise, facts, "run-a").run_key !=
                 RowTemplate(binned, Mode::cube_histogram, ColdMethod::fadvise, facts, "run-a").run_key,
             "the histogram method does not change the cube histogram's run key");
@@ -767,14 +794,16 @@ void TestAModeWritesOnlyItsOwnSettings() {
     const auto written = [&](Mode mode) {
         Row row;
         Workload::For(mode, options)->WriteSettings(row);
-        return std::vector<std::string>{row.region_fraction, row.histogram_method, row.animation_frames,
-                                        row.animation_fps, row.animation_prefetch};
+        return std::vector<std::string>{row.region_fraction,   row.region_emit_chunks, row.region_stop_after_s,
+                                        row.histogram_method,  row.animation_frames,   row.animation_fps,
+                                        row.animation_prefetch};
     };
     using Columns = std::vector<std::string>;
-    const Columns none{"", "", "", "", ""};
+    const Columns none{"", "", "", "", "", "", ""};
     Require(written(Mode::plane) == none && written(Mode::spectrum) == none && written(Mode::open) == none,
             "a mode no setting shapes wrote a setting");
-    Require(written(Mode::region) == Columns{"0.2", "", "", "", ""}, "region wrote other than its fraction");
+    Require(written(Mode::region) == Columns{"0.2", "0", "0", "", "", "", ""},
+            "region wrote other than its fraction, emit chunks and stop");
     // The fraction is part of the run key, so two that read different boxes are two spellings of it.
     // At four decimals 0.000001 and 0.000049 were both 0.0000 -- boxes of 4 and 36 elements on a
     // 1024-square plane -- and a resume skipped the second as done.
@@ -788,9 +817,9 @@ void TestAModeWritesOnlyItsOwnSettings() {
         Require(std::strtod(fraction(value).c_str(), nullptr) == value,
                 "the fraction " + fraction(value) + " does not read back as what it was written from");
     }
-    Require(written(Mode::cube_histogram) == Columns{"", "sampled:4", "", "", ""},
+    Require(written(Mode::cube_histogram) == Columns{"", "", "", "sampled:4", "", "", ""},
             "cube-histogram wrote other than its method");
-    Require(written(Mode::animation) == Columns{"", "", "8", "0", "true"},
+    Require(written(Mode::animation) == Columns{"", "", "", "", "8", "0", "true"},
             "animation wrote other than its frames, frame rate and prefetch");
 }
 
@@ -974,6 +1003,81 @@ void TestEachModeReads() {
             "open did not open the default image");
 }
 
+// A region says when its blocks arrived; a hint of one chunk a block gives one block a spectral chunk
+// layer without changing what it reads; and a region told to stop at once stops, reads nothing it
+// could be fingerprinted by, and says how long the stop took.
+void TestARegionTimesItsBlocksAndItsStop() {
+    const auto image = OpenDefault(kWide);
+    const auto axes = CubeAxes::Of(image.descriptor());
+    Require(axes.has_value(), "the wide fixture is not a cube");
+    const auto depth = image.chunk_geometry().chunk_shape.at(axes->spectral);
+    Require(axes->channels % depth == 0 && axes->channels / depth > 1,
+            "the wide fixture has too few spectral chunks to tell blocks apart");
+    const auto box = Plan(Mode::region, *axes, 1, 0, 1, 0, 1).front();
+
+    const auto plain = MakeRunner(Mode::region, SharedContext(), image);
+    Require(plain->Run(box, {}).has_value(), "a region failed");
+    const auto timed = Recorded(*plain);
+    Require(timed.blocks.value_or(0) >= 1 && timed.handovers.value_or(0) >= *timed.blocks,
+            "a region did not count its blocks and hand-overs");
+    Require(timed.block_first_s.value_or(-1.0) >= 0.0, "a region's first block has no time");
+    Require(timed.block_gap_max_s.has_value() == (*timed.blocks > 1) &&
+                timed.handover_gap_max_s.has_value() == (*timed.handovers > 1),
+            "a region's gaps are not between two arrivals");
+    Require(!timed.stop_s, "a region never told to stop said how long it took to");
+
+    auto one_chunk = Settings();
+    one_chunk.region.emit_chunks = 1;
+    const auto hinted = MakeRunner(Mode::region, SharedContext(), image, one_chunk);
+    Require(hinted->Run(box, {}).has_value(), "a hinted region failed");
+    const auto paced = Recorded(*hinted);
+    Require(paced.blocks == axes->channels / depth, "a hint of one chunk did not give a block a spectral chunk layer");
+    Require(paced.block_gap_max_s.value_or(-1.0) >= 0.0, "a region of several blocks has no gap between them");
+
+    // A box across four chunks of the plane, aligned to none of them, takes two layers a block only once
+    // it is allowed eight chunks: floor(N / F) layers, F counted from where the box sits.
+    const auto& chunks = image.chunk_geometry().chunk_shape;
+    Operation straddling = box;
+    straddling.x = chunks.at(axes->x) - 50;
+    straddling.width = 100;
+    straddling.y = chunks.at(axes->y) - 40;
+    straddling.height = 90;
+    Require(axes->channels == 2 * depth, "the wide fixture is not two spectral chunk layers deep");
+    for (const auto& [emit_chunks, blocks] : {std::pair{7u, 2u}, std::pair{8u, 1u}}) {
+        auto allowed = Settings();
+        allowed.region.emit_chunks = emit_chunks;
+        const auto across = MakeRunner(Mode::region, SharedContext(), image, allowed);
+        Require(across->Run(straddling, {}).has_value(), "a region across four chunks failed");
+        Require(Recorded(*across).blocks == blocks, "a hint of " + std::to_string(emit_chunks) +
+                                                        " chunks over four chunks of the plane did not give " +
+                                                        std::to_string(blocks) + " blocks");
+    }
+    Require(hinted->Fingerprint() == plain->Fingerprint(), "a hint changed what a region reads");
+
+    auto at_once = Settings();
+    at_once.region.stop_after_s = 1e-9;
+    const auto stopped = MakeRunner(Mode::region, SharedContext(), image, at_once);
+    const auto elements = stopped->Run(box, {});
+    Require(elements.has_value() && *elements == 0, "a region told to stop did not stop as asked");
+    const auto stop = Recorded(*stopped);
+    Require(stop.stop_s.value_or(-1.0) >= 0.0, "a stopped region did not say how long the stop took");
+    Require(stopped->Fingerprint() == Fingerprint(static_cast<const double*>(nullptr), 0),
+            "a stopped region fingerprinted as what it had read");
+
+    // A stop too far off to come is never reached, however far: it is not a time point to overflow.
+    auto never = Settings();
+    never.region.stop_after_s = 1e300;
+    const auto unstopped = MakeRunner(Mode::region, SharedContext(), image, never);
+    Require(unstopped->Run(box, {}).has_value() && !Recorded(*unstopped).stop_s &&
+                unstopped->Fingerprint() == plain->Fingerprint(),
+            "a region with a stop far off did not finish as one with none");
+
+    // The trial's deadline is still an error, stop or no stop.
+    ReadOptions late;
+    late.control.deadline = std::chrono::steady_clock::now();
+    Require(!stopped->Run(box, late).has_value(), "a region past the trial's deadline was taken for a stop");
+}
+
 void TestTheColdMethodIsChosenOrRefused() {
     Require(ChooseColdMethod(std::nullopt, "true").method == ColdMethod::command,
             "auto does not prefer the administrator's command");
@@ -1038,6 +1142,7 @@ int main(int argc, char** argv) {
         TestResumingSkipsOnlyWholeTrials();
         TestResumingDropsARowCutShort();
         TestEachModeReads();
+        TestARegionTimesItsBlocksAndItsStop();
         TestAFirstTouchReadsItsChunksAgain();
         TestTheColdMethodIsChosenOrRefused();
     } catch (const std::exception& error) {

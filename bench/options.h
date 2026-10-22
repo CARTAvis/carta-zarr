@@ -81,6 +81,15 @@ struct HistogramMethod {
 struct RegionSettings {
     // The share of the plane one region box covers.
     double fraction = 0.05;
+    // The pixel chunks one emitted block should span, turned into an emit_every_channels hint of
+    // max(1, floor(chunks / F)) spectral chunk layers for a box occupying F chunks of a plane: what a
+    // caller would ask for to have the library emit as often as a watched read reports. 0 asks for no
+    // hint and leaves the block to the library.
+    unsigned emit_chunks = 0;
+    // Seconds after an operation starts at which it is told to stop, through both
+    // ReadControl::cancellation_requested and its sink, as a backend that saw its region change
+    // would; 0 never stops one.
+    double stop_after_s = 0.0;
 };
 
 // What shapes an animation, and nothing else.

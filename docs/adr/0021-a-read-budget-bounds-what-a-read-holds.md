@@ -101,6 +101,44 @@ can be.
   the flag is part of what a chunk holds now, and a caller whose data is chunked that way still gets
   its pixels.
 
+## A reduction's reads are not cut as a watched read's are
+
+*Added for 0.3.0 ([#73](https://github.com/CARTAvis/carta-zarr/issues/73)). The rules above are
+unchanged.*
+
+A reduction calls its sink and checks for a stop between reads, so its reads decide how often a
+caller hears from it. They are cut only to the budget, never to sixteen chunks as a watched read is,
+and that was measured before being kept. One user, the region of a spectral profile over the cigar
+(512 x 512 x 30000 in 128 x 128 x 64 chunks) and pancake (7763 x 4742 x 256 in 256 x 256 x 16) test
+cubes, cold, against an `emit_every_channels` that gives reads of about sixteen chunks, the size such
+a cut would:
+
+| | Default: longest wait between sink calls | Sixteen chunks: longest wait | Sixteen chunks: total time |
+|---|---|---|---|
+| Local NVMe, 4 I/O and 28 decode threads | 44-65 ms | about 20 ms where a read was more than sixteen chunks | up to +23% |
+| Local NVMe, 2 and 4 | 25-40 ms | unchanged, but 22 ms for a small pancake region | unchanged, but -18% for that region |
+| Lustre, 4 and 32, small regions | 0.15-0.30 s | 0.04-0.20 s | -26% to +9% |
+| Lustre, 4 and 32, cigar, a quarter of the plane or more | 0.29-0.34 s | 0.12-0.15 s | +23-30% |
+| Lustre, 4 and 32, the whole pancake plane | 0.31-0.34 s | unchanged | unchanged |
+| Lustre, 2 and 4 | 0.13-0.23 s | unchanged, but 0.07 s for a small pancake region | unchanged, but -36% for that region |
+
+A budget aimed at the decode threads makes a read larger as decoding gets faster, so from the local
+disk a read took about the same 25-65 ms on four threads and on twenty-eight of one machine, and with
+few threads its floor already makes reads of about twenty chunks. A machine whose threads decode more
+slowly, or a costlier codec, would make each read longer; of the configurations measured, only
+storage slower than decoding stretched the wait, to about 0.3 s on Lustre, and there the cut to
+sixteen cost a large region a quarter of its time, because fewer chunks were in flight. A stop took
+effect within 0.1 s everywhere, cut or not.
+
+A region whose chunk layer is more than a read finishes a block only once a layer: for the whole
+pancake plane, every 0.8-1.4 s on NVMe and every 2.6-5 s on Lustre, whatever the cut, with its
+unfinished block handed over once a read. That is the plane's size, not the read's.
+
+A caller that wants results sooner still can ask for them with a smaller `emit_every_channels`, which
+can shorten the reads with the blocks, unless they were already that short. What that does depends
+on the region and the storage, as above: later totals for large regions, and sooner results and
+sometimes a shorter total for small ones.
+
 ## What it does not do
 
 The budget is per read. Reads running at once each hold their own, and a process-wide bound across

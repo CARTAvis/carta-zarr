@@ -99,6 +99,8 @@ const std::vector<Column>& Columns() {
         {"seed", [](const Row& r) { return std::to_string(r.seed); }},
         {"ops", [](const Row& r) { return std::to_string(r.ops); }},
         {"region_fraction", [](const Row& r) { return r.region_fraction; }},
+        {"region_emit_chunks", [](const Row& r) { return r.region_emit_chunks; }},
+        {"region_stop_after_s", [](const Row& r) { return r.region_stop_after_s; }},
         {"histogram_method", [](const Row& r) { return r.histogram_method; }},
         {"animation_frames", [](const Row& r) { return r.animation_frames; }},
         {"animation_fps", [](const Row& r) { return r.animation_fps; }},
@@ -132,6 +134,12 @@ const std::vector<Column>& Columns() {
         {"late_max_s", [](const Row& r) { return Text(r.late_max_s); }},
         {"prefetches", [](const Row& r) { return Text(r.prefetches); }},
         {"late_prefetches", [](const Row& r) { return Text(r.late_prefetches); }},
+        {"handovers", [](const Row& r) { return Text(r.handovers); }},
+        {"blocks", [](const Row& r) { return Text(r.blocks); }},
+        {"block_first_s", [](const Row& r) { return Text(r.block_first_s); }},
+        {"handover_gap_max_s", [](const Row& r) { return Text(r.handover_gap_max_s); }},
+        {"block_gap_max_s", [](const Row& r) { return Text(r.block_gap_max_s); }},
+        {"stop_s", [](const Row& r) { return Text(r.stop_s); }},
     };
     return columns;
 }
@@ -280,6 +288,8 @@ Row RowTemplate(const RunOptions& options, Mode mode, ColdMethod cold, const Dat
                              std::to_string(row.seed),
                              std::to_string(row.ops),
                              row.region_fraction,
+                             row.region_emit_chunks,
+                             row.region_stop_after_s,
                              row.histogram_method,
                              row.animation_frames,
                              row.animation_fps,

@@ -5,7 +5,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html). Before 1.0 a
 minor release may change the ABI, and the soname says so ([ADR 0020](docs/adr/0020-before-1-0-the-minor-version-is-the-abi.md)).
 
-## [Unreleased]
+## [0.3.0]
 
 ### Added
 * Real-valued images of the aperture plane open, as CASA's `ia.fft` writes an amplitude or a phase and XRADIO converts it: `u` and `v` play `spatial_x` and `spatial_y`, so reads and reductions reach them as they reach `l` and `m`, and `ImageDescriptor::aperture`, a new `ApertureCoordinate`, gives their unit, reference pixel, reference value (`crval`) and increment in place of a direction. A dataset of them alone needs no `coordinate_system_info`. With no flag declared, theirs is the one XRADIO names `FLAG_<image>`, and they have no beams. A complex variable on either plane is listed and not opened, with `unsupported_data_type`, and `DiagnosticCode::unsupported_coordinate_plane` is no longer emitted. An aperture-plane variable without its own `u` or `v` coordinate is listed as malformed and does not open, and the sky images beside it do. This changes the ABI ([ADR 0024](docs/adr/0024-the-spatial-roles-are-the-images-plane.md), [#41](https://github.com/CARTAvis/carta-zarr/issues/41)).

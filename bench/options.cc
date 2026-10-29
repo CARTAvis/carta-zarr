@@ -91,11 +91,11 @@ frame rate through the shared one, as CARTA's animator does, and records which f
                              chunks decoded in the background, stopping once a frame is late while
                              one is under way, and nothing unless the cache holds two runs
   --region-fraction F        the share of the plane a region box covers (0.05)
-  --histogram-method METHOD  exact, binned or sampled:N, as the backend's --zarr_histogram_method (exact)
+  --histogram-method METHOD  exact, binned or sampled:N, as test_zarr's --zarr_histogram_method (exact)
   --seed N                   where the random positions come from (1)
-  --io-threads N             ContextOptions::io_threads, the backend's --zarr_file_io_threads (0)
-  --decode-threads N         ContextOptions::decode_threads, the backend's --zarr_data_copy_threads (0)
-  --cache-bytes SIZE         ContextOptions::cache_bytes, the backend's --zarr_cache_size:
+  --io-threads N             ContextOptions::io_threads, the backend's --zarr_io (0)
+  --decode-threads N         ContextOptions::decode_threads, the backend's --zarr_decode (0)
+  --cache-bytes SIZE         ContextOptions::cache_bytes, the backend's --zarr_cache:
                              default, 0 for none, or a size; also the size of the cache each plane
                              and spectrum operation gets, 1G for default
   --read-budget-bytes SIZE   ReadOptions::read_budget_bytes (0, the library's own)

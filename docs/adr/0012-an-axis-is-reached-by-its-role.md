@@ -1,5 +1,9 @@
 # An axis is reached by its role, and where it sits is the profile's
 
+*Amended for 0.3.0 ([#71](https://github.com/CARTAvis/carta-zarr/issues/71)): carta-backend's
+`CartaZarrAxes`, named below, has since been folded into its `ZarrStores` as `CartaShape`, which still
+finds CARTA's axes by role. The decision is unchanged.*
+
 An image's axes are reported in a logical order, and a read's ranges follow it. Which order that is
 was said two ways at once. The README promised `l`, `m`, `frequency`, `polarization`, `time` as part
 of the API, and `kXradioImageAxisOrder` exported it for a consumer to index by. `descriptor.h`, next

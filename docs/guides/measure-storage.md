@@ -194,10 +194,10 @@ recommendation did not survive validation.
 **Once the data is in the recommended layout:** io 8, decode 12, cache 1024 MiB, budget library
 
 ```
---zarr_file_io_threads 8 --zarr_data_copy_threads 12 --zarr_cache_size 1024
+--zarr_io 8 --zarr_decode 12 --zarr_cache 1
 ```
 
-or in settings.json: `{"zarr_file_io_threads": 8, "zarr_data_copy_threads": 12, "zarr_cache_size": 1024}`
+or in settings.json: `{"zarr_io": 8, "zarr_decode": 12, "zarr_cache": 1}`
 
 **Recommended layout:** L02 (chunk l=128,m=128,frequency=64, zstd:3).
 ````
@@ -266,7 +266,7 @@ it ran, every default filled in.
 Pass the flags on carta-backend's command line, or put the `settings.json` line
 in its settings file. carta-controller starts one backend per user, so each user
 gets them, and a server with sixteen users at once holds sixteen caches of
-`--zarr_cache_size`. Write cubes in the recommended layout when they are next
+`--zarr_cache`. Write cubes in the recommended layout when they are next
 converted to Zarr. [Storage tuning](../storage-tuning.md) says what each setting
 does.
 

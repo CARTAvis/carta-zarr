@@ -37,7 +37,7 @@ import sweep  # noqa: E402
 
 CORES = 8
 # The baseline the defaults resolve to on CORES cores, as the CSV spells a setting.
-BASELINE = ("2", str(CORES), str(1024 << 20), "0")
+BASELINE = ("4", str(CORES), str(1024 << 20), "0")
 
 
 def config(**given: Any) -> dict[str, Any]:
@@ -197,11 +197,11 @@ class ReadingAlike(unittest.TestCase):
     def test_two_settings_reading_one_position_differently_are_a_mismatch(self) -> None:
         # One layout read under two settings is two observations, not one written over the other.
         one = layout("one")
-        other = ("4", str(CORES), str(1024 << 20), "0")
+        other = ("8", str(CORES), str(1024 << 20), "0")
         rows = [row(one, "plane", 0.1, checksum="aa"), row(one, "plane", 0.1, checksum="bb", setting=other)]
         mismatches = sweep.Results(rows, datasets(one)).mismatches
         self.assertEqual(len(mismatches), 1, "a setting that read other bytes went unnoticed")
-        self.assertIn("io=4", mismatches[0], "and the mismatch should say which settings disagree")
+        self.assertIn("io=8", mismatches[0], "and the mismatch should say which settings disagree")
 
     def test_two_stages_reading_one_position_differently_are_a_mismatch(self) -> None:
         one = layout("one")
@@ -257,6 +257,22 @@ class ReadingTheCsv(unittest.TestCase):
 
 class Recommending(unittest.TestCase):
     MODES = ["plane"]
+
+    def test_the_backend_is_given_its_v6_1_settings_with_the_cache_in_gib(self) -> None:
+        whole = sweep.Setting(io_threads=8, decode_threads=12, cache_mib=1024, read_budget=0)
+        self.assertEqual(whole.backend_flags(), "--zarr_io 8 --zarr_decode 12 --zarr_cache 1")
+        self.assertEqual(json.loads(whole.settings_json()), {"zarr_io": 8, "zarr_decode": 12, "zarr_cache": 1})
+        part = sweep.Setting(io_threads=8, decode_threads=12, cache_mib=2560, read_budget=0)
+        self.assertEqual(part.backend_flags(), "--zarr_io 8 --zarr_decode 12 --zarr_cache 2.5")
+        self.assertEqual(json.loads(part.settings_json())["zarr_cache"], 2.5)
+        # The flag and the JSON give the same size, to the byte
+        odd = sweep.Setting(io_threads=8, decode_threads=12, cache_mib=1025, read_budget=0)
+        self.assertEqual(odd.backend_flags(), "--zarr_io 8 --zarr_decode 12 --zarr_cache 1.0009765625")
+        self.assertEqual(json.loads(odd.settings_json())["zarr_cache"] * (1 << 30), 1025 << 20)
+
+    def test_the_default_file_reading_threads_follow_the_cores_up_to_four(self) -> None:
+        self.assertEqual(sweep.resolve_threads("min(4, cores)", 2), 2)
+        self.assertEqual(sweep.resolve_threads("min(4, cores)", 32), 4)
 
     def analysis(self, layouts: list[sweep.Layout], rows: list[dict[str, str]], **given: Any) -> sweep.Analysis:
         settings = config(measure={"modes": self.MODES}, **given)

@@ -19,12 +19,15 @@
 #include "schema_version.h"
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <cstddef>
 #include <iterator>
 #include <limits>
 #include <map>
 #include <optional>
+#include <string>
+#include <string_view>
 #include <tuple>
 #include <utility>
 
@@ -148,6 +151,48 @@ std::vector<std::string> FindDataGroups(const nlohmann::json& root_attributes, s
     return data_groups;
 }
 
+// The doppler_type values that schema 0.0.2 allows
+constexpr std::array<std::string_view, 8> kDopplerTypes{"radio", "optical",      "z",    "ratio",
+                                                        "true",  "relativistic", "beta", "gamma"};
+
+// Returns the doppler_type of the velocity coordinate, or an empty string when the store names none.
+// A value that the schema does not allow is returned as written, with a diagnostic. A value that is
+// not a string, or a velocity that cannot be read, gives an empty string and a diagnostic.
+std::string DescribeDopplerType(const Store& store, ImageDescriptor& descriptor) {
+    const auto diagnose = [&](const std::string& problem) {
+        descriptor.diagnostics.push_back(Diagnostic{DiagnosticCode::invalid_metadata, problem, "velocity"});
+    };
+    const auto& metadata = store.ReadNodeMetadata("velocity");
+    if (!metadata) {
+        // Without this diagnostic, an unreadable velocity would look like a store that names no convention.
+        if (metadata.error().code != ErrorCode::not_found) {
+            diagnose("The velocity coordinate could not be read: " + metadata.error().message);
+        }
+        return {};
+    }
+    // A group named velocity is not the coordinate.
+    if (AttributeString(metadata.value(), "node_type") != "array") {
+        return {};
+    }
+    const auto* const attributes = MemberObject(metadata.value(), "attributes");
+    if (attributes == nullptr) {
+        return {};
+    }
+    const auto* const value = Member(*attributes, "doppler_type");
+    if (value == nullptr) {
+        return {};
+    }
+    if (!value->is_string()) {
+        diagnose("The velocity coordinate's doppler_type is not a string");
+        return {};
+    }
+    std::string doppler_type = value->get<std::string>();
+    if (std::find(kDopplerTypes.begin(), kDopplerTypes.end(), doppler_type) == kDopplerTypes.end()) {
+        diagnose("The velocity coordinate's doppler_type '" + doppler_type + "' is not one that the schema allows");
+    }
+    return doppler_type;
+}
+
 std::optional<SpectralCoordinate> DescribeSpectralCoordinate(const Store& store,
                                                              const std::vector<double>& frequency_values,
                                                              ImageDescriptor& descriptor) {
@@ -177,6 +222,7 @@ std::optional<SpectralCoordinate> DescribeSpectralCoordinate(const Store& store,
     if (const auto* const rest_frequency = MemberObject(frequency_attributes, "rest_frequency")) {
         spectral.rest_frequency = MemberNumber(*rest_frequency, "data");
     }
+    spectral.doppler_type = DescribeDopplerType(store, descriptor);
 
     auto fit = FitSpectralAxis(spectral.values, reference_value, "frequency");
     spectral.reference_pixel = fit.reference_pixel;

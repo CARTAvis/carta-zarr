@@ -1974,6 +1974,83 @@ void TestAnImagesPartAndWhereItIsListed() {
             "a dataset with no SKY did not open on its residual");
 }
 
+// Covers a store without velocity, every allowed value, a value that the schema does not allow, a
+// value that is not a string, a velocity that cannot be read, and a velocity that is not an array.
+void TestA002VelocityConventionIsTheDopplerType() {
+    const auto velocity = [](const std::string& attributes) {
+        return NumericArray("[3]", R"(["frequency"])", "float64", attributes);
+    };
+    const auto describe = [](std::map<std::string, std::string> nodes) {
+        return std::move(DescribeWithChannels(std::move(nodes)).descriptor);
+    };
+
+    const auto none = describe(Store002());
+    Require(none.spectral && none.spectral->doppler_type.empty(), "a store with no velocity reported a convention");
+    Require(!HasDiagnostic(none.diagnostics, carta::zarr::DiagnosticCode::invalid_metadata),
+            "a store with no velocity was diagnosed");
+
+    for (const std::string doppler_type : {"radio", "optical", "z", "ratio", "true", "relativistic", "beta", "gamma"}) {
+        auto nodes = Store002();
+        nodes["velocity"] = velocity(R"({"units":"m/s","type":"doppler","doppler_type":")" + doppler_type + R"("})");
+        const auto described = describe(nodes);
+        Require(described.spectral && described.spectral->doppler_type == doppler_type,
+                "the doppler_type '" + doppler_type + "' was not reported as written");
+        Require(!HasDiagnostic(described.diagnostics, carta::zarr::DiagnosticCode::invalid_metadata),
+                "the allowed doppler_type '" + doppler_type + "' was diagnosed");
+    }
+
+    auto unnamed = Store002();
+    unnamed["velocity"] = velocity(R"({"units":"m/s","type":"doppler"})");
+    Require(describe(unnamed).spectral->doppler_type.empty(), "a velocity that names no convention reported one");
+
+    auto unknown = Store002();
+    unknown["velocity"] = velocity(R"({"units":"m/s","type":"doppler","doppler_type":"sideways"})");
+    const auto described = describe(unknown);
+    Require(described.spectral && described.spectral->doppler_type == "sideways",
+            "a doppler_type that the schema does not allow was not reported as written");
+    const auto diagnosed = [](const carta::zarr::ImageDescriptor& descriptor) {
+        return std::any_of(descriptor.diagnostics.begin(), descriptor.diagnostics.end(), [](const auto& entry) {
+            return entry.code == carta::zarr::DiagnosticCode::invalid_metadata && entry.node_path == "velocity";
+        });
+    };
+    Require(diagnosed(described), "a doppler_type that the schema does not allow was not diagnosed");
+
+    // The case is kept, so "Z" is not the optical convention.
+    for (const std::string written : {"Z", ""}) {
+        auto other = Store002();
+        other["velocity"] = velocity(R"({"units":"m/s","type":"doppler","doppler_type":")" + written + R"("})");
+        const auto read = describe(other);
+        Require(read.spectral && read.spectral->doppler_type == written,
+                "the doppler_type '" + written + "' was not reported as written");
+        Require(diagnosed(read), "the doppler_type '" + written + "' was not diagnosed");
+    }
+
+    for (const std::string value : {"42", "true", "null"}) {
+        auto malformed = Store002();
+        malformed["velocity"] = velocity(R"({"units":"m/s","type":"doppler","doppler_type":)" + value + "}");
+        const auto read = describe(malformed);
+        Require(read.spectral && read.spectral->doppler_type.empty(),
+                "the doppler_type " + value + " was reported as a convention");
+        Require(diagnosed(read), "the doppler_type " + value + " was not diagnosed");
+    }
+
+    auto unreadable = Store002();
+    unreadable["velocity"] = "{not json";
+    const auto unread = describe(unreadable);
+    Require(unread.spectral && unread.spectral->doppler_type.empty(),
+            "a velocity that cannot be read gave a convention");
+    Require(diagnosed(unread), "a velocity that cannot be read was not diagnosed");
+
+    // A velocity node that is not an array is not the coordinate, so its attributes name no convention.
+    for (const std::string node_type : {R"("group")", "42", "null"}) {
+        auto other = Store002();
+        other["velocity"] = R"({"attributes":{"doppler_type":"z"},"zarr_format":3,"node_type":)" + node_type + "}";
+        const auto read = describe(other);
+        Require(read.spectral && read.spectral->doppler_type.empty(),
+                "a velocity node of node_type " + node_type + " gave a convention");
+    }
+}
+
 // A continuum image has one channel, and one channel has no spacing to fit an increment from. Schema
 // 0.0.2 states the channel's width, which is then the increment, measured from that channel. An axis
 // of more channels is described by its channels, whatever width it states.
@@ -2078,6 +2155,7 @@ int main() {
         TestAnotherDatasetNamingAVersionIsNotAnImage();
         TestAnImagesPartAndWhereItIsListed();
         TestA002ChannelWidthIsTheIncrementOfOneChannel();
+        TestA002VelocityConventionIsTheDopplerType();
         TestA002SkyImageSaysWhatItMeasures();
         std::cout << "carta-zarr schema profile tests passed\n";
         return 0;

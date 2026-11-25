@@ -137,6 +137,7 @@ void TestSpectralAndPolarization(const carta::zarr::ImageDescriptor& sky) {
     Require(spectral.unit == "Hz", "the frequency unit was not taken from frequency's units");
     Require(spectral.reference_frame == "LSRK", "SPECSYS was not normalized to the canonical spectral system");
     Require(spectral.rest_frequency.has_value(), "RESTFRQ was dropped");
+    Require(spectral.doppler_type == "radio", "a FITS file without VELREF did not report the radio convention");
     RequireClose(*spectral.rest_frequency, 1.420405751e9, 1.0, "rest frequency");
     // These channels are evenly spaced, so the optional linear description must be present.
     Require(spectral.increment.has_value(), "evenly spaced channels reported no increment");
@@ -338,6 +339,19 @@ void TestKeywordsConversion() {
     Require(sky.user_keywords.size() == 4, "a card XRADIO interprets was reported as a user keyword");
 }
 
+// The same cube with VELREF 2, which XRADIO writes as the optical convention "z"
+void TestOpticalConversion() {
+    const std::filesystem::path fixture{CARTA_ZARR_CONFORMANCE_OPTICAL_FIXTURE};
+    const auto context = carta::zarr::Context::Create();
+    Require(static_cast<bool>(context), "Context::Create failed");
+    auto dataset = carta::zarr::Dataset::Open(context.value(), fixture.string());
+    Require(static_cast<bool>(dataset), "Dataset::Open failed on XRADIO's image with an optical velocity");
+    auto image = dataset.value().OpenImage("SKY");
+    Require(static_cast<bool>(image), "the SKY with an optical velocity could not be opened");
+    const auto& sky = image.value().descriptor();
+    Require(sky.spectral && sky.spectral->doppler_type == "z", "VELREF 2 was not reported as the optical convention");
+}
+
 // The amplitude of the cube's transform, an image of the aperture plane as CASA's ia.fft makes one,
 // converted by XRADIO 1.3.0. u and v play the spatial roles, so the reads and reductions reach them
 // as they reach l and m; it has an aperture coordinate and no direction; its mask is FLAG_APERTURE,
@@ -411,6 +425,7 @@ int main() {
         TestFlaggedConversion();
         TestContinuumConversion();
         TestKeywordsConversion();
+        TestOpticalConversion();
         TestApertureConversion();
 
         std::cout << "carta-zarr XRADIO conformance tests passed\n";

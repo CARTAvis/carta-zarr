@@ -230,6 +230,11 @@ struct SpectralCoordinate {
     std::optional<double> reference_value;  // CRVAL3
     std::optional<double> increment;        // CDELT3
     std::optional<double> rest_frequency;
+    // The velocity convention, as the `doppler_type` of the `velocity` coordinate gives it. The schema
+    // allows "radio", "optical", "z", "ratio", "true", "relativistic", "beta" and "gamma". "optical" is
+    // "z", and "true" and "relativistic" are "beta". Another value is reported as written, case and all,
+    // with a diagnostic. It is empty when the store names none.
+    std::string doppler_type;
     // One value per channel, in `unit`. The unit is the frequency coordinate's own. The schema only
     // requires that one is given, so the values need not be in Hz.
     std::vector<double> values;

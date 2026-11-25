@@ -5,6 +5,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html). Before 1.0 a
 minor release may change the ABI, and the soname says so ([ADR 0020](docs/adr/0020-before-1-0-the-minor-version-is-the-abi.md)).
 
+## [Unreleased]
+
+### Added
+* `SpectralCoordinate::doppler_type`: the velocity convention, the `doppler_type` of the `velocity` coordinate as XRADIO writes it, such as `radio` or `z` (optical). XRADIO 1.3.0's FITS reader writes `z` for a `VOPT` or `FELO` axis and for a frequency axis with `VELREF` 256 or below, and `radio` for a `VRAD` axis, for `VELREF` above 256 and without `VELREF`. It is empty when the store names none. A value that the schema does not allow is reported as written, with an `invalid_metadata` diagnostic. A value that is not a string, or a `velocity` that cannot be read, is left out with one. This changes the ABI ([#78](https://github.com/CARTAvis/carta-zarr/issues/78)).
+
 ## [0.3.0]
 
 ### Added

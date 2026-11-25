@@ -67,6 +67,12 @@ for every store that opens, and empty for one that declares nothing.
   `SpectralCoordinate::reference_frame` is the frame in casacore's names, as 0.0.2
   writes it, such as `LSRK` or `GEO`. The reference frequency's `observer` is
   not read.
+- **Velocity convention:** read from `velocity`'s `doppler_type` into
+  `SpectralCoordinate::doppler_type`, as written, such as `radio` or `z`
+  (optical). It is empty when the store names none. A value that the schema
+  does not allow is reported as written, case and all, with an
+  `invalid_metadata` diagnostic. A value that is not a string, or a
+  `velocity` that cannot be read, is left out with one.
 - **Single-channel images:** a finite, nonzero `channel_width`
   can supply `SpectralCoordinate::increment`, with reference pixel 1 and the
   single frequency as reference value. The width's unit must be absent or match

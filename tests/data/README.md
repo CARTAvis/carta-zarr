@@ -69,6 +69,10 @@ direction and four cards XRADIO keeps uninterpreted, a string, a number, an inte
 `pointing_center` and the rest, lower-cased, as its `user`; the cube has neither, so its pointing
 center is its reference direction and its `user` is empty.
 
+`images/zarr/xradio/conformance_optical` is the cube with `VELREF = 2`, an optical velocity in the AIPS
+convention. XRADIO writes it as the `doppler_type` `z` of the `velocity` coordinate. The cube has no
+`VELREF`, which XRADIO reads as radio.
+
 `images/zarr/xradio/conformance_aperture` is the amplitude of the cube's Fourier transform over its
 two direction axes, as CASA's `ia.fft` makes it, with a mask over two known pixels: a real image of
 the aperture plane, like CARTA's `UVamp.image`. XRADIO writes it as `APERTURE` on `u` and `v` in

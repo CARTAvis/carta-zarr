@@ -64,6 +64,12 @@ KEYWORD_CARDS = {
     "PBCOR": True,
 }
 
+# The same cube with an optical velocity convention. VELREF 2 is optical in the AIPS convention, and
+# XRADIO 1.3.0 writes it as the `doppler_type` "z" of the `velocity` coordinate. The cube above has no
+# VELREF, which XRADIO reads as radio.
+OPTICAL_FIXTURE_NAME = "conformance_optical"
+OPTICAL_CARDS = {"VELREF": 2}
+
 # The amplitude of the cube's Fourier transform, a real image of the aperture plane as CASA's
 # `ia.fft` makes one (UVamp in CARTA's test images is another), with a mask over a few known pixels.
 # XRADIO 1.3.0 writes it as APERTURE on (u, v) in wavelengths, its mask as FLAG_APERTURE that no data
@@ -201,6 +207,14 @@ def write_keywords(scratch: Path) -> None:
     write_store(write_image, open_image(str(keywords_path)), OUTPUT_DIR / KEYWORDS_FIXTURE_NAME)
 
 
+def write_optical(scratch: Path) -> None:
+    from xradio.image import open_image, write_image
+
+    optical_path = scratch / f"{OPTICAL_FIXTURE_NAME}.fits"
+    write_fits(optical_path, cards=OPTICAL_CARDS)
+    write_store(write_image, open_image(str(optical_path)), OUTPUT_DIR / OPTICAL_FIXTURE_NAME)
+
+
 def main() -> None:
     from xradio.image import open_image, write_image
 
@@ -221,6 +235,7 @@ def main() -> None:
         write_store(write_image, open_image(str(continuum_path)), OUTPUT_DIR / CONTINUUM_FIXTURE_NAME)
 
         write_keywords(scratch)
+        write_optical(scratch)
         write_aperture(fits_path, scratch)
     finally:
         shutil.rmtree(scratch, ignore_errors=True)
